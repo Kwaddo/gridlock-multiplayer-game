@@ -37,6 +37,38 @@ fn main() -> std::io::Result<()> {
                     println!("Player '{}' disconnected. Total players: {}", p.username, players.len());
                 }
             }
+            MSG_POSITION => {
+                if let Some(player) = players.get_mut(&src_addr) { // get player if exists
+                    // parse position update
+                    // payload is 16 bytes: x(4) + y(4) + z(4) + yaw(4)
+                    let x = f32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+                    let y = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+                    let z = f32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]);
+                    let yaw = f32::from_be_bytes([payload[12], payload[13], payload[14], payload[15]]);
+                    player.position = (x, y, z);
+                    player.yaw = yaw;
+                }
+
+                // broadcast all player positions to everyone
+                // format: [MSG_STATE][player_count(4)][for each: id(4) + x(4) + y(4) + z(4) + yaw(4) + name_len(1) + name]
+                let mut state_msg = vec![MSG_STATE];
+                state_msg.extend_from_slice(&(players.len() as u32).to_be_bytes());
+
+                for player in players.values() {
+                    state_msg.extend_from_slice(&player.id.to_be_bytes());
+                    state_msg.extend_from_slice(&player.position.0.to_be_bytes()); // x
+                    state_msg.extend_from_slice(&player.position.1.to_be_bytes()); // y
+                    state_msg.extend_from_slice(&player.position.2.to_be_bytes()); // z
+                    state_msg.extend_from_slice(&player.yaw.to_be_bytes());
+                    let name_bytes = player.username.as_bytes();
+                    state_msg.push(name_bytes.len() as u8);
+                    state_msg.extend_from_slice(name_bytes);
+                }
+
+                for player in players.values() {
+                    let _ = socket.send_to(&state_msg, player.socket_addr);
+                }
+            }
             _ => {
                 println!("Unknown message type: {}", msg_type);
             }

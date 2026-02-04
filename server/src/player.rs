@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 pub struct Player {
     pub id: u32,
     pub username: String,
-    pub position: (f32, f32),
+    pub position: (f32, f32, f32),
     pub yaw: f32,
     pub pitch: f32,
     pub health: u32,
@@ -19,7 +19,7 @@ impl Player {
         Player {
             id,
             username,
-            position: (0.0, 0.0),
+            position: (0.0, 0.0, 0.0),
             yaw: 0.0,
             pitch: 0.0,
             health: 100,
