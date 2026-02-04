@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+pub mod protocols;
 
 #[macroquad::main("Multiplayer FPS")]
 async fn main() {
