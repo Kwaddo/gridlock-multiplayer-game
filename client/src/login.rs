@@ -41,8 +41,8 @@ impl LoginScreen {
                 self.error_msg = "Both fields are required.".to_string();
             } else {
                 match network::connect(&self.ip_input, &self.username_input) {
-                    Some((socket, id)) => {
-                        return Some((socket, self.username_input.clone(), id));
+                    Some((socket, id, assigned_username)) => {
+                        return Some((socket, assigned_username, id));
                     }
                     None => {
                         self.error_msg = "Failed to connect to server.".to_string();
