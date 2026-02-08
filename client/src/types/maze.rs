@@ -1,3 +1,4 @@
+use ::rand::{thread_rng, Rng};
 use macroquad::prelude::*;
 
 pub struct Maze {
@@ -68,13 +69,22 @@ impl Maze {
     }
 
     pub fn spawn_point(&self) -> Vec3 {
+        let mut open_cells = Vec::new();
         for y in 1..(self.height as i32 - 1) {
             for x in 1..(self.width as i32 - 1) {
                 if self.is_open(x, y) {
-                    return self.cell_to_world(x, y);
+                    open_cells.push((x, y));
                 }
             }
         }
-        vec3(0.0, 0.0, 0.0)
+
+        if !open_cells.is_empty() {
+            let mut rng = thread_rng();
+            let idx = rng.gen_range(0..open_cells.len());
+            let (x, y) = open_cells[idx];
+            self.cell_to_world(x, y)
+        } else {
+            vec3(0.0, 0.0, 0.0)
+        }
     }
 }
