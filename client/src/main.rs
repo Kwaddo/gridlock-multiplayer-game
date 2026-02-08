@@ -20,7 +20,15 @@ struct OtherPlayer {
 }
 
 // helper function to see which button is pressed based on config keybinds, we will use this in the settings menu to show which button is bound to each action
-fn is_button_clicked(x: f32, y: f32, w: f32, h: f32, label:  &str, color: Color, hover_color: Color) -> bool {
+fn is_button_clicked(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    label: &str,
+    color: Color,
+    hover_color: Color
+) -> bool {
     let mouse = mouse_position();
     let hover = mouse.0 >= x && mouse.0 <= x + w && mouse.1 >= y && mouse.1 <= y + h;
     draw_rectangle(x, y, w, h, if hover { hover_color } else { color });
@@ -57,6 +65,8 @@ async fn main() {
 
     // Load textures once before the game loop
     let floor_texture = load_texture("assets/rocks.png").await.ok();
+
+    let mut bob_timer: f32 = 0.0;
 
     loop {
         match state {
@@ -114,25 +124,38 @@ async fn main() {
                 }
 
                 // check if sprinting
-                movement_state.is_sprinting = is_key_down(config.key_sprint)
-                && move_dir != vec3(0.0, 0.0, 0.0) // only sprint if moving
-                && movement_state.stamina > 0.0;
+                movement_state.is_sprinting =
+                    is_key_down(config.key_sprint) &&
+                    move_dir != vec3(0.0, 0.0, 0.0) && // only sprint if moving
+                    movement_state.stamina > 0.0;
 
                 // drain or regen stamina
                 if movement_state.is_sprinting {
                     movement_state.stamina -= movement_config.stamina_drain * delta_time;
                 } else {
-                    movement_state.stamina = (movement_state.stamina + movement_config.stamina_recover * delta_time).min(100.0); // at most 100
+                    movement_state.stamina = (
+                        movement_state.stamina +
+                        movement_config.stamina_recover * delta_time
+                    ).min(100.0); // at most 100
                 }
 
                 // check if crouching
-                movement_state.is_crouching = is_key_down(config.key_crouch);
+                if config.crouch_toggle {
+                    if is_key_pressed(config.key_crouch) {
+                        movement_state.is_crouching = !movement_state.is_crouching;
+                    }
+                } else {
+                    movement_state.is_crouching = is_key_down(config.key_crouch);
+                }
+                
                 let target_height = if movement_state.is_crouching {
                     config.crouch_height
                 } else {
                     config.standing_height
                 };
-                movement_state.height = movement_state.height + (target_height - movement_state.height) * 10.0 * delta_time; // smooth height change
+                movement_state.height =
+                    movement_state.height +
+                    (target_height - movement_state.height) * 10.0 * delta_time; // smooth height change
                 position.y = movement_state.height;
 
                 // check if jumping
@@ -152,7 +175,6 @@ async fn main() {
                     movement_state.is_grounded = true;
                     movement_state.velocity.y = 0.0;
                 }
-
 
                 // calculate velocity
                 let speed = if movement_state.is_sprinting {
@@ -280,6 +302,19 @@ async fn main() {
                     }
                 }
 
+                // bob the camera up and down based on horizontal speed to make movement feel less stiff
+                if movement_state.is_sprinting && movement_state.is_grounded {
+                    bob_timer += delta_time * 12.0; // bob frequency
+                } else {
+                    bob_timer = 0.0;
+                }
+                let bob_offset = if movement_state.is_sprinting && movement_state.is_grounded {
+                    bob_timer.sin() * 0.05 // bob amplitude
+                } else {
+                    0.0
+                };
+                position.y += bob_offset;
+
                 let camera = Camera3D {
                     position,
                     target: position + forward,
@@ -312,6 +347,17 @@ async fn main() {
                 }
 
                 set_default_camera();
+
+                // CROSSHAIR
+                let cx = screen_width() / 2.0;
+                let cy = screen_height() / 2.0;
+
+                let size = 10.0;
+                draw_line(cx - size, cy, cx + size, cy, 1.0, WHITE);
+                draw_line(cx, cy - size, cx, cy + size, 1.0, WHITE);
+
+                // HUD
+
                 draw_text("Multiplayer FPS", 20.0, 20.0, 30.0, WHITE);
                 draw_text(
                     &format!("Player: {} (ID: {})", username, player_id),
@@ -327,6 +373,32 @@ async fn main() {
                     20.0,
                     WHITE
                 );
+
+                // STAMINA BAR
+                let bar_width = 200.0;
+                let bar_height = 8.0;
+                let bar_x = screen_width() - bar_width - 20.0;
+                let bar_y = screen_height() - 40.0;
+                draw_rectangle(
+                    bar_x,
+                    bar_y,
+                    bar_width,
+                    bar_height,
+                    Color::from_rgba(50, 50, 50, 255)
+                );
+                let fill = movement_state.stamina / 100.0;
+                let bar_color = if movement_state.stamina < 20.0 {
+                    RED
+                } else {
+                    Color::from_rgba(80, 180, 80, 255)
+                };
+                draw_rectangle(bar_x, bar_y, bar_width * fill, bar_height, bar_color);
+                draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, GRAY);
+
+                // Crouch indicator
+                if movement_state.is_crouching {
+                    draw_text("CROUCHING", screen_width() / 2.0 - 40.0, bar_y - 10.0, 16.0, YELLOW);
+                }
 
                 // Draw nametags above other players
                 for p in &other_players {
@@ -377,39 +449,76 @@ async fn main() {
                 clear_background(Color::from_rgba(0, 0, 0, 200));
 
                 // Settings panel
-                    let panel_w = 300.0;
-                    let panel_h = 250.0;
-                    let panel_x = (screen_width() - panel_w) / 2.0;
-                    let panel_y = (screen_height() - panel_h) / 2.0;
-                    draw_rectangle(panel_x, panel_y, panel_w, panel_h, Color::from_rgba(30, 30, 30, 240));
-                    draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 2.0, WHITE);
+                let panel_w = 300.0;
+                let panel_h = 250.0;
+                let panel_x = (screen_width() - panel_w) / 2.0;
+                let panel_y = (screen_height() - panel_h) / 2.0;
+                draw_rectangle(
+                    panel_x,
+                    panel_y,
+                    panel_w,
+                    panel_h,
+                    Color::from_rgba(30, 30, 30, 240)
+                );
+                draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 2.0, WHITE);
 
-                    // Title
-                    let title = "PAUSED";
-                    let title_w = measure_text(title, None, 30, 1.0).width;
-                    draw_text(title, (screen_width() - title_w) / 2.0, panel_y + 40.0, 30.0, WHITE);
+                // Title
+                let title = "PAUSED";
+                let title_w = measure_text(title, None, 30, 1.0).width;
+                draw_text(title, (screen_width() - title_w) / 2.0, panel_y + 40.0, 30.0, WHITE);
 
-                    // Buttons
-                    let btn_w = 200.0;
-                    let btn_h = 40.0;
-                    let btn_x = (screen_width() - btn_w) / 2.0;
-                    let btn_color = Color::from_rgba(50,50,50,255);
-                    let btn_hover = DARKGRAY;
+                // Buttons
+                let btn_w = 200.0;
+                let btn_h = 40.0;
+                let btn_x = (screen_width() - btn_w) / 2.0;
+                let btn_color = Color::from_rgba(50, 50, 50, 255);
+                let btn_hover = DARKGRAY;
 
-                    if is_button_clicked(btn_x, panel_y + 80.0, btn_w, btn_h, "Resume", btn_color, btn_hover) {
-                        state = GameState::Playing;
-                        set_cursor_grab(true);
-                        show_mouse(false);
-                        last_mouse_pos = mouse_position();
-                    }
+                if
+                    is_button_clicked(
+                        btn_x,
+                        panel_y + 80.0,
+                        btn_w,
+                        btn_h,
+                        "Resume",
+                        btn_color,
+                        btn_hover
+                    )
+                {
+                    state = GameState::Playing;
+                    set_cursor_grab(true);
+                    show_mouse(false);
+                    last_mouse_pos = mouse_position();
+                }
 
-                    if is_button_clicked(btn_x, panel_y + 130.0, btn_w, btn_h, "Settings", btn_color, btn_hover) {
-                        state = GameState::Settings;
-                    }
+                if
+                    is_button_clicked(
+                        btn_x,
+                        panel_y + 130.0,
+                        btn_w,
+                        btn_h,
+                        "Settings",
+                        btn_color,
+                        btn_hover
+                    )
+                {
+                    settings_screen.enter(&config);
+                    state = GameState::Settings;
+                }
 
-                    if is_button_clicked(btn_x, panel_y + 190.0, btn_w, btn_h, "Exit", Color::from_rgba(80, 20, 20, 255), MAROON) {
-                        std::process::exit(0);
-                    }
+                if
+                    is_button_clicked(
+                        btn_x,
+                        panel_y + 190.0,
+                        btn_w,
+                        btn_h,
+                        "Exit",
+                        Color::from_rgba(80, 20, 20, 255),
+                        MAROON
+                    )
+                {
+                    std::process::exit(0);
+                }
             }
             GameState::Settings => {
                 clear_background(Color::from_rgba(0, 0, 0, 255));

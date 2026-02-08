@@ -13,22 +13,124 @@ const FOV_STEP: f32 = 5.0;
 
 pub struct SettingsScreen {
     pub rebinding: Option<String>,
+    pub saved_config: Option<GameConfig>,
+    pub show_unsaved_prompt: bool,
 }
 
 impl SettingsScreen {
     pub fn new() -> Self {
         Self {
             rebinding: None,
+            saved_config: None,
+            show_unsaved_prompt: false,
+        }
+    }
+
+    pub fn enter(&mut self, config: &GameConfig) {
+        self.saved_config = Some(config.clone());
+        self.show_unsaved_prompt = false;
+    }
+
+    fn has_duplicates(config: &GameConfig) -> bool {
+        let keys = [
+            config.key_forward, config.key_backward, config.key_left,
+            config.key_right, config.key_sprint, config.key_crouch, config.key_jump,
+        ];
+        for i in 0..keys.len() {
+            for j in (i + 1)..keys.len() {
+                if keys[i] == keys[j] {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn has_unsaved_changes(&self, config: &GameConfig) -> bool {
+        match &self.saved_config {
+            Some(saved) => saved != config,
+            None => false,
         }
     }
     pub fn update(&mut self, config: &mut GameConfig) -> bool {
-        if is_key_pressed(KeyCode::Escape) {
-            return true;
-        }
-
         let mouse = mouse_position();
         let clicked = is_mouse_button_pressed(MouseButton::Left);
         let held = is_mouse_button_down(MouseButton::Left);
+
+        // Handle unsaved changes prompt
+        if self.show_unsaved_prompt {
+            let pw = 350.0;
+            let ph = 150.0;
+            let px = (screen_width() - pw) / 2.0;
+            let py = (screen_height() - ph) / 2.0;
+
+            // Draw prompt overlay
+            draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::from_rgba(0, 0, 0, 150));
+            draw_rectangle(px, py, pw, ph, Color::from_rgba(40, 40, 40, 255));
+            draw_rectangle_lines(px, py, pw, ph, 2.0, WHITE);
+
+            let msg = "You have unsaved changes!";
+            let msg_w = measure_text(msg, None, 20, 1.0).width;
+            draw_text(msg, px + (pw - msg_w) / 2.0, py + 35.0, 20.0, YELLOW);
+
+            // "Leave without saving" button
+            let btn_w = 150.0;
+            let btn_h = 35.0;
+            let leave_x = px + 20.0;
+            let btn_y = py + ph - btn_h - 20.0;
+            draw_rectangle(leave_x, btn_y, btn_w, btn_h, Color::from_rgba(80, 30, 30, 255));
+            draw_rectangle_lines(leave_x, btn_y, btn_w, btn_h, 1.0, WHITE);
+            let lt = "Leave";
+            let ltw = measure_text(lt, None, 18, 1.0).width;
+            draw_text(lt, leave_x + (btn_w - ltw) / 2.0, btn_y + 24.0, 18.0, WHITE);
+
+            // "Save & Leave" button
+            let save_x = px + pw - btn_w - 20.0;
+            let has_dupes = Self::has_duplicates(config);
+            let save_color = if has_dupes { Color::from_rgba(50, 50, 50, 255) } else { Color::from_rgba(30, 80, 30, 255) };
+            draw_rectangle(save_x, btn_y, btn_w, btn_h, save_color);
+            draw_rectangle_lines(save_x, btn_y, btn_w, btn_h, 1.0, WHITE);
+            let st = if has_dupes { "Fix duplicates" } else { "Save & Leave" };
+            let stw = measure_text(st, None, 18, 1.0).width;
+            draw_text(st, save_x + (btn_w - stw) / 2.0, btn_y + 24.0, 18.0, if has_dupes { GRAY } else { WHITE });
+
+            if clicked {
+                // Leave without saving
+                if mouse.0 >= leave_x && mouse.0 <= leave_x + btn_w
+                    && mouse.1 >= btn_y && mouse.1 <= btn_y + btn_h
+                {
+                    // Restore saved config
+                    if let Some(saved) = &self.saved_config {
+                        *config = saved.clone();
+                    }
+                    self.show_unsaved_prompt = false;
+                    return true;
+                }
+                // Save & Leave (only if no duplicates)
+                if !has_dupes && mouse.0 >= save_x && mouse.0 <= save_x + btn_w
+                    && mouse.1 >= btn_y && mouse.1 <= btn_y + btn_h
+                {
+                    self.saved_config = Some(config.clone());
+                    self.show_unsaved_prompt = false;
+                    return true;
+                }
+            }
+
+            if is_key_pressed(KeyCode::Escape) {
+                self.show_unsaved_prompt = false;
+            }
+
+            return false;
+        }
+
+        // ESC tries to go back
+        if is_key_pressed(KeyCode::Escape) {
+            if self.has_unsaved_changes(config) {
+                self.show_unsaved_prompt = true;
+                return false;
+            }
+            return true;
+        }
 
         // Layout
         let gap = 20.0;
@@ -111,6 +213,31 @@ impl SettingsScreen {
             config.fov = FOV_MIN + t * (FOV_MAX - FOV_MIN);
         }
 
+        // crouch toggle
+        // text: "Crouch Mode: [Hold] / [Toggle]"
+
+        let crouch_x = left_x + 20.0;
+        let crouch_y = row_y2 + 60.0;
+        let crouch_w = 200.0;
+        let crouch_h = 30.0;
+        if
+            clicked &&
+            mouse.0 >= crouch_x &&
+            mouse.0 <= crouch_x + crouch_w &&
+            mouse.1 >= crouch_y &&
+            mouse.1 <= crouch_y + crouch_h
+        {
+            config.crouch_toggle = !config.crouch_toggle;
+        }
+        let crouch_text = if config.crouch_toggle { "[Toggle]" } else { "[Hold]" };
+        draw_text(
+            &format!("Crouch Mode: {}", crouch_text),
+            crouch_x,
+            crouch_y,
+            20.0,
+            WHITE,
+        );
+
         // Back button
         let back_y = screen_height() - 60.0;
         let back_w = 150.0;
@@ -122,7 +249,26 @@ impl SettingsScreen {
             mouse.1 >= back_y &&
             mouse.1 <= back_y + 40.0
         {
-            return true;
+            if self.has_unsaved_changes(config) {
+                self.show_unsaved_prompt = true;
+            } else {
+                return true;
+            }
+        }
+
+        // Save button
+        let save_w = 150.0;
+        let save_x = back_x + back_w + 20.0;
+        let has_dupes = Self::has_duplicates(config);
+        if
+            clicked &&
+            !has_dupes &&
+            mouse.0 >= save_x &&
+            mouse.0 <= save_x + save_w &&
+            mouse.1 >= back_y &&
+            mouse.1 <= back_y + 40.0
+        {
+            self.saved_config = Some(config.clone());
         }
 
         // Reset button
@@ -182,6 +328,7 @@ impl SettingsScreen {
                 self.rebinding = None;
             }
         }
+
         false
     }
     pub fn draw(&self, config: &GameConfig) {
@@ -316,7 +463,27 @@ impl SettingsScreen {
         let reset_tw = measure_text("Reset", None, 20, 1.0).width;
         draw_text("Reset", reset_x + (back_w - reset_tw) / 2.0, back_y + 26.0, 20.0, WHITE);
 
+        // Save button
+        let save_x = back_x + back_w + 20.0;
+        let has_dupes = Self::has_duplicates(config);
+        let has_changes = self.has_unsaved_changes(config);
+        let save_color = if has_dupes {
+            Color::from_rgba(50, 50, 50, 255)
+        } else if has_changes {
+            Color::from_rgba(30, 100, 30, 255)
+        } else {
+            Color::from_rgba(40, 60, 40, 255)
+        };
+        draw_rectangle(save_x, back_y, back_w, 40.0, save_color);
+        draw_rectangle_lines(save_x, back_y, back_w, 40.0, 1.0, if has_changes && !has_dupes { GREEN } else { WHITE });
+        let save_label = if has_dupes { "Fix dupes" } else { "Save" };
+        let save_tw = measure_text(save_label, None, 20, 1.0).width;
+        draw_text(save_label, save_x + (back_w - save_tw) / 2.0, back_y + 26.0, 20.0, if has_dupes { GRAY } else { WHITE });
+
         // Right Panel - Key Bindings
+  
+
+
         draw_rectangle(right_x, panel_top, panel_w, panel_h, Color::from_rgba(30, 30, 30, 240));
         draw_rectangle_lines(right_x, panel_top, panel_w, panel_h, 1.0, GRAY);
 
@@ -340,6 +507,9 @@ impl SettingsScreen {
             ("Jump", config.key_jump),
         ];
 
+
+
+
         let bind_actions = ["forward", "backward", "left", "right", "sprint", "crouch", "jump"];
 
         for (i, (label, key)) in binds.iter().enumerate() {
@@ -347,6 +517,18 @@ impl SettingsScreen {
             let bx = right_x + 20.0;
             let bw = panel_w - 40.0;
             let bh = 30.0;
+            
+            // check if key appears more than once in binds (duplicate keys)
+            let all_keys = [
+                config.key_forward,
+                config.key_backward,
+                config.key_left,
+                config.key_right,
+                config.key_sprint,
+                config.key_crouch,
+                config.key_jump,
+            ];
+            let duplicate = all_keys.iter().filter(|&&k| k == *key).count() > 1;
 
             let is_rebinding = self.rebinding.as_deref() == Some(bind_actions[i]);
             let bg_color = if is_rebinding {
@@ -366,7 +548,7 @@ impl SettingsScreen {
                 format!("{:?}", key)
             };
             let key_tw = measure_text(&key_text, None, 18, 1.0).width;
-            draw_text(&key_text, bx + bw - key_tw - 10.0, by + 20.0, 18.0, YELLOW);
+            draw_text(&key_text, bx + bw - key_tw - 10.0, by + 20.0, 18.0, if duplicate { RED } else { YELLOW });
         }
     }
 }

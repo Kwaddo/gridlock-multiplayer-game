@@ -5,6 +5,7 @@
 
 use macroquad::prelude::*;
 
+#[derive(Clone, PartialEq)]
 pub struct GameConfig {
     // Mouse (UI value 10-100, default 60)
     pub sensitivity: f32,
@@ -16,6 +17,7 @@ pub struct GameConfig {
     pub key_right: KeyCode,
     pub key_sprint: KeyCode,
     pub key_crouch: KeyCode,
+    pub crouch_toggle: bool, // if true, crouch is a toggle instead of hold
     pub key_jump: KeyCode,
     pub key_settings: KeyCode,
 
@@ -40,6 +42,7 @@ impl GameConfig {
             key_right: KeyCode::D,
             key_sprint: KeyCode::LeftShift,
             key_crouch: KeyCode::LeftControl,
+            crouch_toggle: false, // default to hold
             key_jump: KeyCode::Space,
             key_settings: KeyCode::Escape,
 
