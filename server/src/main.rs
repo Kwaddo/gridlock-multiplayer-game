@@ -12,13 +12,21 @@ use protocols::*;
 
 const PLAYER_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn find_unique_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
-    if !players.values().any(|p| p.username == requested) {
-        return requested.to_string();
+fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
+    let mut candidate = if requested.is_empty() || requested.len() > 20 {
+        println!("Invalid username '{}'. Assigning default.", requested);
+        "Player".to_string()
+    } else {
+        requested.to_string()
+    };
+
+    if !players.values().any(|p| p.username == candidate) {
+        return candidate;
     }
+
     let mut i = 0;
     loop {
-        let candidate = format!("quad{}", i);
+        candidate = format!("quad{}", i);
         if !players.values().any(|p| p.username == candidate) {
             return candidate;
         }
@@ -76,7 +84,7 @@ fn handle_join(
     }
 
     let requested_username = String::from_utf8_lossy(payload).trim().to_string();
-    let assigned_username = find_unique_username(players, &requested_username);
+    let assigned_username = handle_username(players, &requested_username);
     let id = (players.len() as u32) + 1;
     let new_player = Player::new(id, assigned_username.clone(), src_addr);
 
