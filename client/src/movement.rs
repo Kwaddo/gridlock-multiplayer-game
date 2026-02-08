@@ -6,6 +6,7 @@ use macroquad::prelude::*;
     whether they are on the ground, crouching, sprinting, etc. 
     It is updated based on player input and physics calculations.
 */
+#[derive(Debug, PartialEq)]
 pub struct MovementState {
    pub velocity: Vec3,
     pub is_grounded: bool,
@@ -14,6 +15,7 @@ pub struct MovementState {
     pub stamina: f32,
     pub height: f32, // eye height
 }
+
 
 impl MovementState {
     pub fn new() -> Self {
@@ -55,7 +57,7 @@ impl MovementConfig {
             acceleration: 10.0,
             friction: 8.0,
             gravity: 15.0,
-            jump_strength: 6.0,
+            jump_strength: 18.0,
             stamina_drain: 35.0,
             stamina_recover: 15.0,
         }

@@ -113,8 +113,56 @@ async fn main() {
                     move_dir = move_dir.normalize();
                 }
 
+                // check if sprinting
+                movement_state.is_sprinting = is_key_down(config.key_sprint)
+                && move_dir != vec3(0.0, 0.0, 0.0) // only sprint if moving
+                && movement_state.stamina > 0.0;
+
+                // drain or regen stamina
+                if movement_state.is_sprinting {
+                    movement_state.stamina -= movement_config.stamina_drain * delta_time;
+                } else {
+                    movement_state.stamina = (movement_state.stamina + movement_config.stamina_recover * delta_time).min(100.0); // at most 100
+                }
+
+                // check if crouching
+                movement_state.is_crouching = is_key_down(config.key_crouch);
+                let target_height = if movement_state.is_crouching {
+                    config.crouch_height
+                } else {
+                    config.standing_height
+                };
+                movement_state.height = movement_state.height + (target_height - movement_state.height) * 10.0 * delta_time; // smooth height change
+                position.y = movement_state.height;
+
+                // check if jumping
+                if is_key_pressed(config.key_jump) && movement_state.is_grounded {
+                    movement_state.velocity.y = movement_config.jump_strength;
+                    movement_state.is_grounded = false;
+                }
+
+                // apply gravity
+                movement_state.velocity.y -= movement_config.gravity * delta_time;
+
+                position.y += movement_state.velocity.y * delta_time;
+
+                // ground check
+                if position.y <= movement_state.height {
+                    position.y = movement_state.height;
+                    movement_state.is_grounded = true;
+                    movement_state.velocity.y = 0.0;
+                }
+
+
                 // calculate velocity
-                let target_velocity = move_dir * movement_config.walk_speed;
+                let speed = if movement_state.is_sprinting {
+                    movement_config.sprint_speed
+                } else if movement_state.is_crouching {
+                    movement_config.crouch_speed
+                } else {
+                    movement_config.walk_speed
+                };
+                let target_velocity = move_dir * speed;
 
                 // accelerate towards target or toward zero
                 let rate = if move_dir != vec3(0.0, 0.0, 0.0) {
