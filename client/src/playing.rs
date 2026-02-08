@@ -104,7 +104,7 @@ impl PlayingState {
         its a request because we only set a flag here and the actual jump impulse is applied in the simulate() method, 
         which allows us to have consistent jump behavior even if the player presses jump slightly before landing. 
         */
-        self.jump_requested = is_key_pressed(config.key_jump) && self.movement_state.is_grounded;
+        self.jump_requested = is_key_down(config.key_jump) && self.movement_state.is_grounded;
 
         None
     }
