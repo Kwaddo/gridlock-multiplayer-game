@@ -22,12 +22,19 @@ pub fn game_font() -> Option<&'static Font> {
     GAME_FONT.get()
 }
 
+// Oversample factor: render glyphs at Nx the requested size, then scale
+// down when drawing. This gives the font atlas much more pixel data to
+// work with and eliminates the blurriness macroquad gets at small sizes.
+const FONT_OVERSAMPLE: u16 = 2;
+
 // build text params with font so we can easily change font settings in one place
 pub fn text_params(font_size: u16, color: Color) -> TextParams<'static> {
+    let atlas_size = font_size * FONT_OVERSAMPLE;
+    let scale = 1.0 / FONT_OVERSAMPLE as f32;
     TextParams {
         font: game_font(),
-        font_size,
-        font_scale: 1.0,
+        font_size: atlas_size,
+        font_scale: scale,
         font_scale_aspect: 1.0,
         color,
         ..Default::default()
@@ -36,5 +43,7 @@ pub fn text_params(font_size: u16, color: Color) -> TextParams<'static> {
 
 // measure text width using the game font.
 pub fn measure_game_text(text: &str, font_size: u16) -> f32 {
-    measure_text(text, game_font(), font_size, 1.0).width
+    let atlas_size = font_size * FONT_OVERSAMPLE;
+    let scale = 1.0 / FONT_OVERSAMPLE as f32;
+    measure_text(text, game_font(), atlas_size, scale).width
 }
