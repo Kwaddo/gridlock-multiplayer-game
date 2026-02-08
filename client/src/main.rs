@@ -1,9 +1,9 @@
 use macroquad::prelude::*;
 use std::net::UdpSocket;
 
-use client::core::{GameConfig, GameState};
+use client::core::{ GameConfig, GameState };
 use client::net::poll_updates;
-use client::screens::{draw_pause_menu, LoginScreen, PlayingState};
+use client::screens::{ draw_pause_menu, LoginScreen, PlayingState };
 use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
@@ -41,7 +41,22 @@ async fn main() {
             }
 
             GameState::Playing => {
-                sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+
+                if let Some(entries) = assets {
+                    for (key, path) in entries {
+                        println!("Loading asset: {} -> {}", key, path);
+                        match load_texture(&path).await {
+                            Ok(tex) => {
+                                println!("  Loaded successfully");
+                                playing_state.assets.insert(key, tex);
+                            }
+                            Err(e) => {
+                                println!("  FAILED to load: {:?}", e);
+                            }
+                        }
+                    }
+                }
 
                 if let Some(new_state) = playing_state.process_local_input(&config) {
                     state = new_state;
@@ -50,6 +65,7 @@ async fn main() {
                         show_mouse(true);
                         playing_state.clear_input();
                     }
+
                     next_frame().await;
                     continue;
                 }
@@ -60,8 +76,23 @@ async fn main() {
             }
 
             GameState::Paused => {
-                // Keep world up to date even while paused.
-                sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                // keep world up to date even while paused.
+                let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+
+                if let Some(entries) = assets {
+                    for (key, path) in entries {
+                        println!("Loading asset (paused): {} -> {}", key, path);
+                        match load_texture(&path).await {
+                            Ok(tex) => {
+                                println!("  Loaded successfully");
+                                playing_state.assets.insert(key, tex);
+                            }
+                            Err(e) => {
+                                println!("  FAILED to load: {:?}", e);
+                            }
+                        }
+                    }
+                }
 
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
@@ -102,16 +133,24 @@ fn sync_world(
     socket: &Option<UdpSocket>,
     player_id: u32,
     playing_state: &mut PlayingState,
-    maze: &mut Option<Maze>,
-) {
+    maze: &mut Option<Maze>
+) -> Option<Vec<(String, String)> /* assets to load */> {
     if let Some(ref sock) = socket {
         let updates = poll_updates(sock, player_id);
         if let Some((new_maze, spawn)) = updates.maze {
             *maze = Some(new_maze);
-            playing_state.position = spawn;
+            // playing_state.position = spawn; // removed because player starts in lobby now
         }
         if let Some(players) = updates.players {
             playing_state.other_players = players;
         }
+
+        if let Some((world_id, spawn)) = updates.world_change {
+            playing_state.current_world = world_id;
+            playing_state.position = spawn;
+            playing_state.movement_state.velocity = Vec3::ZERO;
+        }
+        return updates.assets;
     }
+    None
 }

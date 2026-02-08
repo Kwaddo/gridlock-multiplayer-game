@@ -6,3 +6,5 @@ pub const MSG_SHOOT: u8 = 5;
 pub const MSG_HIT: u8 = 6;
 pub const MSG_DISCONNECT: u8 = 7;
 pub const MSG_MAZE: u8 = 8;
+pub const MSG_WORLD_CHANGE: u8 = 9; // server -> client: bi-directional world transition
+pub const MSG_ASSETS: u8 = 10; // server -> client: asset manifest per world
