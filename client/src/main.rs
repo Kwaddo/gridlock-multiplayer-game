@@ -3,6 +3,10 @@ use std::net::UdpSocket;
 use client::game_state::*;
 use client::login::LoginScreen;
 use client::protocols::*;
+use client::movement::{ MovementState, MovementConfig };
+use client::lobby::*;
+use client::config::GameConfig;
+use client::settings::SettingsScreen;
 
 struct OtherPlayer {
     id: u32,
@@ -15,10 +19,22 @@ struct OtherPlayer {
     color: Color, // random color till skins
 }
 
+// helper function to see which button is pressed based on config keybinds, we will use this in the settings menu to show which button is bound to each action
+fn is_button_clicked(x: f32, y: f32, w: f32, h: f32, label:  &str, color: Color, hover_color: Color) -> bool {
+    let mouse = mouse_position();
+    let hover = mouse.0 >= x && mouse.0 <= x + w && mouse.1 >= y && mouse.1 <= y + h;
+    draw_rectangle(x, y, w, h, if hover { hover_color } else { color });
+    draw_rectangle_lines(x, y, w, h, 1.0, WHITE);
+    let tw = measure_text(label, None, 20, 1.0).width;
+    draw_text(label, x + (w - tw) / 2.0, y + 26.0, 20.0, WHITE);
+    hover && is_mouse_button_pressed(MouseButton::Left)
+}
+
 #[macroquad::main("Multiplayer FPS")]
 async fn main() {
     let mut state = GameState::Login;
     let mut login_screen = LoginScreen::new();
+    let mut settings_screen = SettingsScreen::new();
 
     let mut socket: Option<UdpSocket> = None;
     let mut player_id: u32 = 0;
@@ -31,6 +47,16 @@ async fn main() {
 
     let mut other_players: Vec<OtherPlayer> = Vec::new();
     let mut server_addr = String::new();
+
+    // movement implementation
+    let mut movement_state = MovementState::new();
+    let movement_config = MovementConfig::new();
+
+    // game config
+    let mut config = GameConfig::new();
+
+    // Load textures once before the game loop
+    let floor_texture = load_texture("assets/rocks.png").await.ok();
 
     loop {
         match state {
@@ -51,52 +77,60 @@ async fn main() {
             GameState::Playing => {
                 let delta_time = get_frame_time();
 
-                // Press ESC to quit
-                if is_key_pressed(KeyCode::Escape) {
-                    std::process::exit(0);
-                }
-
-                // Press Q to unfocus mouse (toggle cursor grab)
-                if is_key_pressed(KeyCode::Q) {
+                // Press ESC to open settings
+                if is_key_pressed(config.key_settings) {
+                    state = GameState::Paused;
                     set_cursor_grab(false);
                     show_mouse(true);
-                }
-
-                // Click window to re-grab mouse
-                if is_mouse_button_pressed(MouseButton::Left) {
-                    set_cursor_grab(true);
-                    show_mouse(false);
-                    last_mouse_pos = mouse_position();
+                    continue;
                 }
 
                 let mouse_pos = mouse_position();
                 let mouse_delta = (mouse_pos.0 - last_mouse_pos.0, mouse_pos.1 - last_mouse_pos.1);
                 last_mouse_pos = mouse_pos;
 
-                yaw += mouse_delta.0 * 0.002; // switched this because it was inverted (-= -> +=)
-                pitch -= mouse_delta.1 * 0.002;
+                yaw += mouse_delta.0 * config.raw_sensitivity();
+                pitch -= mouse_delta.1 * config.raw_sensitivity();
                 pitch = pitch.clamp(-std::f32::consts::PI / 2.0, std::f32::consts::PI / 2.0);
 
                 let forward = vec3(yaw.cos() * pitch.cos(), pitch.sin(), yaw.sin() * pitch.cos());
                 let right = vec3(-yaw.sin(), 0.0, yaw.cos());
 
                 let mut move_dir = vec3(0.0, 0.0, 0.0);
-                if is_key_down(KeyCode::W) {
+                if is_key_down(config.key_forward) {
                     move_dir += forward;
                 }
-                if is_key_down(KeyCode::S) {
+                if is_key_down(config.key_backward) {
                     move_dir -= forward;
                 }
-                if is_key_down(KeyCode::A) {
+                if is_key_down(config.key_left) {
                     move_dir -= right;
                 }
-                if is_key_down(KeyCode::D) {
+                if is_key_down(config.key_right) {
                     move_dir += right;
                 }
                 if move_dir != vec3(0.0, 0.0, 0.0) {
                     move_dir = move_dir.normalize();
-                    position += move_dir * 5.0 * delta_time;
                 }
+
+                // calculate velocity
+                let target_velocity = move_dir * movement_config.walk_speed;
+
+                // accelerate towards target or toward zero
+                let rate = if move_dir != vec3(0.0, 0.0, 0.0) {
+                    // if vec3 is not all zeroes, means u are not moving towards any of the axis, so we should accelerate towards target velocity
+                    movement_config.acceleration
+                } else {
+                    movement_config.friction
+                };
+                movement_state.velocity = movement_state.velocity.lerp(
+                    target_velocity,
+                    rate * delta_time
+                );
+
+                position.x += movement_state.velocity.x * delta_time;
+                // position.y += movement_state.velocity.y * delta_time; // we don't want to move vertically based on input, only based on gravity and jumping, so we comment this out for now. We will add vertical movement later when we implement jumping and gravity
+                position.z += movement_state.velocity.z * delta_time;
 
                 // Send position update to server
                 if let Some(ref s) = socket {
@@ -202,7 +236,7 @@ async fn main() {
                     position,
                     target: position + forward,
                     up: vec3(0.0, 1.0, 0.0),
-                    fovy: 45.0,
+                    fovy: config.raw_fov(),
                     aspect: None,
                     z_near: 0.1,
                     z_far: 100.0,
@@ -214,9 +248,7 @@ async fn main() {
                 clear_background(BLACK);
                 set_camera(&camera);
 
-                draw_cube(vec3(0.0, -1.0, 0.0), vec3(20.0, 0.1, 20.0), None, GRAY);
-                draw_cube(vec3(0.0, 0.0, -5.0), vec3(1.0, 1.0, 1.0), None, RED);
-                draw_cube(vec3(3.0, 0.0, -5.0), vec3(1.0, 1.0, 1.0), None, GREEN);
+                draw_lobby(floor_texture.as_ref());
 
                 // Draw other players
                 for p in &other_players {
@@ -253,10 +285,12 @@ async fn main() {
                     let head_pos = vec3(p.x, p.y + 1.8, p.z);
                     let rel = head_pos - position;
                     let dot = rel.dot(forward);
-                    if dot > 0.1 { // only draw if player is in front of us
+                    if dot > 0.1 {
+                        // only draw if player is in front of us
                         let right_dot = rel.dot(right);
                         let up_dot = rel.y - position.y + pitch.sin() * dot;
-                        let fov_scale = screen_height() / (2.0 * (45.0_f32.to_radians() / 2.0).tan());
+                        let fov_scale =
+                            screen_height() / (2.0 * ((45.0_f32).to_radians() / 2.0).tan());
                         let screen_x = screen_width() / 2.0 + (right_dot / dot) * fov_scale;
                         let screen_y = screen_height() / 2.0 - (up_dot / dot) * fov_scale;
                         let name_w = measure_text(&p.username, None, 16, 1.0).width;
@@ -280,6 +314,60 @@ async fn main() {
                         18.0,
                         p.color
                     );
+                }
+            }
+
+            GameState::Paused => {
+                // Press ESC to go back to playing
+                // if is_key_pressed(config.key_settings) {
+                //     state = GameState::Playing;
+                //     set_cursor_grab(true);
+                //     show_mouse(false);
+                //     last_mouse_pos = mouse_position();
+                // }
+
+                clear_background(Color::from_rgba(0, 0, 0, 200));
+
+                // Settings panel
+                    let panel_w = 300.0;
+                    let panel_h = 250.0;
+                    let panel_x = (screen_width() - panel_w) / 2.0;
+                    let panel_y = (screen_height() - panel_h) / 2.0;
+                    draw_rectangle(panel_x, panel_y, panel_w, panel_h, Color::from_rgba(30, 30, 30, 240));
+                    draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 2.0, WHITE);
+
+                    // Title
+                    let title = "PAUSED";
+                    let title_w = measure_text(title, None, 30, 1.0).width;
+                    draw_text(title, (screen_width() - title_w) / 2.0, panel_y + 40.0, 30.0, WHITE);
+
+                    // Buttons
+                    let btn_w = 200.0;
+                    let btn_h = 40.0;
+                    let btn_x = (screen_width() - btn_w) / 2.0;
+                    let btn_color = Color::from_rgba(50,50,50,255);
+                    let btn_hover = DARKGRAY;
+
+                    if is_button_clicked(btn_x, panel_y + 80.0, btn_w, btn_h, "Resume", btn_color, btn_hover) {
+                        state = GameState::Playing;
+                        set_cursor_grab(true);
+                        show_mouse(false);
+                        last_mouse_pos = mouse_position();
+                    }
+
+                    if is_button_clicked(btn_x, panel_y + 130.0, btn_w, btn_h, "Settings", btn_color, btn_hover) {
+                        state = GameState::Settings;
+                    }
+
+                    if is_button_clicked(btn_x, panel_y + 190.0, btn_w, btn_h, "Exit", Color::from_rgba(80, 20, 20, 255), MAROON) {
+                        std::process::exit(0);
+                    }
+            }
+            GameState::Settings => {
+                clear_background(Color::from_rgba(0, 0, 0, 255));
+                settings_screen.draw(&config);
+                if settings_screen.update(&mut config) {
+                    state = GameState::Paused;
                 }
             }
         }
