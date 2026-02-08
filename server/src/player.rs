@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::time::Instant;
 
 pub struct Player {
     pub id: u32,
@@ -12,6 +13,7 @@ pub struct Player {
     pub deaths: u32,
     pub gun_level: u32,
     pub socket_addr: SocketAddr,
+    pub last_activity: Instant,
 }
 
 impl Player {
@@ -28,6 +30,7 @@ impl Player {
             deaths: 0,
             gun_level: 1,
             socket_addr: addr,
+            last_activity: Instant::now(),
         }
     }
 }
