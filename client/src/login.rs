@@ -4,6 +4,7 @@ use macroquad::prelude::*;
 use std::net::UdpSocket;
 use crate::game_state::*;
 use crate::network;
+use crate::fonts::{text_params, measure_game_text};
 
 pub struct LoginScreen {
     pub ip_input: String,
@@ -71,30 +72,30 @@ impl LoginScreen {
         let box_y = screen_height() / 2.0 - 120.0;
 
         let title = "MULTIPLAYER FPS";
-        let title_w = measure_text(title, None, 40, 1.0).width;
-        draw_text(title, (screen_w - title_w) / 2.0, box_y, 40.0, WHITE);
+        let title_w = measure_game_text(title, 40);
+        draw_text_ex(title, (screen_w - title_w) / 2.0, box_y, text_params(40, WHITE));
 
         // IP field
         let ip_y = box_y + 50.0;
         let ip_color = match self.active_field { LoginField::Ip => YELLOW, _ => GRAY };
-        draw_text("Server IP:", box_x, ip_y, 20.0, ip_color);
+        draw_text_ex("Server IP:", box_x, ip_y, text_params(20, ip_color));
         draw_rectangle(box_x, ip_y + 5.0, box_w, 30.0, Color::from_rgba(50, 50, 50, 255));
         draw_rectangle_lines(box_x, ip_y + 5.0, box_w, 30.0, 2.0, ip_color);
-        draw_text(&self.ip_input, box_x + 5.0, ip_y + 25.0, 20.0, WHITE);
+        draw_text_ex(&self.ip_input, box_x + 5.0, ip_y + 25.0, text_params(20, WHITE));
 
         // Username field
         let name_y = box_y + 120.0;
         let name_color = match self.active_field { LoginField::Username => YELLOW, _ => GRAY };
-        draw_text("Username:", box_x, name_y, 20.0, name_color);
+        draw_text_ex("Username:", box_x, name_y, text_params(20, name_color));
         draw_rectangle(box_x, name_y + 5.0, box_w, 30.0, Color::from_rgba(50, 50, 50, 255));
         draw_rectangle_lines(box_x, name_y + 5.0, box_w, 30.0, 2.0, name_color);
-        draw_text(&self.username_input, box_x + 5.0, name_y + 25.0, 20.0, WHITE);
+        draw_text_ex(&self.username_input, box_x + 5.0, name_y + 25.0, text_params(20, WHITE));
 
         // Hints
-        draw_text("TAB to switch fields | ENTER to connect", box_x, box_y + 185.0, 16.0, GRAY);
+        draw_text_ex("TAB to switch fields | ENTER to connect", box_x, box_y + 185.0, text_params(16, GRAY));
 
         if !self.error_msg.is_empty() {
-            draw_text(&self.error_msg, box_x, box_y + 210.0, 18.0, RED);
+            draw_text_ex(&self.error_msg, box_x, box_y + 210.0, text_params(18, RED));
         }
     }
 }
