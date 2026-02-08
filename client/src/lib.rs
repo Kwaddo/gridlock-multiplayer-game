@@ -6,3 +6,8 @@ pub mod movement;
 pub mod lobby;
 pub mod config;
 pub mod settings;
+pub mod ui;
+pub mod hud;
+pub mod playing;
+pub mod pause_menu;
+pub mod fonts;

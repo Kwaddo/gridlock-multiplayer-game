@@ -56,8 +56,8 @@ impl MovementConfig {
             crouch_speed: 2.5,
             acceleration: 10.0,
             friction: 8.0,
-            gravity: 15.0,
-            jump_strength: 18.0,
+            gravity: 20.0,
+            jump_strength: 4.0,
             stamina_drain: 35.0,
             stamina_recover: 15.0,
         }
