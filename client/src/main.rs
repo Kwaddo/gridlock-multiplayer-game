@@ -86,17 +86,6 @@ impl App {
             std::process::exit(0);
         }
 
-        if is_key_pressed(KeyCode::Q) {
-            set_cursor_grab(false);
-            show_mouse(true);
-        }
-
-        if is_mouse_button_pressed(MouseButton::Left) {
-            set_cursor_grab(true);
-            show_mouse(false);
-            self.orientation.last_mouse_pos = mouse_position();
-        }
-
         false
     }
 
