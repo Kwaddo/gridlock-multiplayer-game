@@ -1,6 +1,25 @@
 use std::net::SocketAddr;
 use std::time::Instant;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorldId {
+    Lobby = 0,
+    Maze = 1,
+}
+
+impl WorldId {
+    pub fn from_u8(value: u8) -> Option<WorldId> {
+        match value {
+            0 => Some(WorldId::Lobby),
+            1 => Some(WorldId::Maze),
+            _ => None,
+        }
+    }
+    pub fn as_u8(self) -> u8 {
+        self as u8
+    }
+}
+
 pub struct Player {
     pub id: u32,
     pub username: String,
@@ -14,6 +33,7 @@ pub struct Player {
     pub gun_level: u32,
     pub socket_addr: SocketAddr,
     pub last_activity: Instant,
+    pub world: WorldId, // where is this player right now? lobby, maze, etc
 }
 
 impl Player {
@@ -31,6 +51,7 @@ impl Player {
             gun_level: 1,
             socket_addr: addr,
             last_activity: Instant::now(),
+            world: WorldId::Lobby, // start in the lobby by default
         }
     }
 }

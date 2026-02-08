@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
+use std::fs;
+
 
 mod maze;
 mod player;
@@ -9,6 +11,8 @@ mod protocols;
 use maze::MazeData;
 use player::Player;
 use protocols::*;
+
+use player::WorldId;
 
 const PLAYER_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -56,6 +60,9 @@ fn main() -> std::io::Result<()> {
             MSG_JOIN => handle_join(&socket, &mut players, &maze, src_addr, payload),
             MSG_DISCONNECT => handle_disconnect(&mut players, src_addr),
             MSG_POSITION => handle_position(&socket, &mut players, src_addr, payload),
+            MSG_WORLD_CHANGE => {
+                handle_world_change(&socket, &mut players, src_addr, payload);
+            }
             _ => println!("Unknown message type: {}", msg_type),
         }
 
@@ -101,6 +108,7 @@ fn handle_join(
     response.extend_from_slice(name_bytes);
     if socket.send_to(&response, src_addr).is_ok() {
         maze.send(socket, src_addr);
+        send_assets(socket, src_addr);
     }
 }
 
@@ -137,26 +145,30 @@ fn handle_position(
     broadcast_state(socket, players);
 }
 
-fn broadcast_state(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) {
-    let mut state_msg = vec![MSG_STATE];
-    state_msg.extend_from_slice(&(players.len() as u32).to_be_bytes());
+fn broadcast_state(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) { // updated this function to build a separate message per receiver filtered by world
+    for receiver in players.values() {
+        let same_world: Vec<&Player> = players.values()
+            .filter(|p| p.world == receiver.world)
+            .collect();
 
-    for player in players.values() {
-        state_msg.extend_from_slice(&player.id.to_be_bytes());
-        state_msg.extend_from_slice(&player.position.0.to_be_bytes());
-        state_msg.extend_from_slice(&player.position.1.to_be_bytes());
-        state_msg.extend_from_slice(&player.position.2.to_be_bytes());
-        state_msg.extend_from_slice(&player.yaw.to_be_bytes());
-        let name_bytes = player.username.as_bytes();
-        state_msg.push(name_bytes.len() as u8);
-        state_msg.extend_from_slice(name_bytes);
-    }
+        let mut state_msg = vec![MSG_STATE];
+        state_msg.extend_from_slice(&(same_world.len() as u32).to_be_bytes());
 
-    for player in players.values() {
-        let _ = socket.send_to(&state_msg, player.socket_addr);
+        for player in &same_world {
+            state_msg.extend_from_slice(&player.id.to_be_bytes());
+            state_msg.extend_from_slice(&player.position.0.to_be_bytes());
+            state_msg.extend_from_slice(&player.position.1.to_be_bytes());
+            state_msg.extend_from_slice(&player.position.2.to_be_bytes());
+            state_msg.extend_from_slice(&player.yaw.to_be_bytes());
+            state_msg.push(player.world.as_u8());
+            let name_bytes = player.username.as_bytes();
+            state_msg.push(name_bytes.len() as u8);
+            state_msg.extend_from_slice(name_bytes);
+        }
+
+        let _ = socket.send_to(&state_msg, receiver.socket_addr);
     }
 }
-
 fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) {
     let now = Instant::now();
     let mut to_remove = Vec::new();
@@ -174,6 +186,67 @@ fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) {
                 p.username,
                 players.len()
             );
+        }
+    }
+}
+
+fn handle_world_change(
+    socket: &UdpSocket,
+    players: &mut HashMap<SocketAddr, Player>,
+    src_addr: SocketAddr,
+    payload: &[u8],
+) {
+    if payload.is_empty() { return; }
+    let Some(target) = WorldId::from_u8(payload[0]) else { return; };
+    let Some(player) = players.get_mut(&src_addr) else { return; };
+
+    player.world = target;
+
+    let (sx, sy, sz) = match target {
+        WorldId::Lobby => (0.0_f32, 0.0_f32, 0.0_f32),
+        WorldId::Maze => (1.5 * 1.8, 0.0, 1.5 * 1.8),
+    };
+    player.position = (sx, sy, sz);
+
+    println!("Player '{}' moved to {:?}", player.username, target);
+
+    let mut response = vec![MSG_WORLD_CHANGE, target.as_u8()];
+    response.extend_from_slice(&sx.to_be_bytes());
+    response.extend_from_slice(&sy.to_be_bytes());
+    response.extend_from_slice(&sz.to_be_bytes());
+    let _ = socket.send_to(&response, src_addr);
+}
+
+fn send_assets(socket: &UdpSocket, addr: SocketAddr) {
+    let Ok(data) = fs::read_to_string("assets/manifest.json") else {
+        println!("Warning: could not read assets/manifest.json");
+        return;
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&data) else {
+        println!("Warning: invalid assets/manifest.json");
+        return;
+    };
+
+    let worlds = [("lobby", 0u8), ("maze", 1u8)];
+
+    for (world_name, world_id) in &worlds {
+        if let Some(assets) = manifest.get(world_name).and_then(|v| v.as_object()) {
+            if assets.is_empty() {
+                continue;
+            }
+            let mut msg = vec![MSG_ASSETS, *world_id, assets.len() as u8];
+            for (key, path) in assets {
+                if let Some(path_str) = path.as_str() {
+                    let key_bytes = key.as_bytes();
+                    let path_bytes = path_str.as_bytes();
+                    msg.push(key_bytes.len() as u8);
+                    msg.extend_from_slice(key_bytes);
+                    msg.push(path_bytes.len() as u8);
+                    msg.extend_from_slice(path_bytes);
+                }
+            }
+            println!("Sending {} asset(s) for world '{}'", assets.len(), world_name);
+            let _ = socket.send_to(&msg, addr);
         }
     }
 }

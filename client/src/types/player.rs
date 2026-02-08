@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use crate::types::world::WorldId;
 
 pub struct OtherPlayer {
     pub id: u32,
@@ -9,6 +10,7 @@ pub struct OtherPlayer {
     pub username: String,
     pub skin: Option<Texture2D>,
     pub color: Color,
+    pub world: WorldId,
 }
 
 impl OtherPlayer {

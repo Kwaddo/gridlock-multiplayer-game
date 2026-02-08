@@ -9,3 +9,6 @@ pub const MSG_SHOOT: u8 = 5; // client -> server: shot fired
 pub const MSG_HIT: u8 = 6; // server -> client: you got hit
 pub const MSG_DISCONNECT: u8 = 7; // client -> server: leaving
 pub const MSG_MAZE: u8 = 8; // server -> client: maze layout
+pub const MSG_WORLD_CHANGE: u8 = 9; // server -> client: bi-directional world transition
+pub const MSG_ASSETS: u8 = 10; // server -> client: asset manifest per world
+

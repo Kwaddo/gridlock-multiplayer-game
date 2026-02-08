@@ -9,6 +9,12 @@ pub fn draw_pause_menu(
     config: &GameConfig,
     settings_screen: &mut SettingsScreen,
 ) -> Option<GameState> {
+    // ESC to resume (is_key_pressed is consumed by the Playing state's check,
+    // so this only fires on a *second* ESC press while paused)
+    if is_key_pressed(config.key_settings) {
+        return Some(GameState::Playing);
+    }
+
     // Semi-transparent overlay on top of the game world
     draw_rectangle(
         0.0,
