@@ -62,13 +62,7 @@ pub fn draw_hud(
             }
         }
         CrosshairStyle::Scope => {
-            if ads_t < 0.3 {
-                // Hip-fire: normal crosshair scaled with bloom (sniper hip = inaccurate)
-                let hip_alpha = ((1.0 - ads_t / 0.3).min(1.0) * 255.0) as u8;
-                let hip_tint = Color::from_rgba(255, 255, 255, hip_alpha);
-                let hip_size = base_size * bloom_scale * 1.5; // extra large = "don't hip-fire me"
-                draw_crosshair_texture(cx, cy, hip_size, hip_tint, stats.crosshair_hip_key, assets);
-            }
+            // No hip-fire crosshair for sniper — forces you to scope
 
             if ads_t > 0.2 {
                 // Scope overlay
@@ -79,14 +73,17 @@ pub fn draw_hud(
                 let scope_radius = screen_height().min(screen_width()) * 0.38;
                 draw_scope_vignette(cx, cy, scope_radius, scope_alpha);
 
-                // Scope reticle inside the circle
-                // Active: crosshair148 — alternatives commented below
-                // let reticle_key = "xhair_scope_148";
-                // let reticle_key = "xhair_scope_141";
-                let reticle_key = "xhair_scope_162";
-                let reticle_size = scope_radius * 1.6;
-                let reticle_tint = Color::from_rgba(255, 255, 255, scope_alpha);
-                draw_crosshair_texture(cx, cy, reticle_size, reticle_tint, reticle_key, assets);
+                // Procedural scope reticle — guaranteed centered, no texture offset issues
+                let line_color = Color::from_rgba(0, 0, 0, scope_alpha);
+                let thin = 1.5;
+                // horizontal line
+                draw_line(cx - scope_radius, cy, cx - 8.0, cy, thin, line_color);
+                draw_line(cx + 8.0, cy, cx + scope_radius, cy, thin, line_color);
+                // vertical line
+                draw_line(cx, cy - scope_radius, cx, cy - 8.0, thin, line_color);
+                draw_line(cx, cy + 8.0, cx, cy + scope_radius, thin, line_color);
+                // center dot
+                draw_circle(cx, cy, 2.0, Color::from_rgba(255, 50, 50, scope_alpha));
             }
         }
     }
@@ -209,43 +206,6 @@ pub fn draw_hud(
             120.0 + (i as f32) * 20.0,
             text_params(18, p.color),
         );
-    }
-
-      // VIEWMODEL
-    let vm_keys = stats.viewmodel_frame_keys;
-    if !vm_keys.is_empty() {
-        let frame_key = vm_keys[weapon.viewmodel_frame];
-        if let Some(tex) = assets.get(frame_key) {
-            let vm_h = screen_height() * 0.55;
-            let vm_w = vm_h; // keep square aspect
-            let vm_x = screen_width() - vm_w - 20.0;
-            let vm_y = screen_height() - vm_h + 40.0;
-
-            // subtle bob when walking
-            let bob_y = if movement_state.is_grounded {
-                let speed = movement_state.stamina; // hacky proxy for "moving"
-                if speed < 100.0 {
-                    (get_time() as f32 * 5.0).sin() * 3.0
-                } else {
-                    0.0
-                }
-            } else {
-                0.0
-            };
-
-            // kick up on fire
-            let fire_kick = if weapon.muzzle_flash_timer > 0.0 {
-                -(weapon.muzzle_flash_timer / 0.08) * 20.0
-            } else {
-                0.0
-            };
-
-            draw_texture_ex(tex, vm_x, vm_y + bob_y + fire_kick, WHITE, DrawTextureParams {
-                dest_size: Some(vec2(vm_w, vm_h)),
-                ..Default::default()
-            });
-        }
-
     }
 
     // ── WEAPON INFO (sprite + name + ammo) ──────────────────────────

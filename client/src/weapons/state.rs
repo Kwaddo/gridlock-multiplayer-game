@@ -35,10 +35,6 @@ pub struct WeaponState {
     // -- Visual feedback
     pub muzzle_flash_timer: f32, // >0 means flash is visible (seconds remaining)
 
-    // -- Viewmodel animation
-    pub viewmodel_frame: usize,
-    pub viewmodel_timer: f32,
-    pub viewmodel_playing: bool,
 }
 
 impl WeaponState {
@@ -59,9 +55,6 @@ impl WeaponState {
             computed_spread: 0.0,
             trigger_held: false,
             muzzle_flash_timer: 0.0,
-            viewmodel_frame: 0,
-            viewmodel_timer: 0.0,
-            viewmodel_playing: false,
         }
     }
 
@@ -111,19 +104,6 @@ impl WeaponState {
             self.ads_progress = (self.ads_progress - delta / stats.ads_time).max(0.0);
         }
 
-        // viewmodel animation
-        if self.viewmodel_playing {
-            let stats = self.stats();
-            self.viewmodel_timer += delta;
-            if self.viewmodel_timer >= stats.viewmodel_frame_time {
-                self.viewmodel_timer = 0.0;
-                self.viewmodel_frame += 1;
-                if self.viewmodel_frame >= stats.viewmodel_frame_keys.len() {
-                    self.viewmodel_playing = false;
-                    self.viewmodel_frame = 0;
-                }
-            }
-        }
     }
 
     // fire the weapon — consume ammo, set cooldown, return true if fired.
@@ -147,13 +127,6 @@ impl WeaponState {
         self.ammo -= 1;
         self.fire_cooldown = 1.0 / stats.fire_rate;
         self.muzzle_flash_timer = 0.08; // 80ms flash
-
-        // viewmodel animation: restart from first frame
-        if !stats.viewmodel_frame_keys.is_empty() {
-            self.viewmodel_frame = 0;
-            self.viewmodel_timer = 0.0;
-            self.viewmodel_playing = true;
-        }
 
         // auto-reload on empty
         if self.ammo == 0 && self.reserve > 0 {

@@ -116,10 +116,7 @@ pub struct WeaponStats {
     pub icon_height: f32,             // display height in pixels
     pub icon_flip_x: bool,            // true if the source image faces left
 
-    // --- Viewmodel (FPS Weapon sprite)
-    pub viewmodel_frame_keys: &'static [&'static str], // asset keys for animation frames (idle, fire, reload)
-    pub viewmodel_frame_time: f32, // time per frame in seconds
-} 
+}
 
 
 
@@ -129,226 +126,208 @@ pub const PISTOL: WeaponStats = WeaponStats {
     name: "Pistol",
     fire_mode: FireMode::SemiAuto,
 
-    damage: 25.0,
+    damage: 22.0,
     headshot_mult: 2.0,
     pellet_count: 1,
 
-    fire_rate: 4.0,       // 4 shots/sec
-    magazine_size: 12,
-    max_reserve: 48,
-    reload_time: 1.5,
+    fire_rate: 5.0,       // fast semi-auto sidearm
+    magazine_size: 15,
+    max_reserve: 60,
+    reload_time: 1.3,     // quick reload
 
-    recoil_vertical: 0.02,
+    recoil_vertical: 0.018,
     recoil_horizontal: 0.005,
-    recoil_recovery: 4.0,
+    recoil_recovery: 5.0,
 
-    hip_spread: 0.015,
-    ads_spread: 0.005,
-    spread_per_shot: 0.025,
-    spread_recovery: 1.5,
-    move_spread_mult: 1.4,
-    sprint_spread_mult: 1.8,
+    hip_spread: 0.012,
+    ads_spread: 0.004,
+    spread_per_shot: 0.02,
+    spread_recovery: 2.0,
+    move_spread_mult: 1.2,
+    sprint_spread_mult: 1.5,
     crouch_spread_mult: 0.8,
 
     ads_zoom_fov: 65.0,
-    ads_time: 0.2,
+    ads_time: 0.15,       // fastest ADS — it's a pistol
 
     bullet_speed: 200.0,
-    bullet_range: 50.0,
+    bullet_range: 40.0,
 
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_pistol_hip",   // crosshair062
     crosshair_ads_key: "xhair_pistol_ads",   // crosshair063
-    crosshair_base_size: 32.0,
+    crosshair_base_size: 20.0,               // small, precise sidearm
 
     icon_asset_key: "weapon_pistol",
     icon_width: 80.0,
     icon_height: 50.0,
     icon_flip_x: false,
-
-     viewmodel_frame_keys: &[
-        "pistol_frame_1",
-        "pistol_frame_2",
-        "pistol_frame_3",
-        "pistol_frame_4",
-        "pistol_frame_5",
-    ],
-    viewmodel_frame_time: 0.06,
 };
 
 pub const SMG: WeaponStats = WeaponStats {
     name: "SMG",
     fire_mode: FireMode::FullAuto,
 
-    damage: 18.0,
+    damage: 20.0,
     headshot_mult: 1.5,
     pellet_count: 1,
 
-    fire_rate: 12.0,      // fast fire
+    fire_rate: 11.0,      // high fire rate spray weapon
     magazine_size: 30,
     max_reserve: 120,
-    reload_time: 2.0,
+    reload_time: 1.8,
 
-    recoil_vertical: 0.015,
-    recoil_horizontal: 0.012,
+    recoil_vertical: 0.012,
+    recoil_horizontal: 0.01,
     recoil_recovery: 5.0,
 
-    hip_spread: 0.03,
-    ads_spread: 0.015,
-    spread_per_shot: 0.018,
-    spread_recovery: 2.0,
-    move_spread_mult: 1.2,
-    sprint_spread_mult: 1.6,
+    hip_spread: 0.025,
+    ads_spread: 0.012,
+    spread_per_shot: 0.015,
+    spread_recovery: 2.5,
+    move_spread_mult: 1.1,    // good run-and-gun weapon
+    sprint_spread_mult: 1.4,
     crouch_spread_mult: 0.85,
 
     ads_zoom_fov: 70.0,
     ads_time: 0.18,
 
     bullet_speed: 180.0,
-    bullet_range: 35.0,
+    bullet_range: 45.0,
 
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_smg_hip",     // crosshair179
     crosshair_ads_key: "xhair_smg_ads",     // crosshair180
-    crosshair_base_size: 36.0,
+    crosshair_base_size: 24.0,              // wider for spray weapon
 
     icon_asset_key: "weapon_smg",
     icon_width: 90.0,
     icon_height: 45.0,
     icon_flip_x: true,
-    viewmodel_frame_keys: &[],
-    viewmodel_frame_time: 0.0,
 };
 
 pub const SHOTGUN: WeaponStats = WeaponStats {
     name: "Shotgun",
     fire_mode: FireMode::SemiAuto,
 
-    damage: 12.0,          // per pellet — 8 pellets = 96 max
-    headshot_mult: 1.5,
+    damage: 12.0,          // per pellet — 8 pellets = 120 max (devastating up close)
+    headshot_mult: 1.5,    
     pellet_count: 8,
 
-    fire_rate: 1.2,        // slow pump
-    magazine_size: 6,
-    max_reserve: 24,
-    reload_time: 2.8,      // per-shell in reality, simplified for now
+    fire_rate: 1.0,        // slow pump action
+    magazine_size: 7,
+    max_reserve: 28,
+    reload_time: 2.2,
 
-    recoil_vertical: 0.06,
-    recoil_horizontal: 0.02,
-    recoil_recovery: 3.0,
+    recoil_vertical: 0.07,
+    recoil_horizontal: 0.025,
+    recoil_recovery: 2.5,
 
-    hip_spread: 0.07,
-    ads_spread: 0.045,
-    spread_per_shot: 0.035,
-    spread_recovery: 1.0,
+    hip_spread: 0.06,      // decent hip-fire (shotguns don't need ADS as much)
+    ads_spread: 0.035,
+    spread_per_shot: 0.04,
+    spread_recovery: 0.8,
     move_spread_mult: 1.1,
     sprint_spread_mult: 1.3,
-    crouch_spread_mult: 0.9,
+    crouch_spread_mult: 0.85,
 
     ads_zoom_fov: 75.0,
     ads_time: 0.25,
 
     bullet_speed: 150.0,
-    bullet_range: 15.0,
+    bullet_range: 20.0,    // short range but not useless
 
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_shotgun_hip", // crosshair039
     crosshair_ads_key: "xhair_shotgun_ads", // crosshair037
-    crosshair_base_size: 48.0,
+    crosshair_base_size: 30.0,              // widest — represents pellet spread cone
 
     icon_asset_key: "weapon_shotgun",
     icon_width: 100.0,
     icon_height: 50.0,
     icon_flip_x: true,
-    viewmodel_frame_keys: &[],
-    viewmodel_frame_time: 0.0,
 };
 
 pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     name: "Assault Rifle",
     fire_mode: FireMode::FullAuto,
 
-    damage: 22.0,
+    damage: 27.0,          // 4-shot body kill (108), 3-shot headshot (27*1.8=48.6)
     headshot_mult: 1.8,
     pellet_count: 1,
 
-    fire_rate: 8.0,
-    magazine_size: 25,
-    max_reserve: 100,
-    reload_time: 2.2,
+    fire_rate: 7.0,        // slower than SMG but hits harder
+    magazine_size: 30,
+    max_reserve: 120,
+    reload_time: 2.5,      // heavier weapon = slower reload
 
-    recoil_vertical: 0.025,
+    recoil_vertical: 0.028,
     recoil_horizontal: 0.008,
     recoil_recovery: 3.5,
 
-    hip_spread: 0.025,
-    ads_spread: 0.008,
-    spread_per_shot: 0.022,
+    hip_spread: 0.03,      // worse hipfire than SMG (heavier weapon)
+    ads_spread: 0.006,     // but better ADS accuracy
+    spread_per_shot: 0.02,
     spread_recovery: 1.8,
     move_spread_mult: 1.3,
     sprint_spread_mult: 1.7,
-    crouch_spread_mult: 0.8,
+    crouch_spread_mult: 0.75,
 
     ads_zoom_fov: 55.0,
     ads_time: 0.25,
 
-    bullet_speed: 220.0,
-    bullet_range: 60.0,
+    bullet_speed: 250.0,
+    bullet_range: 70.0,    // best range of the auto weapons
 
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_ar_hip",      // crosshair010
     crosshair_ads_key: "xhair_ar_ads",      // crosshair011
-    crosshair_base_size: 34.0,
+    crosshair_base_size: 22.0,
 
     icon_asset_key: "weapon_ar",
     icon_width: 100.0,
     icon_height: 45.0,
     icon_flip_x: false,
-    viewmodel_frame_keys: &[],
-    viewmodel_frame_time: 0.0,
 };
 
 pub const SNIPER: WeaponStats = WeaponStats {
     name: "Sniper",
     fire_mode: FireMode::BoltAction,
 
-    damage: 90.0, 
+    damage: 105.0,         // 1-shot body kill (105), 1-shot headshot (105*2.5=262)
     headshot_mult: 2.5,
     pellet_count: 1,
 
     fire_rate: 0.8,        // bolt action — very slow
     magazine_size: 5,
-    max_reserve: 20,
-    reload_time: 4.0,
+    max_reserve: 25,
+    reload_time: 3.2,      // was 4.0 — less punishing for 5 rounds
 
     recoil_vertical: 0.08,
     recoil_horizontal: 0.01,
     recoil_recovery: 2.0,
 
-    hip_spread: 0.08,       // terrible from hip
-    ads_spread: 0.002,      // pinpoint when scoped
-    spread_per_shot: 0.05,
+    hip_spread: 0.10,       // terrible from hip
+    ads_spread: 0.001,      // pinpoint when scoped
+    spread_per_shot: 0.06,
     spread_recovery: 0.8,
     move_spread_mult: 2.0,  // heavy penalty
     sprint_spread_mult: 3.0,
-    crouch_spread_mult: 0.6,
+    crouch_spread_mult: 0.5, // crouching + scoped = laser
 
     ads_zoom_fov: 15.0,     // high zoom scope
-    ads_time: 0.35,
+    ads_time: 0.05,
 
-    bullet_speed: 300.0,
-    bullet_range: 100.0,
+    bullet_speed: 350.0,
+    bullet_range: 120.0,    // longest range in the game
 
     crosshair_style: CrosshairStyle::Scope,
-    crosshair_hip_key: "xhair_sniper_hip",  // crosshair048
-    crosshair_ads_key: "xhair_sniper_ads",  // crosshair049
-    crosshair_base_size: 28.0,
+    crosshair_hip_key: "xhair_sniper_hip",  // no crosshair when hip-firing a sniper
+    crosshair_ads_key: "xhair_sniper_ads",  
+    crosshair_base_size: 18.0,
 
     icon_asset_key: "weapon_sniper",
     icon_width: 110.0,
     icon_height: 40.0,
     icon_flip_x: false,
-
-    viewmodel_frame_keys: &[],
-    viewmodel_frame_time: 0.0,
 };
