@@ -60,7 +60,13 @@ impl GameConfig {
     pub fn defaults() -> Self {
         Self {
             // Mouse - UI value, converted to internal with raw_sensitivity()
-            sensitivity: 60.0,
+            /* 
+                the reason for this is that before the normal sensitivity was 0.002 but its not an 
+                intuitive number, so i normalized it to be 60 by default which is an easier number to 
+                understand and adjust in the settings menu, but raw_sensitivity() will convert it back to the 
+            actual multiplier used in the game
+            */
+            sensitivity: 60.0, 
 
             // Keybinds
             key_forward: KeyCode::W,
@@ -77,6 +83,7 @@ impl GameConfig {
             bind_aim: InputBinding::Mouse(MouseButton::Right),
 
             // Camera - UI value, converted to internal with raw_fov()
+            // this is the same as the sensitivity from earlier, just converting it to a more intuitive UI value while raw_fov() converts it back to the actual FOV used in the game
             fov: 90.0,
 
             // Player

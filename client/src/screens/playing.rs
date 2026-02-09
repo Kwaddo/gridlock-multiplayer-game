@@ -199,11 +199,17 @@ impl PlayingState {
             return Some(GameState::Paused);
         }
 
+        // before processing mouse sens we are gonna check if this specific weapon has a custom ads sensitivity
+        let weapon = self.weapons.active();
+        let ads_mult = weapon.stats().ads_sensitivity.unwrap_or(1.0);
+        // lerp between normal sensitivity and ads sensitivity based on ads_progress (0.0-1.0)
+        let sens = config.raw_sensitivity() * (1.0 + (ads_mult - 1.0) * weapon.ads_progress); // ads mult - 1.0 because if ads_mult is 0.5 for example, we want to reduce sensitivity by 50%, so we multiply the normal sensitivity by 0.5, which is the same as multiplying by (1.0 + (0.5 - 1.0) * ads_progress)
+
         input::process_mouse(
             &mut self.last_mouse_pos,
             &mut self.yaw,
             &mut self.pitch,
-            config.raw_sensitivity()
+            sens,
         );
 
         self.move_dir = input::process_movement_keys(self.yaw, config);
