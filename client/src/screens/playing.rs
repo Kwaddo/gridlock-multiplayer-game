@@ -5,20 +5,20 @@ use crate::screens::input::process_weapon_input;
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::ui::hud::draw_hud;
-use crate::weapons::recoil::{apply_shot_recoil, recover};
+use crate::weapons::recoil::{ apply_shot_recoil, recover };
 use crate::world::{ draw_maze, lobby::draw_lobby };
 use crate::types::world::WorldId;
-use crate::weapons::{WeaponInventory, recoil, SpreadContext};
+use crate::weapons::{ WeaponInventory, recoil, SpreadContext };
 
 use macroquad::prelude::*;
-use macroquad::rand::{gen_range, rand};
+use macroquad::rand::{ gen_range, rand };
 use std::net::UdpSocket;
 
 use std::collections::HashMap;
 
 use super::input;
 
-// ── Floating Damage Numbers ──────────────────────────────────────────
+// Floating Damage Numbers
 pub struct DamageNumber {
     pub amount: f32,
     pub is_headshot: bool,
@@ -27,14 +27,37 @@ pub struct DamageNumber {
     pub lifetime: f32, // starts at 1.0, counts down
 }
 
-// ── NPC Target Dummy ─────────────────────────────────────────────────
+// Hit zones: split player into head, body, and limbs for multipliers
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HitZone {
+    Head,
+    Torso,
+    Limbs,
+}
+
+impl HitZone {
+    pub fn damage_mult(&self) -> f32 {
+        match self {
+            HitZone::Head => 2.0,
+            HitZone::Torso => 1.0,
+            HitZone::Limbs => 0.75,
+        }
+    }
+}
+
+pub struct Hitbox {
+    pub center_offset: Vec3, // offset from player's position to center of this hitbox
+    pub half_extents: Vec3, // size of the hitbox (x=width/2, y=height/2, z=depth/2)
+    pub zone: HitZone, // which hitzone this box represents (head, torso, limbs)
+}
+
+// NPC Target Dummy
 pub struct TargetDummy {
-    pub position: Vec3,     // feet position
+    pub position: Vec3, // feet position
     pub hp: f32,
     pub max_hp: f32,
-    pub hit_timer: f32,     // >0 = flash red (seconds remaining)
-    pub body_size: Vec3,    // AABB half-extents for body
-    pub head_size: Vec3,    // AABB half-extents for head
+    pub hit_timer: f32, // >0 = flash red (seconds remaining)
+    pub hitboxes: Vec<Hitbox>, // for more complex targets with multiple hit zones, but for simplicity we'll just do one head box and one body box
 }
 
 impl TargetDummy {
@@ -44,8 +67,44 @@ impl TargetDummy {
             hp: 100.0,
             max_hp: 100.0,
             hit_timer: 0.0,
-            body_size: vec3(0.3, 0.6, 0.2), // half extents
-            head_size: vec3(0.2, 0.2, 0.2),
+            hitboxes: vec![
+                // Head
+                Hitbox {
+                    center_offset: vec3(0.0, 1.5, 0.0),
+                    half_extents: vec3(0.15, 0.15, 0.15),
+                    zone: HitZone::Head,
+                },
+                // Torso
+                Hitbox {
+                    center_offset: vec3(0.0, 0.9, 0.0),
+                    half_extents: vec3(0.25, 0.35, 0.15),
+                    zone: HitZone::Torso,
+                },
+                // Left arm
+                Hitbox {
+                    center_offset: vec3(-0.4, 0.9, 0.0),
+                    half_extents: vec3(0.1, 0.3, 0.1),
+                    zone: HitZone::Limbs,
+                },
+                // Right arm
+                Hitbox {
+                    center_offset: vec3(0.4, 0.9, 0.0),
+                    half_extents: vec3(0.1, 0.3, 0.1),
+                    zone: HitZone::Limbs,
+                },
+                // Left leg
+                Hitbox {
+                    center_offset: vec3(-0.12, 0.25, 0.0),
+                    half_extents: vec3(0.1, 0.25, 0.1),
+                    zone: HitZone::Limbs,
+                },
+                // Right leg
+                Hitbox {
+                    center_offset: vec3(0.12, 0.25, 0.0),
+                    half_extents: vec3(0.1, 0.25, 0.1),
+                    zone: HitZone::Limbs,
+                }
+            ],
         }
     }
 
@@ -70,8 +129,17 @@ impl TargetDummy {
         if self.hit_timer <= 0.0 && self.hp < self.max_hp {
             self.hp = (self.hp + 20.0 * delta).min(self.max_hp);
         }
-    
-     
+    }
+
+    pub fn ray_test(&self, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<HitZone> {
+        // check all hitboxes against a ray and return first hit zone found
+        for hit_box in &self.hitboxes {
+            let center = self.position + hit_box.center_offset;
+            if ray_hit_aabb(origin, dir, center, hit_box.half_extents, max_dist) {
+                return Some(hit_box.zone);
+            }
+        }
+        None
     }
 }
 
@@ -89,8 +157,8 @@ pub struct PlayingState {
     pub jump_requested: bool,
     pub current_world: WorldId,
     pub pending_world_change: Option<WorldId>,
-    
-    //  --- Weapon system --- 
+
+    //  --- Weapon system ---
     pub weapons: WeaponInventory,
 
     // --- NPC target dummy ---
@@ -102,7 +170,6 @@ pub struct PlayingState {
 
 impl PlayingState {
     pub async fn new() -> Self {
-       
         Self {
             position: vec3(0.0, 0.0, 0.0),
             yaw: 0.0,
@@ -187,12 +254,12 @@ impl PlayingState {
                 let eye = vec3(
                     self.position.x,
                     self.position.y + self.movement_state.height,
-                    self.position.z,
+                    self.position.z
                 );
                 let base_fwd = vec3(
                     self.yaw.cos() * self.pitch.cos(),
                     self.pitch.sin(),
-                    self.yaw.sin() * self.pitch.cos(),
+                    self.yaw.sin() * self.pitch.cos()
                 );
 
                 // NOW apply camera kick (visual recoil for next frame)
@@ -223,18 +290,21 @@ impl PlayingState {
                         if spread > 0.0001 {
                             let angle = gen_range(0.0f32, std::f32::consts::TAU);
                             let deviation = gen_range(0.0f32, spread);
-                            fwd = (fwd + right_vec * (angle.cos() * deviation) + up_vec * (angle.sin() * deviation)).normalize();
+                            fwd = (
+                                fwd +
+                                right_vec * (angle.cos() * deviation) +
+                                up_vec * (angle.sin() * deviation)
+                            ).normalize();
                         }
 
-                        // check head first, then body
-                        if ray_hit_aabb(eye, fwd, self.target_dummy.head_center(), self.target_dummy.head_size, range) {
-                            let dmg = damage * hs_mult;
+                        if let Some(zone) = self.target_dummy.ray_test(eye, fwd, range) {
+                            let mult = zone.damage_mult();
+                            let dmg = damage * mult;
                             self.target_dummy.take_damage(dmg);
                             total_dmg += dmg;
-                            any_headshot = true;
-                        } else if ray_hit_aabb(eye, fwd, self.target_dummy.body_center(), self.target_dummy.body_size, range) {
-                            self.target_dummy.take_damage(damage);
-                            total_dmg += damage;
+                            if zone == HitZone::Head {
+                                any_headshot = true;
+                            }
                         }
                     }
 
@@ -254,9 +324,8 @@ impl PlayingState {
             }
             weapon.trigger_held = true;
         } else {
-            weapon.trigger_held = false; 
+            weapon.trigger_held = false;
         }
-        
 
         // check teleporter input
         self.check_teleporter();
@@ -326,24 +395,22 @@ impl PlayingState {
         }
     }
 
-  
-pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
-    if let Some(ref s) = socket {
+    pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
+        if let Some(ref s) = socket {
+            // send world change request if pending
+            if let Some(target) = self.pending_world_change.take() {
+                let msg = vec![MSG_WORLD_CHANGE, target.as_u8()];
+                let _ = s.send_to(&msg, server_addr);
+            }
 
-        // send world change request if pending
-        if let Some(target) = self.pending_world_change.take() {
-            let msg = vec![MSG_WORLD_CHANGE, target.as_u8()];
+            let mut msg = vec![MSG_POSITION];
+            msg.extend_from_slice(&self.position.x.to_be_bytes());
+            msg.extend_from_slice(&self.position.y.to_be_bytes());
+            msg.extend_from_slice(&self.position.z.to_be_bytes());
+            msg.extend_from_slice(&self.yaw.to_be_bytes());
             let _ = s.send_to(&msg, server_addr);
         }
-
-        let mut msg = vec![MSG_POSITION];
-        msg.extend_from_slice(&self.position.x.to_be_bytes());
-        msg.extend_from_slice(&self.position.y.to_be_bytes());
-        msg.extend_from_slice(&self.position.z.to_be_bytes());
-        msg.extend_from_slice(&self.yaw.to_be_bytes());
-        let _ = s.send_to(&msg, server_addr);
     }
-}
 
     pub fn render( // updated this function to take current world and render accordingly, also added a pending_world_change field to PlayingState to handle world transitions smoothly
         &mut self,
@@ -378,7 +445,7 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
         }
 
         self.draw_other_players();
-        
+
         set_default_camera();
 
         // NPC health bar (2D overlay, projected from 3D)
@@ -387,7 +454,7 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
         }
 
         // has to be after set_default_camera since it's 2D text in a 3d world, also has to be after draw_other_players so that the prompt is on top of other players in case they are between the player and the teleporter
-        self.draw_teleporter_prompt(); 
+        self.draw_teleporter_prompt();
 
         let forward = vec3(
             self.yaw.cos() * self.pitch.cos(),
@@ -409,7 +476,7 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
             &self.assets,
             self.hit_marker_timer,
             self.hit_marker_headshot,
-            &self.damage_numbers,
+            &self.damage_numbers
         );
     }
 
@@ -595,18 +662,29 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
         let d = &self.target_dummy;
         let hit_flash = d.hit_timer > 0.0;
 
-        // body
-        let body_color = if hit_flash { RED } else { Color::from_rgba(180, 140, 100, 255) };
-        draw_cube(d.body_center(), d.body_size * 2.0, None, body_color);
-        draw_cube_wires(d.body_center(), d.body_size * 2.0, BLACK);
+        for hb in &d.hitboxes {
+            let center = d.position + hb.center_offset;
+            let size = hb.half_extents * 2.0;
 
-        // head
-        let head_color = if hit_flash { Color::from_rgba(255, 80, 80, 255) } else { Color::from_rgba(220, 180, 140, 255) };
-        draw_cube(d.head_center(), d.head_size * 2.0, None, head_color);
-        draw_cube_wires(d.head_center(), d.head_size * 2.0, BLACK);
+            // Each zone gets a distinct color
+            let base_color = match hb.zone {
+                HitZone::Head => Color::from_rgba(255, 80, 80, 200), // red
+                HitZone::Torso => Color::from_rgba(80, 180, 255, 200), // blue
+                HitZone::Limbs => Color::from_rgba(80, 255, 80, 200), // green
+            };
 
-        // health bar floating above head (3D → drawn in 3D space as a flat quad)
-        // we'll draw it in 2D after set_default_camera instead
+            let color = if hit_flash { WHITE } else { base_color };
+
+            // Wire color matches zone but brighter
+            let wire_color = match hb.zone {
+                HitZone::Head => Color::from_rgba(255, 120, 120, 255),
+                HitZone::Torso => Color::from_rgba(120, 200, 255, 255),
+                HitZone::Limbs => Color::from_rgba(120, 255, 120, 255),
+            };
+
+            draw_cube(center, size, None, color);
+            draw_cube_wires(center, size, wire_color);
+        }
     }
 
     fn draw_target_dummy_hud(&self, camera: &Camera3D) {
@@ -619,13 +697,15 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
         let up = right.cross(forward).normalize();
 
         let dot = rel.dot(forward);
-        if dot < 0.1 { return; } // behind camera
+        if dot < 0.1 {
+            return;
+        } // behind camera
 
         let fov_rad = camera.fovy; // already in radians
         let fov_scale = screen_height() / (2.0 * (fov_rad / 2.0).tan());
 
-        let sx = screen_width() / 2.0 + rel.dot(right) / dot * fov_scale;
-        let sy = screen_height() / 2.0 - rel.dot(up) / dot * fov_scale;
+        let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
+        let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
 
         // health bar
         let bar_w = 60.0;
@@ -661,10 +741,26 @@ fn ray_hit_aabb(origin: Vec3, dir: Vec3, center: Vec3, half: Vec3, max_dist: f32
     let mut tmax = max_dist;
 
     for i in 0..3 {
-        let o = match i { 0 => origin.x, 1 => origin.y, _ => origin.z };
-        let d = match i { 0 => dir.x, 1 => dir.y, _ => dir.z };
-        let bmin = match i { 0 => min.x, 1 => min.y, _ => min.z };
-        let bmax = match i { 0 => max.x, 1 => max.y, _ => max.z };
+        let o = match i {
+            0 => origin.x,
+            1 => origin.y,
+            _ => origin.z,
+        };
+        let d = match i {
+            0 => dir.x,
+            1 => dir.y,
+            _ => dir.z,
+        };
+        let bmin = match i {
+            0 => min.x,
+            1 => min.y,
+            _ => min.z,
+        };
+        let bmax = match i {
+            0 => max.x,
+            1 => max.y,
+            _ => max.z,
+        };
 
         if d.abs() < 1e-8 {
             // ray parallel to slab — miss if origin outside
@@ -675,7 +771,9 @@ fn ray_hit_aabb(origin: Vec3, dir: Vec3, center: Vec3, half: Vec3, max_dist: f32
             let inv_d = 1.0 / d;
             let mut t1 = (bmin - o) * inv_d;
             let mut t2 = (bmax - o) * inv_d;
-            if t1 > t2 { std::mem::swap(&mut t1, &mut t2); }
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
+            }
             tmin = tmin.max(t1);
             tmax = tmax.min(t2);
             if tmin > tmax {
