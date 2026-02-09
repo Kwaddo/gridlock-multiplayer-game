@@ -22,6 +22,8 @@ pub fn draw_hud(
     hit_marker_timer: f32,
     hit_marker_headshot: bool,
     damage_numbers: &[DamageNumber],
+    hit_marker_pellets_hit: u32,
+    hit_marker_pellets_total: u32,
 ) {
     let cx = screen_width() / 2.0;
     let cy = screen_height() / 2.0;
@@ -32,7 +34,10 @@ pub fn draw_hud(
     // ── DYNAMIC CROSSHAIR (texture-based) ──────────────────────────
     // Bloom scales the hip crosshair up; ADS transitions between hip and ADS textures.
     // For sniper Scope style, ADS shows a full vignette + scope reticle.
-    let base_size = stats.crosshair_base_size;
+    // crosshair sizes are % of screen height so they scale with resolution
+    let sh = screen_height();
+    let base_size = stats.crosshair_base_size * sh / 100.0;
+    let ads_base = stats.crosshair_ads_size * sh / 100.0;
     let bloom_scale = (1.0 + weapon.computed_spread * 60.0).min(3.0); // spread radians → size multiplier (clamped)
     let ads_t = weapon.ads_progress; // 0.0 = hip, 1.0 = full ADS
 
@@ -57,7 +62,7 @@ pub fn draw_hud(
             if ads_t > 0.0 {
                 let ads_alpha = (ads_t * 255.0) as u8;
                 let ads_tint = Color::from_rgba((tint.r * 255.0) as u8, (tint.g * 255.0) as u8, (tint.b * 255.0) as u8, ads_alpha);
-                let ads_size = base_size * 0.75; // ADS is tighter than base
+                let ads_size = ads_base;
                 draw_crosshair_texture(cx, cy, ads_size, ads_tint, stats.crosshair_ads_key, assets);
             }
         }
@@ -88,7 +93,7 @@ pub fn draw_hud(
         }
     }
 
-    // -- HIT MARKER 
+    // -- HIT MARKER (scales with crosshair, shotgun shows pellet dots)
     if hit_marker_timer > 0.0 {
         let t = (hit_marker_timer / 0.35).min(1.0);
         let alpha = (t * 255.0) as u8;
@@ -97,16 +102,38 @@ pub fn draw_hud(
         } else {
             Color::from_rgba(255, 255, 255, alpha) // white for body
         };
-        // pop animation: starts 1.4x, settles to 1.0x
+
+        // scale hit marker to current crosshair size
+        let current_size = if ads_t > 0.5 {
+            ads_base
+        } else {
+            base_size * bloom_scale
+        };
+        // fallback for sniper scope (crosshair size is 0)
+        let current_size = if current_size < 10.0 { sh * 3.0 / 100.0 } else { current_size };
+
         let pop = 1.0 + 0.4 * t;
-        let hm_size = 14.0 * pop;
-        let hm_gap = 4.0 * pop;
-        let hm_thick = 3.0;
-        // X shape
-        draw_line(cx - hm_size, cy - hm_size, cx - hm_gap, cy - hm_gap, hm_thick, hm_color);
-        draw_line(cx + hm_gap, cy - hm_gap, cx + hm_size, cy - hm_size, hm_thick, hm_color);
-        draw_line(cx - hm_size, cy + hm_size, cx - hm_gap, cy + hm_gap, hm_thick, hm_color);
-        draw_line(cx + hm_gap, cy + hm_gap, cx + hm_size, cy + hm_size, hm_thick, hm_color);
+        let hm_thick = 2.5;
+
+        if hit_marker_pellets_total > 1 {
+            // SHOTGUN: dots in a ring, one per pellet hit
+            let dot_radius = 3.0;
+            let ring_radius = current_size * 0.3 * pop;
+            for i in 0..hit_marker_pellets_hit {
+                let angle = (i as f32 / hit_marker_pellets_total as f32) * std::f32::consts::TAU;
+                let dx = cx + angle.cos() * ring_radius;
+                let dy = cy + angle.sin() * ring_radius;
+                draw_circle(dx, dy, dot_radius, hm_color);
+            }
+        } else {
+            // NORMAL: X shape scaled to crosshair
+            let hm_size = current_size * 0.4 * pop;
+            let hm_gap = current_size * 0.1 * pop;
+            draw_line(cx - hm_size, cy - hm_size, cx - hm_gap, cy - hm_gap, hm_thick, hm_color);
+            draw_line(cx + hm_gap, cy - hm_gap, cx + hm_size, cy - hm_size, hm_thick, hm_color);
+            draw_line(cx - hm_size, cy + hm_size, cx - hm_gap, cy + hm_gap, hm_thick, hm_color);
+            draw_line(cx + hm_gap, cy + hm_gap, cx + hm_size, cy + hm_size, hm_thick, hm_color);
+        }
     }
 
     // -- DAMAGE NUMBERS 

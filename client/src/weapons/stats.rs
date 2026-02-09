@@ -110,7 +110,8 @@ pub struct WeaponStats {
     pub crosshair_style: CrosshairStyle,
     pub crosshair_hip_key: &'static str,  // asset key for hip-fire crosshair
     pub crosshair_ads_key: &'static str,  // asset key for ADS crosshair
-    pub crosshair_base_size: f32,         // base draw size in pixels (at min spread)
+    pub crosshair_base_size: f32,         // hip-fire size as % of screen height (bloom scales this up)
+    pub crosshair_ads_size: f32,          // ADS size as % of screen height (fixed, no bloom)
     // --- HUD icon
     pub icon_asset_key: &'static str, // key used to look up texture in assets HashMap
     pub icon_width: f32,              // display width in pixels (tweak per weapon)
@@ -150,7 +151,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
 
     ads_zoom_fov: 65.0,
     ads_time: 0.15,       // fastest ADS — it's a pistol
-    ads_sensitivity: Some(0.8), // slight sensitivity reduction when aiming
+    ads_sensitivity: None, 
 
     bullet_speed: 200.0,
     bullet_range: 40.0,
@@ -158,7 +159,8 @@ pub const PISTOL: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_pistol_hip",   // crosshair062
     crosshair_ads_key: "xhair_pistol_ads",   // crosshair063
-    crosshair_base_size: 20.0,               // small, precise sidearm
+    crosshair_base_size: 4.0,                // % of screen height — small, precise sidearm
+    crosshair_ads_size: 3.3,                 // % of screen height — tighter when aiming
 
     icon_asset_key: "weapon_pistol",
     icon_width: 80.0,
@@ -201,7 +203,8 @@ pub const SMG: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_smg_hip",     // crosshair179
     crosshair_ads_key: "xhair_smg_ads",     // crosshair180
-    crosshair_base_size: 24.0,              // wider for spray weapon
+    crosshair_base_size: 5.2,               // % of screen height — wider for spray weapon
+    crosshair_ads_size: 4.0,                // % of screen height — tighter when aiming
 
     icon_asset_key: "weapon_smg",
     icon_width: 90.0,
@@ -244,7 +247,8 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_shotgun_hip", // crosshair039
     crosshair_ads_key: "xhair_shotgun_ads", // crosshair037
-    crosshair_base_size: 30.0,              // widest — represents pellet spread cone
+    crosshair_base_size: 4.7,               // % of screen height — widest, pellet spread cone
+    crosshair_ads_size: 5.2,                // % of screen height — tighter when aiming
 
     icon_asset_key: "weapon_shotgun",
     icon_width: 100.0,
@@ -287,7 +291,8 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_ar_hip",      // crosshair010
     crosshair_ads_key: "xhair_ar_ads",      // crosshair011
-    crosshair_base_size: 22.0,
+    crosshair_base_size: 4.4,               // % of screen height — medium, balanced weapon
+    crosshair_ads_size: 3.5,                // % of screen height — precise when aiming
 
     icon_asset_key: "weapon_ar",
     icon_width: 100.0,
@@ -322,7 +327,7 @@ pub const SNIPER: WeaponStats = WeaponStats {
 
     ads_zoom_fov: 15.0,     // high zoom scope
     ads_time: 0.05,
-    ads_sensitivity: Some(0.5),
+    ads_sensitivity: Some(0.2), // much lower sensitivity when scoped for precision aiming
 
     bullet_speed: 350.0,
     bullet_range: 120.0,    // longest range in the game
@@ -330,7 +335,8 @@ pub const SNIPER: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Scope,
     crosshair_hip_key: "xhair_sniper_hip",  // no crosshair when hip-firing a sniper
     crosshair_ads_key: "xhair_sniper_ads",  
-    crosshair_base_size: 18.0,
+    crosshair_base_size: 0.0,               // % — sniper has no hip crosshair (Scope style)
+    crosshair_ads_size: 0.0,                // % — scope uses procedural reticle, not texture
 
     icon_asset_key: "weapon_sniper",
     icon_width: 110.0,
