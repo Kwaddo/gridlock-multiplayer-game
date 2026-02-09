@@ -26,6 +26,9 @@ pub struct WeaponState {
     // -- Bloom (spread accumulation beyond base)
     pub bloom: f32, // extra spread from firing (radians)
 
+    // -- Computed spread (updated each frame, includes bloom + movement penalties)
+    pub computed_spread: f32,
+
     // -- Firing flag (used for semi-auto gate)
     pub trigger_held: bool, // was fire button held last frame?
 
@@ -53,6 +56,7 @@ impl WeaponState {
             recoil_pitch: 0.0,
             recoil_yaw: 0.0,
             bloom: 0.0,
+            computed_spread: 0.0,
             trigger_held: false,
             muzzle_flash_timer: 0.0,
             viewmodel_frame: 0,

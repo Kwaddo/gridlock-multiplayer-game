@@ -18,6 +18,15 @@ use std::collections::HashMap;
 
 use super::input;
 
+// ── Floating Damage Numbers ──────────────────────────────────────────
+pub struct DamageNumber {
+    pub amount: f32,
+    pub is_headshot: bool,
+    pub screen_x: f32,
+    pub screen_y: f32,
+    pub lifetime: f32, // starts at 1.0, counts down
+}
+
 // ── NPC Target Dummy ─────────────────────────────────────────────────
 pub struct TargetDummy {
     pub position: Vec3,     // feet position
@@ -88,6 +97,7 @@ pub struct PlayingState {
     pub target_dummy: TargetDummy,
     pub hit_marker_timer: f32, // >0 = show hit X on crosshair
     pub hit_marker_headshot: bool, // true = headshot color
+    pub damage_numbers: Vec<DamageNumber>,
 }
 
 impl PlayingState {
@@ -111,6 +121,7 @@ impl PlayingState {
             target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
             hit_marker_timer: 0.0,
             hit_marker_headshot: false,
+            damage_numbers: Vec::new(),
         }
     }
 
@@ -147,6 +158,20 @@ impl PlayingState {
         let delta = get_frame_time();
         recover(self.weapons.active_mut(), delta);
 
+        // Compute effective spread for crosshair sizing and shot deviation.
+        // Base = lerp(hip_spread, ads_spread, ads_progress) + bloom from firing.
+        // Then multiplied by movement context: moving ~1.2-1.4x, sprinting ~1.6-3x,
+        // crouching ~0.6-0.9x (tighter), airborne ~1.5x. Stacks multiplicatively.
+        let vel = self.movement_state.velocity;
+        let ctx = SpreadContext {
+            is_moving: vec2(vel.x, vel.z).length() > 0.5,
+            is_sprinting: self.movement_state.is_sprinting,
+            is_crouching: self.movement_state.is_crouching,
+            is_airborne: !self.movement_state.is_grounded,
+        };
+        let spread = recoil::current_spread(self.weapons.active(), &ctx);
+        self.weapons.active_mut().computed_spread = spread;
+
         // firing
         let weapon = self.weapons.active_mut();
         if config.bind_fire.is_down() {
@@ -170,25 +195,52 @@ impl PlayingState {
                         self.position.y + self.movement_state.height,
                         self.position.z,
                     );
-                    let fwd = vec3(
+                    let mut fwd = vec3(
                         self.yaw.cos() * self.pitch.cos(),
                         self.pitch.sin(),
                         self.yaw.sin() * self.pitch.cos(),
                     );
+
+                    // apply random spread deviation to shot direction
+                    let spread = weapon.computed_spread;
+                    if spread > 0.0001 {
+                        let angle = gen_range(0.0f32, std::f32::consts::TAU);
+                        let deviation = gen_range(0.0f32, spread);
+                        let right_vec = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
+                        let up_vec = right_vec.cross(fwd).normalize();
+                        fwd = (fwd + right_vec * (angle.cos() * deviation) + up_vec * (angle.sin() * deviation)).normalize();
+                    }
 
                     let damage = stats.damage;
                     let hs_mult = stats.headshot_mult;
                     let range = stats.bullet_range;
 
                     // check head first (higher reward)
+                    let cx = screen_width() / 2.0;
+                    let cy = screen_height() / 2.0;
                     if ray_hit_aabb(eye, fwd, self.target_dummy.head_center(), self.target_dummy.head_size, range) {
-                        self.target_dummy.take_damage(damage * hs_mult);
-                        self.hit_marker_timer = 0.25;
+                        let dmg = damage * hs_mult;
+                        self.target_dummy.take_damage(dmg);
+                        self.hit_marker_timer = 0.35;
                         self.hit_marker_headshot = true;
+                        self.damage_numbers.push(DamageNumber {
+                            amount: dmg,
+                            is_headshot: true,
+                            screen_x: cx + gen_range(-20.0f32, 20.0),
+                            screen_y: cy - 30.0,
+                            lifetime: 1.0,
+                        });
                     } else if ray_hit_aabb(eye, fwd, self.target_dummy.body_center(), self.target_dummy.body_size, range) {
                         self.target_dummy.take_damage(damage);
-                        self.hit_marker_timer = 0.25;
+                        self.hit_marker_timer = 0.35;
                         self.hit_marker_headshot = false;
+                        self.damage_numbers.push(DamageNumber {
+                            amount: damage,
+                            is_headshot: false,
+                            screen_x: cx + gen_range(-20.0f32, 20.0),
+                            screen_y: cy - 30.0,
+                            lifetime: 1.0,
+                        });
                     }
                 }
             }
@@ -219,6 +271,13 @@ impl PlayingState {
         if self.hit_marker_timer > 0.0 {
             self.hit_marker_timer = (self.hit_marker_timer - delta).max(0.0);
         }
+
+        // damage numbers: drift upward and fade
+        for dn in &mut self.damage_numbers {
+            dn.lifetime -= delta;
+            dn.screen_y -= 60.0 * delta;
+        }
+        self.damage_numbers.retain(|dn| dn.lifetime > 0.0);
 
         self.update_stamina(delta);
         self.update_crouch_height(config, delta);
@@ -342,6 +401,7 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
             &self.assets,
             self.hit_marker_timer,
             self.hit_marker_headshot,
+            &self.damage_numbers,
         );
     }
 
