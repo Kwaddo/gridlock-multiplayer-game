@@ -180,63 +180,71 @@ impl PlayingState {
                 let rng = gen_range(0.0f32, 1.0);
                 apply_shot_recoil(weapon, rng);
 
-                // apply camera kick immediately
                 let stats = weapon.stats();
+
+                // compute shot direction BEFORE camera kick so the bullet
+                // goes where the crosshair is, not where recoil moves it
+                let eye = vec3(
+                    self.position.x,
+                    self.position.y + self.movement_state.height,
+                    self.position.z,
+                );
+                let base_fwd = vec3(
+                    self.yaw.cos() * self.pitch.cos(),
+                    self.pitch.sin(),
+                    self.yaw.sin() * self.pitch.cos(),
+                );
+
+                // NOW apply camera kick (visual recoil for next frame)
                 self.pitch += stats.recoil_vertical;
                 let h_kick = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
                 self.yaw += h_kick;
                 self.pitch = self.pitch.clamp(-1.55, 1.55);
 
-                // hitscan: ray from eye in forward direction
-                // hitscans are basically instantaneous bullets that either hit or miss based on a raycast, so we check for hits immediately when the weapon is fired. We only have one target dummy in the lobby for testing, but in a real game you would loop through all potential targets and check for hits against each of them.
+                // hitscan: fire pellet_count rays, each with independent spread.
+                // For most weapons pellet_count=1; shotgun fires 8 pellets.
                 if self.current_world == WorldId::Lobby {
-                    let eye = vec3(
-                        self.position.x,
-                        self.position.y + self.movement_state.height,
-                        self.position.z,
-                    );
-                    let mut fwd = vec3(
-                        self.yaw.cos() * self.pitch.cos(),
-                        self.pitch.sin(),
-                        self.yaw.sin() * self.pitch.cos(),
-                    );
-
-                    // apply random spread deviation to shot direction
-                    let spread = weapon.computed_spread;
-                    if spread > 0.0001 {
-                        let angle = gen_range(0.0f32, std::f32::consts::TAU);
-                        let deviation = gen_range(0.0f32, spread);
-                        let right_vec = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
-                        let up_vec = right_vec.cross(fwd).normalize();
-                        fwd = (fwd + right_vec * (angle.cos() * deviation) + up_vec * (angle.sin() * deviation)).normalize();
-                    }
+                    let right_vec = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
+                    let up_vec = right_vec.cross(base_fwd).normalize();
 
                     let damage = stats.damage;
                     let hs_mult = stats.headshot_mult;
                     let range = stats.bullet_range;
-
-                    // check head first (higher reward)
+                    let spread = weapon.computed_spread;
                     let cx = screen_width() / 2.0;
                     let cy = screen_height() / 2.0;
-                    if ray_hit_aabb(eye, fwd, self.target_dummy.head_center(), self.target_dummy.head_size, range) {
-                        let dmg = damage * hs_mult;
-                        self.target_dummy.take_damage(dmg);
+
+                    let mut total_dmg = 0.0f32;
+                    let mut any_headshot = false;
+
+                    for _ in 0..stats.pellet_count {
+                        let mut fwd = base_fwd;
+                        // each pellet gets its own random spread
+                        if spread > 0.0001 {
+                            let angle = gen_range(0.0f32, std::f32::consts::TAU);
+                            let deviation = gen_range(0.0f32, spread);
+                            fwd = (fwd + right_vec * (angle.cos() * deviation) + up_vec * (angle.sin() * deviation)).normalize();
+                        }
+
+                        // check head first, then body
+                        if ray_hit_aabb(eye, fwd, self.target_dummy.head_center(), self.target_dummy.head_size, range) {
+                            let dmg = damage * hs_mult;
+                            self.target_dummy.take_damage(dmg);
+                            total_dmg += dmg;
+                            any_headshot = true;
+                        } else if ray_hit_aabb(eye, fwd, self.target_dummy.body_center(), self.target_dummy.body_size, range) {
+                            self.target_dummy.take_damage(damage);
+                            total_dmg += damage;
+                        }
+                    }
+
+                    // show hit marker + damage number for the combined total
+                    if total_dmg > 0.0 {
                         self.hit_marker_timer = 0.35;
-                        self.hit_marker_headshot = true;
+                        self.hit_marker_headshot = any_headshot;
                         self.damage_numbers.push(DamageNumber {
-                            amount: dmg,
-                            is_headshot: true,
-                            screen_x: cx + gen_range(-20.0f32, 20.0),
-                            screen_y: cy - 30.0,
-                            lifetime: 1.0,
-                        });
-                    } else if ray_hit_aabb(eye, fwd, self.target_dummy.body_center(), self.target_dummy.body_size, range) {
-                        self.target_dummy.take_damage(damage);
-                        self.hit_marker_timer = 0.35;
-                        self.hit_marker_headshot = false;
-                        self.damage_numbers.push(DamageNumber {
-                            amount: damage,
-                            is_headshot: false,
+                            amount: total_dmg,
+                            is_headshot: any_headshot,
                             screen_x: cx + gen_range(-20.0f32, 20.0),
                             screen_y: cy - 30.0,
                             lifetime: 1.0,
