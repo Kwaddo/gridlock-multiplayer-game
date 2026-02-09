@@ -98,8 +98,9 @@ pub struct WeaponStats {
     pub crouch_spread_mult: f32,// multiplier when crouching (<1 = tighter)
 
     // --- ADS (aim down sights)
-    pub ads_zoom_fov: f32,   // target FOV when ADS (lower = more zoom)
-    pub ads_time: f32,       // seconds to reach full ADS
+    pub ads_zoom_fov: f32,            // target FOV when ADS (lower = more zoom)
+    pub ads_time: f32,                // seconds to reach full ADS
+    pub ads_sensitivity: Option<f32>, // custom sensitivity multiplier when ADS (None = use default), will only use this for sniper scope  
 
     // --- Bullet visual
     pub bullet_speed: f32,   // tracer speed (units/s), purely visual
@@ -149,6 +150,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
 
     ads_zoom_fov: 65.0,
     ads_time: 0.15,       // fastest ADS — it's a pistol
+    ads_sensitivity: Some(0.8), // slight sensitivity reduction when aiming
 
     bullet_speed: 200.0,
     bullet_range: 40.0,
@@ -191,6 +193,7 @@ pub const SMG: WeaponStats = WeaponStats {
 
     ads_zoom_fov: 70.0,
     ads_time: 0.18,
+    ads_sensitivity: None,
 
     bullet_speed: 180.0,
     bullet_range: 45.0,
@@ -233,6 +236,7 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
 
     ads_zoom_fov: 75.0,
     ads_time: 0.25,
+    ads_sensitivity: None, // no sensitivity change when aiming — shotgun ADS is just for tighter spread, not zoom
 
     bullet_speed: 150.0,
     bullet_range: 20.0,    // short range but not useless
@@ -275,6 +279,7 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
 
     ads_zoom_fov: 55.0,
     ads_time: 0.25,
+    ads_sensitivity: None,
 
     bullet_speed: 250.0,
     bullet_range: 70.0,    // best range of the auto weapons
@@ -317,6 +322,7 @@ pub const SNIPER: WeaponStats = WeaponStats {
 
     ads_zoom_fov: 15.0,     // high zoom scope
     ads_time: 0.05,
+    ads_sensitivity: Some(0.5),
 
     bullet_speed: 350.0,
     bullet_range: 120.0,    // longest range in the game
