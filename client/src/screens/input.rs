@@ -1,6 +1,7 @@
 use crate::core::GameConfig;
 use crate::physics::movement::MovementState;
 use macroquad::prelude::*;
+use crate::weapons::WeaponInventory;
 
 /// Process mouse input and update camera orientation
 pub fn process_mouse(
@@ -55,7 +56,7 @@ pub fn process_sprint(config: &GameConfig, movement_state: &MovementState, move_
         && movement_state.stamina > 0.0
 }
 
-/// Process crouch input (handles both toggle and hold)
+// Process crouch input (handles both toggle and hold)
 pub fn process_crouch(config: &GameConfig, is_crouching: bool) -> bool {
     if config.crouch_toggle {
         if is_key_pressed(config.key_crouch) {
@@ -68,7 +69,37 @@ pub fn process_crouch(config: &GameConfig, is_crouching: bool) -> bool {
     }
 }
 
-/// Process jump input
+// Process jump input
 pub fn process_jump(config: &GameConfig, is_grounded: bool) -> bool {
     is_key_down(config.key_jump) && is_grounded
 }
+
+// Process weapon input and return the desired weapon action
+pub fn process_weapon_input(
+    inventory: &mut WeaponInventory,
+    config: &GameConfig,
+) {
+    // weapon switching (number keys)
+    if is_key_pressed(KeyCode::Key1) { inventory.switch_to(0); }
+    if is_key_pressed(KeyCode::Key2) { inventory.switch_to(1); }
+    if is_key_pressed(KeyCode::Key3) { inventory.switch_to(2); }
+    if is_key_pressed(KeyCode::Key4) { inventory.switch_to(3); }
+    if is_key_pressed(KeyCode::Key5) { inventory.switch_to(4); }
+
+    // mouse wheel switching
+    let (_, wheel_y) = mouse_wheel();
+       if wheel_y > 0.0 {
+        inventory.scroll(-1);
+    } else if wheel_y < 0.0 {
+        inventory.scroll(1);
+    }
+
+    // reload
+      if is_key_pressed(config.key_reload) {
+        inventory.active_mut().start_reload();
+    }
+
+   // ADS
+    inventory.active_mut().is_aiming = config.bind_aim.is_down();
+}
+

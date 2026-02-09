@@ -5,6 +5,30 @@
 
 use macroquad::prelude::*;
 
+// A single input binding — can be a key OR a mouse button.
+// Future: add a Controller(u16) variant for gamepad.
+#[derive(Clone, Copy, PartialEq)]
+pub enum InputBinding {
+    Key(KeyCode),
+    Mouse(MouseButton),
+}
+
+impl InputBinding {
+    pub fn is_down(&self) -> bool {
+        match self {
+            InputBinding::Key(k) => is_key_down(*k),
+            InputBinding::Mouse(m) => is_mouse_button_down(*m),
+        }
+    }
+
+    pub fn is_pressed(&self) -> bool {
+        match self {
+            InputBinding::Key(k) => is_key_pressed(*k),
+            InputBinding::Mouse(m) => is_mouse_button_pressed(*m),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub struct GameConfig {
     // Mouse (UI value 10-100, default 60)
@@ -20,6 +44,9 @@ pub struct GameConfig {
     pub crouch_toggle: bool, // if true, crouch is a toggle instead of hold
     pub key_jump: KeyCode,
     pub key_settings: KeyCode,
+    pub key_reload: KeyCode,
+    pub bind_fire: InputBinding,
+    pub bind_aim: InputBinding,
 
     // Camera (UI value 40-120, default 90)
     pub fov: f32,
@@ -45,6 +72,9 @@ impl GameConfig {
             crouch_toggle: false, // default to hold
             key_jump: KeyCode::Space,
             key_settings: KeyCode::Escape,
+            key_reload: KeyCode::R,
+            bind_fire: InputBinding::Mouse(MouseButton::Left),
+            bind_aim: InputBinding::Mouse(MouseButton::Right),
 
             // Camera - UI value, converted to internal with raw_fov()
             fov: 90.0,

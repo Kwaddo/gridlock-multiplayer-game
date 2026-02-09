@@ -5,6 +5,7 @@ pub mod screens;
 pub mod settings;
 pub mod types;
 pub mod ui;
+pub mod weapons;
 pub mod world;
 
 // Re-export commonly used items
