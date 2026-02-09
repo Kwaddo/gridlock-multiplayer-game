@@ -1,14 +1,38 @@
 {
-    "global": {
-        "weapon_pistol": "assets/images/weapons/pistol.png",
-        "weapon_smg": "assets/images/weapons/smg.png",
-        "weapon_shotgun": "assets/images/weapons/shotgun.png",
-        "weapon_ar": "assets/images/weapons/ak47.png",
-        "weapon_sniper": "assets/images/weapons/Sniper.png"
-    },
-    "lobby": {
-        "floor_texture": "assets/images/textures/rocks.png"
-    },
-    "maze": {
-    }
+  "global": {
+    "weapon_pistol": "assets/images/weapons/pistol.png",
+    "weapon_smg": "assets/images/weapons/smg.png",
+    "weapon_shotgun": "assets/images/weapons/shotgun.png",
+    "weapon_ar": "assets/images/weapons/ar.png",
+    "weapon_sniper": "assets/images/weapons/Sniper.png",
+
+    "xhair_pistol_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair062.png",
+    "xhair_pistol_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair063.png",
+
+    "xhair_smg_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair179.png",
+    "xhair_smg_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair180.png",
+
+    "xhair_shotgun_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair039.png",
+    "xhair_shotgun_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair037.png",
+
+    "xhair_ar_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair010.png",
+    "xhair_ar_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair011.png",
+
+    "xhair_sniper_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair048.png",
+    "xhair_sniper_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair049.png",
+
+    "xhair_scope_148": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair148.png",
+    "xhair_scope_141": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair141.png",
+    "xhair_scope_162": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair162.png",
+
+    "pistol_frame_1": "assets/images/weapons/FPS Weapon Sprites/frames/pistol1.png",
+    "pistol_frame_2": "assets/images/weapons/FPS Weapon Sprites/frames/pistol2.png",
+    "pistol_frame_3": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
+    "pistol_frame_4": "assets/images/weapons/FPS Weapon Sprites/frames/pistol4.png",
+    "pistol_frame_5": "assets/images/weapons/FPS Weapon Sprites/frames/pistol5.png"
+  },
+  "lobby": {
+    "floor_texture": "assets/images/textures/rocks.png"
+  },
+  "maze": {}
 }

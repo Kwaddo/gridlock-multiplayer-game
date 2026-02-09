@@ -18,6 +18,54 @@ use std::collections::HashMap;
 
 use super::input;
 
+// ── NPC Target Dummy ─────────────────────────────────────────────────
+pub struct TargetDummy {
+    pub position: Vec3,     // feet position
+    pub hp: f32,
+    pub max_hp: f32,
+    pub hit_timer: f32,     // >0 = flash red (seconds remaining)
+    pub body_size: Vec3,    // AABB half-extents for body
+    pub head_size: Vec3,    // AABB half-extents for head
+}
+
+impl TargetDummy {
+    pub fn new(pos: Vec3) -> Self {
+        Self {
+            position: pos,
+            hp: 100.0,
+            max_hp: 100.0,
+            hit_timer: 0.0,
+            body_size: vec3(0.3, 0.6, 0.2), // half extents
+            head_size: vec3(0.2, 0.2, 0.2),
+        }
+    }
+
+    pub fn body_center(&self) -> Vec3 {
+        self.position + vec3(0.0, 0.6, 0.0) // body center at waist height
+    }
+
+    pub fn head_center(&self) -> Vec3 {
+        self.position + vec3(0.0, 1.4, 0.0) // head center
+    }
+
+    pub fn take_damage(&mut self, dmg: f32) {
+        self.hp = (self.hp - dmg).max(1.0); // never dies, minimum 1 HP
+        self.hit_timer = 0.3; // flash red for 300ms
+    }
+
+    pub fn update(&mut self, delta: f32) {
+        if self.hit_timer > 0.0 {
+            self.hit_timer = (self.hit_timer - delta).max(0.0);
+        }
+        // regen: heal back to full over 3 seconds when not being hit
+        if self.hit_timer <= 0.0 && self.hp < self.max_hp {
+            self.hp = (self.hp + 20.0 * delta).min(self.max_hp);
+        }
+    
+     
+    }
+}
+
 pub struct PlayingState {
     pub position: Vec3,
     pub yaw: f32,
@@ -35,6 +83,11 @@ pub struct PlayingState {
     
     //  --- Weapon system --- 
     pub weapons: WeaponInventory,
+
+    // --- NPC target dummy ---
+    pub target_dummy: TargetDummy,
+    pub hit_marker_timer: f32, // >0 = show hit X on crosshair
+    pub hit_marker_headshot: bool, // true = headshot color
 }
 
 impl PlayingState {
@@ -55,6 +108,9 @@ impl PlayingState {
             current_world: WorldId::Lobby,
             pending_world_change: None,
             weapons: WeaponInventory::new(),
+            target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
+            hit_marker_timer: 0.0,
+            hit_marker_headshot: false,
         }
     }
 
@@ -86,6 +142,11 @@ impl PlayingState {
         // weapon input
         input::process_weapon_input(&mut self.weapons, config);
 
+        // recover recoil/bloom from previous frame BEFORE firing
+        // so new bloom from this frame's shot survives to render
+        let delta = get_frame_time();
+        recover(self.weapons.active_mut(), delta);
+
         // firing
         let weapon = self.weapons.active_mut();
         if config.bind_fire.is_down() {
@@ -93,6 +154,43 @@ impl PlayingState {
                 // recoil
                 let rng = gen_range(0.0f32, 1.0);
                 apply_shot_recoil(weapon, rng);
+
+                // apply camera kick immediately
+                let stats = weapon.stats();
+                self.pitch += stats.recoil_vertical;
+                let h_kick = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
+                self.yaw += h_kick;
+                self.pitch = self.pitch.clamp(-1.55, 1.55);
+
+                // hitscan: ray from eye in forward direction
+                // hitscans are basically instantaneous bullets that either hit or miss based on a raycast, so we check for hits immediately when the weapon is fired. We only have one target dummy in the lobby for testing, but in a real game you would loop through all potential targets and check for hits against each of them.
+                if self.current_world == WorldId::Lobby {
+                    let eye = vec3(
+                        self.position.x,
+                        self.position.y + self.movement_state.height,
+                        self.position.z,
+                    );
+                    let fwd = vec3(
+                        self.yaw.cos() * self.pitch.cos(),
+                        self.pitch.sin(),
+                        self.yaw.sin() * self.pitch.cos(),
+                    );
+
+                    let damage = stats.damage;
+                    let hs_mult = stats.headshot_mult;
+                    let range = stats.bullet_range;
+
+                    // check head first (higher reward)
+                    if ray_hit_aabb(eye, fwd, self.target_dummy.head_center(), self.target_dummy.head_size, range) {
+                        self.target_dummy.take_damage(damage * hs_mult);
+                        self.hit_marker_timer = 0.25;
+                        self.hit_marker_headshot = true;
+                    } else if ray_hit_aabb(eye, fwd, self.target_dummy.body_center(), self.target_dummy.body_size, range) {
+                        self.target_dummy.take_damage(damage);
+                        self.hit_marker_timer = 0.25;
+                        self.hit_marker_headshot = false;
+                    }
+                }
             }
             weapon.trigger_held = true;
         } else {
@@ -113,13 +211,14 @@ impl PlayingState {
 
         // weapon tick (cooldowns, reloads, recoil recovery, etc)
         self.weapons.update(delta);
-        recover(self.weapons.active_mut(), delta);
+        // NOTE: recover() is called in process_local_input before firing
+        // NOTE: camera recoil is applied directly on fire in process_local_input
 
-        // apply recoil to camera
-        let weapon = self.weapons.active();
-        self.pitch += weapon.recoil_pitch * 0.1 * delta;
-        self.yaw += weapon.recoil_yaw * 0.1 * delta;
-        self.pitch = self.pitch.clamp(-1.55, 1.55); // limit looking straight up/down
+        // NPC + hit marker tick
+        self.target_dummy.update(delta);
+        if self.hit_marker_timer > 0.0 {
+            self.hit_marker_timer = (self.hit_marker_timer - delta).max(0.0);
+        }
 
         self.update_stamina(delta);
         self.update_crouch_height(config, delta);
@@ -206,9 +305,19 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
         // teleporter
         self.draw_teleporter();
 
+        // NPC target dummy (only in lobby)
+        if self.current_world == WorldId::Lobby {
+            self.draw_target_dummy();
+        }
+
         self.draw_other_players();
         
         set_default_camera();
+
+        // NPC health bar (2D overlay, projected from 3D)
+        if self.current_world == WorldId::Lobby {
+            self.draw_target_dummy_hud(&camera);
+        }
 
         // has to be after set_default_camera since it's 2D text in a 3d world, also has to be after draw_other_players so that the prompt is on top of other players in case they are between the player and the teleporter
         self.draw_teleporter_prompt(); 
@@ -231,6 +340,8 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
             &self.other_players,
             &self.weapons,
             &self.assets,
+            self.hit_marker_timer,
+            self.hit_marker_headshot,
         );
     }
 
@@ -332,11 +443,17 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
             self.position.z
         );
 
+        // ADS zoom: interpolate FOV based on ads_progress
+        let weapon = self.weapons.active();
+        let base_fov = config.raw_fov();
+        let ads_fov = weapon.stats().ads_zoom_fov;
+        let fov = base_fov + (ads_fov - base_fov) * weapon.ads_progress;
+
         Camera3D {
             position: eye_pos,
             target: eye_pos + forward,
             up: vec3(0.0, 1.0, 0.0),
-            fovy: config.raw_fov(),
+            fovy: fov.to_radians(),
             aspect: None,
             z_near: 0.1,
             z_far: 100.0,
@@ -405,4 +522,98 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
             });
         }
     }
+
+    fn draw_target_dummy(&self) {
+        let d = &self.target_dummy;
+        let hit_flash = d.hit_timer > 0.0;
+
+        // body
+        let body_color = if hit_flash { RED } else { Color::from_rgba(180, 140, 100, 255) };
+        draw_cube(d.body_center(), d.body_size * 2.0, None, body_color);
+        draw_cube_wires(d.body_center(), d.body_size * 2.0, BLACK);
+
+        // head
+        let head_color = if hit_flash { Color::from_rgba(255, 80, 80, 255) } else { Color::from_rgba(220, 180, 140, 255) };
+        draw_cube(d.head_center(), d.head_size * 2.0, None, head_color);
+        draw_cube_wires(d.head_center(), d.head_size * 2.0, BLACK);
+
+        // health bar floating above head (3D → drawn in 3D space as a flat quad)
+        // we'll draw it in 2D after set_default_camera instead
+    }
+
+    fn draw_target_dummy_hud(&self, camera: &Camera3D) {
+        let d = &self.target_dummy;
+        // project 3D position above head to screen space
+        let world_pos = d.position + vec3(0.0, 2.0, 0.0);
+        let rel = world_pos - camera.position;
+        let forward = (camera.target - camera.position).normalize();
+        let right = forward.cross(camera.up).normalize();
+        let up = right.cross(forward).normalize();
+
+        let dot = rel.dot(forward);
+        if dot < 0.1 { return; } // behind camera
+
+        let fov_rad = camera.fovy; // already in radians
+        let fov_scale = screen_height() / (2.0 * (fov_rad / 2.0).tan());
+
+        let sx = screen_width() / 2.0 + rel.dot(right) / dot * fov_scale;
+        let sy = screen_height() / 2.0 - rel.dot(up) / dot * fov_scale;
+
+        // health bar
+        let bar_w = 60.0;
+        let bar_h = 6.0;
+        let hp_frac = d.hp / d.max_hp;
+
+        draw_rectangle(sx - bar_w / 2.0, sy, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
+        let hp_color = if hp_frac > 0.5 {
+            Color::from_rgba(80, 200, 80, 255)
+        } else if hp_frac > 0.25 {
+            Color::from_rgba(220, 180, 40, 255)
+        } else {
+            RED
+        };
+        draw_rectangle(sx - bar_w / 2.0, sy, bar_w * hp_frac, bar_h, hp_color);
+        draw_rectangle_lines(sx - bar_w / 2.0, sy, bar_w, bar_h, 1.0, WHITE);
+
+        // label
+        let label = "TARGET DUMMY";
+        let measure = measure_text(label, None, 14, 1.0);
+        draw_text(label, sx - measure.width / 2.0, sy - 4.0, 14.0, WHITE);
+    }
+}
+
+// ── Ray vs AABB intersection ─────────────────────────────────────────
+// Returns true if a ray from `origin` in `dir` hits an axis-aligned box
+// centered at `center` with half-extents `half`, within `max_dist`.
+fn ray_hit_aabb(origin: Vec3, dir: Vec3, center: Vec3, half: Vec3, max_dist: f32) -> bool {
+    let min = center - half;
+    let max = center + half;
+
+    let mut tmin = 0.0_f32;
+    let mut tmax = max_dist;
+
+    for i in 0..3 {
+        let o = match i { 0 => origin.x, 1 => origin.y, _ => origin.z };
+        let d = match i { 0 => dir.x, 1 => dir.y, _ => dir.z };
+        let bmin = match i { 0 => min.x, 1 => min.y, _ => min.z };
+        let bmax = match i { 0 => max.x, 1 => max.y, _ => max.z };
+
+        if d.abs() < 1e-8 {
+            // ray parallel to slab — miss if origin outside
+            if o < bmin || o > bmax {
+                return false;
+            }
+        } else {
+            let inv_d = 1.0 / d;
+            let mut t1 = (bmin - o) * inv_d;
+            let mut t2 = (bmax - o) * inv_d;
+            if t1 > t2 { std::mem::swap(&mut t1, &mut t2); }
+            tmin = tmin.max(t1);
+            tmax = tmax.min(t2);
+            if tmin > tmax {
+                return false;
+            }
+        }
+    }
+    true
 }

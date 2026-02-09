@@ -53,12 +53,10 @@ impl WeaponKind {
 // crosshair visual style (drives how `crosshair.rs` renders).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CrosshairStyle {
-    /// 4 lines with a gap in the center (pistol, smg, ar)
-    Cross,
-    /// Circle with pellet dots (shotgun)
-    CircleDots,
-    /// Fine cross with scope outline (sniper)
-    ScopeCross,
+    // Standard weapon — hip-fire and ADS are texture crosshairs
+    Standard,
+    // Sniper — hip-fire is a crosshair, ADS is a full scope overlay
+    Scope,
 }
 
 // fire mode determines input behaviour.
@@ -74,23 +72,23 @@ pub struct WeaponStats {
     pub name: &'static str,
     pub fire_mode: FireMode,
 
-    // ── Damage ──────────────────────────────────────────────
+    // --- Damage 
     pub damage: f32,
     pub headshot_mult: f32,
     pub pellet_count: u32, // 1 for most guns, >1 for shotgun
 
-    // ── Fire rate & ammo ────────────────────────────────────
+    // --- Fire rate & ammo 
     pub fire_rate: f32,      // rounds per second
     pub magazine_size: u32,
     pub max_reserve: u32,    // total spare ammo
     pub reload_time: f32,    // seconds
 
-    // ── Recoil ──────────────────────────────────────────────
+    // --- Recoil
     pub recoil_vertical: f32,   // pitch kick per shot (radians)
     pub recoil_horizontal: f32, // max random yaw kick per shot (radians)
     pub recoil_recovery: f32,   // how fast recoil settles back (rad/s)
 
-    // ── Spread / bloom ──────────────────────────────────────
+    // --- Spread / bloom 
     pub hip_spread: f32,        // base spread at hip (radians)
     pub ads_spread: f32,        // base spread when aimed (radians)
     pub spread_per_shot: f32,   // bloom added per shot (radians)
@@ -99,26 +97,33 @@ pub struct WeaponStats {
     pub sprint_spread_mult: f32,// multiplier when sprinting (stacks with move)
     pub crouch_spread_mult: f32,// multiplier when crouching (<1 = tighter)
 
-    // ── ADS (aim down sights) ───────────────────────────────
+    // --- ADS (aim down sights)
     pub ads_zoom_fov: f32,   // target FOV when ADS (lower = more zoom)
     pub ads_time: f32,       // seconds to reach full ADS
 
-    // ── Bullet visual ───────────────────────────────────────
+    // --- Bullet visual
     pub bullet_speed: f32,   // tracer speed (units/s), purely visual
     pub bullet_range: f32,   // max hitscan distance (units)
 
-    // ── Crosshair appearance ────────────────────────────────
+    // --- Crosshair appearance 
     pub crosshair_style: CrosshairStyle,
-    pub crosshair_base_size: f32, // size at minimum spread (px)
-    pub crosshair_thickness: f32, // line thickness (px)
-    // ── HUD icon ────────────────────────────────────────────────
+    pub crosshair_hip_key: &'static str,  // asset key for hip-fire crosshair
+    pub crosshair_ads_key: &'static str,  // asset key for ADS crosshair
+    pub crosshair_base_size: f32,         // base draw size in pixels (at min spread)
+    // --- HUD icon
     pub icon_asset_key: &'static str, // key used to look up texture in assets HashMap
     pub icon_width: f32,              // display width in pixels (tweak per weapon)
     pub icon_height: f32,             // display height in pixels
     pub icon_flip_x: bool,            // true if the source image faces left
-}
 
-// ─── Weapon definitions ─────────────────────────────────────────────
+    // --- Viewmodel (FPS Weapon sprite)
+    pub viewmodel_frame_keys: &'static [&'static str], // asset keys for animation frames (idle, fire, reload)
+    pub viewmodel_frame_time: f32, // time per frame in seconds
+} 
+
+
+
+// --- Weapon definitions 
 
 pub const PISTOL: WeaponStats = WeaponStats {
     name: "Pistol",
@@ -139,8 +144,8 @@ pub const PISTOL: WeaponStats = WeaponStats {
 
     hip_spread: 0.015,
     ads_spread: 0.005,
-    spread_per_shot: 0.008,
-    spread_recovery: 3.0,
+    spread_per_shot: 0.025,
+    spread_recovery: 1.5,
     move_spread_mult: 1.4,
     sprint_spread_mult: 1.8,
     crouch_spread_mult: 0.8,
@@ -151,14 +156,24 @@ pub const PISTOL: WeaponStats = WeaponStats {
     bullet_speed: 200.0,
     bullet_range: 50.0,
 
-    crosshair_style: CrosshairStyle::Cross,
-    crosshair_base_size: 8.0,
-    crosshair_thickness: 1.5,
+    crosshair_style: CrosshairStyle::Standard,
+    crosshair_hip_key: "xhair_pistol_hip",   // crosshair062
+    crosshair_ads_key: "xhair_pistol_ads",   // crosshair063
+    crosshair_base_size: 32.0,
 
     icon_asset_key: "weapon_pistol",
     icon_width: 80.0,
     icon_height: 50.0,
     icon_flip_x: false,
+
+     viewmodel_frame_keys: &[
+        "pistol_frame_1",
+        "pistol_frame_2",
+        "pistol_frame_3",
+        "pistol_frame_4",
+        "pistol_frame_5",
+    ],
+    viewmodel_frame_time: 0.06,
 };
 
 pub const SMG: WeaponStats = WeaponStats {
@@ -180,8 +195,8 @@ pub const SMG: WeaponStats = WeaponStats {
 
     hip_spread: 0.03,
     ads_spread: 0.015,
-    spread_per_shot: 0.006,
-    spread_recovery: 4.0,
+    spread_per_shot: 0.018,
+    spread_recovery: 2.0,
     move_spread_mult: 1.2,
     sprint_spread_mult: 1.6,
     crouch_spread_mult: 0.85,
@@ -192,14 +207,17 @@ pub const SMG: WeaponStats = WeaponStats {
     bullet_speed: 180.0,
     bullet_range: 35.0,
 
-    crosshair_style: CrosshairStyle::Cross,
-    crosshair_base_size: 12.0,
-    crosshair_thickness: 1.5,
+    crosshair_style: CrosshairStyle::Standard,
+    crosshair_hip_key: "xhair_smg_hip",     // crosshair179
+    crosshair_ads_key: "xhair_smg_ads",     // crosshair180
+    crosshair_base_size: 36.0,
 
     icon_asset_key: "weapon_smg",
     icon_width: 90.0,
     icon_height: 45.0,
     icon_flip_x: true,
+    viewmodel_frame_keys: &[],
+    viewmodel_frame_time: 0.0,
 };
 
 pub const SHOTGUN: WeaponStats = WeaponStats {
@@ -221,8 +239,8 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
 
     hip_spread: 0.07,
     ads_spread: 0.045,
-    spread_per_shot: 0.01,
-    spread_recovery: 2.0,
+    spread_per_shot: 0.035,
+    spread_recovery: 1.0,
     move_spread_mult: 1.1,
     sprint_spread_mult: 1.3,
     crouch_spread_mult: 0.9,
@@ -233,14 +251,17 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     bullet_speed: 150.0,
     bullet_range: 15.0,
 
-    crosshair_style: CrosshairStyle::CircleDots,
-    crosshair_base_size: 20.0,
-    crosshair_thickness: 1.5,
+    crosshair_style: CrosshairStyle::Standard,
+    crosshair_hip_key: "xhair_shotgun_hip", // crosshair039
+    crosshair_ads_key: "xhair_shotgun_ads", // crosshair037
+    crosshair_base_size: 48.0,
 
     icon_asset_key: "weapon_shotgun",
     icon_width: 100.0,
     icon_height: 50.0,
     icon_flip_x: true,
+    viewmodel_frame_keys: &[],
+    viewmodel_frame_time: 0.0,
 };
 
 pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
@@ -262,8 +283,8 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
 
     hip_spread: 0.025,
     ads_spread: 0.008,
-    spread_per_shot: 0.007,
-    spread_recovery: 3.5,
+    spread_per_shot: 0.022,
+    spread_recovery: 1.8,
     move_spread_mult: 1.3,
     sprint_spread_mult: 1.7,
     crouch_spread_mult: 0.8,
@@ -274,14 +295,17 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     bullet_speed: 220.0,
     bullet_range: 60.0,
 
-    crosshair_style: CrosshairStyle::Cross,
-    crosshair_base_size: 10.0,
-    crosshair_thickness: 1.5,
+    crosshair_style: CrosshairStyle::Standard,
+    crosshair_hip_key: "xhair_ar_hip",      // crosshair010
+    crosshair_ads_key: "xhair_ar_ads",      // crosshair011
+    crosshair_base_size: 34.0,
 
     icon_asset_key: "weapon_ar",
     icon_width: 100.0,
     icon_height: 45.0,
     icon_flip_x: false,
+    viewmodel_frame_keys: &[],
+    viewmodel_frame_time: 0.0,
 };
 
 pub const SNIPER: WeaponStats = WeaponStats {
@@ -295,7 +319,7 @@ pub const SNIPER: WeaponStats = WeaponStats {
     fire_rate: 0.8,        // bolt action — very slow
     magazine_size: 5,
     max_reserve: 20,
-    reload_time: 3.0,
+    reload_time: 4.0,
 
     recoil_vertical: 0.08,
     recoil_horizontal: 0.01,
@@ -303,24 +327,28 @@ pub const SNIPER: WeaponStats = WeaponStats {
 
     hip_spread: 0.08,       // terrible from hip
     ads_spread: 0.002,      // pinpoint when scoped
-    spread_per_shot: 0.02,
-    spread_recovery: 2.0,
+    spread_per_shot: 0.05,
+    spread_recovery: 0.8,
     move_spread_mult: 2.0,  // heavy penalty
     sprint_spread_mult: 3.0,
     crouch_spread_mult: 0.6,
 
-    ads_zoom_fov: 25.0,     // high zoom scope
+    ads_zoom_fov: 15.0,     // high zoom scope
     ads_time: 0.35,
 
     bullet_speed: 300.0,
     bullet_range: 100.0,
 
-    crosshair_style: CrosshairStyle::ScopeCross,
-    crosshair_base_size: 6.0,
-    crosshair_thickness: 1.0,
+    crosshair_style: CrosshairStyle::Scope,
+    crosshair_hip_key: "xhair_sniper_hip",  // crosshair048
+    crosshair_ads_key: "xhair_sniper_ads",  // crosshair049
+    crosshair_base_size: 28.0,
 
     icon_asset_key: "weapon_sniper",
     icon_width: 110.0,
     icon_height: 40.0,
     icon_flip_x: false,
+
+    viewmodel_frame_keys: &[],
+    viewmodel_frame_time: 0.0,
 };

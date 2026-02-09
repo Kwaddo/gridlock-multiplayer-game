@@ -10,6 +10,9 @@ use client::ui::fonts;
 
 #[macroquad::main("Multiplayer FPS")]
 async fn main() {
+    // Set Nearest filtering globally so all textures (sprites, crosshairs) stay crisp
+    set_default_filter_mode(FilterMode::Nearest);
+
     fonts::init_font().await;
 
     let mut state = GameState::Login;
@@ -49,6 +52,7 @@ async fn main() {
                         match load_texture(&path).await {
                             Ok(tex) => {
                                 println!("  Loaded successfully");
+                                tex.set_filter(FilterMode::Nearest);
                                 playing_state.assets.insert(key, tex);
                             }
                             Err(e) => {
@@ -85,6 +89,7 @@ async fn main() {
                         match load_texture(&path).await {
                             Ok(tex) => {
                                 println!("  Loaded successfully");
+                                tex.set_filter(FilterMode::Nearest);
                                 playing_state.assets.insert(key, tex);
                             }
                             Err(e) => {

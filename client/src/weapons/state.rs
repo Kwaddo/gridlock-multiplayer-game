@@ -1,7 +1,7 @@
 /* Runtime weapon state — ammo, cooldowns, recoil accumulation, ADS progress.
  One instance per weapon the player is carrying.
 */
-use super::stats::{FireMode, WeaponKind, WeaponStats};
+use super::stats::{ FireMode, WeaponKind, WeaponStats };
 
 pub struct WeaponState {
     pub kind: WeaponKind,
@@ -11,26 +11,31 @@ pub struct WeaponState {
     pub reserve: u32,
 
     // -- Timers
-    pub fire_cooldown: f32,  // seconds until next shot allowed
-    pub reload_timer: f32,   // seconds left in reload (0 = not reloading)
+    pub fire_cooldown: f32, // seconds until next shot allowed
+    pub reload_timer: f32, // seconds left in reload (0 = not reloading)
     pub is_reloading: bool,
 
-    // -- ADS 
+    // -- ADS
     pub is_aiming: bool,
     pub ads_progress: f32, // 0.0 = hip, 1.0 = fully aimed
 
     // -- Recoil accumulation (applied to camera)
-    pub recoil_pitch: f32,   // accumulated vertical recoil (radians)
-    pub recoil_yaw: f32,     // accumulated horizontal recoil (radians)
+    pub recoil_pitch: f32, // accumulated vertical recoil (radians)
+    pub recoil_yaw: f32, // accumulated horizontal recoil (radians)
 
-    // -- Bloom (spread accumulation beyond base) 
-    pub bloom: f32,          // extra spread from firing (radians)
+    // -- Bloom (spread accumulation beyond base)
+    pub bloom: f32, // extra spread from firing (radians)
 
-    // -- Firing flag (used for semi-auto gate) 
-    pub trigger_held: bool,  // was fire button held last frame?
+    // -- Firing flag (used for semi-auto gate)
+    pub trigger_held: bool, // was fire button held last frame?
 
     // -- Visual feedback
     pub muzzle_flash_timer: f32, // >0 means flash is visible (seconds remaining)
+
+    // -- Viewmodel animation
+    pub viewmodel_frame: usize,
+    pub viewmodel_timer: f32,
+    pub viewmodel_playing: bool,
 }
 
 impl WeaponState {
@@ -50,6 +55,9 @@ impl WeaponState {
             bloom: 0.0,
             trigger_held: false,
             muzzle_flash_timer: 0.0,
+            viewmodel_frame: 0,
+            viewmodel_timer: 0.0,
+            viewmodel_playing: false,
         }
     }
 
@@ -98,6 +106,20 @@ impl WeaponState {
         } else {
             self.ads_progress = (self.ads_progress - delta / stats.ads_time).max(0.0);
         }
+
+        // viewmodel animation
+        if self.viewmodel_playing {
+            let stats = self.stats();
+            self.viewmodel_timer += delta;
+            if self.viewmodel_timer >= stats.viewmodel_frame_time {
+                self.viewmodel_timer = 0.0;
+                self.viewmodel_frame += 1;
+                if self.viewmodel_frame >= stats.viewmodel_frame_keys.len() {
+                    self.viewmodel_playing = false;
+                    self.viewmodel_frame = 0;
+                }
+            }
+        }
     }
 
     // fire the weapon — consume ammo, set cooldown, return true if fired.
@@ -121,6 +143,13 @@ impl WeaponState {
         self.ammo -= 1;
         self.fire_cooldown = 1.0 / stats.fire_rate;
         self.muzzle_flash_timer = 0.08; // 80ms flash
+
+        // viewmodel animation: restart from first frame
+        if !stats.viewmodel_frame_keys.is_empty() {
+            self.viewmodel_frame = 0;
+            self.viewmodel_timer = 0.0;
+            self.viewmodel_playing = true;
+        }
 
         // auto-reload on empty
         if self.ammo == 0 && self.reserve > 0 {
@@ -151,8 +180,7 @@ pub struct WeaponInventory {
 impl WeaponInventory {
     // start with all 5 weapons for now
     pub fn new() -> Self {
-        let weapons = WeaponKind::ALL
-            .iter()
+        let weapons = WeaponKind::ALL.iter()
             .map(|&kind| WeaponState::new(kind))
             .collect();
         Self {
@@ -189,7 +217,7 @@ impl WeaponInventory {
     // scroll to next/prev weapon.
     pub fn scroll(&mut self, direction: i32) {
         let len = self.weapons.len() as i32;
-        let new_slot = ((self.active_slot as i32 + direction).rem_euclid(len)) as usize;
+        let new_slot = ((self.active_slot as i32) + direction).rem_euclid(len) as usize;
         self.switch_to(new_slot);
     }
 
