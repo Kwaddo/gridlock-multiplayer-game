@@ -43,99 +43,28 @@ pub fn draw_hud(
 
     match stats.crosshair_style {
         CrosshairStyle::Cross => {
-            // 4 lines with gap
             draw_line(cx - arm_len, cy, cx - gap, cy, thickness, xhair_color);
             draw_line(cx + gap, cy, cx + arm_len, cy, thickness, xhair_color);
             draw_line(cx, cy - arm_len, cx, cy - gap, thickness, xhair_color);
             draw_line(cx, cy + gap, cx, cy + arm_len, thickness, xhair_color);
         }
         CrosshairStyle::CircleDots => {
-            // circle outline + dot pattern (shotgun)
             let radius = gap + 8.0;
             draw_circle_lines(cx, cy, radius, thickness, xhair_color);
-            // pellet spread dots (8 dots for shotgun pellet count)
             let dot_count = stats.pellet_count.min(12) as usize;
             for i in 0..dot_count {
                 let angle = (i as f32 / dot_count as f32) * std::f32::consts::TAU;
                 let dot_r = gap * 0.6;
-                draw_circle(
-                    cx + angle.cos() * dot_r,
-                    cy + angle.sin() * dot_r,
-                    2.0,
-                    xhair_color,
-                );
+                draw_circle(cx + angle.cos() * dot_r, cy + angle.sin() * dot_r, 2.0, xhair_color);
             }
         }
         CrosshairStyle::ScopeCross => {
-            // fine cross + scope ring (sniper)
             let scope_r = 30.0 * (1.0 - weapon.ads_progress * 0.3);
             draw_circle_lines(cx, cy, scope_r, 1.0, Color::from_rgba(200, 200, 200, 120));
-            // thin cross lines through center
             draw_line(cx - arm_len, cy, cx - 1.0, cy, 1.0, xhair_color);
             draw_line(cx + 1.0, cy, cx + arm_len, cy, 1.0, xhair_color);
             draw_line(cx, cy - arm_len, cx, cy - 1.0, 1.0, xhair_color);
             draw_line(cx, cy + 1.0, cx, cy + arm_len, 1.0, xhair_color);
-        }
-    }
-
-    // ── WEAPON VIEWMODEL (2D sprite at bottom-center) ────────────────
-    let icon_w = stats.icon_width;
-    let icon_h = stats.icon_height;
-    // base position: bottom-right of center, like classic FPS
-    let base_x = cx + 80.0;
-    let base_y = screen_height() - icon_h - 20.0;
-
-    // ADS: shift towards center and up
-    let ads_offset_x = -60.0 * weapon.ads_progress;
-    let ads_offset_y = -30.0 * weapon.ads_progress;
-
-    // recoil kick: push back briefly on fire
-    let kick_y = if weapon.muzzle_flash_timer > 0.0 {
-        (weapon.muzzle_flash_timer / 0.08) * 12.0 // kick down proportional to flash
-    } else {
-        0.0
-    };
-
-    let vm_x = base_x + ads_offset_x;
-    let vm_y = base_y + ads_offset_y + kick_y;
-
-    if let Some(tex) = assets.get(stats.icon_asset_key) {
-        draw_texture_ex(tex, vm_x, vm_y, WHITE, DrawTextureParams {
-            dest_size: Some(vec2(icon_w, icon_h)),
-            flip_x: stats.icon_flip_x,
-            ..Default::default()
-        });
-    } else {
-        // fallback: draw a placeholder rectangle if texture not loaded
-        draw_rectangle(vm_x, vm_y, icon_w, icon_h, Color::from_rgba(80, 80, 80, 150));
-        draw_rectangle_lines(vm_x, vm_y, icon_w, icon_h, 1.0, GRAY);
-    }
-
-    // ── MUZZLE FLASH ─────────────────────────────────────────────────
-    if weapon.muzzle_flash_timer > 0.0 {
-        let t = weapon.muzzle_flash_timer / 0.08; // 1.0 → 0.0
-        let alpha = (t * 255.0) as u8;
-
-        // flash at the muzzle tip (front-top of the weapon sprite)
-        let flash_x = if stats.icon_flip_x { vm_x + 10.0 } else { vm_x + icon_w - 10.0 };
-        let flash_y = vm_y + 5.0;
-
-        // outer glow
-        draw_circle(flash_x, flash_y, 18.0 * t, Color::from_rgba(255, 180, 50, alpha / 2));
-        // bright core
-        draw_circle(flash_x, flash_y, 8.0 * t, Color::from_rgba(255, 240, 180, alpha));
-        // small spark lines
-        for i in 0..4 {
-            let angle = (i as f32 * 0.8) + t * 3.0;
-            let len = 12.0 * t;
-            draw_line(
-                flash_x,
-                flash_y,
-                flash_x + angle.cos() * len,
-                flash_y + angle.sin() * len,
-                1.5,
-                Color::from_rgba(255, 200, 80, alpha),
-            );
         }
     }
 
@@ -225,7 +154,7 @@ pub fn draw_hud(
         );
     }
 
-    // ── WEAPON INFO (ammo + name) ────────────────────────────────────
+    // ── WEAPON INFO (sprite + name + ammo) ──────────────────────────
     let ammo_text = if weapon.is_reloading {
         "RELOADING...".to_string()
     } else {
@@ -241,10 +170,58 @@ pub fn draw_hud(
     );
 
     let name_w = measure_game_text(stats.name, 16);
+    let name_x = screen_width() - name_w - 20.0;
+    let name_y = screen_height() - 80.0;
     draw_text_ex(
         stats.name,
-        screen_width() - name_w - 20.0,
-        screen_height() - 80.0,
+        name_x,
+        name_y,
         text_params(16, Color::from_rgba(180, 180, 180, 255)),
     );
+
+    // weapon sprite: sits to the left of the weapon name
+    let icon_w = stats.icon_width;
+    let icon_h = stats.icon_height;
+    let icon_x = name_x - icon_w - 8.0;
+    let icon_y = name_y - icon_h + 4.0; // align bottom of icon with text baseline
+
+    // recoil kick on fire
+    let kick_y = if weapon.muzzle_flash_timer > 0.0 {
+        (weapon.muzzle_flash_timer / 0.08) * 6.0
+    } else {
+        0.0
+    };
+
+    if let Some(tex) = assets.get(stats.icon_asset_key) {
+        draw_texture_ex(tex, icon_x, icon_y + kick_y, WHITE, DrawTextureParams {
+            dest_size: Some(vec2(icon_w, icon_h)),
+            flip_x: stats.icon_flip_x,
+            ..Default::default()
+        });
+    } else {
+        draw_rectangle(icon_x, icon_y + kick_y, icon_w, icon_h, Color::from_rgba(80, 80, 80, 150));
+        draw_rectangle_lines(icon_x, icon_y + kick_y, icon_w, icon_h, 1.0, GRAY);
+    }
+
+    // muzzle flash at muzzle tip of the sprite
+    if weapon.muzzle_flash_timer > 0.0 {
+        let t = weapon.muzzle_flash_timer / 0.08;
+        let alpha = (t * 255.0) as u8;
+        let flash_x = if stats.icon_flip_x { icon_x + 6.0 } else { icon_x + icon_w - 6.0 };
+        let flash_y = icon_y + kick_y + 5.0;
+
+        draw_circle(flash_x, flash_y, 14.0 * t, Color::from_rgba(255, 180, 50, alpha / 2));
+        draw_circle(flash_x, flash_y, 6.0 * t, Color::from_rgba(255, 240, 180, alpha));
+        for i in 0..4 {
+            let angle = (i as f32 * 0.8) + t * 3.0;
+            let len = 10.0 * t;
+            draw_line(
+                flash_x, flash_y,
+                flash_x + angle.cos() * len,
+                flash_y + angle.sin() * len,
+                1.5,
+                Color::from_rgba(255, 200, 80, alpha),
+            );
+        }
+    }
 }
