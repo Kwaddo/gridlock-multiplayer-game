@@ -6,27 +6,27 @@ use super::stats::{FireMode, WeaponKind, WeaponStats};
 pub struct WeaponState {
     pub kind: WeaponKind,
 
-    // ── Ammo ────────────────────────────────────────────────
+    // -- Ammo
     pub ammo: u32,
     pub reserve: u32,
 
-    // ── Timers ──────────────────────────────────────────────
+    // -- Timers
     pub fire_cooldown: f32,  // seconds until next shot allowed
     pub reload_timer: f32,   // seconds left in reload (0 = not reloading)
     pub is_reloading: bool,
 
-    // ── ADS ─────────────────────────────────────────────────
+    // -- ADS 
     pub is_aiming: bool,
     pub ads_progress: f32, // 0.0 = hip, 1.0 = fully aimed
 
-    // ── Recoil accumulation (applied to camera) ─────────────
+    // -- Recoil accumulation (applied to camera)
     pub recoil_pitch: f32,   // accumulated vertical recoil (radians)
     pub recoil_yaw: f32,     // accumulated horizontal recoil (radians)
 
-    // ── Bloom (spread accumulation beyond base) ─────────────
+    // -- Bloom (spread accumulation beyond base) 
     pub bloom: f32,          // extra spread from firing (radians)
 
-    // ── Firing flag (used for semi-auto gate) ───────────────
+    // -- Firing flag (used for semi-auto gate) 
     pub trigger_held: bool,  // was fire button held last frame?
 }
 

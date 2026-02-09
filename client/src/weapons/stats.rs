@@ -27,16 +27,16 @@ impl WeaponKind {
     // for now i am making it slot based to simplify testing
     pub fn slot(self) -> usize {
         match self {
-            WeaponKind::Pistol => 0,
-            WeaponKind::Smg => 1,
-            WeaponKind::Shotgun => 2,
-            WeaponKind::AssaultRifle => 3,
-            WeaponKind::Sniper => 4,
+            WeaponKind::Pistol => 1,
+            WeaponKind::Smg => 2,
+            WeaponKind::Shotgun => 3,
+            WeaponKind::AssaultRifle => 4,
+            WeaponKind::Sniper => 5,
         }
     }
 
     pub fn from_slot(slot: usize) -> Option<Self> {
-        WeaponKind::ALL.get(slot).copied()
+        WeaponKind::ALL.get(slot - 1).copied()
     }
 
     pub fn stats(self) -> &'static WeaponStats {
