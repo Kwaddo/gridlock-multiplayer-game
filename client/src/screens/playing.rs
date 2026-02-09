@@ -2,6 +2,7 @@ use crate::core::{ GameConfig, GameState };
 use crate::physics::{ collision, movement::{ MovementConfig, MovementState } };
 use crate::protocols::*;
 use crate::screens::input::process_weapon_input;
+use crate::net::networking::MAZE_CELL_SIZE;
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::ui::hud::draw_hud;
@@ -193,7 +194,7 @@ impl PlayingState {
     }
 
     // process local input and return state transition if any
-    pub fn process_local_input(&mut self, config: &GameConfig) -> Option<GameState> {
+    pub fn process_local_input(&mut self, config: &GameConfig, maze: Option<&Maze>) -> Option<GameState> {
         if is_key_pressed(config.key_settings) {
             return Some(GameState::Paused);
         }
@@ -328,7 +329,7 @@ impl PlayingState {
         }
 
         // check teleporter input
-        self.check_teleporter();
+        self.check_teleporter(maze);
 
         None
     }
@@ -437,7 +438,7 @@ impl PlayingState {
         }
 
         // teleporter
-        self.draw_teleporter();
+        self.draw_teleporter(maze);
 
         // NPC target dummy (only in lobby)
         if self.current_world == WorldId::Lobby {
@@ -454,7 +455,7 @@ impl PlayingState {
         }
 
         // has to be after set_default_camera since it's 2D text in a 3d world, also has to be after draw_other_players so that the prompt is on top of other players in case they are between the player and the teleporter
-        self.draw_teleporter_prompt();
+        self.draw_teleporter_prompt(maze);
 
         let forward = vec3(
             self.yaw.cos() * self.pitch.cos(),
@@ -611,10 +612,18 @@ impl PlayingState {
         (at least x amount of players to be able to teleport and start game)
 
     */
-    fn draw_teleporter(&self) {
+    fn maze_teleporter_pos(&self, maze: Option<&Maze>) -> Vec3 {
+        if let Some(m) = maze {
+            m.teleporter_world()
+        } else {
+            vec3(1.5 * MAZE_CELL_SIZE, 0.0, 1.5 * MAZE_CELL_SIZE)
+        }
+    }
+
+    fn draw_teleporter(&self, maze: Option<&Maze>) {
         let pos = match self.current_world {
             WorldId::Lobby => vec3(0.0, 0.0, -10.0),
-            WorldId::Maze => vec3(1.5 * 1.8, 0.0, 1.5 * 1.8),
+            WorldId::Maze => self.maze_teleporter_pos(maze),
         };
 
         let t = get_time() as f32;
@@ -624,10 +633,10 @@ impl PlayingState {
         draw_cube(pos + vec3(0.0, 1.5, 0.0), vec3(2.0, 3.0, 2.0), None, color);
         draw_cube_wires(pos + vec3(0.0, 1.5, 0.0), vec3(2.0, 3.0, 2.0), WHITE);
     }
-    fn draw_teleporter_prompt(&self) {
+    fn draw_teleporter_prompt(&self, maze: Option<&Maze>) {
         let (pos, label) = match self.current_world {
             WorldId::Lobby => (vec3(0.0, 0.0, -10.0), "ENTER MAZE"),
-            WorldId::Maze => (vec3(1.5 * 1.8, 0.0, 1.5 * 1.8), "RETURN TO LOBBY"),
+            WorldId::Maze => (self.maze_teleporter_pos(maze), "RETURN TO LOBBY"),
         };
 
         let dist = vec3(self.position.x - pos.x, 0.0, self.position.z - pos.z).length();
@@ -643,10 +652,10 @@ impl PlayingState {
             );
         }
     }
-    fn check_teleporter(&mut self) {
+    fn check_teleporter(&mut self, maze: Option<&Maze>) {
         let tp_pos = match self.current_world {
             WorldId::Lobby => vec3(0.0, 0.0, -10.0),
-            WorldId::Maze => vec3(1.5 * 1.8, 0.0, 1.5 * 1.8),
+            WorldId::Maze => self.maze_teleporter_pos(maze),
         };
 
         let dist = vec3(self.position.x - tp_pos.x, 0.0, self.position.z - tp_pos.z).length();

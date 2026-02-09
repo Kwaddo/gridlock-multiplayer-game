@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 
-use crate::types::maze::Maze;
+use crate::types::maze::{DecorationKind, Maze};
 use crate::types::player::OtherPlayer;
 
 pub fn draw_maze(maze: Option<&Maze>) {
@@ -31,8 +31,27 @@ pub fn draw_maze(maze: Option<&Maze>) {
                 }
             }
         }
+
+        draw_decorations(m);
     } else {
         draw_cube(vec3(0.0, -1.0, 0.0), vec3(20.0, 0.1, 20.0), None, GRAY);
+    }
+}
+
+fn draw_decorations(maze: &Maze) {
+    for deco in &maze.decorations {
+        let center = maze.cell_to_world(deco.x as i32, deco.y as i32);
+        match deco.kind {
+            DecorationKind::Table => {
+                // Simple table: thin top + short pedestal
+                draw_cube(center + vec3(0.0, 0.5, 0.0), vec3(1.0, 0.2, 1.0), None, BROWN);
+                draw_cube(center + vec3(0.0, 0.25, 0.0), vec3(0.25, 0.5, 0.25), None, DARKGRAY);
+            }
+            DecorationKind::Chair => {
+                draw_cube(center + vec3(0.0, 0.25, 0.0), vec3(0.6, 0.5, 0.6), None, LIGHTGRAY);
+                draw_cube(center + vec3(0.0, 0.65, -0.2), vec3(0.6, 0.2, 0.15), None, DARKGRAY);
+            }
+        }
     }
 }
 
