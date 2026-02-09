@@ -62,7 +62,7 @@ async fn main() {
                     }
                 }
 
-                if let Some(new_state) = playing_state.process_local_input(&config) {
+                if let Some(new_state) = playing_state.process_local_input(&config, maze.as_ref()) {
                     state = new_state;
                     if matches!(state, GameState::Paused) {
                         set_cursor_grab(false);

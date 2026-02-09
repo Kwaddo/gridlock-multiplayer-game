@@ -3,7 +3,7 @@ use std::net::UdpSocket;
 use macroquad::prelude::*;
 
 use crate::net::protocols::{ MSG_MAZE, MSG_POSITION, MSG_STATE, MSG_WORLD_CHANGE, MSG_ASSETS };
-use crate::types::maze::Maze;
+use crate::types::maze::{Decoration, DecorationKind, Maze, Room};
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 
@@ -34,7 +34,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         assets: None,
     };
 
-    let mut recv_buf: [u8; 2048] = [0; 2048];
+    let mut recv_buf: [u8; 8192] = [0; 8192];
 
     while let Ok((size, _)) = socket.recv_from(&mut recv_buf) {
         if size == 0 {
@@ -42,21 +42,61 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         }
         match recv_buf[0] {
             MSG_MAZE => {
-                if size >= 3 {
+                if size >= 5 {
                     let width = recv_buf[1];
                     let height = recv_buf[2];
+                    let tele_x = recv_buf[3];
+                    let tele_y = recv_buf[4];
+
+                    let mut offset = 5;
+                    if offset >= size { continue; }
+
+                    let room_count = recv_buf[offset] as usize;
+                    offset += 1;
+                    let mut rooms = Vec::with_capacity(room_count);
+                    for _ in 0..room_count {
+                        if offset + 4 > size { break; }
+                        rooms.push(Room {
+                            x: recv_buf[offset],
+                            y: recv_buf[offset + 1],
+                            w: recv_buf[offset + 2],
+                            h: recv_buf[offset + 3],
+                        });
+                        offset += 4;
+                    }
+
+                    if offset >= size { continue; }
+
+                    let decor_count = recv_buf[offset] as usize;
+                    offset += 1;
+                    let mut decorations = Vec::with_capacity(decor_count);
+                    for _ in 0..decor_count {
+                        if offset + 3 > size { break; }
+                        if let Some(kind) = DecorationKind::from_u8(recv_buf[offset]) {
+                            decorations.push(Decoration {
+                                kind,
+                                x: recv_buf[offset + 1],
+                                y: recv_buf[offset + 2],
+                            });
+                        }
+                        offset += 3;
+                    }
+
                     let cell_count = (width as usize) * (height as usize);
-                    if size >= 3 + cell_count {
+                    if size >= offset + cell_count {
                         let mut cells = vec![0u8; cell_count];
-                        cells.copy_from_slice(&recv_buf[3..3 + cell_count]);
+                        cells.copy_from_slice(&recv_buf[offset..offset + cell_count]);
                         let maze = Maze {
                             width,
                             height,
                             cells,
                             cell_size: MAZE_CELL_SIZE,
                             wall_height: MAZE_WALL_HEIGHT,
+                            teleporter: (tele_x, tele_y),
+                            rooms,
+                            decorations,
                         };
-                        let spawn = maze.spawn_point();
+                        let spawn = maze.teleporter_world();
                         update.maze = Some((maze, spawn));
                     }
                 }
