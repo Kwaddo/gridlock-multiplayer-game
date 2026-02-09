@@ -28,6 +28,9 @@ pub struct WeaponState {
 
     // -- Firing flag (used for semi-auto gate) 
     pub trigger_held: bool,  // was fire button held last frame?
+
+    // -- Visual feedback
+    pub muzzle_flash_timer: f32, // >0 means flash is visible (seconds remaining)
 }
 
 impl WeaponState {
@@ -46,6 +49,7 @@ impl WeaponState {
             recoil_yaw: 0.0,
             bloom: 0.0,
             trigger_held: false,
+            muzzle_flash_timer: 0.0,
         }
     }
 
@@ -82,6 +86,11 @@ impl WeaponState {
             }
         }
 
+        // muzzle flash decay
+        if self.muzzle_flash_timer > 0.0 {
+            self.muzzle_flash_timer = (self.muzzle_flash_timer - delta).max(0.0);
+        }
+
         // ADS interpolation
         let stats = self.stats();
         if self.is_aiming {
@@ -111,6 +120,7 @@ impl WeaponState {
 
         self.ammo -= 1;
         self.fire_cooldown = 1.0 / stats.fire_rate;
+        self.muzzle_flash_timer = 0.08; // 80ms flash
 
         // auto-reload on empty
         if self.ammo == 0 && self.reserve > 0 {

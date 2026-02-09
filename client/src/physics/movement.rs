@@ -14,6 +14,7 @@ pub struct MovementState {
     pub is_sprinting: bool,
     pub stamina: f32,
     pub height: f32, // eye height
+    
 }
 
 
@@ -27,6 +28,10 @@ impl MovementState {
             stamina: 100.0,
             height: 1.6, // default eye height
         }
+    }
+      pub fn is_moving(&self) -> bool { // true if player has significant horizontal velocity
+        let h_speed_sq = self.velocity.x * self.velocity.x + self.velocity.z * self.velocity.z;
+        h_speed_sq > 0.5
     }
 }
 

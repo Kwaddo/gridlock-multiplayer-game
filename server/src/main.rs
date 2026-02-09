@@ -227,7 +227,7 @@ fn send_assets(socket: &UdpSocket, addr: SocketAddr) {
         return;
     };
 
-    let worlds = [("lobby", 0u8), ("maze", 1u8)];
+    let worlds = [("global", 255u8), ("lobby", 0u8), ("maze", 1u8)];
 
     for (world_name, world_id) in &worlds {
         if let Some(assets) = manifest.get(world_name).and_then(|v| v.as_object()) {

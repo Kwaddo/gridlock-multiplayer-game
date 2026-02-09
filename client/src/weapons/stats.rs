@@ -111,6 +111,11 @@ pub struct WeaponStats {
     pub crosshair_style: CrosshairStyle,
     pub crosshair_base_size: f32, // size at minimum spread (px)
     pub crosshair_thickness: f32, // line thickness (px)
+    // ── HUD icon ────────────────────────────────────────────────
+    pub icon_asset_key: &'static str, // key used to look up texture in assets HashMap
+    pub icon_width: f32,              // display width in pixels (tweak per weapon)
+    pub icon_height: f32,             // display height in pixels
+    pub icon_flip_x: bool,            // true if the source image faces left
 }
 
 // ─── Weapon definitions ─────────────────────────────────────────────
@@ -149,6 +154,11 @@ pub const PISTOL: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Cross,
     crosshair_base_size: 8.0,
     crosshair_thickness: 1.5,
+
+    icon_asset_key: "weapon_pistol",
+    icon_width: 80.0,
+    icon_height: 50.0,
+    icon_flip_x: false,
 };
 
 pub const SMG: WeaponStats = WeaponStats {
@@ -185,6 +195,11 @@ pub const SMG: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Cross,
     crosshair_base_size: 12.0,
     crosshair_thickness: 1.5,
+
+    icon_asset_key: "weapon_smg",
+    icon_width: 90.0,
+    icon_height: 45.0,
+    icon_flip_x: true,
 };
 
 pub const SHOTGUN: WeaponStats = WeaponStats {
@@ -221,6 +236,11 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::CircleDots,
     crosshair_base_size: 20.0,
     crosshair_thickness: 1.5,
+
+    icon_asset_key: "weapon_shotgun",
+    icon_width: 100.0,
+    icon_height: 50.0,
+    icon_flip_x: true,
 };
 
 pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
@@ -257,6 +277,11 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Cross,
     crosshair_base_size: 10.0,
     crosshair_thickness: 1.5,
+
+    icon_asset_key: "weapon_ar",
+    icon_width: 100.0,
+    icon_height: 45.0,
+    icon_flip_x: false,
 };
 
 pub const SNIPER: WeaponStats = WeaponStats {
@@ -293,4 +318,9 @@ pub const SNIPER: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::ScopeCross,
     crosshair_base_size: 6.0,
     crosshair_thickness: 1.0,
+
+    icon_asset_key: "weapon_sniper",
+    icon_width: 110.0,
+    icon_height: 40.0,
+    icon_flip_x: false,
 };

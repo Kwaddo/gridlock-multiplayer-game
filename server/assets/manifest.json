@@ -1,6 +1,13 @@
 {
+    "global": {
+        "weapon_pistol": "assets/images/weapons/pistol.png",
+        "weapon_smg": "assets/images/weapons/smg.png",
+        "weapon_shotgun": "assets/images/weapons/shotgun.png",
+        "weapon_ar": "assets/images/weapons/ak47.png",
+        "weapon_sniper": "assets/images/weapons/Sniper.png"
+    },
     "lobby": {
-        "floor_texture": "assets/images/rocks.png"
+        "floor_texture": "assets/images/textures/rocks.png"
     },
     "maze": {
     }

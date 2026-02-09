@@ -1,13 +1,17 @@
 use crate::core::{ GameConfig, GameState };
 use crate::physics::{ collision, movement::{ MovementConfig, MovementState } };
 use crate::protocols::*;
+use crate::screens::input::process_weapon_input;
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::ui::hud::draw_hud;
+use crate::weapons::recoil::{apply_shot_recoil, recover};
 use crate::world::{ draw_maze, lobby::draw_lobby };
 use crate::types::world::WorldId;
+use crate::weapons::{WeaponInventory, recoil, SpreadContext};
 
 use macroquad::prelude::*;
+use macroquad::rand::{gen_range, rand};
 use std::net::UdpSocket;
 
 use std::collections::HashMap;
@@ -28,6 +32,9 @@ pub struct PlayingState {
     pub jump_requested: bool,
     pub current_world: WorldId,
     pub pending_world_change: Option<WorldId>,
+    
+    //  --- Weapon system --- 
+    pub weapons: WeaponInventory,
 }
 
 impl PlayingState {
@@ -47,6 +54,7 @@ impl PlayingState {
             jump_requested: false,
             current_world: WorldId::Lobby,
             pending_world_change: None,
+            weapons: WeaponInventory::new(),
         }
     }
 
@@ -75,6 +83,23 @@ impl PlayingState {
         );
         self.jump_requested = input::process_jump(config, self.movement_state.is_grounded);
 
+        // weapon input
+        input::process_weapon_input(&mut self.weapons, config);
+
+        // firing
+        let weapon = self.weapons.active_mut();
+        if config.bind_fire.is_down() {
+            weapon.trigger_held = true;
+            if weapon.fire() {
+                // recoil
+                let rng = gen_range(0.0f32, 1.0);
+                apply_shot_recoil(weapon, rng);
+            }
+        } else {
+            weapon.trigger_held = false; 
+        }
+        
+
         // check teleporter input
         self.check_teleporter();
 
@@ -85,6 +110,16 @@ impl PlayingState {
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
         // updated this function to handle different physics for lobby vs maze, and also added a pending_world_change field to PlayingState to handle world transitions smoothly
         let delta = get_frame_time();
+
+        // weapon tick (cooldowns, reloads, recoil recovery, etc)
+        self.weapons.update(delta);
+        recover(self.weapons.active_mut(), delta);
+
+        // apply recoil to camera
+        let weapon = self.weapons.active();
+        self.pitch += weapon.recoil_pitch * 0.1 * delta;
+        self.yaw += weapon.recoil_yaw * 0.1 * delta;
+        self.pitch = self.pitch.clamp(-1.55, 1.55); // limit looking straight up/down
 
         self.update_stamina(delta);
         self.update_crouch_height(config, delta);
@@ -193,7 +228,9 @@ pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
             right,
             self.pitch,
             &self.movement_state,
-            &self.other_players
+            &self.other_players,
+            &self.weapons,
+            &self.assets,
         );
     }
 
