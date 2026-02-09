@@ -6,6 +6,7 @@ use crate::ui::fonts::{measure_game_text, text_params};
 use crate::ui::OtherPlayer;
 use crate::weapons::WeaponInventory;
 use crate::weapons::stats::CrosshairStyle;
+use crate::screens::playing::DamageNumber;
 
 pub fn draw_hud(
     username: &str,
@@ -20,6 +21,7 @@ pub fn draw_hud(
     assets: &HashMap<String, Texture2D>,
     hit_marker_timer: f32,
     hit_marker_headshot: bool,
+    damage_numbers: &[DamageNumber],
 ) {
     let cx = screen_width() / 2.0;
     let cy = screen_height() / 2.0;
@@ -31,7 +33,7 @@ pub fn draw_hud(
     // Bloom scales the hip crosshair up; ADS transitions between hip and ADS textures.
     // For sniper Scope style, ADS shows a full vignette + scope reticle.
     let base_size = stats.crosshair_base_size;
-    let bloom_scale = 1.0 + weapon.bloom * 800.0; // bloom radians → size multiplier
+    let bloom_scale = (1.0 + weapon.computed_spread * 60.0).min(3.0); // spread radians → size multiplier (clamped)
     let ads_t = weapon.ads_progress; // 0.0 = hip, 1.0 = full ADS
 
     // flash tint briefly on shot
@@ -79,9 +81,9 @@ pub fn draw_hud(
 
                 // Scope reticle inside the circle
                 // Active: crosshair148 — alternatives commented below
-                let reticle_key = "xhair_scope_148";
+                // let reticle_key = "xhair_scope_148";
                 // let reticle_key = "xhair_scope_141";
-                // let reticle_key = "xhair_scope_162";
+                let reticle_key = "xhair_scope_162";
                 let reticle_size = scope_radius * 1.6;
                 let reticle_tint = Color::from_rgba(255, 255, 255, scope_alpha);
                 draw_crosshair_texture(cx, cy, reticle_size, reticle_tint, reticle_key, assets);
@@ -89,25 +91,41 @@ pub fn draw_hud(
         }
     }
 
-    // ── HIT MARKER ───────────────────────────────────────────────────
+    // -- HIT MARKER 
     if hit_marker_timer > 0.0 {
-        let t = (hit_marker_timer / 0.25).min(1.0);
+        let t = (hit_marker_timer / 0.35).min(1.0);
         let alpha = (t * 255.0) as u8;
         let hm_color = if hit_marker_headshot {
-            Color::from_rgba(255, 50, 50, alpha) // red for headshot
+            Color::from_rgba(255, 215, 0, alpha) // gold for headshot
         } else {
             Color::from_rgba(255, 255, 255, alpha) // white for body
         };
-        let hm_size = 8.0 + (1.0 - t) * 4.0; // starts bigger, shrinks
-        let hm_thick = 2.0;
+        // pop animation: starts 1.4x, settles to 1.0x
+        let pop = 1.0 + 0.4 * t;
+        let hm_size = 14.0 * pop;
+        let hm_gap = 4.0 * pop;
+        let hm_thick = 3.0;
         // X shape
-        draw_line(cx - hm_size, cy - hm_size, cx - 3.0, cy - 3.0, hm_thick, hm_color);
-        draw_line(cx + 3.0, cy - 3.0, cx + hm_size, cy - hm_size, hm_thick, hm_color);
-        draw_line(cx - hm_size, cy + hm_size, cx - 3.0, cy + 3.0, hm_thick, hm_color);
-        draw_line(cx + 3.0, cy + 3.0, cx + hm_size, cy + hm_size, hm_thick, hm_color);
+        draw_line(cx - hm_size, cy - hm_size, cx - hm_gap, cy - hm_gap, hm_thick, hm_color);
+        draw_line(cx + hm_gap, cy - hm_gap, cx + hm_size, cy - hm_size, hm_thick, hm_color);
+        draw_line(cx - hm_size, cy + hm_size, cx - hm_gap, cy + hm_gap, hm_thick, hm_color);
+        draw_line(cx + hm_gap, cy + hm_gap, cx + hm_size, cy + hm_size, hm_thick, hm_color);
     }
 
-    // ── HUD TEXT ─────────────────────────────────────────────────────
+    // -- DAMAGE NUMBERS 
+    for dmg in damage_numbers {
+        let alpha = (dmg.lifetime.min(1.0) * 255.0) as u8;
+        let (color, size) = if dmg.is_headshot {
+            (Color::from_rgba(255, 215, 0, alpha), 28) // gold, large
+        } else {
+            (Color::from_rgba(255, 255, 255, alpha), 22) // white, normal
+        };
+        let text = format!("{}", dmg.amount as u32);
+        let tw = measure_game_text(&text, size);
+        draw_text_ex(&text, dmg.screen_x - tw / 2.0, dmg.screen_y, text_params(size, color));
+    }
+
+    // -- HUD TEXT
     draw_text_ex("Multiplayer FPS", 20.0, 20.0, text_params(30, WHITE));
     draw_text_ex(
         &format!("Player: {} (ID: {})", username, player_id),
@@ -125,7 +143,7 @@ pub fn draw_hud(
         text_params(20, WHITE),
     );
 
-    // ── STAMINA BAR ──────────────────────────────────────────────────
+    // -- STAMINA BAR
     let bar_width = 200.0;
     let bar_height = 8.0;
     let bar_x = screen_width() - bar_width - 20.0;
@@ -146,7 +164,7 @@ pub fn draw_hud(
     draw_rectangle(bar_x, bar_y, bar_width * fill, bar_height, bar_color);
     draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, GRAY);
 
-    // ── CROUCH INDICATOR ─────────────────────────────────────────────
+    // -- CROUCH INDICATOR 
     if movement_state.is_crouching {
         draw_text_ex(
             "CROUCHING",
@@ -156,7 +174,7 @@ pub fn draw_hud(
         );
     }
 
-    // ── NAMETAGS ─────────────────────────────────────────────────────
+    // -- NAMETAGS 
     for p in other_players {
         let head_pos = vec3(p.x, p.y + 1.8, p.z);
         let rel = head_pos - position;
@@ -177,7 +195,7 @@ pub fn draw_hud(
         }
     }
 
-    // ── PLAYER LIST ──────────────────────────────────────────────────
+    // -- PLAYER LIST 
     draw_text_ex(
         &format!("Players online: {}", other_players.len() + 1),
         20.0,
