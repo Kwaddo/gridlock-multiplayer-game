@@ -89,12 +89,12 @@ impl PlayingState {
         // firing
         let weapon = self.weapons.active_mut();
         if config.bind_fire.is_down() {
-            weapon.trigger_held = true;
             if weapon.fire() {
                 // recoil
                 let rng = gen_range(0.0f32, 1.0);
                 apply_shot_recoil(weapon, rng);
             }
+            weapon.trigger_held = true;
         } else {
             weapon.trigger_held = false; 
         }
