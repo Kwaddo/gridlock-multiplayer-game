@@ -116,7 +116,7 @@ impl PlayingState {
             config,
             self.movement_state.is_crouching
         );
-        self.jump_requested = input::process_jump(config, self.movement_state.is_grounded);
+        self.jump_requested = input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons);
 
         // weapon input
         input::process_weapon_input(&mut self.weapons, config);

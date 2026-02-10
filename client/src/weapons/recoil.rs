@@ -76,6 +76,8 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
             if weapon.fsa_timer >= fsa_time {
                 weapon.bloom = 0.0;
             }
+        } else {
+            weapon.fsa_timer = 0.0; // reset FSA when moving or firing
         }
     } else {
         weapon.fsa_timer = 0.0; // if weapon doesn't have FSA, just keep timer at 0

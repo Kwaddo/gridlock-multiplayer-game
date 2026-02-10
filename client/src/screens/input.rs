@@ -1,7 +1,7 @@
 use crate::core::GameConfig;
 use crate::physics::movement::MovementState;
 use macroquad::prelude::*;
-use crate::weapons::WeaponInventory;
+use crate::weapons::*;
 
 // process mouse input and update camera orientation
 
@@ -72,8 +72,14 @@ pub fn process_crouch(config: &GameConfig, is_crouching: bool) -> bool {
 }
 
 // process jump input
-pub fn process_jump(config: &GameConfig, is_grounded: bool) -> bool {
-    is_key_down(config.key_jump) && is_grounded
+pub fn process_jump(config: &GameConfig, is_grounded: bool, weapons: &mut WeaponInventory) -> bool {
+    let weapon = weapons.active_mut();
+    if weapon.is_aiming && is_key_down(config.key_jump) && is_grounded {
+        weapon.is_aiming = false;
+        weapon.ads_progress = 0.0;
+        weapon.jump_cancelled_ads = true; // prevent process_weapon_input from re-enabling ADS this frame
+    }
+    is_key_down(config.key_jump) && is_grounded 
 }
 
 // process weapon input and return the desired weapon action
@@ -101,7 +107,14 @@ pub fn process_weapon_input(
         inventory.active_mut().start_reload();
     }
 
-   // ADS
-    inventory.active_mut().is_aiming = config.bind_aim.is_down();
+   // ADS (only set if grounded — jump cancels ADS elsewhere)
+    let weapon = inventory.active_mut();
+    if !weapon.jump_cancelled_ads {
+        weapon.is_aiming = config.bind_aim.is_down();
+    }
+    // clear the flag once aim button is released so player can re-aim
+    if !config.bind_aim.is_down() {
+        weapon.jump_cancelled_ads = false;
+    }
 }
 

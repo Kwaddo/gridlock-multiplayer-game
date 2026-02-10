@@ -19,6 +19,7 @@ pub struct WeaponState {
     // -- ADS
     pub is_aiming: bool,
     pub ads_progress: f32, // 0.0 = hip, 1.0 = fully aimed
+    pub jump_cancelled_ads: bool, // true when jump cancelled ADS, prevents re-aim until button released
 
     // -- Recoil accumulation (applied to camera)
     pub recoil_pitch: f32, // accumulated vertical recoil (radians)
@@ -54,6 +55,7 @@ impl WeaponState {
             is_reloading: false,
             is_aiming: false,
             ads_progress: 0.0,
+            jump_cancelled_ads: false,
             recoil_pitch: 0.0,
             recoil_yaw: 0.0,
             bloom: 0.0,
