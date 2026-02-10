@@ -277,7 +277,7 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     max_reserve: 120,
     reload_time: 2.5, // heavier weapon = slower reload
 
-    recoil_vertical: 0.028,
+    recoil_vertical: 0.01,
     recoil_horizontal: 0.008,
     recoil_recovery: 3.5,
 

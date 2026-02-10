@@ -148,7 +148,7 @@ impl PlayingState {
             if weapon.fire() {
                 // recoil
                 let rng = gen_range(0.0f32, 1.0);
-                apply_shot_recoil(weapon, rng);
+                let fsa_shot = apply_shot_recoil(weapon, rng);
 
                 let stats = weapon.stats();
 
@@ -166,10 +166,13 @@ impl PlayingState {
                 );
 
                 // NOW apply camera kick (visual recoil for next frame)
-                self.pitch += stats.recoil_vertical;
-                let h_kick = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
-                self.yaw += h_kick;
-                self.pitch = self.pitch.clamp(-1.55, 1.55);
+                // skip if FSA was active — the first accurate shot shouldn't kick the camera
+                if !fsa_shot {
+                    self.pitch += stats.recoil_vertical;
+                    let h_kick = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
+                    self.yaw += h_kick;
+                    self.pitch = self.pitch.clamp(-1.55, 1.55);
+                }
 
                 // hitscan: fire pellet_count rays, each with independent spread.
                 // For most weapons pellet_count=1; shotgun fires 8 pellets.

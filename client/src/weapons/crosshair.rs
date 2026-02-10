@@ -49,7 +49,7 @@ impl CrosshairConfig {
                     texture_ads_size: 0.0,
                     kick_per_shot: 1.5,
                     kick_decay_rate: 8.0,
-                    kick_max: 3.0,
+                    kick_max: 1.5,
                     is_4curves: false,
                 },
             WeaponKind::Smg =>
@@ -104,9 +104,9 @@ impl CrosshairConfig {
                     ads_texture_key: None,
                     texture_base_size: 0.0,
                     texture_ads_size: 0.0,
-                    kick_per_shot: 1.2,
+                    kick_per_shot: 0.8,
                     kick_decay_rate: 5.0,
-                    kick_max: 3.0,
+                    kick_max: 2.3,
                     is_4curves: false,
                 },
             WeaponKind::Sniper =>

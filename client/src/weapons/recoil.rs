@@ -21,8 +21,17 @@ pub struct SpreadContext {
 }
 
 // apply recoil kick from a single shot — called right after firing.
-pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) {
+pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
     let stats = weapon.stats();
+    let fsa_was_active = stats.fsa_time.map_or(false, |t| weapon.fsa_timer >= t);
+
+    // reset FSA timer on shot (must happen after the check above)
+    weapon.fsa_timer = 0.0;
+
+    // FSA first shot: no recoil, no bloom, no crosshair kick — perfectly accurate
+    if fsa_was_active {
+        return true;
+    }
 
     // vertical kick (always up)
     weapon.recoil_pitch += stats.recoil_vertical;
@@ -32,16 +41,15 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) {
     weapon.recoil_yaw += h;
 
     // bloom accumulation
-    weapon.bloom += stats.spread_per_shot; // bloom is additive on top of base spread
-
-    // reset FSA timer on shot
-    weapon.fsa_timer = 0.0; 
+    weapon.bloom += stats.spread_per_shot;
 
     // crosshair kick
     weapon.crosshair_kick += weapon.crosshair.kick_per_shot;
     if weapon.crosshair.kick_max > 0.0 {
         weapon.crosshair_kick = weapon.crosshair_kick.min(weapon.crosshair.kick_max);
     }
+
+    false
 }
 
 // recover recoil and bloom over time — called every frame.
