@@ -157,17 +157,11 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     offset += name_len;
 
                     if id != player_id {
-                        let other_player = OtherPlayer {
-                            id,
-                            x,
-                            y,
-                            z,
-                            yaw,
-                            username: name,
-                            skin: None,
-                            color: OtherPlayer::color_for_id(id),
-                            world,
-                        };
+                        let mut other_player = OtherPlayer::new(id, name, world);
+                        other_player.x = x;
+                        other_player.y = y;
+                        other_player.z = z;
+                        other_player.yaw = yaw;
                         new_players.push(other_player);
                     }
                 }

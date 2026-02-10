@@ -6,7 +6,7 @@ use crate::ui::fonts::{measure_game_text, text_params};
 use crate::ui::OtherPlayer;
 use crate::weapons::WeaponInventory;
 use crate::weapons::stats::CrosshairStyle;
-use crate::screens::playing::DamageNumber;
+use crate::weapons::effects::DamageNumber;
 
 pub fn draw_hud(
     username: &str,

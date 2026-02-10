@@ -105,6 +105,7 @@ pub struct WeaponStats {
     // --- Bullet visual
     pub bullet_speed: f32,   // tracer speed (units/s), purely visual
     pub bullet_range: f32,   // max hitscan distance (units)
+    pub tracer_length: f32,  // visible tracer trail length (units)
 
     // --- Crosshair appearance 
     pub crosshair_style: CrosshairStyle,
@@ -117,6 +118,11 @@ pub struct WeaponStats {
     pub icon_width: f32,              // display width in pixels (tweak per weapon)
     pub icon_height: f32,             // display height in pixels
     pub icon_flip_x: bool,            // true if the source image faces left
+
+    // --- damage falloff
+    pub falloff_start: f32, // distance at which damage falloff begins (units)
+    pub falloff_end: f32,   // distance at which damage reaches minimum (units)
+    pub falloff_min_mult: f32, // minimum damage multiplier at max falloff (0..1)
 
 }
 
@@ -155,6 +161,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
 
     bullet_speed: 200.0,
     bullet_range: 40.0,
+    tracer_length: 2.0,
 
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_pistol_hip",   // crosshair062
@@ -166,6 +173,10 @@ pub const PISTOL: WeaponStats = WeaponStats {
     icon_width: 80.0,
     icon_height: 50.0,
     icon_flip_x: false,
+
+    falloff_start: 15.0,
+    falloff_end: 35.0,
+    falloff_min_mult: 0.5,
 };
 
 pub const SMG: WeaponStats = WeaponStats {
@@ -199,6 +210,7 @@ pub const SMG: WeaponStats = WeaponStats {
 
     bullet_speed: 180.0,
     bullet_range: 45.0,
+    tracer_length: 2.5,
 
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_smg_hip",     // crosshair179
@@ -210,6 +222,10 @@ pub const SMG: WeaponStats = WeaponStats {
     icon_width: 90.0,
     icon_height: 45.0,
     icon_flip_x: true,
+
+    falloff_start: 10.0,
+    falloff_end: 30.0,
+    falloff_min_mult: 0.4,
 };
 
 pub const SHOTGUN: WeaponStats = WeaponStats {
@@ -243,6 +259,7 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
 
     bullet_speed: 150.0,
     bullet_range: 20.0,    // short range but not useless
+    tracer_length: 1.5,    // short trails for pellets
 
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_shotgun_hip", // crosshair039
@@ -254,6 +271,10 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     icon_width: 100.0,
     icon_height: 50.0,
     icon_flip_x: true,
+
+    falloff_start: 5.0,
+    falloff_end: 15.0,
+    falloff_min_mult: 0.2,
 };
 
 pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
@@ -287,6 +308,7 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
 
     bullet_speed: 250.0,
     bullet_range: 70.0,    // best range of the auto weapons
+    tracer_length: 3.5,
 
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_ar_hip",      // crosshair010
@@ -298,6 +320,10 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     icon_width: 100.0,
     icon_height: 45.0,
     icon_flip_x: false,
+
+    falloff_start: 25.0,
+    falloff_end: 70.0,
+    falloff_min_mult: 0.6,
 };
 
 pub const SNIPER: WeaponStats = WeaponStats {
@@ -331,6 +357,7 @@ pub const SNIPER: WeaponStats = WeaponStats {
 
     bullet_speed: 350.0,
     bullet_range: 120.0,    // longest range in the game
+    tracer_length: 8.0,     // long visible trail — sniper rounds are iconic
 
     crosshair_style: CrosshairStyle::Scope,
     crosshair_hip_key: "xhair_sniper_hip",  // no crosshair when hip-firing a sniper
@@ -342,4 +369,8 @@ pub const SNIPER: WeaponStats = WeaponStats {
     icon_width: 110.0,
     icon_height: 40.0,
     icon_flip_x: false,
+
+    falloff_start: 1000.0,
+    falloff_end: 10000.0,
+    falloff_min_mult: 1.0, // sniper damage does not fall off — it's a long-range specialist, so it should be rewarded for landing shots at max range
 };
