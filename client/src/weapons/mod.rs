@@ -10,6 +10,7 @@
 
 
 pub mod combat;
+pub mod crosshair;
 pub mod effects;
 pub mod recoil;
 pub mod state;

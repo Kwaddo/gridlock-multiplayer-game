@@ -1,6 +1,7 @@
 /* Runtime weapon state — ammo, cooldowns, recoil accumulation, ADS progress.
  One instance per weapon the player is carrying.
 */
+use super::crosshair::CrosshairConfig;
 use super::stats::{ FireMode, WeaponKind, WeaponStats };
 
 pub struct WeaponState {
@@ -35,6 +36,10 @@ pub struct WeaponState {
     // -- Visual feedback
     pub muzzle_flash_timer: f32, // >0 means flash is visible (seconds remaining)
 
+    // -- Crosshair (runtime config, will be editable in settings later)
+    pub crosshair: CrosshairConfig,
+    pub crosshair_kick: f32, // visual gap expansion from shooting, decays back to 0 over time, separate from bloom which affects actual spread
+    pub fsa_timer: f32, // time spent not firing when stationary, when >= fsa_time, bloom starts to recover 
 }
 
 impl WeaponState {
@@ -55,6 +60,9 @@ impl WeaponState {
             computed_spread: 0.0,
             trigger_held: false,
             muzzle_flash_timer: 0.0,
+            crosshair: CrosshairConfig::for_weapon(kind),
+            fsa_timer: 0.0,
+            crosshair_kick: 0.0,
         }
     }
 
