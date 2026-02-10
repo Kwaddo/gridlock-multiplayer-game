@@ -30,16 +30,16 @@ pub fn process_movement_keys(yaw: f32, config: &GameConfig) -> Vec3 {
     let forward = vec3(yaw.cos(), 0.0, yaw.sin());
 
     let mut move_dir = Vec3::ZERO;
-    if is_key_down(config.key_forward) {
+    if is_key_down(config.key_forward) || is_key_down(KeyCode::Up) {
         move_dir += forward;
     }
-    if is_key_down(config.key_backward) {
+    if is_key_down(config.key_backward) || is_key_down(KeyCode::Down) {
         move_dir -= forward;
     }
-    if is_key_down(config.key_left) {
+    if is_key_down(config.key_left) || is_key_down(KeyCode::Left) {
         move_dir -= right;
     }
-    if is_key_down(config.key_right) {
+    if is_key_down(config.key_right) || is_key_down(KeyCode::Right) {
         move_dir += right;
     }
 
