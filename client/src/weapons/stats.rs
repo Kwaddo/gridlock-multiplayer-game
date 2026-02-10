@@ -123,6 +123,12 @@ pub struct WeaponStats {
     pub falloff_start: f32, // distance at which damage falloff begins (units)
     pub falloff_end: f32, // distance at which damage reaches minimum (units)
     pub falloff_min_mult: f32, // minimum damage multiplier at max falloff (0..1)
+
+    // --- spray pattern
+    pub recoil_pattern: &'static [(f32, f32)], // list of (vertical, horizontal) recoil offsets for each shot in the magazine, applied in order and looping if you exceed the magazine size (like real guns with repeating patterns) rather than randomness shit
+    pub pattern_randomness: f32, // how much random variance to add to the recoil pattern (radians),
+    pub randomness_growth: f32, // additional randomness per shot to make the pattern less predictable the longer you fire (radians)
+    pub pattern_reset_time: f32, // time in seconds to fully reset after releasing trigger
 }
 
 // --- Weapon definitions
@@ -161,7 +167,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
     tracer_length: 2.0,
 
     crosshair_style: CrosshairStyle::Standard,
-    fsa_time: Some(0.25), 
+    fsa_time: Some(0.25),
 
     icon_asset_key: "weapon_pistol",
     icon_width: 80.0,
@@ -171,6 +177,17 @@ pub const PISTOL: WeaponStats = WeaponStats {
     falloff_start: 15.0,
     falloff_end: 35.0,
     falloff_min_mult: 0.5,
+
+    recoil_pattern: &[
+        (0.018, 0.0), 
+        (0.018, 0.05),
+        (0.017, -0.05),
+        (0.016, 0.1),
+        (0.015, -0.1),
+    ],
+    pattern_randomness: 0.15,
+    randomness_growth: 0.08,
+    pattern_reset_time: 0.4,
 };
 
 pub const SMG: WeaponStats = WeaponStats {
@@ -217,6 +234,24 @@ pub const SMG: WeaponStats = WeaponStats {
     falloff_start: 10.0,
     falloff_end: 30.0,
     falloff_min_mult: 0.4,
+
+    recoil_pattern: &[
+    (0.012, 0.0),    // 1-3: straight up
+    (0.012, 0.0),
+    (0.012, 0.05),
+    (0.011, 0.15),   // 4-6: drift right
+    (0.011, 0.25),
+    (0.010, 0.3),
+    (0.010, 0.1),    // 7-9: swing left
+    (0.009, -0.2),
+    (0.009, -0.35),
+    (0.008, -0.25),  // 10-12: settle back
+    (0.008, -0.1),
+    (0.007, 0.0),
+],
+    pattern_randomness: 0.3,
+    randomness_growth: 0.04,
+    pattern_reset_time: 0.35,
 };
 
 pub const SHOTGUN: WeaponStats = WeaponStats {
@@ -263,6 +298,11 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     falloff_start: 5.0,
     falloff_end: 15.0,
     falloff_min_mult: 0.2,
+
+    recoil_pattern: &[], // invalid for shotgun
+    pattern_randomness: 0.0,
+    randomness_growth: 0.0, // no pattern, so randomness doesnt increase
+    pattern_reset_time: 0.0, // no pattern to reset
 };
 
 pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
@@ -286,8 +326,8 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     ads_spread: 0.006, // but better ADS accuracy
     spread_per_shot: 0.02,
     spread_recovery: 1.8,
-    move_spread_mult: 1.3,
-    sprint_spread_mult: 1.7,
+    move_spread_mult: 1.5,
+    sprint_spread_mult: 2.0,
     crouch_spread_mult: 0.75,
 
     ads_zoom_fov: 55.0,
@@ -299,7 +339,7 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     tracer_length: 3.5,
 
     crosshair_style: CrosshairStyle::Standard,
-    fsa_time: Some(0.35), 
+    fsa_time: Some(0.35),
 
     icon_asset_key: "weapon_ar",
     icon_width: 100.0,
@@ -309,7 +349,23 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     falloff_start: 25.0,
     falloff_end: 70.0,
     falloff_min_mult: 0.6,
-    
+
+    recoil_pattern: &[
+    (0.010, 0.0),    // shot 1: straight up
+    (0.011, 0.0),    // shot 2: straight up
+    (0.012, 0.1),    // shot 3: up, slight right
+    (0.012, 0.2),    // shot 4: up, more right  
+    (0.011, 0.3),    // shot 5: up, right
+    (0.010, 0.1),    // shot 6: up, slight right
+    (0.010, -0.2),   // shot 7: up, pulls left
+    (0.009, -0.4),   // shot 8: up, more left
+    (0.008, -0.3),   // shot 9: less kick, left
+    (0.007, -0.1),   // shot 10: settling
+],
+
+    pattern_randomness: 0.1, // early on its very predictable,
+    randomness_growth: 0.06, // but the longer you hold it, the more random it gets to prevent pure pattern memorization
+    pattern_reset_time: 0.5,
 };
 
 pub const SNIPER: WeaponStats = WeaponStats {
@@ -356,4 +412,9 @@ pub const SNIPER: WeaponStats = WeaponStats {
     falloff_start: 1000.0,
     falloff_end: 10000.0,
     falloff_min_mult: 1.0, // sniper damage does not fall off — it's a long-range specialist, so it should be rewarded for landing shots at max range
+
+    recoil_pattern: &[],
+    pattern_randomness: 0.0, // sniper has no recoil pattern, just a single strong kick with some randomness
+    randomness_growth: 0.0, // no pattern, so randomness doesnt increase
+    pattern_reset_time: 0.0, // no pattern to reset
 };

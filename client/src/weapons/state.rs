@@ -42,6 +42,11 @@ pub struct WeaponState {
     pub crosshair: CrosshairConfig,
     pub crosshair_kick: f32, // visual gap expansion from shooting, decays back to 0 over time, separate from bloom which affects actual spread
     pub fsa_timer: f32, // time spent not firing when stationary, when >= fsa_time, bloom starts to recover 
+
+    // -- more recoil stats
+
+    pub shot_index: u32, // which bullet in current spray (for recoil patterns)
+    pub pattern_reset_timer: f32, // time since triggerer released so it can go back to normal after a while
 }
 
 impl WeaponState {
@@ -67,6 +72,8 @@ impl WeaponState {
             crosshair: CrosshairConfig::for_weapon(kind),
             fsa_timer: 0.0,
             crosshair_kick: 0.0,
+            shot_index: 0,
+            pattern_reset_timer: 0.0,
         }
     }
 
