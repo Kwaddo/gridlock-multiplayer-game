@@ -3,6 +3,7 @@ pub enum GameState {
     Playing,
     Paused,
     Settings,
+    DevMode,
     Exit,
 }
 

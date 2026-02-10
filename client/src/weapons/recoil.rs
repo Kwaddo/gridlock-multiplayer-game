@@ -22,8 +22,7 @@ pub struct SpreadContext {
 
 // apply recoil kick from a single shot — called right after firing.
 pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
-    let stats = weapon.stats();
-    let fsa_was_active = stats.fsa_time.map_or(false, |t| weapon.fsa_timer >= t);
+    let fsa_was_active = weapon.stats_data.fsa_time.map_or(false, |t| weapon.fsa_timer >= t);
 
     // reset FSA timer on shot (must happen after the check above)
     weapon.fsa_timer = 0.0;
@@ -34,14 +33,14 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
     }
 
     // vertical kick (always up)
-    weapon.recoil_pitch += stats.recoil_vertical;
+    weapon.recoil_pitch += weapon.stats_data.recoil_vertical;
 
     // horizontal kick (random left/right, seeded by a float 0..1)
-    let h = (rng_seed - 0.5) * 2.0 * stats.recoil_horizontal;
+    let h = (rng_seed - 0.5) * 2.0 * weapon.stats_data.recoil_horizontal;
     weapon.recoil_yaw += h;
 
     // bloom accumulation
-    weapon.bloom += stats.spread_per_shot;
+    weapon.bloom += weapon.stats_data.spread_per_shot;
 
     // crosshair kick
     weapon.crosshair_kick += weapon.crosshair.kick_per_shot;
@@ -54,31 +53,33 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
 
 // recover recoil and bloom over time — called every frame.
 pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
-    let stats = weapon.stats();
+    let recoil_recovery = weapon.stats_data.recoil_recovery;
+    let spread_recovery = weapon.stats_data.spread_recovery;
+    let fsa_time = weapon.stats_data.fsa_time;
 
     // pitch recoil recovery (settles back to 0)
     if weapon.recoil_pitch > 0.0 {
-        let recovery = stats.recoil_recovery * delta;
+        let recovery = recoil_recovery * delta;
         weapon.recoil_pitch = (weapon.recoil_pitch - recovery).max(0.0);
     }
 
     // yaw recoil recovery (settles back to 0)
     if weapon.recoil_yaw.abs() > 0.0001 {
         let sign = weapon.recoil_yaw.signum();
-        let recovery = stats.recoil_recovery * delta;
+        let recovery = recoil_recovery * delta;
         weapon.recoil_yaw -= sign * recovery.min(weapon.recoil_yaw.abs());
     }
 
     // bloom decay
     if weapon.bloom > 0.0 {
-        let decay = stats.spread_recovery * delta;
+        let decay = spread_recovery * delta;
         weapon.bloom = (weapon.bloom - decay).max(0.0);
     }
-    
+
 
     // First shot accuracy logic
     // when timer reaches fsa_time, force bloom to 0
-    if let Some(fsa_time) = weapon.stats().fsa_time {
+    if let Some(fsa_time) = fsa_time {
         if !weapon.trigger_held && !is_moving {
             weapon.fsa_timer += delta;
             if weapon.fsa_timer >= fsa_time {

@@ -23,6 +23,7 @@ use std::net::UdpSocket;
 
 use std::collections::HashMap;
 
+use super::dev_mode::DevModeState;
 use super::input;
 
 pub struct PlayingState {
@@ -52,6 +53,9 @@ pub struct PlayingState {
 
     pub hit_marker_pellets_hit: u32, // for shotguns: how many pellets hit, to show different hit marker icons (1-2 = small, 3-5 = medium, 6-8 = large)
     pub hit_marker_pellets_total: u32, // for shotguns: total pellets fired, to know when to reset hit marker state on next shot
+
+    // --- Dev mode ---
+    pub dev_mode: DevModeState,
 }
 
 impl PlayingState {
@@ -78,6 +82,7 @@ impl PlayingState {
             tracers: Vec::new(),
             hit_marker_pellets_hit: 0,
             hit_marker_pellets_total: 0,
+            dev_mode: DevModeState::new(),
         }
     }
 
@@ -146,9 +151,21 @@ impl PlayingState {
         let weapon = self.weapons.active_mut();
         if config.bind_fire.is_down() {
             if weapon.fire() {
+                // dev mode: infinite ammo — refill after each shot
+                if self.dev_mode.infinite_ammo {
+                    weapon.ammo = weapon.stats_data.magazine_size;
+                    weapon.is_reloading = false;
+                    weapon.reload_timer = 0.0;
+                }
+
                 // recoil
                 let rng = gen_range(0.0f32, 1.0);
-                let fsa_shot = apply_shot_recoil(weapon, rng);
+                let fsa_shot = if self.dev_mode.no_recoil {
+                    // skip bloom/recoil accumulation entirely
+                    false
+                } else {
+                    apply_shot_recoil(weapon, rng)
+                };
 
                 let stats = weapon.stats();
 
@@ -166,8 +183,8 @@ impl PlayingState {
                 );
 
                 // NOW apply camera kick (visual recoil for next frame)
-                // skip if FSA was active — the first accurate shot shouldn't kick the camera
-                if !fsa_shot {
+                // skip if FSA was active or dev no_recoil is on
+                if !fsa_shot && !self.dev_mode.no_recoil {
                     self.pitch += stats.recoil_vertical;
                     let h_kick = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
                     self.yaw += h_kick;
@@ -243,7 +260,9 @@ impl PlayingState {
                             let falloff = damage_falloff(dist, stats);
                             let dmg = damage * mult * falloff;
                             if target_idx == 0 {
-                                self.target_dummy.take_damage(dmg);
+                                if !self.dev_mode.dummy_invincible {
+                                    self.target_dummy.take_damage(dmg);
+                                }
                             } else {
                                 self.other_players[target_idx - 1].take_damage(dmg);
                             }

@@ -1,5 +1,6 @@
 use crate::core::GameConfig;
 use crate::core::GameState;
+use crate::screens::dev_mode::DevModeState;
 use crate::settings::SettingsScreen;
 use crate::ui::fonts::{measure_game_text, text_params};
 use crate::ui::is_button_clicked;
@@ -8,6 +9,7 @@ use macroquad::prelude::*;
 pub fn draw_pause_menu(
     config: &GameConfig,
     settings_screen: &mut SettingsScreen,
+    dev_mode: &mut DevModeState,
 ) -> Option<GameState> {
     // ESC to resume (is_key_pressed is consumed by the Playing state's check,
     // so this only fires on a *second* ESC press while paused)
@@ -25,7 +27,7 @@ pub fn draw_pause_menu(
     );
 
     let panel_w = 300.0;
-    let panel_h = 250.0;
+    let panel_h = 310.0;
     let panel_x = (screen_width() - panel_w) / 2.0;
     let panel_y = (screen_height() - panel_h) / 2.0;
     draw_rectangle(
@@ -79,7 +81,30 @@ pub fn draw_pause_menu(
 
     if is_button_clicked(
         btn_x,
-        panel_y + 190.0,
+        panel_y + 180.0,
+        btn_w,
+        btn_h,
+        "Dev Mode",
+        Color::from_rgba(40, 60, 80, 255),
+        Color::from_rgba(60, 90, 120, 255),
+    ) {
+        dev_mode.request_open();
+        if dev_mode.is_unlocked() {
+            return Some(GameState::DevMode);
+        }
+    }
+
+    // code prompt overlay (drawn on top of pause menu if active)
+    if dev_mode.show_code_prompt {
+        if DevModeState::update_code_prompt(dev_mode) {
+            return Some(GameState::DevMode);
+        }
+        DevModeState::draw_code_prompt(dev_mode);
+    }
+
+    if is_button_clicked(
+        btn_x,
+        panel_y + 250.0,
         btn_w,
         btn_h,
         "Exit",

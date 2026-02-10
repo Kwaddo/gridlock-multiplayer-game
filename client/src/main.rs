@@ -4,6 +4,7 @@ use std::net::UdpSocket;
 use client::core::{ GameConfig, GameState };
 use client::net::poll_updates;
 use client::screens::{ draw_pause_menu, LoginScreen, PlayingState };
+use client::screens::dev_mode::{ draw_dev_overlay, DevModeState };
 use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
@@ -58,6 +59,43 @@ async fn main() {
             }
 
             GameState::Playing => {
+                // F3 → open dev mode (code prompt if not yet verified)
+                if is_key_pressed(KeyCode::F3) {
+                    playing_state.dev_mode.request_open();
+                    if playing_state.dev_mode.is_unlocked() {
+                        state = GameState::DevMode;
+                        set_cursor_grab(false);
+                        show_mouse(true);
+                        playing_state.clear_input();
+                        next_frame().await;
+                        continue;
+                    }
+                }
+
+                // handle code prompt while playing (if F3 was pressed but code not yet verified)
+                if playing_state.dev_mode.show_code_prompt {
+                    let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                    if let Some(entries) = assets {
+                        for (key, path) in entries {
+                            match load_texture(&path).await {
+                                Ok(tex) => { tex.set_filter(FilterMode::Nearest); playing_state.assets.insert(key, tex); }
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                    playing_state.simulate(&config, maze.as_ref());
+                    playing_state.render(&config, &username, player_id, maze.as_ref());
+                    if DevModeState::update_code_prompt(&mut playing_state.dev_mode) {
+                        state = GameState::DevMode;
+                        set_cursor_grab(false);
+                        show_mouse(true);
+                        playing_state.clear_input();
+                    }
+                    DevModeState::draw_code_prompt(&playing_state.dev_mode);
+                    next_frame().await;
+                    continue;
+                }
+
                 let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
 
                 if let Some(entries) = assets {
@@ -116,7 +154,7 @@ async fn main() {
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
-                if let Some(new_state) = draw_pause_menu(&config, &mut settings_screen) {
+                if let Some(new_state) = draw_pause_menu(&config, &mut settings_screen, &mut playing_state.dev_mode) {
                     state = new_state;
                     if matches!(state, GameState::Playing) {
                         set_cursor_grab(true);
@@ -132,6 +170,44 @@ async fn main() {
                 if settings_screen.update(&mut config) {
                     state = GameState::Paused;
                 }
+            }
+
+            GameState::DevMode => {
+                // F3 or ESC to close dev mode
+                if is_key_pressed(KeyCode::F3) {
+                    state = GameState::Playing;
+                    set_cursor_grab(true);
+                    show_mouse(false);
+                    playing_state.last_mouse_pos = mouse_position();
+                    next_frame().await;
+                    continue;
+                }
+                if is_key_pressed(KeyCode::Escape) {
+                    state = GameState::Paused;
+                    next_frame().await;
+                    continue;
+                }
+
+                // keep world in sync + simulate + render behind the overlay
+                let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                if let Some(entries) = assets {
+                    for (key, path) in entries {
+                        match load_texture(&path).await {
+                            Ok(tex) => { tex.set_filter(FilterMode::Nearest); playing_state.assets.insert(key, tex); }
+                            Err(_) => {}
+                        }
+                    }
+                }
+                playing_state.simulate(&config, maze.as_ref());
+                playing_state.render(&config, &username, player_id, maze.as_ref());
+
+                // draw dev overlay on top
+                draw_dev_overlay(
+                    &mut playing_state.dev_mode,
+                    &mut playing_state.weapons,
+                    &mut playing_state.movement_config,
+                    &mut config,
+                );
             }
 
             GameState::Exit => {
