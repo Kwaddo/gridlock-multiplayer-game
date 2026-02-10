@@ -77,7 +77,7 @@ pub fn draw_hud(
                 let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
                 let movement_gap = 0.0; // for shotguns, we won't scale the crosshair with movement bloom, since its a run and gun weapon
                 let ads_rest_gap = if fsa_active {
-                    0.0
+                    (sh * 0.3) / 100.0 // small fixed gap when FSA is active (~3px at 1080p)
                 } else {
                     ((xhair.center_gap * sh) / 100.0) * 0.4 * weapon.ads_progress
                 };
@@ -157,9 +157,9 @@ pub fn draw_hud(
 
                 // resting ads gap, this is so there is ALWAYS a gap unless FSA is active
                 let ads_rest_gap = if fsa_active {
-                    0.0
+                      (sh * 0.3) / 100.0 // small fixed gap when FSA is active (~3px at 1080p)
                 } else {
-                    ((xhair.center_gap * sh) / 100.0) * 0.4 * weapon.ads_progress
+                    ((xhair.center_gap * sh) / 100.0) * 0.7 * weapon.ads_progress
                     // 40% of center gap as minimum gap when fully ADS, scales with ads_progress
                 };
 
