@@ -358,7 +358,7 @@ pub fn draw_hud(
     let icon_x = name_x - icon_w - 8.0;
     let icon_y = name_y - icon_h + 4.0; // align bottom of icon with text baseline
 
-    //jh recoil kick on fire
+    // recoil kick on fire
     let kick_y = if weapon.muzzle_flash_timer > 0.0 {
         (weapon.muzzle_flash_timer / 0.08) * 6.0
     } else {
