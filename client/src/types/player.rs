@@ -1,5 +1,7 @@
 use macroquad::prelude::*;
 use crate::types::world::WorldId;
+use crate::weapons::combat::{ CombatEntity, HitZone, Hitbox, default_player_hitboxes };
+
 
 pub struct OtherPlayer {
     pub id: u32,
@@ -11,6 +13,10 @@ pub struct OtherPlayer {
     pub skin: Option<Texture2D>,
     pub color: Color,
     pub world: WorldId,
+    pub hp: f32,
+    pub max_hp: f32,
+    pub hit_timer:f32,
+    pub hitboxes: Vec<Hitbox>,
 }
 
 impl OtherPlayer {
@@ -19,5 +25,38 @@ impl OtherPlayer {
         let g = ((id * 97 + 53) % 256) as u8;
         let b = ((id * 61 + 19) % 256) as u8;
         Color::from_rgba(r, g, b, 255)
+    }
+
+    pub fn new(id: u32, username: String, world: WorldId) -> Self {
+        Self {
+            id,
+            x: 0.0, y: 0.0, z: 0.0,
+            yaw: 0.0,
+            username,
+            skin: None,
+            color: Self::color_for_id(id),
+            world,
+            hp: 100.0,
+            max_hp: 100.0,
+            hit_timer: 0.0,
+            hitboxes: default_player_hitboxes(),
+        }
+    }
+}
+
+impl CombatEntity for OtherPlayer {
+    fn entity_position(&self) -> Vec3 {
+        vec3(self.x, self.y, self.z)
+    }
+    fn hitboxes(&self) -> &[Hitbox] {
+        &self.hitboxes
+    }
+
+    fn take_damage(&mut self, dmg: f32) {
+        self.hp = (self.hp - dmg).max(0.0);
+        self.hit_timer = 0.3; // flash red for 300ms
+    }
+    fn is_alive(&self) -> bool {
+        self.hp > 0.0
     }
 }

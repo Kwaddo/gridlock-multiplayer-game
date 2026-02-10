@@ -1,159 +1,26 @@
-use crate::core::{GameConfig, GameState};
+use crate::core::{ GameConfig, GameState };
 use crate::net::networking::MAZE_CELL_SIZE;
-use crate::physics::{
-    collision,
-    movement::{MovementConfig, MovementState},
-};
+use crate::physics::{ collision, movement::{ MovementConfig, MovementState } };
 use crate::protocols::*;
 use crate::screens::input::process_weapon_input;
+use crate::screens::target_dummy::TargetDummy;
+use crate::weapons::combat::{ CombatEntity, HitZone, damage_falloff };
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 use crate::ui::hud::draw_hud;
-use crate::weapons::recoil::{apply_shot_recoil, recover};
-use crate::weapons::{recoil, SpreadContext, WeaponInventory};
-use crate::world::{draw_maze, lobby::draw_lobby};
+use crate::weapons::effects::{ BulletTracer, DamageNumber };
+use crate::weapons::recoil::{ apply_shot_recoil, recover };
+use crate::weapons::{ recoil, SpreadContext, WeaponInventory };
+use crate::world::{ draw_maze, lobby::draw_lobby };
 
 use macroquad::prelude::*;
-use macroquad::rand::{gen_range, rand};
+use macroquad::rand::{ gen_range, rand };
 use std::net::UdpSocket;
 
 use std::collections::HashMap;
 
 use super::input;
-
-// Floating Damage Numbers
-pub struct DamageNumber {
-    pub amount: f32,
-    pub is_headshot: bool,
-    pub screen_x: f32,
-    pub screen_y: f32,
-    pub lifetime: f32, // starts at 1.0, counts down
-}
-
-// bullet tracer
-
-pub struct BulletTracer {
-    pub start: Vec3,
-    pub end: Vec3,
-    pub lifetime: f32,
-}
-
-// Hit zones: split player into head, body, and limbs for multipliers
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum HitZone {
-    Head,
-    Torso,
-    Limbs,
-}
-
-impl HitZone {
-    pub fn damage_mult(&self) -> f32 {
-        match self {
-            HitZone::Head => 2.0,
-            HitZone::Torso => 1.0,
-            HitZone::Limbs => 0.75,
-        }
-    }
-}
-
-pub struct Hitbox {
-    pub center_offset: Vec3, // offset from player's position to center of this hitbox
-    pub half_extents: Vec3,  // size of the hitbox (x=width/2, y=height/2, z=depth/2)
-    pub zone: HitZone,       // which hitzone this box represents (head, torso, limbs)
-}
-
-// NPC Target Dummy
-pub struct TargetDummy {
-    pub position: Vec3, // feet position
-    pub hp: f32,
-    pub max_hp: f32,
-    pub hit_timer: f32,        // >0 = flash red (seconds remaining)
-    pub hitboxes: Vec<Hitbox>, // for more complex targets with multiple hit zones, but for simplicity we'll just do one head box and one body box
-}
-
-impl TargetDummy {
-    pub fn new(pos: Vec3) -> Self {
-        Self {
-            position: pos,
-            hp: 100.0,
-            max_hp: 100.0,
-            hit_timer: 0.0,
-            hitboxes: vec![
-                // Head
-                Hitbox {
-                    center_offset: vec3(0.0, 1.5, 0.0),
-                    half_extents: vec3(0.15, 0.15, 0.15),
-                    zone: HitZone::Head,
-                },
-                // Torso
-                Hitbox {
-                    center_offset: vec3(0.0, 0.9, 0.0),
-                    half_extents: vec3(0.25, 0.35, 0.15),
-                    zone: HitZone::Torso,
-                },
-                // Left arm
-                Hitbox {
-                    center_offset: vec3(-0.4, 0.9, 0.0),
-                    half_extents: vec3(0.1, 0.3, 0.1),
-                    zone: HitZone::Limbs,
-                },
-                // Right arm
-                Hitbox {
-                    center_offset: vec3(0.4, 0.9, 0.0),
-                    half_extents: vec3(0.1, 0.3, 0.1),
-                    zone: HitZone::Limbs,
-                },
-                // Left leg
-                Hitbox {
-                    center_offset: vec3(-0.12, 0.25, 0.0),
-                    half_extents: vec3(0.1, 0.25, 0.1),
-                    zone: HitZone::Limbs,
-                },
-                // Right leg
-                Hitbox {
-                    center_offset: vec3(0.12, 0.25, 0.0),
-                    half_extents: vec3(0.1, 0.25, 0.1),
-                    zone: HitZone::Limbs,
-                },
-            ],
-        }
-    }
-
-    pub fn body_center(&self) -> Vec3 {
-        self.position + vec3(0.0, 0.6, 0.0) // body center at waist height
-    }
-
-    pub fn head_center(&self) -> Vec3 {
-        self.position + vec3(0.0, 1.4, 0.0) // head center
-    }
-
-    pub fn take_damage(&mut self, dmg: f32) {
-        self.hp = (self.hp - dmg).max(1.0); // never dies, minimum 1 HP
-        self.hit_timer = 0.3; // flash red for 300ms
-    }
-
-    pub fn update(&mut self, delta: f32) {
-        if self.hit_timer > 0.0 {
-            self.hit_timer = (self.hit_timer - delta).max(0.0);
-        }
-        // regen: heal back to full over 3 seconds when not being hit
-        if self.hit_timer <= 0.0 && self.hp < self.max_hp {
-            self.hp = (self.hp + 20.0 * delta).min(self.max_hp);
-        }
-    }
-
-    pub fn ray_test(&self, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<HitZone> {
-        // check all hitboxes against a ray and return first hit zone found
-        for hit_box in &self.hitboxes {
-            let center = self.position + hit_box.center_offset;
-            if ray_hit_aabb(origin, dir, center, hit_box.half_extents, max_dist) {
-                return Some(hit_box.zone);
-            }
-        }
-        None
-    }
-}
 
 pub struct PlayingState {
     pub position: Vec3,
@@ -175,7 +42,7 @@ pub struct PlayingState {
 
     // --- NPC target dummy ---
     pub target_dummy: TargetDummy,
-    pub hit_marker_timer: f32,     // >0 = show hit X on crosshair
+    pub hit_marker_timer: f32, // >0 = show hit X on crosshair
     pub hit_marker_headshot: bool, // true = headshot color
     pub damage_numbers: Vec<DamageNumber>,
     pub tracers: Vec<BulletTracer>,
@@ -215,7 +82,7 @@ impl PlayingState {
     pub fn process_local_input(
         &mut self,
         config: &GameConfig,
-        maze: Option<&Maze>,
+        maze: Option<&Maze>
     ) -> Option<GameState> {
         if is_key_pressed(config.key_settings) {
             return Some(GameState::Paused);
@@ -234,18 +101,18 @@ impl PlayingState {
         let ads_factor = 1.0 + (fov_scale * ads_mult - 1.0) * weapon.ads_progress;
         let sens = config.raw_sensitivity() * ads_factor;
 
-        input::process_mouse(
-            &mut self.last_mouse_pos,
-            &mut self.yaw,
-            &mut self.pitch,
-            sens,
-        );
+        input::process_mouse(&mut self.last_mouse_pos, &mut self.yaw, &mut self.pitch, sens);
 
         self.move_dir = input::process_movement_keys(self.yaw, config);
-        self.movement_state.is_sprinting =
-            input::process_sprint(config, &self.movement_state, self.move_dir);
-        self.movement_state.is_crouching =
-            input::process_crouch(config, self.movement_state.is_crouching);
+        self.movement_state.is_sprinting = input::process_sprint(
+            config,
+            &self.movement_state,
+            self.move_dir
+        );
+        self.movement_state.is_crouching = input::process_crouch(
+            config,
+            self.movement_state.is_crouching
+        );
         self.jump_requested = input::process_jump(config, self.movement_state.is_grounded);
 
         // weapon input
@@ -285,12 +152,12 @@ impl PlayingState {
                 let eye = vec3(
                     self.position.x,
                     self.position.y + self.movement_state.height,
-                    self.position.z,
+                    self.position.z
                 );
                 let base_fwd = vec3(
                     self.yaw.cos() * self.pitch.cos(),
                     self.pitch.sin(),
-                    self.yaw.sin() * self.pitch.cos(),
+                    self.yaw.sin() * self.pitch.cos()
                 );
 
                 // NOW apply camera kick (visual recoil for next frame)
@@ -323,29 +190,62 @@ impl PlayingState {
                         if spread > 0.0001 {
                             let angle = gen_range(0.0f32, std::f32::consts::TAU);
                             let deviation = gen_range(0.0f32, spread);
-                            fwd = (fwd
-                                + right_vec * (angle.cos() * deviation)
-                                + up_vec * (angle.sin() * deviation))
-                                .normalize();
+                            fwd = (
+                                fwd +
+                                right_vec * (angle.cos() * deviation) +
+                                up_vec * (angle.sin() * deviation)
+                            ).normalize();
                         }
 
                         // bullet tracer
                         self.tracers.push(BulletTracer {
                             start: eye,
                             end: eye + fwd * range,
-                            lifetime: if stats.pellet_count > 1 { 0.1 } else { 0.2 },
+                            lifetime: if stats.pellet_count > 1 {
+                                1.0
+                            } else {
+                                2.0
+                            },
+                            speed: stats.bullet_speed,
+                            progress: 0.0,
+                            tracer_length: stats.tracer_length,
                         });
 
-                        if let Some(zone) = self.target_dummy.ray_test(eye, fwd, range) {
+                        let mut closest: Option<(usize, HitZone, f32)> = None;
+
+                        // check hit on target dummy
+                        if let Some((hit_zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
+                            closest = Some((0, hit_zone, dist));
+                        }
+
+                        // check for hit on other players
+                        for (i, p) in self.other_players.iter().enumerate() {
+                            if let Some((hit_zone, dist)) = p.ray_test(eye, fwd, range) {
+                                // check if this hit is closer than the best hit we have so far, if so it becomes the new best
+                                let is_closer = closest.map_or(true, |(_, _, d)| dist < d);
+                                if is_closer {
+                                    closest = Some((i + 1, hit_zone, dist));
+                                }
+                            }
+                        }
+
+                        // apply damage to appropriate entity
+                        if let Some((target_idx, zone, dist)) = closest {
                             let mult = zone.damage_mult();
-                            let dmg = damage * mult;
-                            self.target_dummy.take_damage(dmg);
+                            let falloff = damage_falloff(dist, stats);
+                            let dmg = damage * mult * falloff;
+                            if target_idx == 0 {
+                                self.target_dummy.take_damage(dmg);
+                            } else {
+                                self.other_players[target_idx - 1].take_damage(dmg);
+                            }
                             total_dmg += dmg;
                             if zone == HitZone::Head {
                                 any_headshot = true;
                             }
                             pellets_hit += 1;
                         }
+
                     }
 
                     // show hit marker + damage number for the combined total
@@ -402,6 +302,10 @@ impl PlayingState {
         self.damage_numbers.retain(|dn| dn.lifetime > 0.0);
 
         for t in &mut self.tracers {
+            if t.progress < 1.0 {
+                let dist = (t.end - t.start).length();
+                t.progress += ((t.speed * delta) / dist).min(1.0);
+            }
             t.lifetime -= delta;
         }
         self.tracers.retain(|t| t.lifetime > 0.0);
@@ -417,13 +321,13 @@ impl PlayingState {
                     &mut self.position,
                     &mut self.movement_state.velocity,
                     self.movement_state.height,
-                    &mut self.movement_state.is_grounded,
+                    &mut self.movement_state.is_grounded
                 );
                 self.apply_movement(delta);
                 collision::resolve_horizontal(
                     &mut self.position,
                     &mut self.movement_state.velocity,
-                    self.movement_state.height,
+                    self.movement_state.height
                 );
             }
             WorldId::Maze => {
@@ -438,7 +342,7 @@ impl PlayingState {
                     collision::resolve_maze(
                         &mut self.position,
                         &mut self.movement_state.velocity,
-                        m,
+                        m
                     );
                 }
             }
@@ -468,7 +372,7 @@ impl PlayingState {
         config: &GameConfig,
         username: &str,
         player_id: u32,
-        maze: Option<&Maze>,
+        maze: Option<&Maze>
     ) {
         self.update_head_bob(get_frame_time());
         let camera = self.build_camera(config);
@@ -513,7 +417,7 @@ impl PlayingState {
         let forward = vec3(
             self.yaw.cos() * self.pitch.cos(),
             self.pitch.sin(),
-            self.yaw.sin() * self.pitch.cos(),
+            self.yaw.sin() * self.pitch.cos()
         );
         let right = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
 
@@ -532,7 +436,7 @@ impl PlayingState {
             self.hit_marker_headshot,
             &self.damage_numbers,
             self.hit_marker_pellets_hit,
-            self.hit_marker_pellets_total,
+            self.hit_marker_pellets_total
         );
     }
 
@@ -549,9 +453,10 @@ impl PlayingState {
         if self.movement_state.is_sprinting {
             self.movement_state.stamina -= self.movement_config.stamina_drain * delta;
         } else {
-            self.movement_state.stamina = (self.movement_state.stamina
-                + self.movement_config.stamina_recover * delta)
-                .min(100.0);
+            self.movement_state.stamina = (
+                self.movement_state.stamina +
+                self.movement_config.stamina_recover * delta
+            ).min(100.0);
         }
     }
 
@@ -596,10 +501,10 @@ impl PlayingState {
         };
 
         let saved_vy = self.movement_state.velocity.y;
-        self.movement_state.velocity = self
-            .movement_state
-            .velocity
-            .lerp(target_velocity, rate * delta);
+        self.movement_state.velocity = self.movement_state.velocity.lerp(
+            target_velocity,
+            rate * delta
+        );
         self.movement_state.velocity.y = saved_vy;
 
         self.position.x += self.movement_state.velocity.x * delta;
@@ -624,13 +529,13 @@ impl PlayingState {
         let forward = vec3(
             self.yaw.cos() * self.pitch.cos(),
             self.pitch.sin(),
-            self.yaw.sin() * self.pitch.cos(),
+            self.yaw.sin() * self.pitch.cos()
         );
 
         let eye_pos = vec3(
             self.position.x,
             self.position.y + self.movement_state.height + bob_offset,
-            self.position.z,
+            self.position.z
         );
 
         // ADS zoom: interpolate FOV based on ads_progress
@@ -702,7 +607,7 @@ impl PlayingState {
                 screen_width() / 2.0 - measure.width / 2.0,
                 screen_height() / 2.0 + 60.0,
                 24.0,
-                WHITE,
+                WHITE
             );
         }
     }
@@ -775,13 +680,7 @@ impl PlayingState {
         let bar_h = 6.0;
         let hp_frac = d.hp / d.max_hp;
 
-        draw_rectangle(
-            sx - bar_w / 2.0,
-            sy,
-            bar_w,
-            bar_h,
-            Color::from_rgba(40, 40, 40, 200),
-        );
+        draw_rectangle(sx - bar_w / 2.0, sy, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
         let hp_color = if hp_frac > 0.5 {
             Color::from_rgba(80, 200, 80, 255)
         } else if hp_frac > 0.25 {
@@ -799,63 +698,32 @@ impl PlayingState {
     }
     fn draw_tracers(&self) {
         for t in &self.tracers {
-            let alpha = (t.lifetime / 0.2 * 255.0).min(255.0) as u8;
-            let color = Color::from_rgba(255, 200, 80, alpha);
-            draw_line_3d(t.start, t.end, color);
+            let dir = t.end - t.start;
+            let dist = dir.length();
+
+            let head = t.start + dir * t.progress; // current end point of the tracer
+            let tail_t = (t.progress - t.tracer_length / dist).max(0.0);
+            let tail = t.start + dir * tail_t; // start point of the tracer
+
+            let mid = (head + tail) * 0.5;
+            let length = (head - tail).length();
+            let dir_norm = dir.normalize();
+
+            // rotate cube to align with direction
+            // size = thin on X/Y Axis, stretched on Z axis (length)
+            // draw 2-3 lines offset by the up and right vectors since we dont have thickness in macroquad's draw_line_3d
+
+            let offset = 0.02; // thickness of the tracer
+            let up = vec3(0.0, 1.0, 0.0);
+            let side = dir_norm.cross(up).normalize() * offset;
+
+            let alpha = (t.lifetime * 255.0).min(255.0) as u8;
+            let color = Color::from_rgba(255, 200, 80, alpha); // bright orange with fading alpha
+
+            draw_line_3d(tail, head, color);
+            draw_line_3d(tail + side, head + side, color);
+            draw_line_3d(tail - side, head - side, color);
+            draw_line_3d(tail + up * offset, head + up * offset, color);
         }
     }
-}
-
-// ── Ray vs AABB intersection ─────────────────────────────────────────
-// Returns true if a ray from `origin` in `dir` hits an axis-aligned box
-// centered at `center` with half-extents `half`, within `max_dist`.
-fn ray_hit_aabb(origin: Vec3, dir: Vec3, center: Vec3, half: Vec3, max_dist: f32) -> bool {
-    let min = center - half;
-    let max = center + half;
-
-    let mut tmin = 0.0_f32;
-    let mut tmax = max_dist;
-
-    for i in 0..3 {
-        let o = match i {
-            0 => origin.x,
-            1 => origin.y,
-            _ => origin.z,
-        };
-        let d = match i {
-            0 => dir.x,
-            1 => dir.y,
-            _ => dir.z,
-        };
-        let bmin = match i {
-            0 => min.x,
-            1 => min.y,
-            _ => min.z,
-        };
-        let bmax = match i {
-            0 => max.x,
-            1 => max.y,
-            _ => max.z,
-        };
-
-        if d.abs() < 1e-8 {
-            // ray parallel to slab — miss if origin outside
-            if o < bmin || o > bmax {
-                return false;
-            }
-        } else {
-            let inv_d = 1.0 / d;
-            let mut t1 = (bmin - o) * inv_d;
-            let mut t2 = (bmax - o) * inv_d;
-            if t1 > t2 {
-                std::mem::swap(&mut t1, &mut t2);
-            }
-            tmin = tmin.max(t1);
-            tmax = tmax.min(t2);
-            if tmin > tmax {
-                return false;
-            }
-        }
-    }
-    true
 }

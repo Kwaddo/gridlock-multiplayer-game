@@ -4,7 +4,7 @@
     Designed so future features (mantling, sliding, etc.) can hook in
     as additional multipliers without changing this core logic.
 */
-use super::state::WeaponState;
+use super::state::WeaponState; //use super means "use from the parent module" (weapons::state)
 
 /*  
     Context flags that affect spread calculation.
