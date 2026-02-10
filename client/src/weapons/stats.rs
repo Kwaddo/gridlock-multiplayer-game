@@ -239,8 +239,8 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     ads_spread: 0.035,
     spread_per_shot: 0.04,
     spread_recovery: 0.8,
-    move_spread_mult: 1.0,
-    sprint_spread_mult: 1.0,
+    move_spread_mult: 1.3,
+    sprint_spread_mult: 1.1,
     crouch_spread_mult: 0.85,
 
     ads_zoom_fov: 75.0,

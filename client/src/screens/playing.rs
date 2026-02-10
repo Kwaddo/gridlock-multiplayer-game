@@ -315,7 +315,7 @@ impl PlayingState {
         }
         self.tracers.retain(|t| t.lifetime > 0.0);
 
-        self.update_stamina(delta);
+        self.update_stamina(config, delta);
         self.update_crouch_height(config, delta);
         self.apply_jump();
         self.apply_gravity(delta);
