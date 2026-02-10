@@ -28,13 +28,10 @@ impl SettingsScreen {
     }
 
     fn has_duplicates(config: &GameConfig) -> bool {
-        let keys = [
-            config.key_forward, config.key_backward, config.key_left,
-            config.key_right, config.key_sprint, config.key_crouch, config.key_jump,
-        ];
-        for i in 0..keys.len() {
-            for j in (i + 1)..keys.len() {
-                if keys[i] == keys[j] {
+        let bindings = config.all_bindings();
+        for i in 0..bindings.len() {
+            for j in (i + 1)..bindings.len() {
+                if bindings[i].1 == bindings[j].1 {
                     return true;
                 }
             }

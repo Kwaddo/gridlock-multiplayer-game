@@ -27,6 +27,18 @@ impl InputBinding {
             InputBinding::Mouse(m) => is_mouse_button_pressed(*m),
         }
     }
+
+    pub fn display_name(&self) -> String {
+        match self {
+            InputBinding::Key(k) => format!("{:?}", k),
+            InputBinding::Mouse(m) => match m {
+                MouseButton::Left => "Mouse Left".to_string(),
+                MouseButton::Right => "Mouse Right".to_string(),
+                MouseButton::Middle => "Mouse Middle".to_string(),
+                _ => format!("Mouse {:?}", m),
+            },
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -34,19 +46,24 @@ pub struct GameConfig {
     // Mouse (UI value 10-100, default 60)
     pub sensitivity: f32,
 
-    // Keybinds
-    pub key_forward: KeyCode,
-    pub key_backward: KeyCode,
-    pub key_left: KeyCode,
-    pub key_right: KeyCode,
-    pub key_sprint: KeyCode,
-    pub key_crouch: KeyCode,
+    // Keybinds — all use InputBinding so any key or mouse button works
+    pub bind_forward: InputBinding,
+    pub bind_backward: InputBinding,
+    pub bind_left: InputBinding,
+    pub bind_right: InputBinding,
+    pub bind_sprint: InputBinding,
+    pub bind_crouch: InputBinding,
     pub crouch_toggle: bool, // if true, crouch is a toggle instead of hold
-    pub key_jump: KeyCode,
-    pub key_settings: KeyCode,
-    pub key_reload: KeyCode,
+    pub bind_jump: InputBinding,
+    pub bind_settings: InputBinding,
+    pub bind_reload: InputBinding,
     pub bind_fire: InputBinding,
     pub bind_aim: InputBinding,
+    pub bind_weapon1: InputBinding,
+    pub bind_weapon2: InputBinding,
+    pub bind_weapon3: InputBinding,
+    pub bind_weapon4: InputBinding,
+    pub bind_weapon5: InputBinding,
 
     // Camera (UI value 40-120, default 90)
     pub fov: f32,
@@ -60,27 +77,32 @@ impl GameConfig {
     pub fn defaults() -> Self {
         Self {
             // Mouse - UI value, converted to internal with raw_sensitivity()
-            /* 
-                the reason for this is that before the normal sensitivity was 0.002 but its not an 
-                intuitive number, so i normalized it to be 60 by default which is an easier number to 
-                understand and adjust in the settings menu, but raw_sensitivity() will convert it back to the 
+            /*
+                the reason for this is that before the normal sensitivity was 0.002 but its not an
+                intuitive number, so i normalized it to be 60 by default which is an easier number to
+                understand and adjust in the settings menu, but raw_sensitivity() will convert it back to the
             actual multiplier used in the game
             */
-            sensitivity: 60.0, 
+            sensitivity: 60.0,
 
             // Keybinds
-            key_forward: KeyCode::W,
-            key_backward: KeyCode::S,
-            key_left: KeyCode::A,
-            key_right: KeyCode::D,
-            key_sprint: KeyCode::LeftShift,
-            key_crouch: KeyCode::LeftControl,
+            bind_forward: InputBinding::Key(KeyCode::W),
+            bind_backward: InputBinding::Key(KeyCode::S),
+            bind_left: InputBinding::Key(KeyCode::A),
+            bind_right: InputBinding::Key(KeyCode::D),
+            bind_sprint: InputBinding::Key(KeyCode::LeftShift),
+            bind_crouch: InputBinding::Key(KeyCode::LeftControl),
             crouch_toggle: false, // default to hold
-            key_jump: KeyCode::Space,
-            key_settings: KeyCode::Escape,
-            key_reload: KeyCode::R,
+            bind_jump: InputBinding::Key(KeyCode::Space),
+            bind_settings: InputBinding::Key(KeyCode::Escape),
+            bind_reload: InputBinding::Key(KeyCode::R),
             bind_fire: InputBinding::Mouse(MouseButton::Left),
             bind_aim: InputBinding::Mouse(MouseButton::Right),
+            bind_weapon1: InputBinding::Key(KeyCode::Key1),
+            bind_weapon2: InputBinding::Key(KeyCode::Key2),
+            bind_weapon3: InputBinding::Key(KeyCode::Key3),
+            bind_weapon4: InputBinding::Key(KeyCode::Key4),
+            bind_weapon5: InputBinding::Key(KeyCode::Key5),
 
             // Camera - UI value, converted to internal with raw_fov()
             // this is the same as the sensitivity from earlier, just converting it to a more intuitive UI value while raw_fov() converts it back to the actual FOV used in the game
@@ -110,5 +132,26 @@ impl GameConfig {
     // Uses the value directly clamped to reasonable range
     pub fn raw_fov(&self) -> f32 {
         self.fov.clamp(40.0, 120.0)
+    }
+
+    // collect all bindings into a vec for duplicate detection
+    pub fn all_bindings(&self) -> Vec<(&str, InputBinding)> {
+        vec![
+            ("Forward", self.bind_forward),
+            ("Backward", self.bind_backward),
+            ("Left", self.bind_left),
+            ("Right", self.bind_right),
+            ("Sprint", self.bind_sprint),
+            ("Crouch", self.bind_crouch),
+            ("Jump", self.bind_jump),
+            ("Reload", self.bind_reload),
+            ("Fire", self.bind_fire),
+            ("Aim", self.bind_aim),
+            ("Weapon 1", self.bind_weapon1),
+            ("Weapon 2", self.bind_weapon2),
+            ("Weapon 3", self.bind_weapon3),
+            ("Weapon 4", self.bind_weapon4),
+            ("Weapon 5", self.bind_weapon5),
+        ]
     }
 }

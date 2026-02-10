@@ -262,7 +262,7 @@ async fn main() {
                     next_frame().await;
                     continue;
                 }
-                if is_key_pressed(KeyCode::Escape) {
+                if config.bind_settings.is_pressed() {
                     state = GameState::Paused;
                     next_frame().await;
                     continue;

@@ -1,6 +1,70 @@
 use macroquad::prelude::*;
-use crate::core::GameConfig;
+use crate::core::{GameConfig, InputBinding};
 use crate::ui::fonts::{text_params, measure_game_text};
+
+// all rebindable actions in display order
+const BIND_ACTIONS: &[(&str, &str)] = &[
+    ("Forward", "forward"),
+    ("Backward", "backward"),
+    ("Left", "left"),
+    ("Right", "right"),
+    ("Sprint", "sprint"),
+    ("Crouch", "crouch"),
+    ("Jump", "jump"),
+    ("Reload", "reload"),
+    ("Fire", "fire"),
+    ("Aim", "aim"),
+    ("Settings", "settings"),
+    ("Weapon 1", "weapon1"),
+    ("Weapon 2", "weapon2"),
+    ("Weapon 3", "weapon3"),
+    ("Weapon 4", "weapon4"),
+    ("Weapon 5", "weapon5"),
+];
+
+fn get_binding(config: &GameConfig, action: &str) -> InputBinding {
+    match action {
+        "forward" => config.bind_forward,
+        "backward" => config.bind_backward,
+        "left" => config.bind_left,
+        "right" => config.bind_right,
+        "sprint" => config.bind_sprint,
+        "crouch" => config.bind_crouch,
+        "jump" => config.bind_jump,
+        "reload" => config.bind_reload,
+        "fire" => config.bind_fire,
+        "aim" => config.bind_aim,
+        "settings" => config.bind_settings,
+        "weapon1" => config.bind_weapon1,
+        "weapon2" => config.bind_weapon2,
+        "weapon3" => config.bind_weapon3,
+        "weapon4" => config.bind_weapon4,
+        "weapon5" => config.bind_weapon5,
+        _ => InputBinding::Key(KeyCode::Unknown),
+    }
+}
+
+fn set_binding(config: &mut GameConfig, action: &str, binding: InputBinding) {
+    match action {
+        "forward" => config.bind_forward = binding,
+        "backward" => config.bind_backward = binding,
+        "left" => config.bind_left = binding,
+        "right" => config.bind_right = binding,
+        "sprint" => config.bind_sprint = binding,
+        "crouch" => config.bind_crouch = binding,
+        "jump" => config.bind_jump = binding,
+        "reload" => config.bind_reload = binding,
+        "fire" => config.bind_fire = binding,
+        "aim" => config.bind_aim = binding,
+        "settings" => config.bind_settings = binding,
+        "weapon1" => config.bind_weapon1 = binding,
+        "weapon2" => config.bind_weapon2 = binding,
+        "weapon3" => config.bind_weapon3 = binding,
+        "weapon4" => config.bind_weapon4 = binding,
+        "weapon5" => config.bind_weapon5 = binding,
+        _ => {}
+    }
+}
 
 pub fn update_keybinds(
     config: &mut GameConfig,
@@ -11,45 +75,62 @@ pub fn update_keybinds(
     mouse: (f32, f32),
     clicked: bool,
 ) {
-    let bind_actions = ["forward", "backward", "left", "right", "sprint", "crouch", "jump"];
+    let row_h = 30.0;
+    let row_gap = 3.0;
+    let bx = right_x + 20.0;
+    let bw = panel_w - 40.0;
 
-    if clicked && rebinding.is_none() {
-        for (i, action) in bind_actions.iter().enumerate() {
-            let by = panel_top + 50.0 + (i as f32) * 35.0;
-            let bx = right_x + 20.0;
-            let bw = panel_w - 40.0;
-            let bh = 30.0;
-            if mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= by && mouse.1 <= by + bh {
-                *rebinding = Some(action.to_string());
-            }
+    // if currently rebinding, listen for key or mouse input
+    if let Some(action) = rebinding.clone() {
+        // check mouse buttons first (Left, Right, Middle)
+        if is_mouse_button_pressed(MouseButton::Left) {
+            set_binding(config, &action, InputBinding::Mouse(MouseButton::Left));
+            *rebinding = None;
+            return;
         }
+        if is_mouse_button_pressed(MouseButton::Right) {
+            set_binding(config, &action, InputBinding::Mouse(MouseButton::Right));
+            *rebinding = None;
+            return;
+        }
+        if is_mouse_button_pressed(MouseButton::Middle) {
+            set_binding(config, &action, InputBinding::Mouse(MouseButton::Middle));
+            *rebinding = None;
+            return;
+        }
+        // check keyboard
+        if let Some(key) = get_last_key_pressed() {
+            if key == KeyCode::Escape {
+                // cancel rebinding
+                *rebinding = None;
+            } else {
+                set_binding(config, &action, InputBinding::Key(key));
+                *rebinding = None;
+            }
+            return;
+        }
+        return; // don't process clicks while rebinding
+    }
 
-        // Crouch toggle button
-        let toggle_y = panel_top + 50.0 + 7.0 * 35.0 + 10.0;
-        let bx = right_x + 20.0;
-        let bw = panel_w - 40.0;
-        let bh = 30.0;
-        if mouse.0 >= bx && mouse.0 <= bx + bw
-            && mouse.1 >= toggle_y && mouse.1 <= toggle_y + bh
-        {
-            config.crouch_toggle = !config.crouch_toggle;
+    if !clicked {
+        return;
+    }
+
+    // check clicks on bind rows
+    for (i, &(_, action_id)) in BIND_ACTIONS.iter().enumerate() {
+        let by = panel_top + 50.0 + (i as f32) * (row_h + row_gap);
+        if mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= by && mouse.1 <= by + row_h {
+            *rebinding = Some(action_id.to_string());
+            return; // consume the click so it doesn't also fire as a mouse binding
         }
     }
 
-    if let Some(action) = rebinding {
-        if let Some(key_code) = get_last_key_pressed() {
-            match action.as_str() {
-                "forward" => config.key_forward = key_code,
-                "backward" => config.key_backward = key_code,
-                "left" => config.key_left = key_code,
-                "right" => config.key_right = key_code,
-                "sprint" => config.key_sprint = key_code,
-                "crouch" => config.key_crouch = key_code,
-                "jump" => config.key_jump = key_code,
-                _ => {}
-            }
-            *rebinding = None;
-        }
+    // crouch toggle button (after all bind rows)
+    let toggle_y = panel_top + 50.0 + (BIND_ACTIONS.len() as f32) * (row_h + row_gap) + 10.0;
+    if mouse.0 >= bx && mouse.0 <= bx + bw
+        && mouse.1 >= toggle_y && mouse.1 <= toggle_y + row_h
+    {
+        config.crouch_toggle = !config.crouch_toggle;
     }
 }
 
@@ -73,45 +154,38 @@ pub fn draw_keybinds(
         text_params(22, YELLOW),
     );
 
-    let binds: [(&str, KeyCode); 7] = [
-        ("Forward", config.key_forward),
-        ("Backward", config.key_backward),
-        ("Left", config.key_left),
-        ("Right", config.key_right),
-        ("Sprint", config.key_sprint),
-        ("Crouch", config.key_crouch),
-        ("Jump", config.key_jump),
-    ];
+    let row_h = 30.0;
+    let row_gap = 3.0;
+    let bx = right_x + 20.0;
+    let bw = panel_w - 40.0;
 
-    let bind_actions = ["forward", "backward", "left", "right", "sprint", "crouch", "jump"];
+    // collect all bindings for duplicate detection
+    let all_bindings = config.all_bindings();
 
-    let all_keys = [
-        config.key_forward, config.key_backward, config.key_left,
-        config.key_right, config.key_sprint, config.key_crouch, config.key_jump,
-    ];
+    for (i, &(label, action_id)) in BIND_ACTIONS.iter().enumerate() {
+        let by = panel_top + 50.0 + (i as f32) * (row_h + row_gap);
+        let binding = get_binding(config, action_id);
 
-    for (i, (label, key)) in binds.iter().enumerate() {
-        let by = panel_top + 50.0 + (i as f32) * 35.0;
-        let bx = right_x + 20.0;
-        let bw = panel_w - 40.0;
-        let bh = 30.0;
+        // check if this binding is a duplicate
+        let duplicate = all_bindings.iter()
+            .filter(|(_, b)| *b == binding)
+            .count() > 1;
 
-        let duplicate = all_keys.iter().filter(|&&k| k == *key).count() > 1;
-        let is_rebinding = rebinding.as_deref() == Some(bind_actions[i]);
+        let is_rebinding = rebinding.as_deref() == Some(action_id);
         let bg_color = if is_rebinding {
             Color::from_rgba(80, 80, 20, 255)
         } else {
             Color::from_rgba(45, 45, 45, 255)
         };
 
-        draw_rectangle(bx, by, bw, bh, bg_color);
-        draw_rectangle_lines(bx, by, bw, bh, 1.0, GRAY);
+        draw_rectangle(bx, by, bw, row_h, bg_color);
+        draw_rectangle_lines(bx, by, bw, row_h, 1.0, GRAY);
         draw_text_ex(label, bx + 10.0, by + 20.0, text_params(18, WHITE));
 
         let key_text = if is_rebinding {
-            "Press a key...".to_string()
+            "Press key/mouse...".to_string()
         } else {
-            format!("{:?}", key)
+            binding.display_name()
         };
         let key_tw = measure_game_text(&key_text, 18);
         draw_text_ex(
@@ -122,32 +196,28 @@ pub fn draw_keybinds(
         );
     }
 
-    // Crouch mode toggle button
-    let toggle_y = panel_top + 50.0 + 7.0 * 35.0 + 10.0;
-    let bx = right_x + 20.0;
-    let bw = panel_w - 40.0;
-    let bh = 30.0;
+    // Crouch mode toggle button (after all bind rows)
+    let toggle_y = panel_top + 50.0 + (BIND_ACTIONS.len() as f32) * (row_h + row_gap) + 10.0;
 
     let mouse = mouse_position();
     let hover = mouse.0 >= bx && mouse.0 <= bx + bw
-        && mouse.1 >= toggle_y && mouse.1 <= toggle_y + bh;
+        && mouse.1 >= toggle_y && mouse.1 <= toggle_y + row_h;
 
     let bg = if hover {
         Color::from_rgba(65, 65, 85, 255)
     } else {
         Color::from_rgba(55, 55, 75, 255)
     };
-    draw_rectangle(bx, toggle_y, bw, bh, bg);
-    draw_rectangle_lines(bx, toggle_y, bw, bh, 1.0, GRAY);
+    draw_rectangle(bx, toggle_y, bw, row_h, bg);
+    draw_rectangle_lines(bx, toggle_y, bw, row_h, 1.0, GRAY);
     draw_text_ex("Crouch Mode", bx + 10.0, toggle_y + 20.0, text_params(18, WHITE));
 
-    // Mode button inset on the right side of the row
     let mode_text = if config.crouch_toggle { "Toggle" } else { "Hold" };
     let mode_tw = measure_game_text(mode_text, 18);
     let mode_btn_w = 80.0;
     let mode_btn_x = bx + bw - mode_btn_w - 5.0;
     let mode_btn_y = toggle_y + 3.0;
-    let mode_btn_h = bh - 6.0;
+    let mode_btn_h = row_h - 6.0;
     let mode_btn_color = if config.crouch_toggle {
         Color::from_rgba(30, 100, 30, 255)
     } else {
