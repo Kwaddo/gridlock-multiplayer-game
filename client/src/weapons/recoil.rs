@@ -32,12 +32,34 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
         return true;
     }
 
-    // vertical kick (always up)
-    weapon.recoil_pitch += weapon.stats_data.recoil_vertical;
+    let pattern = weapon.stats_data.recoil_pattern;
+    let idx = weapon.shot_index as usize;
+
+    // check which pattern entry you are in based on idx
+    let (ptrn_pitch, ptrn_yaw) = if pattern.is_empty() {
+        // no pattern for shotgun and sniper and other future weapons, just use pure randomness each shot
+        (weapon.stats_data.recoil_vertical, 0.0)
+    } else {
+        pattern[idx.min(pattern.len() - 1)] // if idx exceeds pattern length, just use the last entry (many games do this to avoid punishing long sprays with super crazy recoil)
+    };
+
+    // calculate randomness, increasing mroe as you shoot more in a spray, added on top of existing pattern values
+    let rand = (weapon.stats_data.pattern_randomness
+    + weapon.shot_index as f32 * weapon.stats_data.randomness_growth)
+    .clamp(0.0, 1.0); // randomness should be between 0 and 1
+
+    // vertical kick
+
+    let random_pitch = weapon.stats_data.recoil_vertical;
+    let pitch_kick = ptrn_pitch * (1.0 - rand) + random_pitch * rand; // 1.0 - rand since its clamped to 0..1, so more randomness means pattern has less influence
+    weapon.recoil_pitch += pitch_kick;
 
     // horizontal kick (random left/right, seeded by a float 0..1)
-    let h = (rng_seed - 0.5) * 2.0 * weapon.stats_data.recoil_horizontal;
-    weapon.recoil_yaw += h;
+    let ptrn_h = ptrn_yaw * weapon.stats_data.recoil_horizontal;
+    let rand_h = (rng_seed - 0.5) * 2.0 * weapon.stats_data.recoil_horizontal;
+    let h_kick = ptrn_h * (1.0 - rand) + rand_h * rand; // h kick is calculated by getting total randomness (1.0 - rand) and applying it to the multiplication of horizontal and effective randomness (we multiply to get a value that is scaled by how much randomness there is, so if randomness is 0 then it has no effect, and if randomness is 1 then it has full effect, and in between it scales linearly)
+    weapon.recoil_yaw += h_kick;
+
 
     // bloom accumulation
     weapon.bloom += weapon.stats_data.spread_per_shot;
@@ -47,6 +69,10 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
     if weapon.crosshair.kick_max > 0.0 {
         weapon.crosshair_kick = weapon.crosshair_kick.min(weapon.crosshair.kick_max);
     }
+
+    // go to next pattern index for next shot
+    weapon.shot_index += 1;
+    weapon.pattern_reset_timer = 0.0; // reset pattern reset timer since we just fired
 
     false
 }
@@ -71,9 +97,33 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     }
 
     // bloom decay
+    // initially a fast decay
     if weapon.bloom > 0.0 {
-        let decay = spread_recovery * delta;
-        weapon.bloom = (weapon.bloom - decay).max(0.0);
+        let decay = spread_recovery * 3.0; // initial fast decay
+        weapon.bloom *= (1.0 - decay * delta).max(0.0); // exponential decay
+        // snap to zero when tiny
+        if weapon.bloom < 0.001 {
+            weapon.bloom = 0.0;
+        }
+    }
+
+    // shot idx decay, when we are not firing it slowly decays to zero
+    // in other words, short bursts restart from start of pattern
+
+    if !weapon.trigger_held && weapon.shot_index > 0 {
+        let reset_time = weapon.stats_data.pattern_reset_time;
+
+        weapon.pattern_reset_timer += delta;
+        if reset_time > 0.0 {
+            // exponential decay, fast then slow
+            let progress = (weapon.pattern_reset_timer / reset_time).clamp(0.0, 1.0);
+            let decayed = ((weapon.shot_index as f32) * (1.0 - progress* progress)) as u32;
+            weapon.shot_index = decayed;
+        }
+        if weapon.pattern_reset_timer >= reset_time {
+            weapon.shot_index = 0;
+            // we dont reset the pattern timer here because it will just stay at the reset time until the next shot, at which point it will be reset to 0, so this just ensures that if you wait long enough between bursts, you always start at the first pattern entry with no bloom or extra randomness from shot index
+        }
     }
 
 

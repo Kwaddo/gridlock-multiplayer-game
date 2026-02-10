@@ -140,8 +140,12 @@ async fn main() {
                     }
                 }
 
+
+
                 // handle code prompt while playing (if F3 was pressed but code not yet verified)
                 if playing_state.dev_mode.show_code_prompt {
+                    set_cursor_grab(false); // show cursor to know ur in prompt mode
+                    show_mouse(true);
                     let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
                     if let Some(entries) = assets {
                         for (key, path) in entries {
@@ -160,6 +164,14 @@ async fn main() {
                         playing_state.clear_input();
                     }
                     DevModeState::draw_code_prompt(&playing_state.dev_mode);
+
+                    // if prompt was closed (ESC) without entering dev mode, re-grab cursor for gameplay
+                    if !playing_state.dev_mode.show_code_prompt && !matches!(state, GameState::DevMode) {
+                        set_cursor_grab(true);
+                        show_mouse(false);
+                        playing_state.last_mouse_pos = mouse_position();
+                    }
+
                     next_frame().await;
                     continue;
                 }

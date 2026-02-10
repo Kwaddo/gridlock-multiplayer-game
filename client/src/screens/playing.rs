@@ -121,7 +121,11 @@ impl PlayingState {
             config,
             self.movement_state.is_crouching
         );
-        self.jump_requested = input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons);
+        self.jump_requested = input::process_jump(
+            config,
+            self.movement_state.is_grounded,
+            &mut self.weapons
+        );
 
         // weapon input
         input::process_weapon_input(&mut self.weapons, config);
@@ -185,9 +189,23 @@ impl PlayingState {
                 // NOW apply camera kick (visual recoil for next frame)
                 // skip if FSA was active or dev no_recoil is on
                 if !fsa_shot && !self.dev_mode.no_recoil {
-                    self.pitch += stats.recoil_vertical;
-                    let h_kick = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
-                    self.yaw += h_kick;
+                    let pattern = stats.recoil_pattern;
+                    let idx = weapon.shot_index.saturating_sub(1) as usize; // -1 because we just incremented, saturating is used to avoid going below zero
+                    let (ptrn_pitch, ptrn_yaw) = if pattern.is_empty() {
+                        (stats.recoil_vertical, 0.0)
+                    } else {
+                        pattern[idx.min(pattern.len() - 1)]
+                    };
+
+                    let rand = (
+                        stats.pattern_randomness +
+                        (idx as f32) * stats.randomness_growth
+                    ).clamp(0.0, 1.0);
+
+                    self.pitch += ptrn_pitch;
+                    let ptrn_h = ptrn_yaw * stats.recoil_horizontal;
+                    let rand_h = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
+                    self.yaw += ptrn_h * (1.0 - rand) + rand_h * rand;
                     self.pitch = self.pitch.clamp(-1.55, 1.55);
                 }
 
@@ -272,7 +290,6 @@ impl PlayingState {
                             }
                             pellets_hit += 1;
                         }
-
                     }
 
                     // show hit marker + damage number for the combined total

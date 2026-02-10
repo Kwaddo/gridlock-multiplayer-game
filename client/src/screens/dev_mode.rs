@@ -47,6 +47,8 @@ impl DevModeState {
         } else {
             self.code_input.clear();
             self.show_code_prompt = true;
+            // drain stale character queue so keys typed before opening don't pre-fill
+            while get_char_pressed().is_some() {}
         }
     }
 
@@ -57,15 +59,23 @@ impl DevModeState {
     // CODE PROMPT MODAL
 
     pub fn update_code_prompt(state: &mut DevModeState) -> bool {
+        // if prompt not open, ignore input
         if !state.show_code_prompt {
+            state.code_input.clear();
             return false;
         }
 
         // collect typed input
         while let Some(c) = get_char_pressed() {
+
             if c.is_alphanumeric() {
                 state.code_input.push(c);
             }
+        }
+
+        // cap input length to prevent overflow
+        if state.code_input.len() > 20 {
+            state.code_input.truncate(20);
         }
 
         // backspace
