@@ -1,105 +1,11 @@
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
-use std::net::{SocketAddr, UdpSocket};
 
-use crate::protocols::MSG_MAZE;
+use crate::maze::decoration::decorate_first_room;
+use crate::maze::types::{Decoration, Room};
 
-#[derive(Clone, Copy, Debug)]
-pub struct Room {
-    pub x: u8,
-    pub y: u8,
-    pub w: u8,
-    pub h: u8,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum DecorationKind {
-    Table = 1,
-    Chair = 2,
-}
-
-impl DecorationKind {
-    fn as_u8(self) -> u8 {
-        self as u8
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Decoration {
-    pub kind: DecorationKind,
-    pub x: u8,
-    pub y: u8,
-}
-
-pub struct MazeData {
-    pub width: u8,
-    pub height: u8,
-    pub cells: Vec<u8>,
-    pub seed: u64,
-    pub rooms: Vec<Room>,
-    pub decorations: Vec<Decoration>,
-    pub teleporter: (u8, u8),
-}
-
-impl MazeData {
-    pub fn new(width: u8, height: u8) -> Self {
-        let seed = rand::thread_rng().gen();
-        let (cells, rooms, decorations, teleporter) = generate_maze(width, height, seed);
-        Self {
-            width,
-            height,
-            cells,
-            seed,
-            rooms,
-            decorations,
-            teleporter,
-        }
-    }
-
-    pub fn send(&self, socket: &UdpSocket, addr: SocketAddr) {
-        let header_len = 5; // msg, w, h, tele_x, tele_y
-        let rooms_len = 1 + self.rooms.len() * 4; // count + (x,y,w,h)
-        let decor_len = 1 + self.decorations.len() * 3; // count + (kind,x,y)
-        let mut msg = Vec::with_capacity(header_len + rooms_len + decor_len + self.cells.len());
-
-        msg.push(MSG_MAZE);
-        msg.push(self.width);
-        msg.push(self.height);
-        msg.push(self.teleporter.0);
-        msg.push(self.teleporter.1);
-
-        msg.push(self.rooms.len() as u8);
-        for room in &self.rooms {
-            msg.push(room.x);
-            msg.push(room.y);
-            msg.push(room.w);
-            msg.push(room.h);
-        }
-
-        msg.push(self.decorations.len() as u8);
-        for deco in &self.decorations {
-            msg.push(deco.kind.as_u8());
-            msg.push(deco.x);
-            msg.push(deco.y);
-        }
-
-        msg.extend_from_slice(&self.cells);
-        let _ = socket.send_to(&msg, addr);
-    }
-
-    pub fn teleporter_world(&self, cell_size: f32) -> (f32, f32, f32) {
-        let (tx, ty) = self.teleporter;
-        (
-            (tx as f32 + 0.5) * cell_size,
-            0.0,
-            (ty as f32 + 0.5) * cell_size,
-        )
-    }
-}
-
-// Depth-first perfect maze generator with post-process rooms. Cells: 1 open, 0 wall.
-fn generate_maze(
+pub fn generate_maze(
     width: u8,
     height: u8,
     seed: u64,
@@ -113,11 +19,9 @@ fn generate_maze(
         return (grid, Vec::new(), Vec::new(), (1, 1));
     }
 
-    // Work with an odd-sized carving area so even-sized mazes still generate.
     let w_carve = if w % 2 == 0 { w - 1 } else { w };
     let h_carve = if h % 2 == 0 { h - 1 } else { h };
 
-    // Base perfect maze with recursive backtracker.
     let mut stack = Vec::new();
     let start = (1usize, 1usize);
     grid[start.1 * w + start.0] = 1;
@@ -149,7 +53,6 @@ fn generate_maze(
     let rooms = carve_rooms(&mut grid, w, h, &mut rng);
     connect_rooms(&mut grid, w, h, &rooms, &mut rng);
 
-    // Place teleporter in the first room if available; otherwise use entrance.
     let teleporter = if let Some(room) = rooms.first() {
         let tx = (room.x as usize + 1).min((room.x + room.w - 1) as usize);
         let ty = (room.y as usize + 1).min((room.y + room.h - 1) as usize);
@@ -165,10 +68,16 @@ fn generate_maze(
 
 fn carve_rooms(grid: &mut [u8], w: usize, h: usize, rng: &mut StdRng) -> Vec<Room> {
     let mut rooms: Vec<Room> = Vec::new();
-    let desired_rooms = if w >= 50 && h >= 50 { 10 } else { 4 };
+    let desired_rooms = if w >= 40 && h >= 40 {
+        8
+    } else if w >= 25 && h >= 25 {
+        5
+    } else {
+        3
+    };
     let mut size_bands: Vec<(usize, usize)> = vec![(4usize, 8usize)];
-    if w >= 50 && h >= 50 {
-        size_bands.push((4usize, 6usize)); // tighter fallback sizes to reach the quota
+    if w >= 40 && h >= 40 {
+        size_bands.push((4usize, 6usize));
     }
 
     for (min_size, max_size) in size_bands {
@@ -189,7 +98,6 @@ fn carve_rooms(grid: &mut [u8], w: usize, h: usize, rng: &mut StdRng) -> Vec<Roo
 
             let mut overlaps = false;
             for r in &rooms {
-                // 1-cell padding keeps corridors between rooms
                 let r_x1 = r.x.saturating_sub(1) as isize;
                 let r_y1 = r.y.saturating_sub(1) as isize;
                 let r_x2 = (r.x as usize + r.w as usize + 1) as isize;
@@ -224,7 +132,6 @@ fn carve_rooms(grid: &mut [u8], w: usize, h: usize, rng: &mut StdRng) -> Vec<Roo
         }
     }
 
-    // deterministic fallback pass to guarantee quota when space allows
     if rooms.len() < desired_rooms {
         let target = desired_rooms;
         let rw = 4usize;
@@ -276,7 +183,6 @@ fn carve_rooms(grid: &mut [u8], w: usize, h: usize, rng: &mut StdRng) -> Vec<Roo
 
 fn connect_rooms(grid: &mut [u8], w: usize, h: usize, rooms: &[Room], rng: &mut StdRng) {
     for room in rooms {
-        // Build candidate doorway cells along perimeter.
         let mut edges = Vec::new();
         let rx = room.x as usize;
         let ry = room.y as usize;
@@ -294,7 +200,6 @@ fn connect_rooms(grid: &mut [u8], w: usize, h: usize, rooms: &[Room], rng: &mut 
 
         edges.shuffle(rng);
 
-        // Create 2 connections per room (or as many as fit).
         let mut links = 0;
         for &(sx, sy, dx, dy) in &edges {
             if links >= 2 {
@@ -311,7 +216,6 @@ fn connect_rooms(grid: &mut [u8], w: usize, h: usize, rooms: &[Room], rng: &mut 
                 }
                 let idx = ny as usize * w + nx as usize;
                 if grid[idx] == 1 {
-                    // reached a corridor; carve doorway cell and stop.
                     grid[sy * w + sx] = 1;
                     links += 1;
                     break;
@@ -322,34 +226,4 @@ fn connect_rooms(grid: &mut [u8], w: usize, h: usize, rooms: &[Room], rng: &mut 
             }
         }
     }
-}
-
-fn decorate_first_room(rooms: &[Room]) -> Vec<Decoration> {
-    let mut decorations = Vec::new();
-    if let Some(room) = rooms.first() {
-        let table_x_u8 = room.x + (room.w / 2);
-        let table_y_u8 = room.y + (room.h / 2);
-        decorations.push(Decoration {
-            kind: DecorationKind::Table,
-            x: table_x_u8,
-            y: table_y_u8,
-        });
-
-        let chair_positions = [
-            (table_x_u8.wrapping_sub(1), table_y_u8),
-            (table_x_u8 + 1, table_y_u8),
-            (table_x_u8, table_y_u8.wrapping_sub(1)),
-            (table_x_u8, table_y_u8 + 1),
-        ];
-
-        for (x, y) in chair_positions {
-            decorations.push(Decoration {
-                kind: DecorationKind::Chair,
-                x,
-                y,
-            });
-        }
-    }
-
-    decorations
 }

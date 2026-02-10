@@ -45,7 +45,7 @@ fn main() -> std::io::Result<()> {
     let mut buffer: [u8; 512] = [0; 512];
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
 
-    let maze = MazeData::new(50, 50);
+    let maze = MazeData::new(35, 35);
     println!(
         "Maze generated: {}x{} with seed {}",
         maze.width, maze.height, maze.seed
