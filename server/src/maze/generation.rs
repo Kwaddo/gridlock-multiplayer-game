@@ -2,14 +2,14 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 
-use crate::maze::decoration::decorate_first_room;
-use crate::maze::types::{Decoration, Room};
+use crate::maze::decoration::generate_props;
+use crate::maze::types::{Prop, Room};
 
 pub fn generate_maze(
     width: u8,
     height: u8,
     seed: u64,
-) -> (Vec<u8>, Vec<Room>, Vec<Decoration>, (u8, u8)) {
+) -> (Vec<u8>, Vec<Room>, Vec<Prop>, (u8, u8)) {
     let w = width as usize;
     let h = height as usize;
     let mut grid = vec![0u8; w * h];
@@ -61,9 +61,9 @@ pub fn generate_maze(
         (1u8, 1u8)
     };
 
-    let decorations = decorate_first_room(&rooms);
+    let props = generate_props(&rooms, &mut rng);
 
-    (grid, rooms, decorations, teleporter)
+    (grid, rooms, props, teleporter)
 }
 
 fn carve_rooms(grid: &mut [u8], w: usize, h: usize, rng: &mut StdRng) -> Vec<Room> {
@@ -75,9 +75,10 @@ fn carve_rooms(grid: &mut [u8], w: usize, h: usize, rng: &mut StdRng) -> Vec<Roo
     } else {
         3
     };
-    let mut size_bands: Vec<(usize, usize)> = vec![(4usize, 8usize)];
+    // Prefer slightly larger rooms so the 3x5 office layout (with 1-tile border) fits more often.
+    let mut size_bands: Vec<(usize, usize)> = vec![(5usize, 9usize)];
     if w >= 40 && h >= 40 {
-        size_bands.push((4usize, 6usize));
+        size_bands.push((6usize, 11usize));
     }
 
     for (min_size, max_size) in size_bands {

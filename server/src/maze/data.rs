@@ -3,7 +3,7 @@ use std::net::{SocketAddr, UdpSocket};
 use rand::Rng;
 
 use crate::maze::generation::generate_maze;
-use crate::maze::types::{Decoration, DecorationKind, Room};
+use crate::maze::types::{Prop, PropKind, Room};
 use crate::protocols::MSG_MAZE;
 
 pub struct MazeData {
@@ -12,21 +12,21 @@ pub struct MazeData {
     pub cells: Vec<u8>,
     pub seed: u64,
     pub rooms: Vec<Room>,
-    pub decorations: Vec<Decoration>,
+    pub props: Vec<Prop>,
     pub teleporter: (u8, u8),
 }
 
 impl MazeData {
     pub fn new(width: u8, height: u8) -> Self {
         let seed = rand::thread_rng().gen();
-        let (cells, rooms, decorations, teleporter) = generate_maze(width, height, seed);
+        let (cells, rooms, props, teleporter) = generate_maze(width, height, seed);
         Self {
             width,
             height,
             cells,
             seed,
             rooms,
-            decorations,
+            props,
             teleporter,
         }
     }
@@ -34,8 +34,8 @@ impl MazeData {
     pub fn send(&self, socket: &UdpSocket, addr: SocketAddr) {
         let header_len = 5;
         let rooms_len = 1 + self.rooms.len() * 4;
-        let decor_len = 1 + self.decorations.len() * 3;
-        let mut msg = Vec::with_capacity(header_len + rooms_len + decor_len + self.cells.len());
+        let props_len = 1 + self.props.len() * 3;
+        let mut msg = Vec::with_capacity(header_len + rooms_len + props_len + self.cells.len());
 
         msg.push(MSG_MAZE);
         msg.push(self.width);
@@ -51,11 +51,11 @@ impl MazeData {
             msg.push(room.h);
         }
 
-        msg.push(self.decorations.len() as u8);
-        for deco in &self.decorations {
-            msg.push(deco.kind.as_u8());
-            msg.push(deco.x);
-            msg.push(deco.y);
+        msg.push(self.props.len() as u8);
+        for prop in &self.props {
+            msg.push(prop.kind.as_u8());
+            msg.push(prop.x);
+            msg.push(prop.y);
         }
 
         msg.extend_from_slice(&self.cells);

@@ -10,24 +10,47 @@ pub struct Room {
 }
 
 #[derive(Clone, Copy)]
-pub enum DecorationKind {
-    Table = 1,
-    Chair = 2,
+pub enum PropKind {
+    Crate = 1,
+    Barrel = 2,
+    SupplyCrate = 3,
+    Lamp = 4,
+    Desk = 5,
+    Monitor = 6,
+    OfficeChair = 7,
 }
 
-impl DecorationKind {
+impl PropKind {
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
-            1 => Some(DecorationKind::Table),
-            2 => Some(DecorationKind::Chair),
+            1 => Some(PropKind::Crate),
+            2 => Some(PropKind::Barrel),
+            3 => Some(PropKind::SupplyCrate),
+            4 => Some(PropKind::Lamp),
+            5 => Some(PropKind::Desk),
+            6 => Some(PropKind::Monitor),
+            7 => Some(PropKind::OfficeChair),
             _ => None,
+        }
+    }
+
+    /// Get collision radius for this prop type (0.0 = no collision)
+    pub fn collision_radius(self) -> f32 {
+        match self {
+            PropKind::Crate => 0.35,
+            PropKind::Barrel => 0.28,
+            PropKind::SupplyCrate => 0.35,
+            PropKind::Lamp => 0.0, // lamps don't block movement
+            PropKind::Desk => 0.40,
+            PropKind::Monitor => 0.0,     // monitors are on desks
+            PropKind::OfficeChair => 0.0, // chairs can be pushed through
         }
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct Decoration {
-    pub kind: DecorationKind,
+pub struct Prop {
+    pub kind: PropKind,
     pub x: u8,
     pub y: u8,
 }
@@ -40,7 +63,7 @@ pub struct Maze {
     pub wall_height: f32,
     pub teleporter: (u8, u8),
     pub rooms: Vec<Room>,
-    pub decorations: Vec<Decoration>,
+    pub props: Vec<Prop>,
 }
 
 impl Maze {
@@ -55,6 +78,10 @@ impl Maze {
         self.cells[self.idx(x as usize, y as usize)] == 1
     }
 
+    pub fn get_prop_at(&self, x: u8, y: u8) -> Option<&Prop> {
+        self.props.iter().find(|p| p.x == x && p.y == y)
+    }
+
     pub fn cell_from_world(&self, pos: Vec3) -> (i32, i32) {
         let cx = (pos.x / self.cell_size).floor() as i32;
         let cy = (pos.z / self.cell_size).floor() as i32;
@@ -62,6 +89,7 @@ impl Maze {
     }
 
     pub fn is_blocked(&self, pos: Vec3, radius: f32) -> bool {
+        // Check walls
         for &(ox, oz) in [
             (-radius, -radius),
             (-radius, radius),
@@ -76,6 +104,22 @@ impl Maze {
                 return true;
             }
         }
+
+        // Check prop collisions
+        for prop in &self.props {
+            let prop_radius = prop.kind.collision_radius();
+            if prop_radius > 0.0 {
+                let prop_pos = self.cell_to_world(prop.x as i32, prop.y as i32);
+                let dx = pos.x - prop_pos.x;
+                let dz = pos.z - prop_pos.z;
+                let dist_sq = dx * dx + dz * dz;
+                let collision_dist = radius + prop_radius;
+                if dist_sq < collision_dist * collision_dist {
+                    return true;
+                }
+            }
+        }
+
         false
     }
 

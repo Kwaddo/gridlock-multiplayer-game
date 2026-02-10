@@ -3,7 +3,7 @@ use std::net::UdpSocket;
 use macroquad::prelude::*;
 
 use crate::net::protocols::{ MSG_MAZE, MSG_POSITION, MSG_STATE, MSG_WORLD_CHANGE, MSG_ASSETS };
-use crate::types::maze::{Decoration, DecorationKind, Maze, Room};
+use crate::types::maze::{Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 
@@ -67,13 +67,13 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
 
                     if offset >= size { continue; }
 
-                    let decor_count = recv_buf[offset] as usize;
+                    let prop_count = recv_buf[offset] as usize;
                     offset += 1;
-                    let mut decorations = Vec::with_capacity(decor_count);
-                    for _ in 0..decor_count {
+                    let mut props = Vec::with_capacity(prop_count);
+                    for _ in 0..prop_count {
                         if offset + 3 > size { break; }
-                        if let Some(kind) = DecorationKind::from_u8(recv_buf[offset]) {
-                            decorations.push(Decoration {
+                        if let Some(kind) = PropKind::from_u8(recv_buf[offset]) {
+                            props.push(Prop {
                                 kind,
                                 x: recv_buf[offset + 1],
                                 y: recv_buf[offset + 2],
@@ -94,7 +94,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                             wall_height: MAZE_WALL_HEIGHT,
                             teleporter: (tele_x, tele_y),
                             rooms,
-                            decorations,
+                            props,
                         };
                         let spawn = maze.teleporter_world();
                         update.maze = Some((maze, spawn));
