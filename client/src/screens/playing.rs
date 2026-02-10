@@ -124,7 +124,9 @@ impl PlayingState {
         // recover recoil/bloom from previous frame BEFORE firing
         // so new bloom from this frame's shot survives to render
         let delta = get_frame_time();
-        recover(self.weapons.active_mut(), delta);
+        let vel = self.movement_state.velocity;
+        let is_moving = vec2(vel.x, vel.z).length() > 0.5;
+        recover(self.weapons.active_mut(), delta, is_moving);
 
         // Compute effective spread for crosshair sizing and shot deviation.
         // Base = lerp(hip_spread, ads_spread, ads_progress) + bloom from firing.

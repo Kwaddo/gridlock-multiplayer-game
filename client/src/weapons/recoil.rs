@@ -33,10 +33,19 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) {
 
     // bloom accumulation
     weapon.bloom += stats.spread_per_shot; // bloom is additive on top of base spread
+
+    // reset FSA timer on shot
+    weapon.fsa_timer = 0.0; 
+
+    // crosshair kick
+    weapon.crosshair_kick += weapon.crosshair.kick_per_shot;
+    if weapon.crosshair.kick_max > 0.0 {
+        weapon.crosshair_kick = weapon.crosshair_kick.min(weapon.crosshair.kick_max);
+    }
 }
 
 // recover recoil and bloom over time — called every frame.
-pub fn recover(weapon: &mut WeaponState, delta: f32) {
+pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     let stats = weapon.stats();
 
     // pitch recoil recovery (settles back to 0)
@@ -56,6 +65,27 @@ pub fn recover(weapon: &mut WeaponState, delta: f32) {
     if weapon.bloom > 0.0 {
         let decay = stats.spread_recovery * delta;
         weapon.bloom = (weapon.bloom - decay).max(0.0);
+    }
+    
+
+    // First shot accuracy logic
+    // when timer reaches fsa_time, force bloom to 0
+    if let Some(fsa_time) = weapon.stats().fsa_time {
+        if !weapon.trigger_held && !is_moving {
+            weapon.fsa_timer += delta;
+            if weapon.fsa_timer >= fsa_time {
+                weapon.bloom = 0.0;
+            }
+        }
+    } else {
+        weapon.fsa_timer = 0.0; // if weapon doesn't have FSA, just keep timer at 0
+    }
+
+    // crosshair kick decay
+    if weapon.crosshair_kick > 0.0 { 
+        weapon.crosshair_kick *= (1.0 - weapon.crosshair.kick_decay_rate * delta).max(0.0); // exponential decay
+    } else {
+        weapon.crosshair_kick = 0.0;
     }
 }
 
