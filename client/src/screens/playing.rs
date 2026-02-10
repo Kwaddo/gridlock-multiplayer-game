@@ -404,7 +404,7 @@ impl PlayingState {
         self.update_head_bob(get_frame_time());
         let camera = self.build_camera(config);
 
-        clear_background(BLACK);
+        clear_background(Color::from_rgba(16, 20, 28, 255));
         set_camera(&camera);
 
         match self.current_world {

@@ -4,4 +4,4 @@ mod generation;
 pub mod types;
 
 pub use data::MazeData;
-pub use types::{Decoration, DecorationKind, Room};
+pub use types::{Prop, PropKind, Room};
