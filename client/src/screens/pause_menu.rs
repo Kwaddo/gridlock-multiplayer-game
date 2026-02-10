@@ -42,7 +42,7 @@ pub fn draw_pause_menu(
     
     // ESC to resume (is_key_pressed is consumed by the Playing state's check,
     // so this only fires on a *second* ESC press while paused as to not immediately unpause when you open the menu)
-    if is_key_pressed(config.key_settings) {
+    if config.bind_settings.is_pressed() {
         return Some(GameState::Playing);
     }
 

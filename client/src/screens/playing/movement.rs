@@ -12,7 +12,7 @@ impl PlayingState {
         if self.movement_state.is_sprinting {
             self.movement_state.stamina -= self.movement_config.stamina_drain * delta;
         } else {
-            if !is_key_down(config.key_sprint) {
+            if !config.bind_sprint.is_down() {
                 self.movement_state.stamina = (
                     self.movement_state.stamina +
                     self.movement_config.stamina_recover * delta

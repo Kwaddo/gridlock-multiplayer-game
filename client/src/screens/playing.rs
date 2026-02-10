@@ -92,7 +92,7 @@ impl PlayingState {
         config: &GameConfig,
         maze: Option<&Maze>
     ) -> Option<GameState> {
-        if is_key_pressed(config.key_settings) {
+        if config.bind_settings.is_pressed() {
             return Some(GameState::Paused);
         }
 
