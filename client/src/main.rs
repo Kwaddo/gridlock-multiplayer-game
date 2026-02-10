@@ -37,6 +37,13 @@ async fn main() {
     let mut maze: Option<Maze> = None;
     let mut is_fullscreen = true;
 
+    // loading state tracking
+    let mut loading_assets: Vec<(String, String)> = Vec::new();
+    let mut loading_index: usize = 0;
+    let mut loading_current: String = String::new();
+    let mut loading_stable_frames: u8 = 0;
+    let mut loading_started: bool = false;
+
     loop {
         if is_key_pressed(KeyCode::F11) {
             is_fullscreen = !is_fullscreen;
@@ -50,12 +57,73 @@ async fn main() {
                     username = name;
                     player_id = id;
                     server_addr = login_screen.ip_input.clone();
+
+                    // reset loading state and transition to Loading
+                    loading_assets.clear();
+                    loading_index = 0;
+                    loading_current.clear();
+                    loading_stable_frames = 0;
+                    loading_started = false;
+                    state = GameState::Loading;
+                }
+                login_screen.draw();
+            }
+
+            GameState::Loading => {
+                login_screen.update_background();
+
+                // poll for network data (maze, assets)
+                let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                if let Some(entries) = assets {
+                    if !entries.is_empty() {
+                        loading_assets.extend(entries);
+                        loading_stable_frames = 0;
+                    }
+                }
+
+                if !loading_started {
+                    loading_stable_frames += 1;
+                    // start once we've collected asset packets and they've stabilised
+                    if !loading_assets.is_empty() && loading_stable_frames >= 3 {
+                        loading_started = true;
+                    }
+                    // timeout: server might have no assets at all
+                    if loading_stable_frames >= 30 {
+                        loading_started = true;
+                    }
+                }
+
+                // load one texture per frame to keep the progress bar updating
+                if loading_started && loading_index < loading_assets.len() {
+                    let (key, path) = loading_assets[loading_index].clone();
+                    loading_current = key.clone();
+                    match load_texture(&path).await {
+                        Ok(tex) => {
+                            tex.set_filter(FilterMode::Nearest);
+                            playing_state.assets.insert(key, tex);
+                        }
+                        Err(e) => {
+                            println!("Failed to load {}: {:?}", path, e);
+                        }
+                    }
+                    loading_index += 1;
+                }
+
+                // transition to Playing when done
+                if loading_started && loading_index >= loading_assets.len() {
                     state = GameState::Playing;
                     set_cursor_grab(true);
                     show_mouse(false);
                     playing_state.last_mouse_pos = mouse_position();
                 }
-                login_screen.draw();
+
+                // draw loading screen
+                login_screen.draw_loading(
+                    loading_assets.len(),
+                    loading_index,
+                    &loading_current,
+                    loading_started,
+                );
             }
 
             GameState::Playing => {

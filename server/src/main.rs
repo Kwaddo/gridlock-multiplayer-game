@@ -63,6 +63,7 @@ fn main() -> std::io::Result<()> {
             MSG_WORLD_CHANGE => {
                 handle_world_change(&socket, &maze, &mut players, src_addr, payload);
             }
+            MSG_DISCOVER => handle_discover(&socket, &players, src_addr),
             _ => println!("Unknown message type: {}", msg_type),
         }
 
@@ -223,6 +224,19 @@ fn handle_world_change(
     response.extend_from_slice(&sx.to_be_bytes());
     response.extend_from_slice(&sy.to_be_bytes());
     response.extend_from_slice(&sz.to_be_bytes());
+    let _ = socket.send_to(&response, src_addr);
+}
+
+fn handle_discover(
+    socket: &UdpSocket,
+    players: &HashMap<SocketAddr, Player>,
+    src_addr: SocketAddr,
+) {
+    let player_count = players.len().min(255) as u8;
+    let max_players: u8 = 16;
+    let name = b"Multiplayer FPS Server";
+    let mut response = vec![MSG_DISCOVER, player_count, max_players, name.len() as u8];
+    response.extend_from_slice(name);
     let _ = socket.send_to(&response, src_addr);
 }
 

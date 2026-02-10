@@ -8,3 +8,4 @@ pub const MSG_DISCONNECT: u8 = 7;
 pub const MSG_MAZE: u8 = 8;
 pub const MSG_WORLD_CHANGE: u8 = 9; // server -> client: bi-directional world transition
 pub const MSG_ASSETS: u8 = 10; // server -> client: asset manifest per world
+pub const MSG_DISCOVER: u8 = 11; // client -> server: LAN discovery broadcast

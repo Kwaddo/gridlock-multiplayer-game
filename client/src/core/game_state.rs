@@ -1,5 +1,6 @@
 pub enum GameState {
     Login,
+    Loading,
     Playing,
     Paused,
     Settings,
@@ -12,3 +13,7 @@ pub enum LoginField {
     Username,
 }
 
+pub enum MainMenuTab {
+    Play,
+    Servers,
+}
