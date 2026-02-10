@@ -73,6 +73,7 @@ impl LoginScreen {
         let sh = screen_height().max(600.0);
         let particles = (0..80).map(|_| MenuParticle::random(sw, sh)).collect();
 
+        let scan_socket = start_discovery();
         Self {
             ip_input: String::new(),
             username_input: String::new(),
@@ -80,8 +81,8 @@ impl LoginScreen {
             error_msg: String::new(),
             active_tab: MainMenuTab::Play,
             discovered_servers: Vec::new(),
-            scan_socket: None,
-            scan_timer: 0.0,
+            scan_socket,
+            scan_timer: 2.0,
             particles,
             anim_time: 0.0,
             connecting: false,
@@ -114,6 +115,10 @@ impl LoginScreen {
                         self.discovered_servers.push(ns);
                     }
                 }
+            }
+            // auto-fill IP as soon as exactly one server is found
+            if self.discovered_servers.len() == 1 && self.ip_input.is_empty() {
+                self.ip_input = self.discovered_servers[0].addr.clone();
             }
             if self.scan_timer <= 0.0 {
                 self.scan_socket = None;

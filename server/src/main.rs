@@ -234,9 +234,13 @@ fn handle_discover(
 ) {
     let player_count = players.len().min(255) as u8;
     let max_players: u8 = 16;
-    let name = b"Multiplayer FPS Server";
-    let mut response = vec![MSG_DISCOVER, player_count, max_players, name.len() as u8];
-    response.extend_from_slice(name);
+    let hostname = fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "Unknown".to_string());
+    let name = format!("{}'s Server", hostname);
+    let name_bytes = name.as_bytes();
+    let mut response = vec![MSG_DISCOVER, player_count, max_players, name_bytes.len() as u8];
+    response.extend_from_slice(name_bytes);
     let _ = socket.send_to(&response, src_addr);
 }
 
