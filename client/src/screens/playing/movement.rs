@@ -5,14 +5,19 @@ use super::PlayingState;
 
 impl PlayingState {
     // pub(super) = visible to playing.rs (the parent module) but not the rest of the codebase
-    pub(super) fn update_stamina(&mut self, delta: f32) {
+    pub(super) fn update_stamina(&mut self, config: &GameConfig, delta: f32) {
+        // if stamina runs out while holding sprinting, no stamina will be regained until player releases sprint key, so you have to tap it again to start regaining stamina.
+        //this prevents the player from just holding sprint and waiting for stamina to regen, which would be a bit too easy to abuse.
+
         if self.movement_state.is_sprinting {
             self.movement_state.stamina -= self.movement_config.stamina_drain * delta;
         } else {
-            self.movement_state.stamina = (
-                self.movement_state.stamina +
-                self.movement_config.stamina_recover * delta
-            ).min(100.0);
+            if !is_key_down(config.key_sprint) {
+                self.movement_state.stamina = (
+                    self.movement_state.stamina +
+                    self.movement_config.stamina_recover * delta
+                ).min(100.0);
+            }
         }
     }
 

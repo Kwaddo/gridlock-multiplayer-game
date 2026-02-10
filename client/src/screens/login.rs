@@ -145,5 +145,13 @@ impl LoginScreen {
         if !self.error_msg.is_empty() {
             draw_text_ex(&self.error_msg, box_x, box_y + 210.0, text_params(18, RED));
         }
+
+        draw_text_ex(
+            "F11 to toggle fullscreen",
+            box_x,
+            box_y + 230.0,
+            text_params(16, GRAY),
+        );
+        
     }
 }

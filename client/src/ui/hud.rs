@@ -28,6 +28,16 @@ pub fn draw_hud(
     let cx = screen_width() / 2.0;
     let cy = screen_height() / 2.0;
 
+    // sprint sway — crosshair bobs side-to-side when sprinting
+    let sprint_sway = if movement_state.is_sprinting {
+        let freq = 8.0;
+        let amp = screen_height() * 0.4 / 100.0;
+        (macroquad::time::get_time() as f32 * freq).sin() * amp
+    } else {
+        0.0
+    };
+    let cx = cx + sprint_sway;
+
     let weapon = weapons.active();
     let stats = weapon.stats();
 
@@ -65,7 +75,7 @@ pub fn draw_hud(
 
                 let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
                 let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
-                let movement_gap = ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
+                let movement_gap = 0.0; // for shotguns, we won't scale the crosshair with movement bloom, since its a run and gun weapon
                 let ads_rest_gap = if fsa_active {
                     0.0
                 } else {

@@ -8,7 +8,15 @@ use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
 
-#[macroquad::main("Multiplayer FPS")]
+fn window_conf() -> Conf {
+    Conf {
+        window_title: "Multiplayer FPS".to_owned(),
+        fullscreen: true,
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(window_conf)]
 async fn main() {
     // Set Nearest filtering globally so all textures (sprites, crosshairs) stay crisp
     set_default_filter_mode(FilterMode::Nearest);
@@ -26,8 +34,14 @@ async fn main() {
     let mut server_addr = String::new();
     let mut config = GameConfig::new();
     let mut maze: Option<Maze> = None;
+    let mut is_fullscreen = true;
 
     loop {
+        if is_key_pressed(KeyCode::F11) {
+            is_fullscreen = !is_fullscreen;
+            set_fullscreen(is_fullscreen);
+        }
+
         match state {
             GameState::Login => {
                 if let Some((s, name, id)) = login_screen.update() {
