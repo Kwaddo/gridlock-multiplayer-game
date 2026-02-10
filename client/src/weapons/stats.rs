@@ -68,6 +68,7 @@ pub enum FireMode {
 }
 
 // all the numbers that define how a weapon behaves and feels.
+#[derive(Clone)]
 pub struct WeaponStats {
     pub name: &'static str,
     pub fire_mode: FireMode,

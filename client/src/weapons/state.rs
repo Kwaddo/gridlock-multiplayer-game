@@ -6,6 +6,7 @@ use super::stats::{ FireMode, WeaponKind, WeaponStats };
 
 pub struct WeaponState {
     pub kind: WeaponKind,
+    pub stats_data: WeaponStats, // owned mutable copy (const defaults used for reset)
 
     // -- Ammo
     pub ammo: u32,
@@ -48,6 +49,7 @@ impl WeaponState {
         let stats = kind.stats();
         Self {
             kind,
+            stats_data: stats.clone(),
             ammo: stats.magazine_size,
             reserve: stats.max_reserve,
             fire_cooldown: 0.0,
@@ -68,8 +70,13 @@ impl WeaponState {
         }
     }
 
-    pub fn stats(&self) -> &'static WeaponStats {
-        self.kind.stats()
+    pub fn stats(&self) -> &WeaponStats {
+        &self.stats_data
+    }
+
+    // reset stats to factory defaults (from const definitions)
+    pub fn reset_stats(&mut self) {
+        self.stats_data = self.kind.stats().clone();
     }
 
     // can we fire right now?
@@ -79,10 +86,11 @@ impl WeaponState {
 
     // start a reload if we're not already reloading and magazine isn't full, AND we have reserve ammo AND attempting to fire
     pub fn start_reload(&mut self) {
-        let stats = self.stats();
-        if !self.is_reloading && self.ammo < stats.magazine_size && self.reserve > 0 {
+        let mag = self.stats_data.magazine_size;
+        let reload_t = self.stats_data.reload_time;
+        if !self.is_reloading && self.ammo < mag && self.reserve > 0 {
             self.is_reloading = true;
-            self.reload_timer = stats.reload_time;
+            self.reload_timer = reload_t;
         }
     }
 
@@ -107,11 +115,11 @@ impl WeaponState {
         }
 
         // ADS interpolation
-        let stats = self.stats();
+        let ads_time = self.stats_data.ads_time;
         if self.is_aiming {
-            self.ads_progress = (self.ads_progress + delta / stats.ads_time).min(1.0);
+            self.ads_progress = (self.ads_progress + delta / ads_time).min(1.0);
         } else {
-            self.ads_progress = (self.ads_progress - delta / stats.ads_time).max(0.0);
+            self.ads_progress = (self.ads_progress - delta / ads_time).max(0.0);
         }
 
     }
@@ -122,10 +130,11 @@ impl WeaponState {
             return false;
         }
 
-        let stats = self.stats();
+        let fire_mode = self.stats_data.fire_mode;
+        let fire_rate = self.stats_data.fire_rate;
 
         // semi-auto / bolt-action gate: must release trigger between shots, as in u have to stop shooting and click again. full auto has no such requirement.
-        match stats.fire_mode {
+        match fire_mode {
             FireMode::SemiAuto | FireMode::BoltAction => {
                 if self.trigger_held {
                     return false;
@@ -135,7 +144,7 @@ impl WeaponState {
         }
 
         self.ammo -= 1;
-        self.fire_cooldown = 1.0 / stats.fire_rate;
+        self.fire_cooldown = 1.0 / fire_rate;
         self.muzzle_flash_timer = 0.08; // 80ms flash
 
         // auto-reload on empty
@@ -147,8 +156,7 @@ impl WeaponState {
     }
 
     fn finish_reload(&mut self) {
-        let stats = self.stats();
-        let needed = stats.magazine_size - self.ammo;
+        let needed = self.stats_data.magazine_size - self.ammo;
         let available = needed.min(self.reserve);
         self.ammo += available;
         self.reserve -= available;
