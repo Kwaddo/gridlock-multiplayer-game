@@ -21,7 +21,7 @@ impl CombatEntity for TargetDummy {
 
     fn take_damage(&mut self, dmg: f32) {
         self.hp = (self.hp - dmg).max(1.0); // target dummy never dies, it just has a minimum of 1 HP
-        self.hit_timer = 0.3; // flash red for 300ms
+        self.hit_timer = 0.05; // flash red for 10ms
     }
 
     fn is_alive(&self) -> bool {

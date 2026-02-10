@@ -264,8 +264,8 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     crosshair_hip_key: "xhair_shotgun_hip", // crosshair039
     crosshair_ads_key: "xhair_shotgun_ads", // crosshair037
-    crosshair_base_size: 4.7,               // % of screen height — widest, pellet spread cone
-    crosshair_ads_size: 5.2,                // % of screen height — tighter when aiming
+    crosshair_base_size: 2.7,               // % of screen height — widest, pellet spread cone
+    crosshair_ads_size: 7.5,                // % of screen height — tighter when aiming
 
     icon_asset_key: "weapon_shotgun",
     icon_width: 100.0,
