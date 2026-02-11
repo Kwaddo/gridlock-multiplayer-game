@@ -22,8 +22,7 @@ pub fn draw_hud(
     hit_marker_timer: f32,
     hit_marker_headshot: bool,
     damage_numbers: &[DamageNumber],
-    hit_marker_pellets_hit: u32,
-    hit_marker_pellets_total: u32
+    hit_marker_pellet_mask: u16,
 ) {
     let cx = screen_width() / 2.0;
     let cy = screen_height() / 2.0;
@@ -223,19 +222,22 @@ pub fn draw_hud(
         let current_size = if current_size < 10.0 { (sh * 3.0) / 100.0 } else { current_size };
 
         let pop = 1.0 + 0.4 * t;
-        let hm_thick = 2.5;
-
-        if hit_marker_pellets_total > 1 {
-            // SHOTGUN: dots in a ring, one per pellet hit
-            let dot_radius = 3.0;
+        let hm_thick = 2.5; // size of each line in the hit marker X
+        let stats = weapon.stats();
+        let pellet_spread = stats.pellet_spread;
+        if let Some(ptrn) = pellet_spread {
+            // SHOTGUN: dot per pellet, like fortnite
+            let dot_radius = 5.0; // size of each pellet dot in the hit marker
             let ring_radius = current_size * 0.3 * pop;
-            for i in 0..hit_marker_pellets_hit {
-                let angle =
-                    ((i as f32) / (hit_marker_pellets_total as f32)) * std::f32::consts::TAU;
-                let dx = cx + angle.cos() * ring_radius;
-                let dy = cy + angle.sin() * ring_radius;
-                draw_circle(dx, dy, dot_radius, hm_color);
+            for (i, &(angle, radius)) in ptrn.iter().enumerate() {
+                if hit_marker_pellet_mask & (1 << i) != 0 {
+                    let r = ring_radius * radius;
+                    let dx = cx + angle.cos() * r;
+                    let dy = cy - angle.sin() * r;
+                    draw_circle(dx,dy,dot_radius, RED);
+                }
             }
+
         } else {
             // NORMAL: X shape scaled to crosshair
             let hm_size = current_size * 0.4 * pop;
