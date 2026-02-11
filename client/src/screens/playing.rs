@@ -51,8 +51,7 @@ pub struct PlayingState {
     pub damage_numbers: Vec<DamageNumber>,
     pub tracers: Vec<BulletTracer>,
 
-    pub hit_marker_pellets_hit: u32, // for shotguns: how many pellets hit, to show different hit marker icons (1-2 = small, 3-5 = medium, 6-8 = large)
-    pub hit_marker_pellets_total: u32, // for shotguns: total pellets fired, to know when to reset hit marker state on next shot
+    pub hit_marker_pellet_mask: u16, // bitmasks of shotgun pellets hit, up to 16 | stored as 
 
     // --- Dev mode ---
     pub dev_mode: DevModeState,
@@ -80,8 +79,7 @@ impl PlayingState {
             hit_marker_headshot: false,
             damage_numbers: Vec::new(),
             tracers: Vec::new(),
-            hit_marker_pellets_hit: 0,
-            hit_marker_pellets_total: 0,
+            hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
         }
     }
@@ -225,20 +223,24 @@ impl PlayingState {
                     let mut total_dmg = 0.0f32;
                     let mut any_headshot = false;
 
-                    let mut pellets_hit = 0u32;
+                    let mut pellet_mask: u16 = 0;
 
-                    for _ in 0..stats.pellet_count {
+                    for i in 0..stats.pellet_count as usize {
                         let mut fwd = base_fwd;
-                        // each pellet gets its own random spread
+                        // follow fixed spread pattern
                         if spread > 0.0001 {
-                            let angle = gen_range(0.0f32, std::f32::consts::TAU);
-                            let deviation = gen_range(0.0f32, spread);
-                            fwd = (
-                                fwd +
-                                right_vec * (angle.cos() * deviation) +
-                                up_vec * (angle.sin() * deviation)
-                            ).normalize();
+                            if let Some(ptrn) = stats.pellet_spread {
+                                let (angle, radius) = ptrn[i];
+                                let deviation = spread * radius;
+                                fwd = (fwd + right_vec * (angle.cos() * deviation) + up_vec * (angle.sin() * deviation)).normalize();
+                            } else {
+                                // random spread if no pattern specified (not recommended for competitive weapons since it's less consistent)
+                                let angle = gen_range(0.0f32, std::f32::consts::TAU);
+                                let radius = gen_range(0.0f32, spread);
+                                fwd = (fwd + right_vec * (angle.cos() * radius) + up_vec * (angle.sin() * radius)).normalize();
+                            }
                         }
+                        
 
                         // bullet tracer
                         self.tracers.push(BulletTracer {
@@ -288,7 +290,7 @@ impl PlayingState {
                             if zone == HitZone::Head {
                                 any_headshot = true;
                             }
-                            pellets_hit += 1;
+                            pellet_mask |= 1 << i; // if this pellet hit, you set the bit mark to one, << is left shift operator, so it sets it left by i, bit 1 is at i zero so it is the first bit if it hits, looks like 0 0 0 0 0 0 0 1 (if 8 pellets) and so on
                         }
                     }
 
@@ -298,9 +300,7 @@ impl PlayingState {
                         self.hit_marker_headshot = any_headshot;
 
                         // pellet shit
-                        self.hit_marker_pellets_hit = pellets_hit;
-                        self.hit_marker_pellets_total = stats.pellet_count;
-
+                        self.hit_marker_pellet_mask = pellet_mask;
                         self.damage_numbers.push(DamageNumber {
                             amount: total_dmg,
                             is_headshot: any_headshot,
@@ -479,8 +479,7 @@ impl PlayingState {
             self.hit_marker_timer,
             self.hit_marker_headshot,
             &self.damage_numbers,
-            self.hit_marker_pellets_hit,
-            self.hit_marker_pellets_total
+            self.hit_marker_pellet_mask
         );
     }
 

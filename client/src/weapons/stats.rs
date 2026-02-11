@@ -77,6 +77,7 @@ pub struct WeaponStats {
     pub damage: f32,
     pub headshot_mult: f32,
     pub pellet_count: u32, // 1 for most guns, >1 for shotgun
+    pub pellet_spread: Option<&'static [(f32,f32)]>, // (radian around circle, how far it deviates from center)
 
     // --- Fire rate & ammo
     pub fire_rate: f32, // rounds per second
@@ -129,6 +130,8 @@ pub struct WeaponStats {
     pub pattern_randomness: f32, // how much random variance to add to the recoil pattern (radians),
     pub randomness_growth: f32, // additional randomness per shot to make the pattern less predictable the longer you fire (radians)
     pub pattern_reset_time: f32, // time in seconds to fully reset after releasing trigger
+
+
 }
 
 // --- Weapon definitions
@@ -140,6 +143,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
     damage: 22.0,
     headshot_mult: 2.0,
     pellet_count: 1,
+    pellet_spread: None,
 
     fire_rate: 5.0, // fast semi-auto sidearm
     magazine_size: 15,
@@ -197,7 +201,7 @@ pub const SMG: WeaponStats = WeaponStats {
     damage: 20.0,
     headshot_mult: 1.5,
     pellet_count: 1,
-
+    pellet_spread: None,
     fire_rate: 11.0, // high fire rate spray weapon
     magazine_size: 30,
     max_reserve: 120,
@@ -260,7 +264,18 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
 
     damage: 12.0, // per pellet — 8 pellets = 120 max (devastating up close)
     headshot_mult: 1.5,
-    pellet_count: 8,
+    pellet_count: 9,
+    pellet_spread: Some(&[
+        (0.0,0.0), // center pellet
+        (0.4363, 2.0), 
+        (1.1345, 2.0),
+        (2.0071, 2.0),
+        (2.7053, 2.0),
+        (3.5779, 2.0),
+        (4.2761, 2.0),
+        (5.1487, 2.0),
+        (5.8469, 2.0),
+    ]), 
 
     fire_rate: 1.0, // slow pump action
     magazine_size: 7,
@@ -312,6 +327,7 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     damage: 27.0, // 4-shot body kill (108), 3-shot headshot (27*1.8=48.6)
     headshot_mult: 1.8,
     pellet_count: 1,
+    pellet_spread: None,
 
     fire_rate: 7.0, // slower than SMG but hits harder
     magazine_size: 30,
@@ -375,7 +391,7 @@ pub const SNIPER: WeaponStats = WeaponStats {
     damage: 105.0, // 1-shot body kill (105), 1-shot headshot (105*2.5=262)
     headshot_mult: 2.5,
     pellet_count: 1,
-
+    pellet_spread: None,
     fire_rate: 0.8, // bolt action — very slow doesnt matter cause u have one magazine anyways lol
     magazine_size: 1,
     max_reserve: 8,
@@ -418,3 +434,5 @@ pub const SNIPER: WeaponStats = WeaponStats {
     randomness_growth: 0.0, // no pattern, so randomness doesnt increase
     pattern_reset_time: 0.0, // no pattern to reset
 };
+
+
