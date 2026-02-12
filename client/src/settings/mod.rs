@@ -2,15 +2,26 @@ mod sliders;
 mod keybinds;
 pub mod sensitivity;
 pub mod fov;
+pub mod crosshair_settings;
 
 use macroquad::prelude::*;
 use crate::core::GameConfig;
 use crate::ui::fonts::{text_params, measure_game_text};
+use crate::weapons::WeaponInventory;
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum SettingsTab {
+    General,
+    Keybinds,
+    Crosshair,
+}
 
 pub struct SettingsScreen {
     pub rebinding: Option<String>,
     pub saved_config: Option<GameConfig>,
     pub show_unsaved_prompt: bool,
+    pub active_tab: SettingsTab,
+    pub crosshair_state: crosshair_settings::CrosshairSettingsPreview,
 }
 
 impl SettingsScreen {
@@ -19,12 +30,15 @@ impl SettingsScreen {
             rebinding: None,
             saved_config: None,
             show_unsaved_prompt: false,
+            active_tab: SettingsTab::General,
+            crosshair_state: crosshair_settings::CrosshairSettingsPreview::new(),
         }
     }
 
     pub fn enter(&mut self, config: &GameConfig) {
         self.saved_config = Some(config.clone());
         self.show_unsaved_prompt = false;
+        self.crosshair_state.reset_visit();
     }
 
     fn has_duplicates(config: &GameConfig) -> bool {
@@ -46,7 +60,7 @@ impl SettingsScreen {
         }
     }
 
-    pub fn update(&mut self, config: &mut GameConfig) -> bool {
+    pub fn update(&mut self, config: &mut GameConfig, weapons: &mut WeaponInventory) -> bool {
         let mouse = mouse_position();
         let clicked = is_mouse_button_pressed(MouseButton::Left);
         let held = is_mouse_button_down(MouseButton::Left);
@@ -65,21 +79,59 @@ impl SettingsScreen {
             return true;
         }
 
-        // Layout
-        let gap = 20.0;
-        let panel_w = (screen_width() - gap * 3.0) / 2.0;
-        let left_x = gap;
-        let right_x = gap * 2.0 + panel_w;
-        let panel_top = 80.0;
-        let slider_x = left_x + 160.0;
-        let slider_w = panel_w - 220.0;
-        let btn_size = 25.0;
+        // Tab buttons
+        let tab_y = 80.0;
+        let tab_w = 150.0;
+        let tab_h = 40.0;
+        let tab_gap = 20.0;
+        let tabs = [(SettingsTab::General, "General"), (SettingsTab::Keybinds, "Keybinds"), (SettingsTab::Crosshair, "Crosshair")];
 
-        // Slider updates
-        sliders::update_sliders(config, slider_x, slider_w, btn_size, panel_top, mouse, clicked, held);
+        for (i, (tab, _)) in tabs.iter().enumerate() {
+            let tab_x = 20.0 + (tab_w + tab_gap) * (i as f32);
+            if clicked && mouse.0 >= tab_x && mouse.0 <= tab_x + tab_w &&
+               mouse.1 >= tab_y && mouse.1 <= tab_y + tab_h
+            {
+                if self.active_tab != *tab && *tab == SettingsTab::Crosshair {
+                    self.crosshair_state.reset_visit();
+                }
+                self.active_tab = *tab;
+            }
+        }
 
-        // Keybind updates
-        keybinds::update_keybinds(config, &mut self.rebinding, right_x, panel_top, panel_w, mouse, clicked);
+        let content_top = tab_y + tab_h + 20.0;
+
+        match self.active_tab {
+            SettingsTab::General => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                let slider_x = gap + 160.0;
+                let slider_w = panel_w - 220.0;
+                let btn_size = 25.0;
+
+                sliders::update_sliders(config, slider_x, slider_w, btn_size, content_top, mouse, clicked, held);
+            }
+            SettingsTab::Keybinds => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+
+                keybinds::update_keybinds(config, &mut self.rebinding, gap, content_top, panel_w, mouse, clicked);
+            }
+            SettingsTab::Crosshair => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                crosshair_settings::update_crosshair_settings(
+                    &mut self.crosshair_state,
+                    weapons,
+                    gap,
+                    content_top,
+                    panel_w,
+                    screen_height() - content_top - 100.0,
+                    mouse,
+                    clicked,
+                    held,
+                );
+            }
+        }
 
         // Back button
         let back_y = screen_height() - 60.0;
@@ -195,42 +247,90 @@ impl SettingsScreen {
         false
     }
 
-    pub fn draw(&self, config: &GameConfig) {
+    pub fn draw(&self, config: &GameConfig, weapons: &WeaponInventory, assets: &std::collections::HashMap<String, Texture2D>) {
         // Title
         let title = "SETTINGS";
         let title_w = measure_game_text(title, 30);
         draw_text_ex(title, (screen_width() - title_w) / 2.0, 50.0, text_params(30, WHITE));
 
-        // Layout
-        let gap = 20.0;
-        let panel_w = (screen_width() - gap * 3.0) / 2.0;
-        let left_x = gap;
-        let right_x = gap * 2.0 + panel_w;
-        let panel_top = 80.0;
-        let panel_h = screen_height() - 150.0;
+        // Tab buttons
+        let tab_y = 80.0;
+        let tab_w = 150.0;
+        let tab_h = 40.0;
+        let tab_gap = 20.0;
+        let tabs = [(SettingsTab::General, "General"), (SettingsTab::Keybinds, "Keybinds"), (SettingsTab::Crosshair, "Crosshair")];
+        let mouse = mouse_position();
 
-        // Left panel - General settings
-        draw_rectangle(left_x, panel_top, panel_w, panel_h, Color::from_rgba(30, 30, 30, 240));
-        draw_rectangle_lines(left_x, panel_top, panel_w, panel_h, 1.0, GRAY);
+        for (i, (tab, name)) in tabs.iter().enumerate() {
+            let tab_x = 20.0 + (tab_w + tab_gap) * (i as f32);
 
-        let section_title = "General";
-        let section_w = measure_game_text(section_title, 22);
-        draw_text_ex(
-            section_title,
-            left_x + (panel_w - section_w) / 2.0,
-            panel_top + 30.0,
-            text_params(22, YELLOW),
-        );
+            let tab_color = if *tab == self.active_tab {
+                Color::from_rgba(80, 150, 220, 255)
+            } else {
+                Color::from_rgba(40, 40, 40, 255)
+            };
 
-        let slider_x = left_x + 160.0;
-        let slider_w = panel_w - 220.0;
-        let btn_size = 25.0;
-        let label_x = left_x + 20.0;
+            draw_rectangle(tab_x, tab_y, tab_w, tab_h, tab_color);
+            draw_rectangle_lines(tab_x, tab_y, tab_w, tab_h, 1.0, GRAY);
 
-        sliders::draw_sliders(config, label_x, slider_x, slider_w, btn_size, panel_top);
+            let text_w = measure_game_text(name, 18);
+            draw_text_ex(
+                name,
+                tab_x + (tab_w - text_w) / 2.0,
+                tab_y + 26.0,
+                text_params(18, WHITE),
+            );
+        }
 
-        // Right panel - Key Bindings
-        keybinds::draw_keybinds(config, &self.rebinding, right_x, panel_w, panel_top, panel_h);
+        let content_top = tab_y + tab_h + 20.0;
+
+        match self.active_tab {
+            SettingsTab::General => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                let panel_h = screen_height() - content_top - 70.0;
+
+                draw_rectangle(gap, content_top, panel_w, panel_h, Color::from_rgba(30, 30, 30, 240));
+                draw_rectangle_lines(gap, content_top, panel_w, panel_h, 1.0, GRAY);
+
+                let section_title = "General";
+                let section_w = measure_game_text(section_title, 22);
+                draw_text_ex(
+                    section_title,
+                    gap + (panel_w - section_w) / 2.0,
+                    content_top + 30.0,
+                    text_params(22, YELLOW),
+                );
+
+                let slider_x = gap + 160.0;
+                let slider_w = panel_w - 220.0;
+                let btn_size = 25.0;
+                let label_x = gap + 20.0;
+
+                sliders::draw_sliders(config, label_x, slider_x, slider_w, btn_size, content_top);
+            }
+            SettingsTab::Keybinds => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                let panel_h = screen_height() - content_top - 70.0;
+
+                keybinds::draw_keybinds(config, &self.rebinding, gap, panel_w, content_top, panel_h);
+            }
+            SettingsTab::Crosshair => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                crosshair_settings::draw_crosshair_settings(
+                    &self.crosshair_state,
+                    weapons,
+                    gap,
+                    content_top,
+                    panel_w,
+                    screen_height() - content_top - 100.0,
+                    assets,
+                    mouse,
+                );
+            }
+        }
 
         // Bottom buttons
         self.draw_bottom_buttons(config);

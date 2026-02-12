@@ -44,9 +44,6 @@ pub fn draw_hud(
     // visual config comes from weapon.crosshair (runtime), gameplay from stats (const)
     let sh = screen_height();
     let xhair = &weapon.crosshair;
-    let base_size = (xhair.texture_base_size * sh) / 100.0;
-    let ads_base = (xhair.texture_ads_size * sh) / 100.0;
-    let bloom_scale = (1.0 + weapon.computed_spread * 60.0).min(3.0);
     let ads_t = weapon.ads_progress;
 
     // FSA tint: gray when FSA is ready AND player is aiming (hip-fire shouldn't look gray)
@@ -113,34 +110,6 @@ pub fn draw_hud(
                         dot_alpha
                     );
                     draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
-                }
-            } else if
-                let (Some(hip_key), Some(ads_key)) = (
-                    &xhair.hip_texture_key,
-                    &xhair.ads_texture_key,
-                )
-            {
-                // TEXTURE crosshair (shotgun)
-                if ads_t < 1.0 {
-                    let hip_alpha = ((1.0 - ads_t) * 255.0) as u8;
-                    let hip_tint = Color::from_rgba(
-                        (tint.r * 255.0) as u8,
-                        (tint.g * 255.0) as u8,
-                        (tint.b * 255.0) as u8,
-                        hip_alpha
-                    );
-                    let hip_size = base_size * bloom_scale;
-                    draw_crosshair_texture(cx, cy, hip_size, hip_tint, hip_key, assets);
-                }
-                if ads_t > 0.0 {
-                    let ads_alpha = (ads_t * 255.0) as u8;
-                    let ads_tint = Color::from_rgba(
-                        (tint.r * 255.0) as u8,
-                        (tint.g * 255.0) as u8,
-                        (tint.b * 255.0) as u8,
-                        ads_alpha
-                    );
-                    draw_crosshair_texture(cx, cy, ads_base, ads_tint, ads_key, assets);
                 }
             } else {
                 // cross crosshair (pistol, AR, SMG)
@@ -217,7 +186,13 @@ pub fn draw_hud(
         };
 
         // scale hit marker to current crosshair size
-        let current_size = if ads_t > 0.5 { ads_base } else { base_size * bloom_scale };
+        // compute effective crosshair size based on gap + line length
+        let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_t);
+        let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_t;
+        let gap = hip_gap + ads_rest_gap;
+        let len = (xhair.line_length * sh) / 100.0;
+        let current_size = (gap + len) * 2.0; // full diameter
+
         // fallback for sniper scope (crosshair size is 0)
         let current_size = if current_size < 10.0 { (sh * 3.0) / 100.0 } else { current_size };
 

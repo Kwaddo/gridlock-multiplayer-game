@@ -17,12 +17,6 @@ pub struct CrosshairConfig {
     pub outline_enabled: bool,
     pub outline_thickness: f32, // % of screen height
 
-    // texture crosshair (sniper scope texture if we add one later)
-    pub hip_texture_key: Option<String>,
-    pub ads_texture_key: Option<String>,
-    pub texture_base_size: f32, // % of screen height
-    pub texture_ads_size: f32, // % of screen height
-
     pub kick_per_shot: f32, //  how much gap to add per shot (% of screen height)
     pub kick_decay_rate: f32, // how quickly the gap recovers back to normal after shooting (units per second)
     pub kick_max: f32,
@@ -43,10 +37,6 @@ impl CrosshairConfig {
                     center_gap: 0.5,
                     outline_enabled: true,
                     outline_thickness: 0.1,
-                    hip_texture_key: None,
-                    ads_texture_key: None,
-                    texture_base_size: 0.0,
-                    texture_ads_size: 0.0,
                     kick_per_shot: 1.5,
                     kick_decay_rate: 8.0,
                     kick_max: 1.5,
@@ -62,10 +52,6 @@ impl CrosshairConfig {
                     center_gap: 0.7,
                     outline_enabled: true,
                     outline_thickness: 0.1,
-                    hip_texture_key: None,
-                    ads_texture_key: None,
-                    texture_base_size: 0.0,
-                    texture_ads_size: 0.0,
                     kick_per_shot: 0.8,
                     kick_decay_rate: 6.0,
                     kick_max: 2.5,
@@ -74,17 +60,13 @@ impl CrosshairConfig {
             WeaponKind::Shotgun =>
                 Self {
                     color: Color::from_rgba(255, 255, 255, 255),
-                    dot_enabled: true, 
+                    dot_enabled: true,
                     dot_size: 0.15,
-                    line_length: 1.8, 
+                    line_length: 1.8,
                     line_thickness: 0.25,
                     center_gap: 2.5,
                     outline_enabled: true,
                     outline_thickness: 0.1,
-                    hip_texture_key: None, 
-                    ads_texture_key: None,
-                    texture_base_size: 0.0,
-                    texture_ads_size: 0.0,
                     kick_per_shot: 2.5,
                     kick_decay_rate: 8.0,
                     kick_max: 4.0,
@@ -100,10 +82,6 @@ impl CrosshairConfig {
                     center_gap: 0.6,
                     outline_enabled: true,
                     outline_thickness: 0.1,
-                    hip_texture_key: None,
-                    ads_texture_key: None,
-                    texture_base_size: 0.0,
-                    texture_ads_size: 0.0,
                     kick_per_shot: 0.8,
                     kick_decay_rate: 5.0,
                     kick_max: 2.3,
@@ -119,12 +97,6 @@ impl CrosshairConfig {
                     center_gap: 0.0,
                     outline_enabled: false,
                     outline_thickness: 0.0,
-                    // None for now — procedural scope. can swap to Some("scope_texture") later
-                    hip_texture_key: None,
-                    ads_texture_key: None,
-                    texture_base_size: 0.0,
-                    texture_ads_size: 0.0,
-                    // N/A for sniper
                     kick_per_shot: 0.0,
                     kick_decay_rate: 0.0,
                     kick_max: 0.0,

@@ -246,8 +246,8 @@ async fn main() {
 
             GameState::Settings => {
                 clear_background(Color::from_rgba(0, 0, 0, 255));
-                settings_screen.draw(&config);
-                if settings_screen.update(&mut config) {
+                settings_screen.draw(&config, &playing_state.weapons, &playing_state.assets);
+                if settings_screen.update(&mut config, &mut playing_state.weapons) {
                     state = GameState::Paused;
                 }
             }

@@ -464,10 +464,6 @@ fn draw_crosshair_tab(
     y += DevModeState::draw_slider("kick_decay_rate", &mut ch.kick_decay_rate, 1.0, 20.0, 1.0, x, y, w, mouse, clicked, held);
     y += DevModeState::draw_slider("kick_max", &mut ch.kick_max, 0.0, 30.0, 1.0, x, y, w, mouse, clicked, held);
 
-    y += DevModeState::draw_section_header("Texture Size", x, y);
-    y += DevModeState::draw_slider("texture_base_size", &mut ch.texture_base_size, 0.0, 15.0, 0.5, x, y, w, mouse, clicked, held);
-    y += DevModeState::draw_slider("texture_ads_size", &mut ch.texture_ads_size, 0.0, 15.0, 0.5, x, y, w, mouse, clicked, held);
-
     y += DevModeState::draw_section_header("Color (RGB)", x, y);
     let mut r = ch.color.r * 255.0;
     let mut g = ch.color.g * 255.0;
