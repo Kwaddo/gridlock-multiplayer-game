@@ -16,28 +16,34 @@ impl PlayingState {
         let d = &self.target_dummy;
         let hit_flash = d.hit_timer > 0.0;
 
-        for hb in &d.hitboxes {
-            let center = d.position + hb.center_offset;
-            let size = hb.half_extents * 2.0;
+        if self.dev_mode.show_hitboxes {
+            // show zone-colored hitboxes with wireframes
+            for hb in &d.hitboxes {
+                let center = d.position + hb.center_offset;
+                let size = hb.half_extents * 2.0;
 
-            // each zone gets a distinct color
-            let base_color = match hb.zone {
-                HitZone::Head => Color::from_rgba(255, 80, 80, 200), // red
-                HitZone::Torso => Color::from_rgba(80, 180, 255, 200), // blue
-                HitZone::Limbs => Color::from_rgba(80, 255, 80, 200), // green
-            };
+                let base_color = match hb.zone {
+                    HitZone::Head => Color::from_rgba(255, 80, 80, 200),
+                    HitZone::Torso => Color::from_rgba(80, 180, 255, 200),
+                    HitZone::Limbs => Color::from_rgba(80, 255, 80, 200),
+                };
 
-            let color = if hit_flash { WHITE } else { base_color };
+                let color = if hit_flash { WHITE } else { base_color };
 
-            // Wire color matches zone but brighter
-            let wire_color = match hb.zone {
-                HitZone::Head => Color::from_rgba(255, 120, 120, 255),
-                HitZone::Torso => Color::from_rgba(120, 200, 255, 255),
-                HitZone::Limbs => Color::from_rgba(120, 255, 120, 255),
-            };
+                let wire_color = match hb.zone {
+                    HitZone::Head => Color::from_rgba(255, 120, 120, 255),
+                    HitZone::Torso => Color::from_rgba(120, 200, 255, 255),
+                    HitZone::Limbs => Color::from_rgba(120, 255, 120, 255),
+                };
 
-            draw_cube(center, size, None, color);
-            draw_cube_wires(center, size, wire_color);
+                draw_cube(center, size, None, color);
+                draw_cube_wires(center, size, wire_color);
+            }
+        } else {
+            // simple neutral dummy model
+            let body_color = if hit_flash { WHITE } else { Color::from_rgba(180, 140, 100, 255) };
+            draw_cube(d.position + vec3(0.0, 0.6, 0.0), vec3(0.6, 1.2, 0.4), None, body_color);
+            draw_cube(d.position + vec3(0.0, 1.4, 0.0), vec3(0.4, 0.4, 0.4), None, body_color);
         }
     }
 
@@ -92,8 +98,8 @@ impl PlayingState {
             let tail_t = (t.progress - t.tracer_length / dist).max(0.0);
             let tail = t.start + dir * tail_t; // start point of the tracer
 
-            let mid = (head + tail) * 0.5;
-            let length = (head - tail).length();
+            let _mid = (head + tail) * 0.5;
+            let _length = (head - tail).length();
             let dir_norm = dir.normalize();
 
             // rotate cube to align with direction

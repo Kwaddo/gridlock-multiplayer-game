@@ -162,7 +162,7 @@ impl DevModeState {
         y: f32,
         width: f32,
         mouse: (f32, f32),
-        clicked: bool,
+        _clicked: bool,
         held: bool
     ) -> f32 {
         let label_w = 200.0;

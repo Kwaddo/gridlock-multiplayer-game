@@ -6,8 +6,9 @@
 
 use macroquad::prelude::Color;
 use super::stats::WeaponKind;
+use serde::{Serialize, Deserialize};
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum CrosshairType {
     Cross,       // standard + crosshair lines
     FourCurves,  // 4 curved arcs with gaps at cardinal directions

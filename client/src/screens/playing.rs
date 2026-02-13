@@ -18,7 +18,7 @@ use crate::weapons::{ recoil, SpreadContext, WeaponInventory };
 use crate::world::{ draw_maze, lobby::draw_lobby };
 
 use macroquad::prelude::*;
-use macroquad::rand::{ gen_range, rand };
+use macroquad::rand::gen_range;
 use std::net::UdpSocket;
 
 use std::collections::HashMap;
@@ -214,7 +214,6 @@ impl PlayingState {
                     let up_vec = right_vec.cross(base_fwd).normalize();
 
                     let damage = stats.damage;
-                    let hs_mult = stats.headshot_mult;
                     let range = stats.bullet_range;
                     let spread = weapon.computed_spread;
                     let cx = screen_width() / 2.0;
@@ -230,7 +229,7 @@ impl PlayingState {
                         // follow fixed spread pattern
                         if spread > 0.0001 {
                             if let Some(ptrn) = stats.pellet_spread {
-                                let (angle, radius) = ptrn[i];
+                                let (angle, radius) = ptrn.get(i).copied().unwrap_or((0.0, 0.0));
                                 let deviation = spread * radius;
                                 fwd = (fwd + right_vec * (angle.cos() * deviation) + up_vec * (angle.sin() * deviation)).normalize();
                             } else {
@@ -276,7 +275,7 @@ impl PlayingState {
 
                         // apply damage to appropriate entity
                         if let Some((target_idx, zone, dist)) = closest {
-                            let mult = zone.damage_mult();
+                            let mult = if zone == HitZone::Head { stats.headshot_mult } else { zone.damage_mult() };
                             let falloff = damage_falloff(dist, stats);
                             let dmg = damage * mult * falloff;
                             if target_idx == 0 {
@@ -348,7 +347,7 @@ impl PlayingState {
         for t in &mut self.tracers {
             if t.progress < 1.0 {
                 let dist = (t.end - t.start).length();
-                t.progress += ((t.speed * delta) / dist).min(1.0);
+                t.progress = (t.progress + (t.speed * delta) / dist).min(1.0);
             }
             t.lifetime -= delta;
         }
