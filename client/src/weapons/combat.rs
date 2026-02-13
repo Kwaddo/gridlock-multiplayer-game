@@ -127,12 +127,16 @@ pub fn damage_falloff(distance: f32, stats: &WeaponStats) -> f32 {
 }
 
 pub fn default_player_hitboxes() -> Vec<Hitbox> {
+    // Head:  1.35 → 1.65
+    // Torso: 0.50 → 1.35  (flush with head bottom and legs top — no gaps)
+    // Arms:  0.50 → 1.35  (match torso height)
+    // Legs:  0.00 → 0.50
     vec![
-        Hitbox { center_offset: vec3(0.0, 1.5, 0.0), half_extents: vec3(0.15, 0.15, 0.15), zone: HitZone::Head },
-        Hitbox { center_offset: vec3(0.0, 0.9, 0.0), half_extents: vec3(0.25, 0.35, 0.15), zone: HitZone::Torso },
-        Hitbox { center_offset: vec3(-0.4, 0.9, 0.0), half_extents: vec3(0.1, 0.3, 0.1), zone: HitZone::Limbs },
-        Hitbox { center_offset: vec3(0.4, 0.9, 0.0), half_extents: vec3(0.1, 0.3, 0.1), zone: HitZone::Limbs },
+        Hitbox { center_offset: vec3(0.0, 1.5, 0.0),    half_extents: vec3(0.15, 0.15, 0.15), zone: HitZone::Head },
+        Hitbox { center_offset: vec3(0.0, 0.925, 0.0),  half_extents: vec3(0.25, 0.425, 0.15), zone: HitZone::Torso },
+        Hitbox { center_offset: vec3(-0.4, 0.925, 0.0), half_extents: vec3(0.1, 0.425, 0.1), zone: HitZone::Limbs },
+        Hitbox { center_offset: vec3(0.4, 0.925, 0.0),  half_extents: vec3(0.1, 0.425, 0.1), zone: HitZone::Limbs },
         Hitbox { center_offset: vec3(-0.12, 0.25, 0.0), half_extents: vec3(0.1, 0.25, 0.1), zone: HitZone::Limbs },
-        Hitbox { center_offset: vec3(0.12, 0.25, 0.0), half_extents: vec3(0.1, 0.25, 0.1), zone: HitZone::Limbs },
+        Hitbox { center_offset: vec3(0.12, 0.25, 0.0),  half_extents: vec3(0.1, 0.25, 0.1), zone: HitZone::Limbs },
     ]
 }

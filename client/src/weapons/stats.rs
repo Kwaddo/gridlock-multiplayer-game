@@ -108,6 +108,9 @@ pub struct WeaponStats {
     pub bullet_speed: f32, // tracer speed (units/s), purely visual
     pub bullet_range: f32, // max hitscan distance (units)
     pub tracer_length: f32, // visible tracer trail length (units)
+    pub tracer_color: [u8; 4], // color of the bullet tracer (for visual variety, not necessarily tied to damage or team color)
+    pub tracer_thickness: f32, // thickness of the bullet tracer line (units)
+    pub tracer_lifetime: f32, // how long the tracer trail lingers (seconds)
 
     // --- Crosshair
     pub crosshair_style: CrosshairStyle, // which render path (Standard = cross/texture, Scope = sniper overlay)
@@ -130,6 +133,7 @@ pub struct WeaponStats {
     pub pattern_randomness: f32, // how much random variance to add to the recoil pattern (radians),
     pub randomness_growth: f32, // additional randomness per shot to make the pattern less predictable the longer you fire (radians)
     pub pattern_reset_time: f32, // time in seconds to fully reset after releasing trigger
+
 
 
 }
@@ -169,6 +173,9 @@ pub const PISTOL: WeaponStats = WeaponStats {
     bullet_speed: 200.0,
     bullet_range: 40.0,
     tracer_length: 2.0,
+    tracer_color:[255,200,80,255],
+    tracer_thickness: 0.01,
+    tracer_lifetime: 1.5,
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.25),
@@ -226,6 +233,9 @@ pub const SMG: WeaponStats = WeaponStats {
     bullet_speed: 180.0,
     bullet_range: 45.0,
     tracer_length: 2.5,
+    tracer_color:[255,200,80,255],
+    tracer_thickness: 0.01,
+    tracer_lifetime: 1.2,
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None, // SMG never reaches FSA
@@ -267,14 +277,14 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     pellet_count: 9,
     pellet_spread: Some(&[
         (0.0,0.0), // center pellet
-        (0.4363, 2.0), 
-        (1.1345, 2.0),
-        (2.0071, 2.0),
-        (2.7053, 2.0),
-        (3.5779, 2.0),
-        (4.2761, 2.0),
-        (5.1487, 2.0),
-        (5.8469, 2.0),
+        (0.4363, 0.9), 
+        (1.1345, 0.9),
+        (2.0071, 0.9),
+        (2.7053, 0.9),
+        (3.5779, 0.9),
+        (4.2761, 0.9),
+        (5.1487, 0.9),
+        (5.8469, 0.9),
     ]), 
 
     fire_rate: 1.0, // slow pump action
@@ -301,6 +311,9 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     bullet_speed: 150.0,
     bullet_range: 20.0, // short range but not useless
     tracer_length: 1.5, // short trails for pellets
+    tracer_color:[255,140,60,255],
+    tracer_thickness: 0.008,
+    tracer_lifetime: 0.8,
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None, // shotgun has no FSA
@@ -353,6 +366,9 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     bullet_speed: 250.0,
     bullet_range: 70.0, // best range of the auto weapons
     tracer_length: 3.5,
+    tracer_color:[255,230,150,255],
+    tracer_thickness: 0.015,
+    tracer_lifetime: 1.5,
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.35),
@@ -416,6 +432,9 @@ pub const SNIPER: WeaponStats = WeaponStats {
     bullet_speed: 350.0,
     bullet_range: 120.0, // longest range in the game
     tracer_length: 8.0, // long visible trail — sniper rounds are iconic
+    tracer_color:[180, 200, 255, 255],
+    tracer_thickness: 0.03,
+    tracer_lifetime: 3.5,
 
     crosshair_style: CrosshairStyle::Scope,
     fsa_time: None, // sniper doesnt use FSA (scope handles accuracy)

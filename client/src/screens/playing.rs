@@ -17,6 +17,7 @@ use crate::weapons::recoil::{ apply_shot_recoil, recover };
 use crate::weapons::{ recoil, SpreadContext, WeaponInventory };
 use crate::world::{ draw_maze, lobby::draw_lobby };
 
+use macroquad::prelude::scene::camera_pos;
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
 use std::net::UdpSocket;
@@ -241,18 +242,17 @@ impl PlayingState {
                         }
                         
 
-                        // bullet tracer
+                        // bullet tracer — tiny offset so billboard quad is never perfectly edge-on
+                        let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.05, 0.0);
                         self.tracers.push(BulletTracer {
-                            start: eye,
+                            start: tracer_start,
                             end: eye + fwd * range,
-                            lifetime: if stats.pellet_count > 1 {
-                                1.0
-                            } else {
-                                2.0
-                            },
+                            lifetime: stats.tracer_lifetime,
                             speed: stats.bullet_speed,
                             progress: 0.0,
                             tracer_length: stats.tracer_length,
+                            tracer_color: stats.tracer_color,
+                            tracer_thickness: stats.tracer_thickness,
                         });
 
                         let mut closest: Option<(usize, HitZone, f32)> = None;
@@ -445,7 +445,7 @@ impl PlayingState {
         self.draw_other_players();
 
         // bullet tracer
-        self.draw_tracers();
+        self.draw_tracers(camera.position);
 
         set_default_camera();
 
