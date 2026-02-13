@@ -6,6 +6,7 @@ use crate::ui::fonts::{ measure_game_text, text_params };
 use crate::ui::OtherPlayer;
 use crate::weapons::WeaponInventory;
 use crate::weapons::stats::CrosshairStyle;
+use crate::weapons::crosshair::CrosshairType;
 use crate::weapons::effects::DamageNumber;
 
 pub fn draw_hud(
@@ -63,88 +64,195 @@ pub fn draw_hud(
 
     match stats.crosshair_style {
         CrosshairStyle::Standard => {
-            if xhair.is_4curves {
-                // 4-curves crosshair (shotgun)
-                let stats = weapon.stats();
-                let base =
-                    stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+            match xhair.crosshair_type {
+                CrosshairType::FourCurves => {
+                    // 4-curves crosshair (shotgun)
+                    let stats = weapon.stats();
+                    let base =
+                        stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
-                let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
-                let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
-                let movement_gap = 0.0; // for shotguns, we won't scale the crosshair with movement bloom, since its a run and gun weapon
-                let ads_rest_gap = if fsa_active {
-                    (sh * 0.3) / 100.0 // small fixed gap when FSA is active (~3px at 1080p)
-                } else {
-                    ((xhair.center_gap * sh) / 100.0) * 0.4 * weapon.ads_progress
-                };
+                    let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
+                    let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
+                    let movement_gap = 0.0; // for shotguns, we won't scale the crosshair with movement bloom, since its a run and gun weapon
+                    let ads_rest_gap = if fsa_active {
+                        (sh * 0.3) / 100.0 // small fixed gap when FSA is active (~3px at 1080p)
+                    } else {
+                        ((xhair.center_gap * sh) / 100.0) * 0.4 * weapon.ads_progress
+                    };
 
-                let radius = hip_gap + kick_gap + ads_rest_gap + movement_gap;
-                let thick = (xhair.line_thickness * sh) / 100.0;
-                let gap_angle: f32 = 20.0_f32.to_radians(); // gap at cardinal directions
-                let quarter = std::f32::consts::FRAC_PI_2;
-                let segs = 32;
+                    let radius = hip_gap + kick_gap + ads_rest_gap + movement_gap;
+                    let thick = (xhair.line_thickness * sh) / 100.0;
+                    let gap_angle: f32 = 20.0_f32.to_radians(); // gap at cardinal directions
+                    let quarter = std::f32::consts::FRAC_PI_2;
+                    let segs = 32;
 
-                // outline
-                if xhair.outline_enabled {
-                    let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
-                    let oc = Color::from_rgba(0, 0, 0, 180);
+                    // outline
+                    if xhair.outline_enabled {
+                        let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                        let oc = Color::from_rgba(0, 0, 0, 180);
+                        for q in 0..4 {
+                            let base_angle = q as f32 * quarter;
+                            draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, ot, segs, oc);
+                        }
+                    }
+
+                    // 4 arcs (one per quadrant, gaps at top/bottom/left/right)
                     for q in 0..4 {
                         let base_angle = q as f32 * quarter;
-                        draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, ot, segs, oc);
+                        draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, thick, segs, color);
+                    }
+
+                    // center dot (visible at hip, fades out when ADS)
+                    if xhair.dot_enabled {
+                        let dot_alpha = ((1.0 - weapon.ads_progress) * 255.0) as u8;
+                        let dot_color = Color::from_rgba(
+                            (color.r * 255.0) as u8,
+                            (color.g * 255.0) as u8,
+                            (color.b * 255.0) as u8,
+                            dot_alpha
+                        );
+                        draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
                     }
                 }
+                CrosshairType::Chevron => {
+                    // L-bracket crosshair with bezier-chamfered corners
+                    let stats = weapon.stats();
+                    let base =
+                        stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
-                // 4 arcs (one per quadrant, gaps at top/bottom/left/right)
-                for q in 0..4 {
-                    let base_angle = q as f32 * quarter;
-                    draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, thick, segs, color);
+                    let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
+                    let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
+                    let movement_gap = 0.0;
+                    let ads_rest_gap = if fsa_active {
+                        (sh * 0.3) / 100.0
+                    } else {
+                        ((xhair.center_gap * sh) / 100.0) * 0.7 * weapon.ads_progress
+                    };
+
+                    let radius = hip_gap + kick_gap + ads_rest_gap + movement_gap;
+                    let thick = (xhair.line_thickness * sh) / 100.0;
+
+                    // 4 corner brackets (L-shapes)
+                    let arm = ((xhair.line_length / 2.0) * sh) / 100.0;
+
+                    let corners: [(f32, f32); 4] = [
+                        (-1.0, -1.0), // top-left
+                        ( 1.0, -1.0), // top-right
+                        (-1.0,  1.0), // bottom-left
+                        ( 1.0,  1.0), // bottom-right
+                    ];
+
+                    for &(sx, sy) in &corners {
+                        let corner_x = cx + sx * radius;
+                        let corner_y = cy + sy * radius;
+                        let h_end_x = corner_x - sx * arm;
+                        let v_end_y = corner_y - sy * arm;
+
+                        // chamfer: cut the corner with a curved diagonal
+                        let chamfer = arm * 0.35; // smaller chamfer = longer straight diagonal
+
+                        let h_near = corner_x - sx * chamfer;
+                        let v_near = corner_y - sy * chamfer;
+
+                        // quadratic bezier: P0 = (h_near, corner_y), P1 = (corner_x, corner_y), P2 = (corner_x, v_near)
+                        let p0x = h_near; let p0y = corner_y;
+                        let p1x = corner_x; let p1y = corner_y;
+                        let p2x = corner_x; let p2y = v_near;
+                        let bez = |t: f32| -> (f32, f32) {
+                            let u = 1.0 - t;
+                            (u*u*p0x + 2.0*u*t*p1x + t*t*p2x,
+                             u*u*p0y + 2.0*u*t*p1y + t*t*p2y)
+                        };
+
+                        // chamfer curves at ends, long straight diagonal in the middle
+                        let t_a = 0.10_f32; // end of chamfer1 / start of straight
+                        let t_b = 0.90_f32; // end of straight / start of chamfer2
+                        let (mid_ax, mid_ay) = bez(t_a);
+                        let (mid_bx, mid_by) = bez(t_b);
+                        let chamfer_segs = 4;
+
+                        let draw_corner_shape = |thickness: f32, col: Color| {
+                            // chamfer 1: curve from t=0 to t=t_a
+                            for i in 0..chamfer_segs {
+                                let s0 = t_a * (i as f32 / chamfer_segs as f32);
+                                let s1 = t_a * ((i + 1) as f32 / chamfer_segs as f32);
+                                let (x0, y0) = bez(s0);
+                                let (x1, y1) = bez(s1);
+                                draw_line(x0, y0, x1, y1, thickness, col);
+                            }
+                            // straight diagonal connector (longer now)
+                            draw_line(mid_ax, mid_ay, mid_bx, mid_by, thickness, col);
+                            // chamfer 2: curve from t=t_b to t=1.0
+                            for i in 0..chamfer_segs {
+                                let s0 = t_b + (1.0 - t_b) * (i as f32 / chamfer_segs as f32);
+                                let s1 = t_b + (1.0 - t_b) * ((i + 1) as f32 / chamfer_segs as f32);
+                                let (x0, y0) = bez(s0);
+                                let (x1, y1) = bez(s1);
+                                draw_line(x0, y0, x1, y1, thickness, col);
+                            }
+                        };
+
+                        // outline
+                        if xhair.outline_enabled {
+                            let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                            let oc = Color::from_rgba(0, 0, 0, 180);
+                            draw_line(h_near, corner_y, h_end_x, corner_y, ot, oc);
+                            draw_line(corner_x, v_near, corner_x, v_end_y, ot, oc);
+                            draw_corner_shape(ot, oc);
+                        }
+
+                        draw_line(h_near, corner_y, h_end_x, corner_y, thick, color);
+                        draw_line(corner_x, v_near, corner_x, v_end_y, thick, color);
+                        draw_corner_shape(thick, color);
+                    }
+
+                    // center dot (visible at hip, fades out when ADS)
+                    if xhair.dot_enabled {
+                        let dot_alpha = ((1.0 - weapon.ads_progress) * 255.0) as u8;
+                        let dot_color = Color::from_rgba(
+                            (color.r * 255.0) as u8,
+                            (color.g * 255.0) as u8,
+                            (color.b * 255.0) as u8,
+                            dot_alpha
+                        );
+                        draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
+                    }
                 }
+                CrosshairType::Cross => {
+                    // cross crosshair (pistol, AR, SMG)
+                    // all values are % of screen height so it scales with resolution
+                    let stats = weapon.stats();
+                    let base =
+                        stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
-                // center dot (visible at hip, fades out when ADS)
-                if xhair.dot_enabled {
-                    let dot_alpha = ((1.0 - weapon.ads_progress) * 255.0) as u8;
-                    let dot_color = Color::from_rgba(
-                        (color.r * 255.0) as u8,
-                        (color.g * 255.0) as u8,
-                        (color.b * 255.0) as u8,
-                        dot_alpha
-                    );
-                    draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
-                }
-            } else {
-                // cross crosshair (pistol, AR, SMG)
-                // all values are % of screen height so it scales with resolution
-                let stats = weapon.stats();
-                let base =
-                    stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+                    let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
+                    let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
 
-                let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
-                let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
+                    let movement_gap = ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
 
-                let movement_gap = ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
+                    // resting ads gap, this is so there is ALWAYS a gap unless FSA is active
+                    let ads_rest_gap = if fsa_active {
+                          (sh * 0.3) / 100.0 // small fixed gap when FSA is active (~3px at 1080p)
+                    } else {
+                        ((xhair.center_gap * sh) / 100.0) * 0.7 * weapon.ads_progress
+                        // 40% of center gap as minimum gap when fully ADS, scales with ads_progress
+                    };
 
-                // resting ads gap, this is so there is ALWAYS a gap unless FSA is active
-                let ads_rest_gap = if fsa_active {
-                      (sh * 0.3) / 100.0 // small fixed gap when FSA is active (~3px at 1080p)
-                } else {
-                    ((xhair.center_gap * sh) / 100.0) * 0.7 * weapon.ads_progress
-                    // 40% of center gap as minimum gap when fully ADS, scales with ads_progress
-                };
+                    let gap = hip_gap + kick_gap + ads_rest_gap + movement_gap;
 
-                let gap = hip_gap + kick_gap + ads_rest_gap + movement_gap;
+                    let length = (xhair.line_length * sh) / 100.0;
+                    let thick = (xhair.line_thickness * sh) / 100.0;
 
-                let length = (xhair.line_length * sh) / 100.0;
-                let thick = (xhair.line_thickness * sh) / 100.0;
+                    // 4 lines: up, down, left, right
+                    draw_rectangle(cx - thick / 2.0, cy - gap - length, thick, length, color); // up
+                    draw_rectangle(cx - thick / 2.0, cy + gap, thick, length, color); // down
+                    draw_rectangle(cx - gap - length, cy - thick / 2.0, length, thick, color); // left
+                    draw_rectangle(cx + gap, cy - thick / 2.0, length, thick, color); // right
 
-                // 4 lines: up, down, left, right
-                draw_rectangle(cx - thick / 2.0, cy - gap - length, thick, length, color); // up
-                draw_rectangle(cx - thick / 2.0, cy + gap, thick, length, color); // down
-                draw_rectangle(cx - gap - length, cy - thick / 2.0, length, thick, color); // left
-                draw_rectangle(cx + gap, cy - thick / 2.0, length, thick, color); // right
-
-                // center dot
-                if xhair.dot_enabled {
-                    draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, color);
+                    // center dot
+                    if xhair.dot_enabled {
+                        draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, color);
+                    }
                 }
             }
         }

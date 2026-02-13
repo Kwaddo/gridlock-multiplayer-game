@@ -477,7 +477,21 @@ fn draw_crosshair_tab(
     y += DevModeState::draw_toggle("outline_enabled", &mut ch.outline_enabled, x, y, mouse, clicked);
     y += DevModeState::draw_slider("outline_thickness", &mut ch.outline_thickness, 0.0, 3.0, 0.1, x, y, w, mouse, clicked, held);
 
-    y += DevModeState::draw_toggle("is_4curves (shotgun)", &mut ch.is_4curves, x, y, mouse, clicked);
+    use crate::weapons::crosshair::CrosshairType;
+    let type_label = match ch.crosshair_type {
+        CrosshairType::Cross => "Cross",
+        CrosshairType::FourCurves => "4-Curves",
+        CrosshairType::Chevron => "Chevron",
+    };
+    let (btn_h, pressed) = DevModeState::draw_action_button(&format!("Type: {}", type_label), x, y, 200.0, mouse, clicked);
+    if pressed {
+        ch.crosshair_type = match ch.crosshair_type {
+            CrosshairType::Cross => CrosshairType::FourCurves,
+            CrosshairType::FourCurves => CrosshairType::Chevron,
+            CrosshairType::Chevron => CrosshairType::Cross,
+        };
+    }
+    y += btn_h;
 
     // reset
     y += 8.0;

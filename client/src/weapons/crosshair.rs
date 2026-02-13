@@ -7,6 +7,13 @@
 use macroquad::prelude::Color;
 use super::stats::WeaponKind;
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum CrosshairType {
+    Cross,       // standard + crosshair lines
+    FourCurves,  // 4 curved arcs with gaps at cardinal directions
+    Chevron,     // 4 L-bracket corners with bezier-chamfered diagonals
+}
+
 pub struct CrosshairConfig {
     pub color: Color,
     pub dot_enabled: bool,
@@ -20,7 +27,7 @@ pub struct CrosshairConfig {
     pub kick_per_shot: f32, //  how much gap to add per shot (% of screen height)
     pub kick_decay_rate: f32, // how quickly the gap recovers back to normal after shooting (units per second)
     pub kick_max: f32,
-    pub is_4curves: bool, // 4 curved arcs with gaps at cardinal directions (shotgun style)
+    pub crosshair_type: CrosshairType,
 }
 
 impl CrosshairConfig {
@@ -40,7 +47,7 @@ impl CrosshairConfig {
                     kick_per_shot: 1.5,
                     kick_decay_rate: 8.0,
                     kick_max: 1.5,
-                    is_4curves: false,
+                    crosshair_type: CrosshairType::Cross,
                 },
             WeaponKind::Smg =>
                 Self {
@@ -55,7 +62,7 @@ impl CrosshairConfig {
                     kick_per_shot: 0.8,
                     kick_decay_rate: 6.0,
                     kick_max: 2.5,
-                    is_4curves: false,
+                    crosshair_type: CrosshairType::Cross,
                 },
             WeaponKind::Shotgun =>
                 Self {
@@ -70,7 +77,7 @@ impl CrosshairConfig {
                     kick_per_shot: 2.5,
                     kick_decay_rate: 8.0,
                     kick_max: 4.0,
-                    is_4curves: true,
+                    crosshair_type: CrosshairType::FourCurves,
                 },
             WeaponKind::AssaultRifle =>
                 Self {
@@ -85,7 +92,7 @@ impl CrosshairConfig {
                     kick_per_shot: 0.8,
                     kick_decay_rate: 5.0,
                     kick_max: 2.3,
-                    is_4curves: false,
+                    crosshair_type: CrosshairType::Cross,
                 },
             WeaponKind::Sniper =>
                 Self {
@@ -100,7 +107,7 @@ impl CrosshairConfig {
                     kick_per_shot: 0.0,
                     kick_decay_rate: 0.0,
                     kick_max: 0.0,
-                    is_4curves: false,
+                    crosshair_type: CrosshairType::Cross,
                 },
         }
     }
