@@ -144,7 +144,7 @@ impl PlayingState {
 
             let glow_alpha = ((alpha as f32) * 0.3) as u8;
             let glow_color = Color::from_rgba(r, g, b, glow_alpha);
-            let glow_w = half_w * 1.8;
+            let glow_w = half_w * 0.6;
 
             // draw two crossed planes (right + up) for 3D depth illusion
             for axis in [right, up] {

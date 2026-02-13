@@ -16,6 +16,10 @@ const CROSSHAIR_TYPES: &[CrosshairType] = &[
     CrosshairType::Cross,
     CrosshairType::FourCurves,
     CrosshairType::Chevron,
+    CrosshairType::Circle,
+    CrosshairType::Square,
+    CrosshairType::Triangle,
+    CrosshairType::AngleBrackets,
 ];
 
 fn crosshair_type_name(ct: CrosshairType) -> &'static str {
@@ -23,6 +27,10 @@ fn crosshair_type_name(ct: CrosshairType) -> &'static str {
         CrosshairType::Cross => "Cross",
         CrosshairType::FourCurves => "4-Curves",
         CrosshairType::Chevron => "Chevron",
+        CrosshairType::Circle => "Circle",
+        CrosshairType::Square => "Square",
+        CrosshairType::Triangle => "Triangle",
+        CrosshairType::AngleBrackets => "Angle Brackets",
     }
 }
 
@@ -931,6 +939,9 @@ fn draw_crosshair_preview(
     let ads_progress = if state.preview_ads { 1.0 } else { 0.0 };
     let color = xhair.color;
 
+    let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
+    let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
+
     match xhair.crosshair_type {
         CrosshairType::FourCurves => {
             let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
@@ -1047,6 +1058,83 @@ fn draw_crosshair_preview(
             draw_rectangle(cx - gap - len, cy - thick / 2.0, len, thick, color);
             draw_rectangle(cx + gap, cy - thick / 2.0, len, thick, color);
 
+            if xhair.dot_enabled {
+                let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
+                let dot_color = Color::from_rgba((color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha);
+                draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
+            }
+        }
+        CrosshairType::Circle => {
+            let gap = hip_gap + ads_rest_gap;
+            let thick = (xhair.line_thickness * sh) / 100.0;
+            if xhair.outline_enabled {
+                let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                draw_circle_lines(cx, cy, gap, ot, Color::from_rgba(0, 0, 0, 180));
+            }
+            draw_circle_lines(cx, cy, gap, thick, color);
+            if xhair.dot_enabled {
+                draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, color);
+            }
+        }
+        CrosshairType::Square => {
+            let size = (hip_gap + ads_rest_gap) * 2.0;
+            let thick = (xhair.line_thickness * sh) / 100.0;
+            if xhair.outline_enabled {
+                let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                draw_rectangle_lines(cx - size/2.0, cy - size/2.0, size, size, ot, Color::from_rgba(0, 0, 0, 180));
+            }
+            draw_rectangle_lines(cx - size/2.0, cy - size/2.0, size, size, thick, color);
+            if xhair.dot_enabled {
+                draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, color);
+            }
+        }
+        CrosshairType::Triangle => {
+            let size = (hip_gap + ads_rest_gap) * 2.0;
+            let thick = (xhair.line_thickness * sh) / 100.0;
+            let height = size * 0.866;
+            let v1 = (cx, cy - height * 0.67);
+            let v2 = (cx - size/2.0, cy + height * 0.33);
+            let v3 = (cx + size/2.0, cy + height * 0.33);
+            if xhair.outline_enabled {
+                let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                let oc = Color::from_rgba(0, 0, 0, 180);
+                draw_line(v1.0, v1.1, v2.0, v2.1, ot, oc);
+                draw_line(v2.0, v2.1, v3.0, v3.1, ot, oc);
+                draw_line(v3.0, v3.1, v1.0, v1.1, ot, oc);
+            }
+            draw_line(v1.0, v1.1, v2.0, v2.1, thick, color);
+            draw_line(v2.0, v2.1, v3.0, v3.1, thick, color);
+            draw_line(v3.0, v3.1, v1.0, v1.1, thick, color);
+            if xhair.dot_enabled {
+                draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, color);
+            }
+        }
+        CrosshairType::AngleBrackets => {
+            let gap = hip_gap + ads_rest_gap;
+            let arm = ((xhair.line_length) * sh) / 100.0;
+            let thick = (xhair.line_thickness * sh) / 100.0;
+            let left_tip_x = cx - gap - arm;
+            let left_base_x = cx - gap;
+            let top_y = cy - arm / 2.0;
+            let bot_y = cy + arm / 2.0;
+            if xhair.outline_enabled {
+                let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                let oc = Color::from_rgba(0, 0, 0, 180);
+                draw_line(left_base_x, top_y, left_tip_x, cy, ot, oc);
+                draw_line(left_tip_x, cy, left_base_x, bot_y, ot, oc);
+            }
+            draw_line(left_base_x, top_y, left_tip_x, cy, thick, color);
+            draw_line(left_tip_x, cy, left_base_x, bot_y, thick, color);
+            let right_tip_x = cx + gap + arm;
+            let right_base_x = cx + gap;
+            if xhair.outline_enabled {
+                let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                let oc = Color::from_rgba(0, 0, 0, 180);
+                draw_line(right_base_x, top_y, right_tip_x, cy, ot, oc);
+                draw_line(right_tip_x, cy, right_base_x, bot_y, ot, oc);
+            }
+            draw_line(right_base_x, top_y, right_tip_x, cy, thick, color);
+            draw_line(right_tip_x, cy, right_base_x, bot_y, thick, color);
             if xhair.dot_enabled {
                 let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
                 let dot_color = Color::from_rgba((color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha);

@@ -112,6 +112,11 @@ pub struct WeaponStats {
     pub tracer_thickness: f32, // thickness of the bullet tracer line (units)
     pub tracer_lifetime: f32, // how long the tracer trail lingers (seconds)
 
+    // --- Crosshair kick (visual gap expansion on fire, not user-editable)
+    pub crosshair_kick_per_shot: f32, // how much gap to add per shot (% of screen height)
+    pub crosshair_kick_decay: f32, // how quickly the gap recovers (units per second)
+    pub crosshair_kick_max: f32, // maximum kick gap
+
     // --- Crosshair
     pub crosshair_style: CrosshairStyle, // which render path (Standard = cross/texture, Scope = sniper overlay)
     pub fsa_time: Option<f32>, // seconds to reach first shot accuracy, None = never (SMG)
@@ -177,6 +182,10 @@ pub const PISTOL: WeaponStats = WeaponStats {
     tracer_thickness: 0.01,
     tracer_lifetime: 1.5,
 
+    crosshair_kick_per_shot: 1.5,
+    crosshair_kick_decay: 8.0,
+    crosshair_kick_max: 1.5,
+
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.25),
 
@@ -236,6 +245,10 @@ pub const SMG: WeaponStats = WeaponStats {
     tracer_color:[255,200,80,255],
     tracer_thickness: 0.01,
     tracer_lifetime: 1.2,
+
+    crosshair_kick_per_shot: 0.8,
+    crosshair_kick_decay: 6.0,
+    crosshair_kick_max: 2.5,
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None, // SMG never reaches FSA
@@ -315,6 +328,10 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     tracer_thickness: 0.008,
     tracer_lifetime: 0.8,
 
+    crosshair_kick_per_shot: 2.5,
+    crosshair_kick_decay: 8.0,
+    crosshair_kick_max: 4.0,
+
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None, // shotgun has no FSA
 
@@ -369,6 +386,10 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     tracer_color:[255,230,150,255],
     tracer_thickness: 0.015,
     tracer_lifetime: 1.5,
+
+    crosshair_kick_per_shot: 0.8,
+    crosshair_kick_decay: 5.0,
+    crosshair_kick_max: 2.3,
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.35),
@@ -435,6 +456,10 @@ pub const SNIPER: WeaponStats = WeaponStats {
     tracer_color:[180, 200, 255, 255],
     tracer_thickness: 0.03,
     tracer_lifetime: 3.5,
+
+    crosshair_kick_per_shot: 0.0,
+    crosshair_kick_decay: 0.0,
+    crosshair_kick_max: 0.0,
 
     crosshair_style: CrosshairStyle::Scope,
     fsa_time: None, // sniper doesnt use FSA (scope handles accuracy)

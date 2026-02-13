@@ -243,7 +243,7 @@ impl PlayingState {
                         
 
                         // bullet tracer — tiny offset so billboard quad is never perfectly edge-on
-                        let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.05, 0.0);
+                        let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
                         self.tracers.push(BulletTracer {
                             start: tracer_start,
                             end: eye + fwd * range,
