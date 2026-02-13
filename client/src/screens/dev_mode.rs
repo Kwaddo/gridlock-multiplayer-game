@@ -460,9 +460,9 @@ fn draw_crosshair_tab(
     y += DevModeState::draw_slider("dot_size", &mut ch.dot_size, 0.0, 8.0, 0.05, x, y, w, mouse, clicked, held);
 
     y += DevModeState::draw_section_header("Kick", x, y);
-    y += DevModeState::draw_slider("kick_per_shot", &mut ch.kick_per_shot, 0.0, 10.0, 0.5, x, y, w, mouse, clicked, held);
-    y += DevModeState::draw_slider("kick_decay_rate", &mut ch.kick_decay_rate, 1.0, 20.0, 1.0, x, y, w, mouse, clicked, held);
-    y += DevModeState::draw_slider("kick_max", &mut ch.kick_max, 0.0, 30.0, 1.0, x, y, w, mouse, clicked, held);
+    y += DevModeState::draw_slider("kick_per_shot", &mut weapon.stats_data.crosshair_kick_per_shot, 0.0, 10.0, 0.5, x, y, w, mouse, clicked, held);
+    y += DevModeState::draw_slider("kick_decay_rate", &mut weapon.stats_data.crosshair_kick_decay, 1.0, 20.0, 1.0, x, y, w, mouse, clicked, held);
+    y += DevModeState::draw_slider("kick_max", &mut weapon.stats_data.crosshair_kick_max, 0.0, 30.0, 1.0, x, y, w, mouse, clicked, held);
 
     y += DevModeState::draw_section_header("Color (RGB)", x, y);
     let mut r = ch.color.r * 255.0;
@@ -482,13 +482,21 @@ fn draw_crosshair_tab(
         CrosshairType::Cross => "Cross",
         CrosshairType::FourCurves => "4-Curves",
         CrosshairType::Chevron => "Chevron",
+        CrosshairType::Circle => "Circle",
+        CrosshairType::Square => "Square",
+        CrosshairType::Triangle => "Triangle",
+        CrosshairType::AngleBrackets => "Angle Brackets",
     };
     let (btn_h, pressed) = DevModeState::draw_action_button(&format!("Type: {}", type_label), x, y, 200.0, mouse, clicked);
     if pressed {
         ch.crosshair_type = match ch.crosshair_type {
             CrosshairType::Cross => CrosshairType::FourCurves,
             CrosshairType::FourCurves => CrosshairType::Chevron,
-            CrosshairType::Chevron => CrosshairType::Cross,
+            CrosshairType::Chevron => CrosshairType::Circle,
+            CrosshairType::Circle => CrosshairType::Square,
+            CrosshairType::Square => CrosshairType::Triangle,
+            CrosshairType::Triangle => CrosshairType::AngleBrackets,
+            CrosshairType::AngleBrackets => CrosshairType::Cross,
         };
     }
     y += btn_h;

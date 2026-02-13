@@ -78,14 +78,42 @@ impl CrosshairPresetManager {
         manager.load_user_presets();
         manager
     }
-    // rebuild defaults
+    // rebuild defaults — one per crosshair type, not per weapon
     fn rebuild_defaults(&mut self) {
         self.presets.clear();
-        for kind in WeaponKind::ALL {
-            let config = CrosshairConfig::for_weapon(kind);
-            let name = format!("{} Default", kind.stats().name);
-            self.presets.push(CrosshairPreset::from_config(&name, &config, true));
-        }
+
+        // Cross default 
+        let cross = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        self.presets.push(CrosshairPreset::from_config("Cross", &cross, true));
+
+        // 4 Curves 
+        let curves = CrosshairConfig::for_weapon(WeaponKind::Shotgun);
+        self.presets.push(CrosshairPreset::from_config("4 Curves", &curves, true));
+
+        // Chevron default
+        let mut chevron = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        chevron.crosshair_type = CrosshairType::Chevron;
+        self.presets.push(CrosshairPreset::from_config("Chevron", &chevron, true));
+
+        // Circle default
+        let mut circle = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        circle.crosshair_type = CrosshairType::Circle;
+        self.presets.push(CrosshairPreset::from_config("Circle", &circle, true));
+
+        // Square default
+        let mut square = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        square.crosshair_type = CrosshairType::Square;
+        self.presets.push(CrosshairPreset::from_config("Square", &square, true));
+
+        // Triangle default
+        let mut triangle = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        triangle.crosshair_type = CrosshairType::Triangle;
+        self.presets.push(CrosshairPreset::from_config("Triangle", &triangle, true));
+
+        // Angle Brackets (shotgun-style wider gap)
+        let mut brackets = CrosshairConfig::for_weapon(WeaponKind::Shotgun);
+        brackets.crosshair_type = CrosshairType::AngleBrackets;
+        self.presets.push(CrosshairPreset::from_config("Angle Brackets", &brackets, true));
     }
     // load user presets from JSON and append
     fn load_user_presets(&mut self) {

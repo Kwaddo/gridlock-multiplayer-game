@@ -65,9 +65,11 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
     weapon.bloom += weapon.stats_data.spread_per_shot;
 
     // crosshair kick
-    weapon.crosshair_kick += weapon.crosshair.kick_per_shot;
-    if weapon.crosshair.kick_max > 0.0 {
-        weapon.crosshair_kick = weapon.crosshair_kick.min(weapon.crosshair.kick_max);
+    let kick_per_shot = weapon.stats().crosshair_kick_per_shot;
+    let kick_max = weapon.stats().crosshair_kick_max;
+    weapon.crosshair_kick += kick_per_shot;
+    if kick_max > 0.0 {
+        weapon.crosshair_kick = weapon.crosshair_kick.min(kick_max);
     }
 
     // go to next pattern index for next shot
@@ -144,7 +146,7 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
 
     // crosshair kick decay
     if weapon.crosshair_kick > 0.0 { 
-        weapon.crosshair_kick *= (1.0 - weapon.crosshair.kick_decay_rate * delta).max(0.0); // exponential decay
+        weapon.crosshair_kick *= (1.0 - weapon.stats().crosshair_kick_decay * delta).max(0.0); // exponential decay
     } else {
         weapon.crosshair_kick = 0.0;
     }
