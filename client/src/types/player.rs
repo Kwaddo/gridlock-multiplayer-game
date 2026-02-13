@@ -1,6 +1,6 @@
 use macroquad::prelude::*;
 use crate::types::world::WorldId;
-use crate::weapons::combat::{ CombatEntity, HitZone, Hitbox, default_player_hitboxes };
+use crate::weapons::combat::{ CombatEntity, Hitbox, default_player_hitboxes };
 
 
 pub struct OtherPlayer {

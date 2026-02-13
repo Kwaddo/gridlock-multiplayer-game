@@ -8,6 +8,7 @@ use macroquad::prelude::*;
 use crate::core::GameConfig;
 use crate::ui::fonts::{text_params, measure_game_text};
 use crate::weapons::WeaponInventory;
+use crate::weapons::crosshair_presets::CrosshairPresetManager;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum SettingsTab {
@@ -60,18 +61,53 @@ impl SettingsScreen {
         }
     }
 
-    pub fn update(&mut self, config: &mut GameConfig, weapons: &mut WeaponInventory) -> bool {
+    pub fn update(&mut self, config: &mut GameConfig, weapons: &mut WeaponInventory, presets: &mut CrosshairPresetManager) -> bool {
         let mouse = mouse_position();
         let clicked = is_mouse_button_pressed(MouseButton::Left);
         let held = is_mouse_button_down(MouseButton::Left);
 
-        // Handle unsaved changes prompt
+        // Handle crosshair save prompt (fullscreen modal, blocks everything)
+        if self.active_tab == SettingsTab::Crosshair && self.crosshair_state.show_save_prompt {
+            if let Some(should_leave) = crosshair_settings::update_crosshair_save_prompt(
+                &mut self.crosshair_state, weapons, presets,
+            ) {
+                if should_leave {
+                    // Check if there's a pending tab switch instead of leaving settings
+                    if let Some(tab_id) = self.crosshair_state.pending_tab.take() {
+                        self.active_tab = match tab_id {
+                            0 => SettingsTab::General,
+                            1 => SettingsTab::Keybinds,
+                            _ => SettingsTab::General,
+                        };
+                        return false;
+                    }
+                    return true;
+                }
+                // Resolved but staying — check pending tab
+                if let Some(tab_id) = self.crosshair_state.pending_tab.take() {
+                    self.active_tab = match tab_id {
+                        0 => SettingsTab::General,
+                        1 => SettingsTab::Keybinds,
+                        _ => SettingsTab::General,
+                    };
+                }
+            }
+            return false; // block all other input while prompt is open
+        }
+
+        // Handle unsaved changes prompt (for non-crosshair tabs)
         if self.show_unsaved_prompt {
             return self.update_unsaved_prompt(config, mouse, clicked);
         }
 
         // ESC tries to go back
         if is_key_pressed(KeyCode::Escape) {
+            if self.active_tab == SettingsTab::Crosshair {
+                self.crosshair_state.show_save_prompt = true;
+                self.crosshair_state.save_prompt_is_leave = true;
+                self.crosshair_state.pending_tab = None;
+                return false;
+            }
             if self.has_unsaved_changes(config) {
                 self.show_unsaved_prompt = true;
                 return false;
@@ -91,10 +127,25 @@ impl SettingsScreen {
             if clicked && mouse.0 >= tab_x && mouse.0 <= tab_x + tab_w &&
                mouse.1 >= tab_y && mouse.1 <= tab_y + tab_h
             {
-                if self.active_tab != *tab && *tab == SettingsTab::Crosshair {
-                    self.crosshair_state.reset_visit();
+                if self.active_tab != *tab {
+                    // Switching away from crosshair tab — trigger save prompt
+                    if self.active_tab == SettingsTab::Crosshair {
+                        let pending = match *tab {
+                            SettingsTab::General => 0u8,
+                            SettingsTab::Keybinds => 1u8,
+                            SettingsTab::Crosshair => 2u8,
+                        };
+                        self.crosshair_state.show_save_prompt = true;
+                        self.crosshair_state.save_prompt_is_leave = true;
+                        self.crosshair_state.pending_tab = Some(pending);
+                        break;
+                    }
+                    // Switching to crosshair tab
+                    if *tab == SettingsTab::Crosshair {
+                        self.crosshair_state.reset_visit();
+                    }
+                    self.active_tab = *tab;
                 }
-                self.active_tab = *tab;
             }
         }
 
@@ -122,6 +173,7 @@ impl SettingsScreen {
                 crosshair_settings::update_crosshair_settings(
                     &mut self.crosshair_state,
                     weapons,
+                    presets,
                     gap,
                     content_top,
                     panel_w,
@@ -141,7 +193,11 @@ impl SettingsScreen {
             && mouse.0 >= back_x && mouse.0 <= back_x + back_w
             && mouse.1 >= back_y && mouse.1 <= back_y + 40.0
         {
-            if self.has_unsaved_changes(config) {
+            if self.active_tab == SettingsTab::Crosshair {
+                self.crosshair_state.show_save_prompt = true;
+                self.crosshair_state.save_prompt_is_leave = true;
+                self.crosshair_state.pending_tab = None;
+            } else if self.has_unsaved_changes(config) {
                 self.show_unsaved_prompt = true;
             } else {
                 return true;
@@ -156,7 +212,13 @@ impl SettingsScreen {
             && mouse.0 >= save_x && mouse.0 <= save_x + save_w
             && mouse.1 >= back_y && mouse.1 <= back_y + 40.0
         {
-            self.saved_config = Some(config.clone());
+            if self.active_tab == SettingsTab::Crosshair {
+                self.crosshair_state.show_save_prompt = true;
+                self.crosshair_state.save_prompt_is_leave = false;
+                self.crosshair_state.pending_tab = None;
+            } else {
+                self.saved_config = Some(config.clone());
+            }
         }
 
         // Reset button
@@ -247,7 +309,7 @@ impl SettingsScreen {
         false
     }
 
-    pub fn draw(&self, config: &GameConfig, weapons: &WeaponInventory, assets: &std::collections::HashMap<String, Texture2D>) {
+    pub fn draw(&self, config: &GameConfig, weapons: &WeaponInventory, presets: &CrosshairPresetManager, assets: &std::collections::HashMap<String, Texture2D>) {
         // Title
         let title = "SETTINGS";
         let title_w = measure_game_text(title, 30);
@@ -322,6 +384,7 @@ impl SettingsScreen {
                 crosshair_settings::draw_crosshair_settings(
                     &self.crosshair_state,
                     weapons,
+                    presets,
                     gap,
                     content_top,
                     panel_w,
@@ -334,6 +397,11 @@ impl SettingsScreen {
 
         // Bottom buttons
         self.draw_bottom_buttons(config);
+
+        // Draw save prompt overlay on top of everything (including bottom buttons)
+        if self.active_tab == SettingsTab::Crosshair && self.crosshair_state.show_save_prompt {
+            crosshair_settings::draw_crosshair_save_prompt(&self.crosshair_state, presets);
+        }
     }
 
     fn draw_bottom_buttons(&self, config: &GameConfig) {

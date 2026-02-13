@@ -1,24 +1,321 @@
 # Full Implementation Roadmap
 
-Ordered by priority. Items discussed this session come first, then existing todolist items,
-then bigger features (hybrid recoil, universal input bindings) at the end.
+Ordered by priority. Each phase includes implementation hints, code snippets, and file paths.
+Phases marked [DONE] have been completed. Minimap is handled separately (not in this roadmap).
 
 ---
 
-## Phase 1: Immediate — Things discussed this session
+## Phase 1: Crosshair Preset System (save/load custom crosshairs)
 
-### 1A. Dev Mode: Aim Trace Line (aimbot visualization)
+### 1A. Add serde dependencies
 
-**What:** When `show_hitboxes` is ON, draw a continuous 3D line from the player's eye to wherever their aim hits a hitbox. If no hit, draw a dim line to max range. Useful for debugging and future AI.
+**File:** `client/Cargo.toml`
 
-**Files:**
-- `client/src/screens/playing/rendering.rs` — new `draw_aim_trace()` method
-- `client/src/screens/playing.rs` — call it during 3D render pass
+```toml
+[dependencies]
+macroquad = "0.4"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+```
 
-**Implementation:**
+These unlock JSON save/load for crosshair presets AND full settings persistence later.
 
-In `rendering.rs`, add to `impl PlayingState`:
+---
+
+### 1B. Crosshair preset data model
+
+**New file:** `client/src/weapons/crosshair_presets.rs`
+**Register in:** `client/src/weapons/mod.rs` — add `pub mod crosshair_presets;`
+
 ```rust
+use serde::{Serialize, Deserialize};
+use std::path::PathBuf;
+use super::crosshair::{CrosshairConfig, CrosshairType};
+use super::stats::WeaponKind;
+use macroquad::prelude::Color;
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CrosshairPreset {
+    pub name: String,
+    pub is_default: bool,           // true = factory preset, can't overwrite/delete
+    pub crosshair_type: CrosshairType,
+    pub color: [u8; 4],             // RGBA (Color doesn't impl Serialize)
+    pub dot_enabled: bool,
+    pub dot_size: f32,
+    pub line_length: f32,
+    pub line_thickness: f32,
+    pub center_gap: f32,
+    pub outline_enabled: bool,
+    pub outline_thickness: f32,
+    pub kick_per_shot: f32,
+    pub kick_decay_rate: f32,
+    pub kick_max: f32,
+}
+
+impl CrosshairPreset {
+    /// Convert from runtime CrosshairConfig to serializable preset
+    pub fn from_config(name: &str, config: &CrosshairConfig, is_default: bool) -> Self {
+        Self {
+            name: name.to_string(),
+            is_default,
+            crosshair_type: config.crosshair_type,
+            color: [
+                (config.color.r * 255.0) as u8,
+                (config.color.g * 255.0) as u8,
+                (config.color.b * 255.0) as u8,
+                (config.color.a * 255.0) as u8,
+            ],
+            dot_enabled: config.dot_enabled,
+            dot_size: config.dot_size,
+            line_length: config.line_length,
+            line_thickness: config.line_thickness,
+            center_gap: config.center_gap,
+            outline_enabled: config.outline_enabled,
+            outline_thickness: config.outline_thickness,
+            kick_per_shot: config.kick_per_shot,
+            kick_decay_rate: config.kick_decay_rate,
+            kick_max: config.kick_max,
+        }
+    }
+
+    /// Apply this preset to a CrosshairConfig
+    pub fn apply_to(&self, config: &mut CrosshairConfig) {
+        config.crosshair_type = self.crosshair_type;
+        config.color = Color::from_rgba(self.color[0], self.color[1], self.color[2], self.color[3]);
+        config.dot_enabled = self.dot_enabled;
+        config.dot_size = self.dot_size;
+        config.line_length = self.line_length;
+        config.line_thickness = self.line_thickness;
+        config.center_gap = self.center_gap;
+        config.outline_enabled = self.outline_enabled;
+        config.outline_thickness = self.outline_thickness;
+        config.kick_per_shot = self.kick_per_shot;
+        config.kick_decay_rate = self.kick_decay_rate;
+        config.kick_max = self.kick_max;
+    }
+}
+
+pub struct CrosshairPresetManager {
+    pub presets: Vec<CrosshairPreset>,
+    file_path: PathBuf,
+}
+
+impl CrosshairPresetManager {
+    pub fn new() -> Self {
+        let mut mgr = Self {
+            presets: Vec::new(),
+            file_path: PathBuf::from("crosshair_presets.json"),
+        };
+        mgr.rebuild_defaults();
+        mgr.load_user_presets();
+        mgr
+    }
+
+    /// Regenerate factory defaults (always first in list)
+    fn rebuild_defaults(&mut self) {
+        self.presets.clear();
+        for kind in WeaponKind::ALL {
+            let config = CrosshairConfig::for_weapon(kind);
+            let name = format!("{} Default", kind.stats().name);
+            self.presets.push(CrosshairPreset::from_config(&name, &config, true));
+        }
+    }
+
+    /// Load user presets from JSON and append after defaults
+    fn load_user_presets(&mut self) {
+        if let Ok(data) = std::fs::read_to_string(&self.file_path) {
+            if let Ok(user_presets) = serde_json::from_str::<Vec<CrosshairPreset>>(&data) {
+                for mut p in user_presets {
+                    p.is_default = false; // safety: never trust file marking itself as default
+                    self.presets.push(p);
+                }
+            }
+        }
+    }
+
+    /// Save only user (non-default) presets to disk
+    pub fn save(&self) {
+        let user_only: Vec<&CrosshairPreset> = self.presets.iter()
+            .filter(|p| !p.is_default)
+            .collect();
+        if let Ok(json) = serde_json::to_string_pretty(&user_only) {
+            let _ = std::fs::write(&self.file_path, json);
+        }
+    }
+
+    /// Create a new user preset from current config
+    pub fn save_as_new(&mut self, name: String, config: &CrosshairConfig) {
+        self.presets.push(CrosshairPreset::from_config(&name, config, false));
+        self.save();
+    }
+
+    /// Overwrite an existing user preset (panics if default)
+    pub fn overwrite(&mut self, index: usize, config: &CrosshairConfig) {
+        if index < self.presets.len() && !self.presets[index].is_default {
+            let name = self.presets[index].name.clone();
+            self.presets[index] = CrosshairPreset::from_config(&name, config, false);
+            self.save();
+        }
+    }
+
+    /// Delete a user preset (no-op if default)
+    pub fn delete(&mut self, index: usize) {
+        if index < self.presets.len() && !self.presets[index].is_default {
+            self.presets.remove(index);
+            self.save();
+        }
+    }
+
+    pub fn default_count(&self) -> usize {
+        self.presets.iter().filter(|p| p.is_default).count()
+    }
+
+    /// Suggested name for next custom preset
+    pub fn next_custom_name(&self) -> String {
+        let custom_count = self.presets.iter().filter(|p| !p.is_default).count();
+        format!("Custom {}", custom_count + 1)
+    }
+}
+```
+
+---
+
+### 1C. Add Serialize/Deserialize to CrosshairType
+
+**File:** `client/src/weapons/crosshair.rs`
+
+Change the derive line:
+```rust
+// BEFORE:
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum CrosshairType { ... }
+
+// AFTER:
+use serde::{Serialize, Deserialize};
+
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub enum CrosshairType { ... }
+```
+
+---
+
+### 1D. Integrate preset manager into game state
+
+**File:** `client/src/main.rs`
+```rust
+use crate::weapons::crosshair_presets::CrosshairPresetManager;
+
+// In main(), before game loop:
+let mut crosshair_presets = CrosshairPresetManager::new();
+
+// Pass &mut crosshair_presets to settings screen update/draw calls
+```
+
+**File:** `client/src/settings/mod.rs`
+- Add `crosshair_presets: &mut CrosshairPresetManager` parameter to `update()` and `draw()`
+- Forward to `crosshair_settings::update_crosshair_settings()` and `draw_crosshair_settings()`
+
+---
+
+### 1E. Crosshair settings UI — preset dropdown + save/overwrite/delete
+
+**File:** `client/src/settings/crosshair_settings.rs`
+
+Add to `CrosshairSettingsPreview`:
+```rust
+pub selected_preset: usize,        // index into preset manager
+pub naming_mode: bool,             // true when text input is active
+pub preset_name_buffer: String,    // text input buffer
+pub confirm_delete: bool,          // true when delete confirmation is shown
+```
+
+**Preset dropdown** (replaces or sits above current crosshair type dropdown):
+```rust
+// Draw preset selector
+let preset_names: Vec<String> = presets.presets.iter().map(|p| {
+    if p.is_default { format!("{} [Default]", p.name) } else { p.name.clone() }
+}).collect();
+
+// Cycle through presets on click (or use scrollable list)
+// When preset changes, apply it: presets.presets[idx].apply_to(&mut weapon.crosshair)
+```
+
+**Action buttons layout:**
+```rust
+// [Save As New]  [Overwrite]  [Delete]  [Reset Default]
+//      ^              ^           ^            ^
+//   always       only if       only if     always
+//   visible     !is_default   !is_default   visible
+
+// "Save As New" → sets naming_mode = true, shows text input
+// "Overwrite" → presets.overwrite(selected, &weapon.crosshair)
+// "Delete" → presets.delete(selected); selected = 0
+// "Reset Default" → weapon.crosshair = CrosshairConfig::for_weapon(weapon.kind)
+```
+
+**Inline preview thumbnail** for each preset in dropdown:
+```rust
+// Reuse draw_crosshair_preview() but with smaller cx/cy offset
+// Draw into a 30x30 box next to the preset name
+// Just call the same crosshair rendering code with scaled-down parameters
+```
+
+---
+
+### 1F. Text input widget
+
+**Hint:** macroquad has `get_char_pressed()` and `is_key_pressed(KeyCode::Backspace)`.
+
+```rust
+fn update_text_input(buffer: &mut String, max_len: usize) -> Option<bool> {
+    // Returns Some(true) on Enter, Some(false) on Escape, None if still editing
+    if is_key_pressed(KeyCode::Enter) { return Some(true); }
+    if is_key_pressed(KeyCode::Escape) { return Some(false); }
+
+    if is_key_pressed(KeyCode::Backspace) && !buffer.is_empty() {
+        buffer.pop();
+    }
+
+    while let Some(ch) = get_char_pressed() {
+        if ch.is_alphanumeric() || ch == ' ' || ch == '-' || ch == '_' {
+            if buffer.len() < max_len {
+                buffer.push(ch);
+            }
+        }
+    }
+    None
+}
+
+fn draw_text_input(buffer: &str, x: f32, y: f32, w: f32) {
+    draw_rectangle(x, y, w, 30.0, Color::from_rgba(20, 20, 20, 255));
+    draw_rectangle_lines(x, y, w, 30.0, 2.0, Color::from_rgba(100, 180, 255, 255));
+
+    let display = if buffer.is_empty() { "Type name..." } else { buffer };
+    let color = if buffer.is_empty() { GRAY } else { WHITE };
+    draw_text_ex(display, x + 8.0, y + 22.0, text_params(18, color));
+
+    // blinking cursor
+    let cursor_x = x + 8.0 + measure_game_text(buffer, 18);
+    if (get_time() * 2.0) as i32 % 2 == 0 {
+        draw_line(cursor_x, y + 5.0, cursor_x, y + 25.0, 1.5, WHITE);
+    }
+}
+```
+
+---
+
+## Phase 2: Immediate Fixes
+
+### 2A. Dev Mode: Aim Trace Line
+
+**Files:** `client/src/screens/playing/rendering.rs`, `client/src/screens/playing.rs`
+
+When `show_hitboxes` is ON, draw a continuous 3D line from player's eye to aim hit point.
+Color-coded: head=red, torso=green, limbs=blue, miss=dim white.
+
+```rust
+// In rendering.rs, add to impl PlayingState:
 pub(super) fn draw_aim_trace(&self) {
     use crate::weapons::combat::CombatEntity;
 
@@ -32,7 +329,6 @@ pub(super) fn draw_aim_trace(&self) {
     let stats = self.weapons.active().stats();
     let range = stats.bullet_range;
 
-    // find closest hit across all entities
     let mut closest: Option<(f32, crate::weapons::combat::HitZone)> = None;
 
     if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
@@ -40,39 +336,36 @@ pub(super) fn draw_aim_trace(&self) {
     }
     for p in &self.other_players {
         if let Some((zone, dist)) = p.ray_test(eye, fwd, range) {
-            let is_closer = closest.map_or(true, |(d, _)| dist < d);
-            if is_closer {
+            if closest.map_or(true, |(d, _)| dist < d) {
                 closest = Some((dist, zone));
             }
         }
     }
 
     let (end_point, color) = if let Some((dist, zone)) = closest {
-        let hit_color = match zone {
+        let c = match zone {
             crate::weapons::combat::HitZone::Head => Color::from_rgba(255, 50, 50, 200),
             crate::weapons::combat::HitZone::Torso => Color::from_rgba(50, 255, 50, 200),
             crate::weapons::combat::HitZone::Limbs => Color::from_rgba(50, 150, 255, 200),
         };
-        (eye + fwd * dist, hit_color)
+        (eye + fwd * dist, c)
     } else {
         (eye + fwd * range, Color::from_rgba(255, 255, 255, 40))
     };
 
-    // draw the trace line (3 offset lines for thickness)
     let up = vec3(0.0, 1.0, 0.0);
     let side = fwd.cross(up).normalize() * 0.01;
     draw_line_3d(eye, end_point, color);
     draw_line_3d(eye + side, end_point + side, color);
     draw_line_3d(eye - side, end_point - side, color);
 
-    // draw a small sphere at hit point
     if closest.is_some() {
         draw_sphere(end_point, 0.05, None, color);
     }
 }
 ```
 
-In `playing.rs`, after `self.draw_tracers();` (around line 452):
+In `playing.rs`, after `self.draw_tracers();`:
 ```rust
 if self.dev_mode.show_hitboxes {
     self.draw_aim_trace();
@@ -81,143 +374,334 @@ if self.dev_mode.show_hitboxes {
 
 ---
 
-### 1B. Fix `choke_distance` compile error
+### 2B. Sniper scope sway
 
-**What:** The `choke_distance` field was added to `WeaponStats` struct but never added to the 5 weapon const definitions. Either remove it or add `choke_distance: 0.0` to all 5 consts.
+**Files:** `client/src/screens/playing.rs`, `client/src/ui/hud.rs`
 
-**Recommendation:** Keep the field (it's a good idea for later), add `choke_distance: 0.0` to PISTOL, SMG, SHOTGUN, ASSAULT_RIFLE, SNIPER in `stats.rs`. Set shotgun to `8.0` if we decide to implement choke later.
-
-**File:** `client/src/weapons/stats.rs`
-
-For each weapon const, add after `falloff_min_mult`:
+Add to PlayingState:
 ```rust
-choke_distance: 0.0, // no choke (pure cone spread)
+pub scope_sway_x: f32,
+pub scope_sway_y: f32,
 ```
 
----
-
-### 1C. Fine-tune sniper feel
-
-**What:** Scope sway when moving, tracer feel, overall sniper polish.
-
-**Files:**
-- `client/src/ui/hud.rs` — scope rendering, add sway offset
-- `client/src/weapons/stats.rs` — tweak sniper values
-- `client/src/screens/playing.rs` — scope sway calculation
-
-**Implementation — Scope Sway:**
-
-In `playing.rs`, compute sway offset based on movement state:
+In simulate/update:
 ```rust
-// in simulate() or a new method, update sway
 let is_moving = self.movement_state.is_moving();
 let is_crouching = self.movement_state.is_crouching;
 let sway_amount = if is_crouching { 0.3 } else if is_moving { 1.0 } else { 0.5 };
-
-// sinusoidal sway using time
 let time = get_time() as f32;
-let sway_x = (time * 1.2).sin() * sway_amount;
-let sway_y = (time * 0.8).cos() * sway_amount * 0.6;
+self.scope_sway_x = (time * 1.2).sin() * sway_amount;
+self.scope_sway_y = (time * 0.8).cos() * sway_amount * 0.6;
 ```
 
-Store `scope_sway_x` and `scope_sway_y` on PlayingState (or WeaponState).
-
-In `hud.rs` scope rendering (around line 252), offset `cx` and `cy` by the sway values when drawing the reticle:
+In `hud.rs` scope rendering, offset reticle (NOT vignette):
 ```rust
 let sway_cx = cx + scope_sway_x;
 let sway_cy = cy + scope_sway_y;
-// use sway_cx/sway_cy for the reticle lines and center dot
+// Use sway_cx/sway_cy for reticle lines and center dot
 ```
-
-The vignette stays centered (scope housing doesn't move), but the reticle inside sways.
-
-**Sniper tracer:** Already 8.0 length and 350 speed. Could increase speed to 500+ for more "instant" feel. Tweak in stats.rs.
 
 ---
 
+### 2C. Fix `choke_distance` (if field still exists in stats.rs)
 
-
-## Phase 3: Billboard quad tracers with glow
-
-### 3A. Upgrade tracers to billboarded quads
-
-**What:** Replace the current 3-line `draw_line_3d` tracers with camera-facing quads that have a glow texture. Much more visually appealing.
-
-**Files:**
-- `client/src/screens/playing/rendering.rs` — rewrite `draw_tracers()`
-- `client/src/weapons/effects.rs` — add glow texture loading or procedural generation
-- Asset: create a simple 1D gradient texture (white center → transparent edges)
-
-**Approach:**
-1. For each tracer, compute a quad that always faces the camera (billboard)
-2. Vertices: `tail - right*width`, `tail + right*width`, `head + right*width`, `head - right*width`
-3. `right = normalize(cross(tracer_dir, camera_to_tracer))` — this makes it face the camera
-4. Apply a glow texture (or use additive blending with a gradient)
-5. Width tapers from head (thicker) to tail (thinner) for a comet-trail look
-
+Check if `choke_distance` is a field on `WeaponStats`. If yes:
 ```rust
-pub(super) fn draw_tracers(&self, camera_pos: Vec3) {
-    for t in &self.tracers {
-        let dir = t.end - t.start;
-        let dist = dir.length();
-        let dir_norm = dir.normalize();
+// Add to each weapon const after falloff_min_mult:
+choke_distance: 0.0,  // shotgun could be 8.0 later
+```
 
-        let head = t.start + dir * t.progress;
-        let tail_t = (t.progress - t.tracer_length / dist).max(0.0);
-        let tail = t.start + dir * tail_t;
+---
 
-        // billboard: always face camera
-        let to_cam = (camera_pos - (head + tail) * 0.5).normalize();
-        let right = dir_norm.cross(to_cam).normalize();
+## Phase 3: Full Settings Persistence
 
-        let width = 0.04; // base width
-        let alpha = (t.lifetime * 255.0).min(255.0) as u8;
+**File:** `client/src/core/config.rs`
 
-        // head quad (brighter, wider)
-        let v1 = tail - right * width * 0.5;
-        let v2 = tail + right * width * 0.5;
-        let v3 = head + right * width;
-        let v4 = head - right * width;
+Add `serde` derives to `GameConfig` and `InputBinding`:
+```rust
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct GameConfig { ... }
 
-        let color = Color::from_rgba(255, 220, 100, alpha);
-        // draw as two triangles
-        draw_triangle_3d(v1, v2, v3, color);
-        draw_triangle_3d(v1, v3, v4, color);
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub enum InputBinding { ... }
+```
 
-        // glow pass (wider, more transparent)
-        let glow_w = width * 3.0;
-        let glow_alpha = (alpha as f32 * 0.3) as u8;
-        let gv1 = tail - right * glow_w * 0.5;
-        let gv2 = tail + right * glow_w * 0.5;
-        let gv3 = head + right * glow_w;
-        let gv4 = head - right * glow_w;
-        let glow = Color::from_rgba(255, 180, 50, glow_alpha);
-        draw_triangle_3d(gv1, gv2, gv3, glow);
-        draw_triangle_3d(gv1, gv3, gv4, glow);
+Add save/load:
+```rust
+impl GameConfig {
+    pub fn load_from_file() -> Self {
+        std::fs::read_to_string("settings.json")
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(Self::new)
+    }
+
+    pub fn save_to_file(&self) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write("settings.json", json);
+        }
     }
 }
 ```
 
-Note: Need to pass `camera_pos` to `draw_tracers()`. Get it from the camera struct in the render function.
+In `main.rs`, change `GameConfig::new()` to `GameConfig::load_from_file()`.
+In settings "Save" button handler, call `config.save_to_file()`.
+
+**Hint:** `KeyCode` doesn't impl Serialize — you'll need a custom serializer or store keybinds as strings. The `InputBinding` enum already wraps KeyCode/MouseButton, so add a `to_string()`/`from_string()` pair or use `#[serde(serialize_with, deserialize_with)]`.
 
 ---
 
-## Phase 4: CombatEntity refactor + Moving targets
+## Phase 4: Visual Polish
 
-### 4A. Add EntityKind + trait methods to CombatEntity
+### 4A. Billboard quad tracers with glow
 
-**What:** Extend CombatEntity with `entity_kind()`, `as_any()`, `update()` so we can store all entities in one `Vec<Box<dyn CombatEntity>>`.
+**File:** `client/src/screens/playing/rendering.rs`
+
+Replace current `draw_tracers()` — see Phase 3 in old roadmap for full code.
+Key: `right = dir_norm.cross(to_cam).normalize()` makes it face camera.
+Draw 2 triangle pairs: inner bright quad + outer dim glow quad.
+Pass `camera_pos` to `draw_tracers()`.
+
+---
+
+### 4B. Hit feedback improvements
+
+**Files:** `client/src/weapons/effects.rs`, `client/src/ui/hud.rs`
+
+- Kill feed: `Vec<(String, f32)>` where f32 = remaining display time
+- Damage number horizontal jitter: add `rand::gen_range(-5.0, 5.0)` to x offset on spawn
+- Already have colored hitmarkers (head=red, body=white) — keep those
+
+---
+
+### 4C. Muzzle flash visual
+
+**File:** `client/src/ui/hud.rs` or `rendering.rs`
+
+```rust
+// After firing, for muzzle_flash_timer > 0:
+if weapon.muzzle_flash_timer > 0.0 {
+    let alpha = ((weapon.muzzle_flash_timer / 0.06) * 200.0) as u8;
+    let flash_size = 8.0 + weapon.muzzle_flash_timer * 100.0;
+    // Draw in screen space near bottom center (gun position)
+    let flash_x = screen_width() / 2.0;
+    let flash_y = screen_height() * 0.75;
+    draw_circle(flash_x, flash_y, flash_size, Color::from_rgba(255, 200, 80, alpha));
+    draw_circle(flash_x, flash_y, flash_size * 0.5, Color::from_rgba(255, 255, 200, alpha));
+}
+```
+
+---
+
+### 4D. Movement inertia feedback (camera tilt)
+
+**File:** `client/src/screens/playing.rs` or `playing/camera.rs`
+
+```rust
+// Add to PlayingState:
+pub camera_roll: f32,  // current roll angle (radians)
+
+// In simulate(), compute target roll from strafe input:
+let strafe_input = /* right key pressed */ as i32 - /* left key pressed */ as i32;
+let target_roll = strafe_input as f32 * 0.03; // ~1.7 degrees max
+self.camera_roll += (target_roll - self.camera_roll) * delta * 8.0; // smooth lerp
+
+// When building Camera3D, apply roll to the up vector:
+let roll_up = vec3(self.camera_roll.sin(), self.camera_roll.cos(), 0.0);
+```
+
+---
+
+### 4E. Headshot kill confirmation
+
+**File:** `client/src/ui/hud.rs`
+
+Already have colored X hitmarkers. Add screen shake:
+```rust
+// In PlayingState:
+pub screen_shake: f32,  // remaining shake time
+
+// On headshot kill:
+self.screen_shake = 0.15; // 150ms shake
+
+// In camera setup:
+if self.screen_shake > 0.0 {
+    let shake_amount = self.screen_shake * 20.0; // intensity
+    let offset_x = rand::gen_range(-shake_amount, shake_amount);
+    let offset_y = rand::gen_range(-shake_amount, shake_amount);
+    camera.target += vec3(offset_x * 0.01, offset_y * 0.01, 0.0);
+    self.screen_shake -= delta;
+}
+```
+
+---
+
+### 4F. Ammo counter upgrade
+
+**File:** `client/src/ui/hud.rs`
+
+```rust
+// Low ammo warning — flash red when < 25% magazine
+let ammo_frac = weapon.ammo as f32 / stats.magazine_size as f32;
+let ammo_color = if ammo_frac < 0.25 {
+    if (get_time() * 4.0) as i32 % 2 == 0 { RED } else { YELLOW }
+} else {
+    WHITE
+};
+
+// Reload progress bar (during reload)
+if weapon.is_reloading {
+    let progress = 1.0 - (weapon.reload_timer / stats.reload_time);
+    let bar_w = 80.0;
+    let bar_h = 4.0;
+    let bar_x = ammo_x;
+    let bar_y = ammo_y + 20.0;
+    draw_rectangle(bar_x, bar_y, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
+    draw_rectangle(bar_x, bar_y, bar_w * progress, bar_h, Color::from_rgba(80, 200, 80, 255));
+}
+```
+
+---
+
+## Phase 5: Advanced Movement
+
+### 5A. Peeking (lean left/right)
+
+**File:** `client/src/physics/movement.rs`, `client/src/screens/playing.rs`
+
+```rust
+// Add to MovementState:
+pub lean: f32,  // -1.0 = left, 0.0 = center, 1.0 = right
+pub lean_target: f32,
+
+// In update:
+if q_pressed { lean_target = -1.0; }
+else if e_pressed { lean_target = 1.0; }
+else { lean_target = 0.0; }
+lean += (lean_target - lean) * delta * 10.0;
+
+// Apply to camera:
+let lean_offset = right * lean * 0.4; // 0.4 units sideways
+let lean_roll = lean * 0.05; // slight head tilt (~3 degrees)
+camera.position += lean_offset;
+```
+
+---
+
+### 5B. Sliding
+
+**File:** `client/src/physics/movement.rs`
+
+```rust
+// Sprint + crouch while moving fast → slide
+pub is_sliding: bool,
+pub slide_timer: f32,
+pub slide_velocity: Vec3,
+
+// Trigger: if sprinting && crouch pressed && speed > threshold
+// Duration: ~0.8 seconds
+// Camera height: crouch height
+// Speed: starts at sprint speed * 1.3, decays to 0
+// Can't shoot during slide (or hipfire only, no ADS)
+
+if is_sprinting && crouch_just_pressed && horizontal_speed > 4.0 {
+    is_sliding = true;
+    slide_timer = 0.8;
+    slide_velocity = forward * horizontal_speed * 1.3;
+}
+
+if is_sliding {
+    slide_timer -= delta;
+    slide_velocity *= 0.95; // friction decay
+    position += slide_velocity * delta;
+    if slide_timer <= 0.0 { is_sliding = false; }
+}
+```
+
+---
+
+### 5C. Mantling (vault over obstacles)
+
+**File:** `client/src/physics/movement.rs`
+
+```rust
+// When moving forward, check for a ledge at chest height:
+// 1. Raycast forward at eye level — if blocked, check slightly above
+// 2. If top of obstacle is reachable (< head height), start mantle
+// 3. Smoothly move camera up and over the ledge
+
+pub is_mantling: bool,
+pub mantle_target_y: f32,
+pub mantle_timer: f32,
+
+// Trigger: forward raycast hits wall + top is within reach
+// Duration: ~0.3 seconds
+// Camera: lerp from current Y to mantle_target_y + 0.1, then lerp forward
+```
+
+**Hint:** Use your existing collision system to check the wall height. Cast a ray down from slightly above the wall to find the top surface.
+
+---
+
+### 5D. Prone
+
+**File:** `client/src/physics/movement.rs`
+
+```rust
+// Add to MovementState:
+pub is_prone: bool,
+
+// Prone height: 0.3 (vs standing 1.7, crouching 1.0)
+// Speed: very slow (1.0 units/sec vs normal ~5)
+// Accuracy: best possible (lowest spread multiplier)
+// Toggle: press prone key to enter, press again or stand to exit
+// Transition: crouch → prone (smooth camera lower), prone → crouch → stand
+
+const PRONE_HEIGHT: f32 = 0.3;
+const PRONE_SPEED: f32 = 1.0;
+const PRONE_SPREAD_MULT: f32 = 0.3; // 70% less spread than standing
+```
+
+---
+
+## Phase 6: Gameplay Systems
+
+### 6A. Moving targets in practice range
+
+**New file:** `client/src/screens/moving_target.rs`
+
+```rust
+pub struct MovingTarget {
+    pub position: Vec3,
+    pub velocity: Vec3,
+    pub bounds_min: Vec3,
+    pub bounds_max: Vec3,
+    pub hp: f32,
+    pub max_hp: f32,
+    pub hit_timer: f32,
+    pub hitboxes: Vec<Hitbox>,
+    pub pattern: MovementPattern,
+}
+
+pub enum MovementPattern {
+    Linear,     // back and forth along velocity axis
+    Circular,   // orbit around a center point
+    Random,     // random waypoints within bounds
+}
+```
+
+Implements `CombatEntity`. In `update()`, move position and bounce off bounds.
+
+---
+
+### 6B. CombatEntity refactor
 
 **File:** `client/src/weapons/combat.rs`
 
+Add `EntityKind` enum and extend trait:
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EntityKind {
-    TargetDummy,
-    Player,
-    MovingTarget,
-    Bot,
-}
+pub enum EntityKind { TargetDummy, Player, MovingTarget, Bot }
 
 pub trait CombatEntity {
     fn entity_kind(&self) -> EntityKind;
@@ -225,52 +709,29 @@ pub trait CombatEntity {
     fn hitboxes(&self) -> &[Hitbox];
     fn take_damage(&mut self, dmg: f32);
     fn is_alive(&self) -> bool;
-    fn update(&mut self, delta: f32); // tick logic (regen, movement, AI)
-    fn as_any(&self) -> &dyn std::any::Any; // for downcasting
-
-    fn ray_test(...) -> ... { /* existing default impl */ }
+    fn update(&mut self, delta: f32);
+    // existing ray_test default impl stays
 }
 ```
 
-### 4B. Replace separate vecs with unified entity vec
+Replace `other_players: Vec<OtherPlayer>` + `target_dummy: TargetDummy` with
+`entities: Vec<Box<dyn CombatEntity>>` in PlayingState.
 
-**File:** `client/src/screens/playing.rs`
+---
 
-Replace:
-```rust
-pub other_players: Vec<OtherPlayer>,
-pub target_dummy: TargetDummy,
-```
-With:
-```rust
-pub entities: Vec<Box<dyn CombatEntity>>,
-```
+### 6C. Hybrid recoil fine-tuning
 
-Update firing loop to iterate `self.entities` instead of checking dummy + players separately.
-Update rendering to dispatch based on `entity_kind()`.
+**File:** `client/src/weapons/stats.rs`
 
-### 4C. Moving targets
+- Fine-tune `recoil_pattern` arrays per weapon
+- Add visual spray pattern indicator in dev mode (draw dots on screen showing pattern)
+- Balance testing with target dummy
 
-**New file:** `client/src/screens/moving_target.rs`
+---
 
-```rust
-pub struct MovingTarget {
-    pub position: Vec3,
-    pub velocity: Vec3,      // direction + speed
-    pub bounds_min: Vec3,    // patrol area min
-    pub bounds_max: Vec3,    // patrol area max
-    pub hp: f32,
-    pub max_hp: f32,
-    pub hit_timer: f32,
-    pub hitboxes: Vec<Hitbox>,
-}
-```
+## Phase 7: Advanced Features
 
-- Implements CombatEntity
-- `update()`: moves position along velocity, bounces off bounds
-- Could have different patterns: linear back-and-forth, circular, random waypoints
-
-### 4D. AI Bots with difficulty levels
+### 7A. AI Bots (Easy/Medium/Hard)
 
 **New file:** `client/src/screens/bot.rs`
 
@@ -279,63 +740,144 @@ pub enum BotDifficulty { Easy, Medium, Hard }
 
 pub struct Bot {
     pub position: Vec3,
-    pub yaw: f32,
-    pub pitch: f32,
-    pub hp: f32,
-    pub max_hp: f32,
+    pub yaw: f32, pub pitch: f32,
+    pub hp: f32, pub max_hp: f32,
     pub difficulty: BotDifficulty,
     pub hitboxes: Vec<Hitbox>,
-    // AI state
     pub target: Option<Vec3>,
     pub reaction_timer: f32,
 }
+
+// Easy: 1s reaction, large aim offset, walks toward player
+// Medium: 0.5s reaction, decent aim, strafes
+// Hard: 0.2s reaction, accurate, dodges
 ```
-
-- Easy: slow reaction (1s), poor aim (large random offset), walks toward player
-- Medium: moderate reaction (0.5s), decent aim, strafes
-- Hard: fast reaction (0.2s), accurate aim, dodges
-
-This is the most complex feature — defer until after everything else works.
 
 ---
 
-## Phase 5: Deferred — Bigger systems
+### 7B. Dev mode aimbot
 
-### 5A. Hybrid recoil system (Valorant-style)
+```rust
+// Find entity whose hitbox center is closest to screen center
+// Snap pitch/yaw toward that entity's head
+// Reusable for bot AI: aimbot + reaction_delay + random_offset = bot aim
+```
 
-Already partially implemented with recoil patterns. Remaining work:
-- Fine-tune pattern values for each weapon
-- Add visual spray pattern indicator (dev mode)
-- Balance testing
+---
 
-### 5B. Universal input bindings
+### 7C. Universal input bindings
 
-- Convert all `key_*: KeyCode` to `bind_*: InputBinding` in config
-- Support mouse buttons for any action
-- Expand keybind UI to show all actions
-- Mouse4/Mouse5 support deferred (needs macroquad fork or raw input)
+- Convert remaining hardcoded `KeyCode` checks to `InputBinding`
+- Mouse4/Mouse5 support (needs macroquad fork or raw input — defer)
 
-### 5C. Dev mode aimbot
+---
 
-- Implement actual aimbot logic: find closest enemy to crosshair, snap aim to them
-- Toggle in dev mode panel
-- Reusable for AI bots later (bot aim = aimbot with reaction delay + accuracy offset)
+## Phase 8: Weapon Models & Inspect (asset-dependent)
+
+### Research findings:
+
+**macroquad 3D model support:**
+- `Mesh { vertices: Vec<Vertex>, indices: Vec<u16>, texture: Option<Texture2D> }`
+- `draw_mesh(&mesh)` renders custom geometry
+- No native OBJ/GLTF loader — use `tobj` crate to parse OBJ files
+
+**Concrete pipeline:**
+1. Source Minecraft resource pack (blocky aesthetic matches game)
+2. Export weapon models as OBJ (many free tools: Blockbench, MCreator)
+3. Use `tobj` crate to load OBJ at runtime: `tobj::load_obj("gun.obj", &options)`
+4. Convert tobj vertices → macroquad `Vertex` + `Mesh`
+5. Load texture with `load_texture("gun_texture.png")`
+6. Render with `draw_mesh()` in first-person viewport
+
+**Cargo.toml addition when ready:**
+```toml
+tobj = "4"
+```
+
+**Why not Bevy?**
+- Bevy and macroquad CANNOT run together (both own the window + GPU context)
+- Bevy gives you PBR, shadows, GLTF loading — but its render graph is complex and undocumented
+- You lose all the pixel-level control you have now (crosshairs, scope, HUD)
+- macroquad + tobj gives you model loading while keeping full control
+- The blocky Minecraft aesthetic means you don't NEED PBR or fancy shaders
+
+**Weapon switch animation** (works even without 3D models):
+```rust
+// Use switch_cooldown timer on WeaponInventory
+// Fade crosshair out, bob HUD weapon icon down, swap, bob up, fade in
+let switch_progress = 1.0 - (weapon_inventory.switch_cooldown / SWITCH_TIME);
+let bob_y = if switch_progress < 0.5 {
+    switch_progress * 2.0 * 30.0 // lowering: 0 → 30px down
+} else {
+    (1.0 - (switch_progress - 0.5) * 2.0) * 30.0 // raising: 30px → 0
+};
+```
+
+**Weapon inspect** (cosmetic, press key to view):
+```rust
+// Rotate weapon mesh around Y axis
+// Show weapon stats overlay briefly
+// Only allowed when not firing/reloading/ADS
+```
+
+### Status: Deferred until assets are sourced. Weapon switch bob animation can be done NOW without assets.
 
 ---
 
 ## Execution Order Summary
 
 ```
-1A. Aim trace line (dev mode)
-1B. Fix choke_distance compile error
-1C. Fine-tune sniper
-2A. Crosshair settings + live preview
-3A. Billboard quad tracers
-4A. EntityKind + CombatEntity refactor
-4B. Unified entity vec
-4C. Moving targets
-4D. AI bots
-5A. Hybrid recoil fine-tuning
-5B. Universal input bindings
-5C. Dev mode aimbot
+IMMEDIATE (this session):
+  1A-1F. Crosshair preset system
+
+NEXT:
+  2A. Aim trace line (dev mode)
+  2B. Sniper scope sway
+  2C. Fix choke_distance (if needed)
+  3.  Full settings persistence (GameConfig + keybinds to JSON)
+
+VISUAL POLISH:
+  4A. Billboard quad tracers
+  4B. Hit feedback (kill feed, damage number jitter)
+  4C. Muzzle flash
+  4D. Camera tilt on strafe
+  4E. Headshot screen shake
+  4F. Ammo counter (low ammo warning, reload bar)
+
+ADVANCED MOVEMENT:
+  5A. Peeking (lean Q/E)
+  5B. Sliding (sprint + crouch)
+  5C. Mantling (vault over walls)
+  5D. Prone (go flat)
+
+GAMEPLAY SYSTEMS:
+  6A. Moving targets
+  6B. CombatEntity refactor
+  6C. Hybrid recoil tuning
+
+ADVANCED:
+  7A. AI Bots
+  7B. Dev mode aimbot
+  7C. Universal input bindings
+
+ASSET-DEPENDENT (end):
+  8.  Weapon models + inspect (macroquad Mesh + tobj + Minecraft packs)
 ```
+
+---
+
+## Already Completed [DONE]
+
+- [x] CrosshairType enum (Cross, FourCurves, Chevron)
+- [x] Chevron crosshair with bezier-chamfered L-brackets
+- [x] Per-weapon headshot multiplier (stats.headshot_mult instead of hardcoded 2.0x)
+- [x] Pellet pattern bounds safety (.get().unwrap_or())
+- [x] Tracer progress clamping to 1.0
+- [x] Shared draw_arc utility (ui/mod.rs)
+- [x] show_hitboxes toggle connected to rendering
+- [x] Dead code cleanup (zero warnings build)
+- [x] Crosshair settings live preview with per-weapon selection
+- [x] Crosshair kick (visual gap expansion on fire)
+- [x] First Shot Accuracy (FSA) visual indicator
+- [x] Recoil patterns (spray patterns per weapon)
+- [x] Input binding system (keyboard + mouse)

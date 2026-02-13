@@ -1,0 +1,38 @@
+[
+  {
+    "name": "custom_preset_1 awSdsd",
+    "is_default": false,
+    "crosshair_type": "FourCurves",
+    "color": [
+      136,
+      25,
+      25,
+      255
+    ],
+    "dot_enabled": true,
+    "dot_size": 0.2,
+    "line_length": 1.8000001,
+    "line_thickness": 0.15,
+    "center_gap": 1.3000001,
+    "outline_enabled": true,
+    "outline_thickness": 0.1
+  },
+  {
+    "name": "my preset",
+    "is_default": false,
+    "crosshair_type": "FourCurves",
+    "color": [
+      138,
+      19,
+      185,
+      255
+    ],
+    "dot_enabled": true,
+    "dot_size": 1.2,
+    "line_length": 1.0,
+    "line_thickness": 0.4,
+    "center_gap": 1.0,
+    "outline_enabled": true,
+    "outline_thickness": 0.0
+  }
+]

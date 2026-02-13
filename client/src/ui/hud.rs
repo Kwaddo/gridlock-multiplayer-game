@@ -8,6 +8,7 @@ use crate::weapons::WeaponInventory;
 use crate::weapons::stats::CrosshairStyle;
 use crate::weapons::crosshair::CrosshairType;
 use crate::weapons::effects::DamageNumber;
+use crate::ui::draw_arc;
 
 pub fn draw_hud(
     username: &str,
@@ -56,7 +57,7 @@ pub fn draw_hud(
     };
 
     // flash tint briefly on shot
-    let tint = if weapon.muzzle_flash_timer > 0.04 {
+    let _tint = if weapon.muzzle_flash_timer > 0.04 {
         Color::from_rgba(255, 255, 200, 255)
     } else {
         WHITE
@@ -68,7 +69,7 @@ pub fn draw_hud(
                 CrosshairType::FourCurves => {
                     // 4-curves crosshair (shotgun)
                     let stats = weapon.stats();
-                    let base =
+                    let _base =
                         stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
@@ -84,20 +85,20 @@ pub fn draw_hud(
                     let thick = (xhair.line_thickness * sh) / 100.0;
                     let gap_angle: f32 = 20.0_f32.to_radians(); // gap at cardinal directions
                     let quarter = std::f32::consts::FRAC_PI_2;
-                    let segs = 32;
+                    let segs = 32u32;
 
                     // outline
                     if xhair.outline_enabled {
                         let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
                         let oc = Color::from_rgba(0, 0, 0, 180);
-                        for q in 0..4 {
+                        for q in 0..4u32 {
                             let base_angle = q as f32 * quarter;
                             draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, ot, segs, oc);
                         }
                     }
 
                     // 4 arcs (one per quadrant, gaps at top/bottom/left/right)
-                    for q in 0..4 {
+                    for q in 0..4u32 {
                         let base_angle = q as f32 * quarter;
                         draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, thick, segs, color);
                     }
@@ -117,7 +118,7 @@ pub fn draw_hud(
                 CrosshairType::Chevron => {
                     // L-bracket crosshair with bezier-chamfered corners
                     let stats = weapon.stats();
-                    let base =
+                    let _base =
                         stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
@@ -482,50 +483,6 @@ pub fn draw_hud(
                 Color::from_rgba(255, 200, 80, alpha)
             );
         }
-    }
-}
-
-fn draw_crosshair_texture(
-    cx: f32,
-    cy: f32,
-    size: f32,
-    color: Color,
-    key: &str,
-    assets: &HashMap<String, Texture2D>
-) {
-    if let Some(tex) = assets.get(key) {
-        let half = size / 2.0;
-        draw_texture_ex(tex, cx - half, cy - half, color, DrawTextureParams {
-            dest_size: Some(vec2(size, size)),
-            ..Default::default()
-        });
-    } else {
-        draw_circle(cx, cy, size / 2.0, color); // fallback dot
-    }
-}
-
-fn draw_arc(
-    cx: f32,
-    cy: f32,
-    radius: f32,
-    angle_start: f32,
-    angle_end: f32,
-    thickness: f32,
-    segments: i32,
-    color: Color,
-) {
-    let step = (angle_end - angle_start) / segments as f32;
-    for i in 0..segments {
-        let a0 = angle_start + i as f32 * step;
-        let a1 = angle_start + (i + 1) as f32 * step;
-        draw_line(
-            cx + a0.cos() * radius,
-            cy + a0.sin() * radius,
-            cx + a1.cos() * radius,
-            cy + a1.sin() * radius,
-            thickness,
-            color,
-        );
     }
 }
 

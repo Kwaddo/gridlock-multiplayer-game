@@ -40,7 +40,7 @@ pub enum HitZone {
 impl HitZone {
     pub fn damage_mult(&self) -> f32 {
         match self {
-            HitZone::Head => 2.0,
+            HitZone::Head => 1.0, // per-weapon headshot_mult from stats is used instead
             HitZone::Torso => 1.0,
             HitZone::Limbs => 0.75,
         }

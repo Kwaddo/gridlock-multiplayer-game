@@ -3,7 +3,7 @@ use macroquad::prelude::*;
 use crate::types::maze::Maze;
 
 use super::props::draw_props;
-use super::utils::{cell_noise, tint_color};
+use super::utils::tint_color;
 
 pub fn draw_maze(maze: Option<&Maze>) {
     if let Some(m) = maze {

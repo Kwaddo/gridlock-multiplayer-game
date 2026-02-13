@@ -6,6 +6,7 @@ use client::net::poll_updates;
 use client::screens::{ draw_pause_menu, LoginScreen, PlayingState };
 use client::screens::dev_mode::{ draw_dev_overlay, DevModeState };
 use client::settings::SettingsScreen;
+use client::weapons::crosshair_presets::CrosshairPresetManager;
 use client::types::maze::Maze;
 use client::ui::fonts;
 
@@ -34,6 +35,7 @@ async fn main() {
     let mut username = String::new();
     let mut server_addr = String::new();
     let mut config = GameConfig::new();
+    let mut preset_manager = CrosshairPresetManager::new("");
     let mut maze: Option<Maze> = None;
     let mut is_fullscreen = true;
 
@@ -57,6 +59,9 @@ async fn main() {
                     username = name;
                     player_id = id;
                     server_addr = login_screen.ip_input.clone();
+
+                    // rebuild preset manager now that we know the username
+                    preset_manager = CrosshairPresetManager::new(&username);
 
                     // reset loading state and transition to Loading
                     loading_assets.clear();
@@ -246,8 +251,8 @@ async fn main() {
 
             GameState::Settings => {
                 clear_background(Color::from_rgba(0, 0, 0, 255));
-                settings_screen.draw(&config, &playing_state.weapons, &playing_state.assets);
-                if settings_screen.update(&mut config, &mut playing_state.weapons) {
+                settings_screen.draw(&config, &playing_state.weapons, &preset_manager, &playing_state.assets);
+                if settings_screen.update(&mut config, &mut playing_state.weapons, &mut preset_manager) {
                     state = GameState::Paused;
                 }
             }
@@ -312,7 +317,7 @@ fn sync_world(
 ) -> Option<Vec<(String, String)> /* assets to load */> {
     if let Some(ref sock) = socket {
         let updates = poll_updates(sock, player_id);
-        if let Some((new_maze, spawn)) = updates.maze {
+        if let Some((new_maze, _spawn)) = updates.maze {
             *maze = Some(new_maze);
             // playing_state.position = spawn; // removed because player starts in lobby now
         }
