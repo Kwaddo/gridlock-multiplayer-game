@@ -1,4 +1,6 @@
 use macroquad::prelude::*;
+use macroquad::models::Vertex;
+use macroquad::window::get_internal_gl;
 use crate::weapons::combat::HitZone;
 
 use super::PlayingState;
@@ -16,34 +18,27 @@ impl PlayingState {
         let d = &self.target_dummy;
         let hit_flash = d.hit_timer > 0.0;
 
-        if self.dev_mode.show_hitboxes {
-            // show zone-colored hitboxes with wireframes
-            for hb in &d.hitboxes {
-                let center = d.position + hb.center_offset;
-                let size = hb.half_extents * 2.0;
+        // always show zone-colored hitboxes for the target dummy
+        for hb in &d.hitboxes {
+            let center = d.position + hb.center_offset;
+            let size = hb.half_extents * 2.0;
 
-                let base_color = match hb.zone {
-                    HitZone::Head => Color::from_rgba(255, 80, 80, 200),
-                    HitZone::Torso => Color::from_rgba(80, 180, 255, 200),
-                    HitZone::Limbs => Color::from_rgba(80, 255, 80, 200),
-                };
+            let base_color = match hb.zone {
+                HitZone::Head => Color::from_rgba(255, 80, 80, 200),
+                HitZone::Torso => Color::from_rgba(80, 180, 255, 200),
+                HitZone::Limbs => Color::from_rgba(80, 255, 80, 200),
+            };
 
-                let color = if hit_flash { WHITE } else { base_color };
+            let color = if hit_flash { WHITE } else { base_color };
 
-                let wire_color = match hb.zone {
-                    HitZone::Head => Color::from_rgba(255, 120, 120, 255),
-                    HitZone::Torso => Color::from_rgba(120, 200, 255, 255),
-                    HitZone::Limbs => Color::from_rgba(120, 255, 120, 255),
-                };
+            let wire_color = match hb.zone {
+                HitZone::Head => Color::from_rgba(255, 120, 120, 255),
+                HitZone::Torso => Color::from_rgba(120, 200, 255, 255),
+                HitZone::Limbs => Color::from_rgba(120, 255, 120, 255),
+            };
 
-                draw_cube(center, size, None, color);
-                draw_cube_wires(center, size, wire_color);
-            }
-        } else {
-            // simple neutral dummy model
-            let body_color = if hit_flash { WHITE } else { Color::from_rgba(180, 140, 100, 255) };
-            draw_cube(d.position + vec3(0.0, 0.6, 0.0), vec3(0.6, 1.2, 0.4), None, body_color);
-            draw_cube(d.position + vec3(0.0, 1.4, 0.0), vec3(0.4, 0.4, 0.4), None, body_color);
+            draw_cube(center, size, None, color);
+            draw_cube_wires(center, size, wire_color);
         }
     }
 
@@ -89,34 +84,92 @@ impl PlayingState {
         draw_text(label, sx - measure.width / 2.0, sy - 4.0, 14.0, WHITE);
     }
 
-    pub(super) fn draw_tracers(&self) {
+    pub(super) fn draw_tracers(&self, camera_pos: Vec3) {
         for t in &self.tracers {
             let dir = t.end - t.start;
             let dist = dir.length();
+            if dist < 0.001 {
+                continue;
+            }
 
-            let head = t.start + dir * t.progress; // current end point of the tracer
+            let head = t.start + dir * t.progress;
             let tail_t = (t.progress - t.tracer_length / dist).max(0.0);
-            let tail = t.start + dir * tail_t; // start point of the tracer
+            let tail = t.start + dir * tail_t;
 
-            let _mid = (head + tail) * 0.5;
-            let _length = (head - tail).length();
+            // if head and tail are the same point, nothing to draw
+            if (head - tail).length() < 0.001 {
+                continue;
+            }
+
             let dir_norm = dir.normalize();
+            let mid = (head + tail) * 0.5;
+            let to_cam = camera_pos - mid;
+            let to_cam_len = to_cam.length();
+            if to_cam_len < 0.001 {
+                continue;
+            }
+            let to_cam_norm = to_cam / to_cam_len;
 
-            // rotate cube to align with direction
-            // size = thin on X/Y Axis, stretched on Z axis (length)
-            // draw 2-3 lines offset by the up and right vectors since we dont have thickness in macroquad's draw_line_3d
+            // cross product gives the "right" vector perpendicular to both
+            // tracer direction and camera direction — this is what makes it billboard
+            let right_raw = dir_norm.cross(to_cam_norm);
+            let right_len_sq = right_raw.length_squared();
 
-            let offset = 0.02; // thickness of the tracer
-            let up = vec3(0.0, 1.0, 0.0);
-            let side = dir_norm.cross(up).normalize() * offset;
+            // if cross product is degenerate (tracer points directly at/away from camera),
+            // fall back to world-up to get a valid right vector
+            let right = if right_len_sq < 0.0001 {
+                let fallback = dir_norm.cross(vec3(0.0, 1.0, 0.0));
+                let fb_len_sq = fallback.length_squared();
+                if fb_len_sq < 0.0001 {
+                    // tracer is perfectly vertical — use world-right
+                    vec3(1.0, 0.0, 0.0)
+                } else {
+                    fallback / fb_len_sq.sqrt()
+                }
+            } else {
+                right_raw / right_len_sq.sqrt()
+            };
 
             let alpha = (t.lifetime * 255.0).min(255.0) as u8;
-            let color = Color::from_rgba(255, 200, 80, alpha); // bright orange with fading alpha
+            let [r, g, b, _] = t.tracer_color;
+            let half_w = t.tracer_thickness;
+            let uv = vec2(0.0, 0.0);
 
-            draw_line_3d(tail, head, color);
-            draw_line_3d(tail + side, head + side, color);
-            draw_line_3d(tail - side, head - side, color);
-            draw_line_3d(tail + up * offset, head + up * offset, color);
+            // second axis perpendicular to both right and direction — crossed billboards
+            let up = right.cross(dir_norm).normalize();
+
+            let color = Color::from_rgba(r, g, b, alpha);
+            let head_color = Color::from_rgba(r, g, b, 0);
+            let indices: [u16; 6] = [0, 1, 2, 2, 1, 0];
+
+            let glow_alpha = ((alpha as f32) * 0.3) as u8;
+            let glow_color = Color::from_rgba(r, g, b, glow_alpha);
+            let glow_w = half_w * 1.8;
+
+            // draw two crossed planes (right + up) for 3D depth illusion
+            for axis in [right, up] {
+                // inner bright streak
+                let vertices = [
+                    Vertex::new2(tail - axis * half_w, uv, color),
+                    Vertex::new2(tail + axis * half_w, uv, color),
+                    Vertex::new2(head, uv, head_color),
+                ];
+                let gl = unsafe { get_internal_gl() };
+                gl.quad_gl.texture(None);
+                gl.quad_gl.draw_mode(DrawMode::Triangles);
+                gl.quad_gl.geometry(&vertices, &indices);
+
+                // outer glow
+                let glow_vertices = [
+                    Vertex::new2(tail - axis * glow_w, uv, glow_color),
+                    Vertex::new2(tail + axis * glow_w, uv, glow_color),
+                    Vertex::new2(head, uv, Color::from_rgba(r, g, b, 0)),
+                ];
+                let gl = unsafe { get_internal_gl() };
+                gl.quad_gl.texture(None);
+                gl.quad_gl.draw_mode(DrawMode::Triangles);
+                gl.quad_gl.geometry(&glow_vertices, &indices);
+            }
         }
     }
-}
+}   
