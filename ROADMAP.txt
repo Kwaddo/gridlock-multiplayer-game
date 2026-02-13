@@ -1,0 +1,341 @@
+# Full Implementation Roadmap
+
+Ordered by priority. Items discussed this session come first, then existing todolist items,
+then bigger features (hybrid recoil, universal input bindings) at the end.
+
+---
+
+## Phase 1: Immediate — Things discussed this session
+
+### 1A. Dev Mode: Aim Trace Line (aimbot visualization)
+
+**What:** When `show_hitboxes` is ON, draw a continuous 3D line from the player's eye to wherever their aim hits a hitbox. If no hit, draw a dim line to max range. Useful for debugging and future AI.
+
+**Files:**
+- `client/src/screens/playing/rendering.rs` — new `draw_aim_trace()` method
+- `client/src/screens/playing.rs` — call it during 3D render pass
+
+**Implementation:**
+
+In `rendering.rs`, add to `impl PlayingState`:
+```rust
+pub(super) fn draw_aim_trace(&self) {
+    use crate::weapons::combat::CombatEntity;
+
+    let eye = self.position + vec3(0.0, 1.6, 0.0);
+    let fwd = vec3(
+        self.yaw.cos() * self.pitch.cos(),
+        self.pitch.sin(),
+        self.yaw.sin() * self.pitch.cos(),
+    );
+
+    let stats = self.weapons.active().stats();
+    let range = stats.bullet_range;
+
+    // find closest hit across all entities
+    let mut closest: Option<(f32, crate::weapons::combat::HitZone)> = None;
+
+    if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
+        closest = Some((dist, zone));
+    }
+    for p in &self.other_players {
+        if let Some((zone, dist)) = p.ray_test(eye, fwd, range) {
+            let is_closer = closest.map_or(true, |(d, _)| dist < d);
+            if is_closer {
+                closest = Some((dist, zone));
+            }
+        }
+    }
+
+    let (end_point, color) = if let Some((dist, zone)) = closest {
+        let hit_color = match zone {
+            crate::weapons::combat::HitZone::Head => Color::from_rgba(255, 50, 50, 200),
+            crate::weapons::combat::HitZone::Torso => Color::from_rgba(50, 255, 50, 200),
+            crate::weapons::combat::HitZone::Limbs => Color::from_rgba(50, 150, 255, 200),
+        };
+        (eye + fwd * dist, hit_color)
+    } else {
+        (eye + fwd * range, Color::from_rgba(255, 255, 255, 40))
+    };
+
+    // draw the trace line (3 offset lines for thickness)
+    let up = vec3(0.0, 1.0, 0.0);
+    let side = fwd.cross(up).normalize() * 0.01;
+    draw_line_3d(eye, end_point, color);
+    draw_line_3d(eye + side, end_point + side, color);
+    draw_line_3d(eye - side, end_point - side, color);
+
+    // draw a small sphere at hit point
+    if closest.is_some() {
+        draw_sphere(end_point, 0.05, None, color);
+    }
+}
+```
+
+In `playing.rs`, after `self.draw_tracers();` (around line 452):
+```rust
+if self.dev_mode.show_hitboxes {
+    self.draw_aim_trace();
+}
+```
+
+---
+
+### 1B. Fix `choke_distance` compile error
+
+**What:** The `choke_distance` field was added to `WeaponStats` struct but never added to the 5 weapon const definitions. Either remove it or add `choke_distance: 0.0` to all 5 consts.
+
+**Recommendation:** Keep the field (it's a good idea for later), add `choke_distance: 0.0` to PISTOL, SMG, SHOTGUN, ASSAULT_RIFLE, SNIPER in `stats.rs`. Set shotgun to `8.0` if we decide to implement choke later.
+
+**File:** `client/src/weapons/stats.rs`
+
+For each weapon const, add after `falloff_min_mult`:
+```rust
+choke_distance: 0.0, // no choke (pure cone spread)
+```
+
+---
+
+### 1C. Fine-tune sniper feel
+
+**What:** Scope sway when moving, tracer feel, overall sniper polish.
+
+**Files:**
+- `client/src/ui/hud.rs` — scope rendering, add sway offset
+- `client/src/weapons/stats.rs` — tweak sniper values
+- `client/src/screens/playing.rs` — scope sway calculation
+
+**Implementation — Scope Sway:**
+
+In `playing.rs`, compute sway offset based on movement state:
+```rust
+// in simulate() or a new method, update sway
+let is_moving = self.movement_state.is_moving();
+let is_crouching = self.movement_state.is_crouching;
+let sway_amount = if is_crouching { 0.3 } else if is_moving { 1.0 } else { 0.5 };
+
+// sinusoidal sway using time
+let time = get_time() as f32;
+let sway_x = (time * 1.2).sin() * sway_amount;
+let sway_y = (time * 0.8).cos() * sway_amount * 0.6;
+```
+
+Store `scope_sway_x` and `scope_sway_y` on PlayingState (or WeaponState).
+
+In `hud.rs` scope rendering (around line 252), offset `cx` and `cy` by the sway values when drawing the reticle:
+```rust
+let sway_cx = cx + scope_sway_x;
+let sway_cy = cy + scope_sway_y;
+// use sway_cx/sway_cy for the reticle lines and center dot
+```
+
+The vignette stays centered (scope housing doesn't move), but the reticle inside sways.
+
+**Sniper tracer:** Already 8.0 length and 350 speed. Could increase speed to 500+ for more "instant" feel. Tweak in stats.rs.
+
+---
+
+
+
+## Phase 3: Billboard quad tracers with glow
+
+### 3A. Upgrade tracers to billboarded quads
+
+**What:** Replace the current 3-line `draw_line_3d` tracers with camera-facing quads that have a glow texture. Much more visually appealing.
+
+**Files:**
+- `client/src/screens/playing/rendering.rs` — rewrite `draw_tracers()`
+- `client/src/weapons/effects.rs` — add glow texture loading or procedural generation
+- Asset: create a simple 1D gradient texture (white center → transparent edges)
+
+**Approach:**
+1. For each tracer, compute a quad that always faces the camera (billboard)
+2. Vertices: `tail - right*width`, `tail + right*width`, `head + right*width`, `head - right*width`
+3. `right = normalize(cross(tracer_dir, camera_to_tracer))` — this makes it face the camera
+4. Apply a glow texture (or use additive blending with a gradient)
+5. Width tapers from head (thicker) to tail (thinner) for a comet-trail look
+
+```rust
+pub(super) fn draw_tracers(&self, camera_pos: Vec3) {
+    for t in &self.tracers {
+        let dir = t.end - t.start;
+        let dist = dir.length();
+        let dir_norm = dir.normalize();
+
+        let head = t.start + dir * t.progress;
+        let tail_t = (t.progress - t.tracer_length / dist).max(0.0);
+        let tail = t.start + dir * tail_t;
+
+        // billboard: always face camera
+        let to_cam = (camera_pos - (head + tail) * 0.5).normalize();
+        let right = dir_norm.cross(to_cam).normalize();
+
+        let width = 0.04; // base width
+        let alpha = (t.lifetime * 255.0).min(255.0) as u8;
+
+        // head quad (brighter, wider)
+        let v1 = tail - right * width * 0.5;
+        let v2 = tail + right * width * 0.5;
+        let v3 = head + right * width;
+        let v4 = head - right * width;
+
+        let color = Color::from_rgba(255, 220, 100, alpha);
+        // draw as two triangles
+        draw_triangle_3d(v1, v2, v3, color);
+        draw_triangle_3d(v1, v3, v4, color);
+
+        // glow pass (wider, more transparent)
+        let glow_w = width * 3.0;
+        let glow_alpha = (alpha as f32 * 0.3) as u8;
+        let gv1 = tail - right * glow_w * 0.5;
+        let gv2 = tail + right * glow_w * 0.5;
+        let gv3 = head + right * glow_w;
+        let gv4 = head - right * glow_w;
+        let glow = Color::from_rgba(255, 180, 50, glow_alpha);
+        draw_triangle_3d(gv1, gv2, gv3, glow);
+        draw_triangle_3d(gv1, gv3, gv4, glow);
+    }
+}
+```
+
+Note: Need to pass `camera_pos` to `draw_tracers()`. Get it from the camera struct in the render function.
+
+---
+
+## Phase 4: CombatEntity refactor + Moving targets
+
+### 4A. Add EntityKind + trait methods to CombatEntity
+
+**What:** Extend CombatEntity with `entity_kind()`, `as_any()`, `update()` so we can store all entities in one `Vec<Box<dyn CombatEntity>>`.
+
+**File:** `client/src/weapons/combat.rs`
+
+```rust
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntityKind {
+    TargetDummy,
+    Player,
+    MovingTarget,
+    Bot,
+}
+
+pub trait CombatEntity {
+    fn entity_kind(&self) -> EntityKind;
+    fn entity_position(&self) -> Vec3;
+    fn hitboxes(&self) -> &[Hitbox];
+    fn take_damage(&mut self, dmg: f32);
+    fn is_alive(&self) -> bool;
+    fn update(&mut self, delta: f32); // tick logic (regen, movement, AI)
+    fn as_any(&self) -> &dyn std::any::Any; // for downcasting
+
+    fn ray_test(...) -> ... { /* existing default impl */ }
+}
+```
+
+### 4B. Replace separate vecs with unified entity vec
+
+**File:** `client/src/screens/playing.rs`
+
+Replace:
+```rust
+pub other_players: Vec<OtherPlayer>,
+pub target_dummy: TargetDummy,
+```
+With:
+```rust
+pub entities: Vec<Box<dyn CombatEntity>>,
+```
+
+Update firing loop to iterate `self.entities` instead of checking dummy + players separately.
+Update rendering to dispatch based on `entity_kind()`.
+
+### 4C. Moving targets
+
+**New file:** `client/src/screens/moving_target.rs`
+
+```rust
+pub struct MovingTarget {
+    pub position: Vec3,
+    pub velocity: Vec3,      // direction + speed
+    pub bounds_min: Vec3,    // patrol area min
+    pub bounds_max: Vec3,    // patrol area max
+    pub hp: f32,
+    pub max_hp: f32,
+    pub hit_timer: f32,
+    pub hitboxes: Vec<Hitbox>,
+}
+```
+
+- Implements CombatEntity
+- `update()`: moves position along velocity, bounces off bounds
+- Could have different patterns: linear back-and-forth, circular, random waypoints
+
+### 4D. AI Bots with difficulty levels
+
+**New file:** `client/src/screens/bot.rs`
+
+```rust
+pub enum BotDifficulty { Easy, Medium, Hard }
+
+pub struct Bot {
+    pub position: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub hp: f32,
+    pub max_hp: f32,
+    pub difficulty: BotDifficulty,
+    pub hitboxes: Vec<Hitbox>,
+    // AI state
+    pub target: Option<Vec3>,
+    pub reaction_timer: f32,
+}
+```
+
+- Easy: slow reaction (1s), poor aim (large random offset), walks toward player
+- Medium: moderate reaction (0.5s), decent aim, strafes
+- Hard: fast reaction (0.2s), accurate aim, dodges
+
+This is the most complex feature — defer until after everything else works.
+
+---
+
+## Phase 5: Deferred — Bigger systems
+
+### 5A. Hybrid recoil system (Valorant-style)
+
+Already partially implemented with recoil patterns. Remaining work:
+- Fine-tune pattern values for each weapon
+- Add visual spray pattern indicator (dev mode)
+- Balance testing
+
+### 5B. Universal input bindings
+
+- Convert all `key_*: KeyCode` to `bind_*: InputBinding` in config
+- Support mouse buttons for any action
+- Expand keybind UI to show all actions
+- Mouse4/Mouse5 support deferred (needs macroquad fork or raw input)
+
+### 5C. Dev mode aimbot
+
+- Implement actual aimbot logic: find closest enemy to crosshair, snap aim to them
+- Toggle in dev mode panel
+- Reusable for AI bots later (bot aim = aimbot with reaction delay + accuracy offset)
+
+---
+
+## Execution Order Summary
+
+```
+1A. Aim trace line (dev mode)
+1B. Fix choke_distance compile error
+1C. Fine-tune sniper
+2A. Crosshair settings + live preview
+3A. Billboard quad tracers
+4A. EntityKind + CombatEntity refactor
+4B. Unified entity vec
+4C. Moving targets
+4D. AI bots
+5A. Hybrid recoil fine-tuning
+5B. Universal input bindings
+5C. Dev mode aimbot
+```

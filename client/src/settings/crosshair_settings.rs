@@ -7,45 +7,22 @@
 
 use macroquad::prelude::*;
 use crate::weapons::WeaponState;
-use crate::weapons::{ WeaponInventory, crosshair::CrosshairConfig };
+use crate::weapons::{ WeaponInventory, crosshair::{ CrosshairConfig, CrosshairType } };
 use crate::weapons::stats::WeaponKind;
 use std::collections::HashMap;
 use crate::ui::fonts::{text_params, measure_game_text};
 
+const CROSSHAIR_TYPES: &[CrosshairType] = &[
+    CrosshairType::Cross,
+    CrosshairType::FourCurves,
+    CrosshairType::Chevron,
+];
 
-#[derive(Copy, Clone, PartialEq)]
-enum CrosshairType {
-    Cross,
-    FourCurves,
-    // Future types can be added here
-}
-
-impl CrosshairType {
-    const ALL: &'static [CrosshairType] = &[
-        CrosshairType::Cross,
-        CrosshairType::FourCurves,
-    ];
-
-    fn name(&self) -> &'static str {
-        match self {
-            CrosshairType::Cross => "Cross",
-            CrosshairType::FourCurves => "4-Curves (Chevron)",
-        }
-    }
-
-    fn from_config(config: &CrosshairConfig) -> Self {
-        if config.is_4curves {
-            CrosshairType::FourCurves
-        } else {
-            CrosshairType::Cross
-        }
-    }
-
-    fn apply_to_config(&self, config: &mut CrosshairConfig) {
-        config.is_4curves = match self {
-            CrosshairType::Cross => false,
-            CrosshairType::FourCurves => true,
-        };
+fn crosshair_type_name(ct: CrosshairType) -> &'static str {
+    match ct {
+        CrosshairType::Cross => "Cross",
+        CrosshairType::FourCurves => "4-Curves",
+        CrosshairType::Chevron => "Chevron",
     }
 }
 
@@ -136,15 +113,14 @@ pub fn update_crosshair_settings(
     slider_y += 10.0;
 
     // crosshair Type dropdown
-    let type_names: Vec<&str> = CrosshairType::ALL.iter().map(|t| t.name()).collect();
-    let current_type = CrosshairType::from_config(ch);
-    let mut selected_idx = CrosshairType::ALL.iter().position(|t| *t == current_type).unwrap_or(0);
+    let type_names: Vec<&str> = CROSSHAIR_TYPES.iter().map(|t| crosshair_type_name(*t)).collect();
+    let mut selected_idx = CROSSHAIR_TYPES.iter().position(|t| *t == ch.crosshair_type).unwrap_or(0);
     let prev_idx = selected_idx;
 
     draw_dropdown("Crosshair Type", &type_names, &mut selected_idx, slider_x, slider_y, slider_w, mouse, clicked);
 
-    if selected_idx < CrosshairType::ALL.len() {
-        CrosshairType::ALL[selected_idx].apply_to_config(ch);
+    if selected_idx < CROSSHAIR_TYPES.len() {
+        ch.crosshair_type = CROSSHAIR_TYPES[selected_idx];
     }
 
     // Shotgun warning when crosshair type changes (only once per visit)
@@ -337,65 +313,145 @@ fn draw_crosshair_preview(
 
     let color = xhair.color;
 
-    if xhair.is_4curves {
-        let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
-        let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
+    match xhair.crosshair_type {
+        CrosshairType::FourCurves => {
+            let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
+            let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
 
-        let radius = hip_gap + ads_rest_gap;
-        let thick = (xhair.line_thickness * sh) / 100.0;
-        let gap_angle: f32 = 20.0_f32.to_radians();
-        let quarter = std::f32::consts::FRAC_PI_2;
-        let segs = 32;
+            let radius = hip_gap + ads_rest_gap;
+            let thick = (xhair.line_thickness * sh) / 100.0;
+            let gap_angle: f32 = 20.0_f32.to_radians();
+            let quarter = std::f32::consts::FRAC_PI_2;
+            let segs = 32;
 
-        if xhair.outline_enabled {
-            let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
-            let oc = Color::from_rgba(0, 0, 0, 180);
+            if xhair.outline_enabled {
+                let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                let oc = Color::from_rgba(0, 0, 0, 180);
+                for q in 0..4 {
+                    let base_angle = q as f32 * quarter;
+                    draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, ot, segs, oc);
+                }
+            }
+
             for q in 0..4 {
                 let base_angle = q as f32 * quarter;
-                draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, ot, segs, oc);
+                draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, thick, segs, color);
+            }
+
+            if xhair.dot_enabled {
+                let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
+                let dot_color = Color::from_rgba(
+                    (color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha
+                );
+                draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
             }
         }
+        CrosshairType::Chevron => {
+            let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
+            let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
 
-        for q in 0..4 {
-            let base_angle = q as f32 * quarter;
-            draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, thick, segs, color);
+            let radius = hip_gap + ads_rest_gap;
+            let thick = (xhair.line_thickness * sh) / 100.0;
+            let arm = ((xhair.line_length / 2.0) * sh) / 100.0;
+
+            let corners: [(f32, f32); 4] = [
+                (-1.0, -1.0), ( 1.0, -1.0),
+                (-1.0,  1.0), ( 1.0,  1.0),
+            ];
+
+            for &(sx, sy) in &corners {
+                let corner_x = cx + sx * radius;
+                let corner_y = cy + sy * radius;
+                let h_end_x = corner_x - sx * arm;
+                let v_end_y = corner_y - sy * arm;
+
+                let chamfer = arm * 0.35;
+                let h_near = corner_x - sx * chamfer;
+                let v_near = corner_y - sy * chamfer;
+
+                let p0x = h_near; let p0y = corner_y;
+                let p1x = corner_x; let p1y = corner_y;
+                let p2x = corner_x; let p2y = v_near;
+                let bez = |t: f32| -> (f32, f32) {
+                    let u = 1.0 - t;
+                    (u*u*p0x + 2.0*u*t*p1x + t*t*p2x,
+                     u*u*p0y + 2.0*u*t*p1y + t*t*p2y)
+                };
+
+                let t_a = 0.10_f32;
+                let t_b = 0.90_f32;
+                let (mid_ax, mid_ay) = bez(t_a);
+                let (mid_bx, mid_by) = bez(t_b);
+                let chamfer_segs = 4;
+
+                let draw_corner_shape = |thickness: f32, col: Color| {
+                    for i in 0..chamfer_segs {
+                        let s0 = t_a * (i as f32 / chamfer_segs as f32);
+                        let s1 = t_a * ((i + 1) as f32 / chamfer_segs as f32);
+                        let (x0, y0) = bez(s0);
+                        let (x1, y1) = bez(s1);
+                        draw_line(x0, y0, x1, y1, thickness, col);
+                    }
+                    draw_line(mid_ax, mid_ay, mid_bx, mid_by, thickness, col);
+                    for i in 0..chamfer_segs {
+                        let s0 = t_b + (1.0 - t_b) * (i as f32 / chamfer_segs as f32);
+                        let s1 = t_b + (1.0 - t_b) * ((i + 1) as f32 / chamfer_segs as f32);
+                        let (x0, y0) = bez(s0);
+                        let (x1, y1) = bez(s1);
+                        draw_line(x0, y0, x1, y1, thickness, col);
+                    }
+                };
+
+                if xhair.outline_enabled {
+                    let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                    let oc = Color::from_rgba(0, 0, 0, 180);
+                    draw_line(h_near, corner_y, h_end_x, corner_y, ot, oc);
+                    draw_line(corner_x, v_near, corner_x, v_end_y, ot, oc);
+                    draw_corner_shape(ot, oc);
+                }
+
+                draw_line(h_near, corner_y, h_end_x, corner_y, thick, color);
+                draw_line(corner_x, v_near, corner_x, v_end_y, thick, color);
+                draw_corner_shape(thick, color);
+            }
+
+            if xhair.dot_enabled {
+                let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
+                let dot_color = Color::from_rgba(
+                    (color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha
+                );
+                draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
+            }
         }
+        CrosshairType::Cross => {
+            let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
+            let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
 
-        if xhair.dot_enabled {
-            let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
-            let dot_color = Color::from_rgba(
-                (color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha
-            );
-            draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
-        }
-    } else {
-        let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
-        let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
+            let gap = hip_gap + ads_rest_gap;
+            let len = (xhair.line_length * sh) / 100.0;
+            let thick = (xhair.line_thickness * sh) / 100.0;
 
-        let gap = hip_gap + ads_rest_gap;
-        let len = (xhair.line_length * sh) / 100.0;
-        let thick = (xhair.line_thickness * sh) / 100.0;
+            if xhair.outline_enabled {
+                let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
+                let oc = Color::from_rgba(0, 0, 0, 180);
+                draw_rectangle(cx - ot / 2.0, cy - gap - len, ot, len, oc);
+                draw_rectangle(cx - ot / 2.0, cy + gap, ot, len, oc);
+                draw_rectangle(cx - gap - len, cy - ot / 2.0, len, ot, oc);
+                draw_rectangle(cx + gap, cy - ot / 2.0, len, ot, oc);
+            }
 
-        if xhair.outline_enabled {
-            let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
-            let oc = Color::from_rgba(0, 0, 0, 180);
-            draw_rectangle(cx - ot / 2.0, cy - gap - len, ot, len, oc);
-            draw_rectangle(cx - ot / 2.0, cy + gap, ot, len, oc);
-            draw_rectangle(cx - gap - len, cy - ot / 2.0, len, ot, oc);
-            draw_rectangle(cx + gap, cy - ot / 2.0, len, ot, oc);
-        }
+            draw_rectangle(cx - thick / 2.0, cy - gap - len, thick, len, color);
+            draw_rectangle(cx - thick / 2.0, cy + gap, thick, len, color);
+            draw_rectangle(cx - gap - len, cy - thick / 2.0, len, thick, color);
+            draw_rectangle(cx + gap, cy - thick / 2.0, len, thick, color);
 
-        draw_rectangle(cx - thick / 2.0, cy - gap - len, thick, len, color);
-        draw_rectangle(cx - thick / 2.0, cy + gap, thick, len, color);
-        draw_rectangle(cx - gap - len, cy - thick / 2.0, len, thick, color);
-        draw_rectangle(cx + gap, cy - thick / 2.0, len, thick, color);
-
-        if xhair.dot_enabled {
-            let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
-            let dot_color = Color::from_rgba(
-                (color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha
-            );
-            draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
+            if xhair.dot_enabled {
+                let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
+                let dot_color = Color::from_rgba(
+                    (color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha
+                );
+                draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
+            }
         }
     }
 
