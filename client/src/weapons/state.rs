@@ -131,6 +131,14 @@ impl WeaponState {
 
     // fire the weapon — consume ammo, set cooldown, return true if fired.
     pub fn fire(&mut self) -> bool {
+        // If empty, pressing fire should auto-reload when we have reserve.
+        if self.ammo == 0 {
+            if self.reserve > 0 {
+                self.start_reload();
+            }
+            return false;
+        }
+
         if !self.can_fire() {
             return false;
         }
@@ -151,11 +159,6 @@ impl WeaponState {
         self.ammo -= 1;
         self.fire_cooldown = 1.0 / fire_rate;
         self.muzzle_flash_timer = 0.08; // 80ms flash
-
-        // auto-reload on empty
-        if self.ammo == 0 && self.reserve > 0 {
-            self.start_reload();
-        }
 
         true
     }
