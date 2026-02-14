@@ -150,7 +150,7 @@ impl DevModeState {
 
     // TAB NAMES
 
-    const TAB_NAMES: &[&str] = &["Weapon", "Crosshair", "Movement", "Debug"];
+    const TAB_NAMES: &[&str] = &["Weapon", "Crosshair", "Movement", "Viewmodel", "Debug"];
 
     // Slider helper
     fn draw_slider(
@@ -358,9 +358,9 @@ pub fn draw_dev_overlay(
     let clicked = is_mouse_button_pressed(MouseButton::Left);
     let held = is_mouse_button_down(MouseButton::Left);
 
-    // panel on the right side
+    // panel on the left side
     let panel_w = 460.0;
-    let panel_x = sw - panel_w - 10.0;
+    let panel_x = 10.0;
     let panel_y = 10.0;
     let panel_h = sh - 20.0;
 
@@ -428,12 +428,22 @@ pub fn draw_dev_overlay(
             && mouse.1 <= tab_y + 26.0
         {
             dev.active_tab = i;
+            dev.scroll_offset = 0.0;
         }
     }
 
-    // content area
+    // scroll wheel — only when mouse is over the panel
+    let (_, scroll_y) = mouse_wheel();
+    if mouse.0 >= panel_x && mouse.0 <= panel_x + panel_w
+        && mouse.1 >= panel_y && mouse.1 <= panel_y + panel_h
+    {
+        dev.scroll_offset += scroll_y * 30.0;
+        dev.scroll_offset = dev.scroll_offset.min(0.0); // can't scroll above top
+    }
+
+    // content area with scroll offset applied
     let content_x = panel_x + 16.0;
-    let content_y = tab_y + 36.0;
+    let content_y = tab_y + 36.0 + dev.scroll_offset;
     let content_w = panel_w - 32.0;
 
     match dev.active_tab {
@@ -452,7 +462,10 @@ pub fn draw_dev_overlay(
             clicked,
             held,
         ),
-        3 => draw_debug_tab(
+        3 => draw_viewmodel_tab(
+            inventory, content_x, content_y, content_w, mouse, clicked, held,
+        ),
+        4 => draw_debug_tab(
             dev, inventory, content_x, content_y, content_w, mouse, clicked, held,
         ),
         _ => {}
@@ -1153,7 +1166,128 @@ fn draw_movement_tab(
     );
 }
 
-// ── Tab 3: Debug ─────────────────────────────────────────────────────────
+// ── Tab 3: Viewmodel ─────────────────────────────────────────────────────
+fn draw_viewmodel_tab(
+    inv: &mut WeaponInventory,
+    x: f32,
+    mut y: f32,
+    w: f32,
+    mouse: (f32, f32),
+    clicked: bool,
+    held: bool,
+) {
+    let weapon = inv.active_mut();
+    let name = weapon.stats_data.name;
+    draw_text_ex(
+        &format!("Viewmodel: {}", name),
+        x,
+        y + 14.0,
+        text_params(16, Color::from_rgba(255, 200, 80, 255)),
+    );
+    y += 24.0;
+
+    y += DevModeState::draw_section_header("Scale", x, y);
+    y += DevModeState::draw_slider(
+        "viewmodel_scale",
+        &mut weapon.stats_data.viewmodel_scale,
+        0.001,
+        0.1,
+        0.001,
+        x, y, w, mouse, clicked, held,
+    );
+
+    y += DevModeState::draw_section_header("Position", x, y);
+    y += DevModeState::draw_slider(
+        "pos_x (right)",
+        &mut weapon.stats_data.viewmodel_position.0,
+        -0.5,
+        0.5,
+        0.01,
+        x, y, w, mouse, clicked, held,
+    );
+    y += DevModeState::draw_slider(
+        "pos_y (up)",
+        &mut weapon.stats_data.viewmodel_position.1,
+        -0.5,
+        0.5,
+        0.01,
+        x, y, w, mouse, clicked, held,
+    );
+    y += DevModeState::draw_slider(
+        "pos_z (forward)",
+        &mut weapon.stats_data.viewmodel_position.2,
+        -0.5,
+        0.5,
+        0.01,
+        x, y, w, mouse, clicked, held,
+    );
+
+    y += DevModeState::draw_section_header("Rotation (radians)", x, y);
+    y += DevModeState::draw_slider(
+        "pitch (up/down)",
+        &mut weapon.stats_data.viewmodel_rotation.0,
+        -3.15,
+        3.15,
+        0.05,
+        x, y, w, mouse, clicked, held,
+    );
+    y += DevModeState::draw_slider(
+        "yaw (left/right)",
+        &mut weapon.stats_data.viewmodel_rotation.1,
+        -3.15,
+        3.15,
+        0.05,
+        x, y, w, mouse, clicked, held,
+    );
+    y += DevModeState::draw_slider(
+        "roll (tilt)",
+        &mut weapon.stats_data.viewmodel_rotation.2,
+        -3.15,
+        3.15,
+        0.05,
+        x, y, w, mouse, clicked, held,
+    );
+
+    y += DevModeState::draw_section_header("Muzzle Offset", x, y);
+    y += DevModeState::draw_slider(
+        "muzzle_x",
+        &mut weapon.stats_data.viewmodel_muzzle_offset.0,
+        -2.0,
+        2.0,
+        0.02,
+        x, y, w, mouse, clicked, held,
+    );
+    y += DevModeState::draw_slider(
+        "muzzle_y",
+        &mut weapon.stats_data.viewmodel_muzzle_offset.1,
+        -2.0,
+        2.0,
+        0.02,
+        x, y, w, mouse, clicked, held,
+    );
+    y += DevModeState::draw_slider(
+        "muzzle_z",
+        &mut weapon.stats_data.viewmodel_muzzle_offset.2,
+        -2.0,
+        2.0,
+        0.02,
+        x, y, w, mouse, clicked, held,
+    );
+
+    // reset button
+    y += 8.0;
+    let (_h, pressed) =
+        DevModeState::draw_action_button("Reset Viewmodel to Defaults", x, y, 260.0, mouse, clicked);
+    if pressed {
+        let defaults = weapon.kind.stats();
+        weapon.stats_data.viewmodel_scale = defaults.viewmodel_scale;
+        weapon.stats_data.viewmodel_position = defaults.viewmodel_position;
+        weapon.stats_data.viewmodel_rotation = defaults.viewmodel_rotation;
+        weapon.stats_data.viewmodel_muzzle_offset = defaults.viewmodel_muzzle_offset;
+    }
+}
+
+// ── Tab 4: Debug ─────────────────────────────────────────────────────────
 fn draw_debug_tab(
     dev: &mut DevModeState,
     inv: &mut WeaponInventory,

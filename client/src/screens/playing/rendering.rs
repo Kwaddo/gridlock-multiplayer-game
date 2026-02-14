@@ -213,6 +213,11 @@ impl PlayingState {
         weapon: &crate::weapons::WeaponState,
         stats: &crate::weapons::stats::WeaponStats,
     ) {
+        // Hide weapon model when fully scoped (sniper scope overlay replaces it)
+        if stats.crosshair_style == CrosshairStyle::Scope && weapon.ads_progress > 0.9 {
+            return;
+        }
+
         // Separate viewmodel camera with wider FOV and very close near plane
         let vm_fov = 60.0f32.to_radians();
         let vm_camera = Camera3D {
