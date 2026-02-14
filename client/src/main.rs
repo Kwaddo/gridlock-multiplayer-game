@@ -77,12 +77,7 @@ fn parse_mtl_diffuse_colors(mtl_text: &str) -> HashMap<String, [u8; 4]> {
                     ) {
                         colors.insert(
                             name.clone(),
-                            [
-                                boost_channel(r),
-                                boost_channel(g),
-                                boost_channel(b),
-                                255,
-                            ],
+                            [boost_channel(r), boost_channel(g), boost_channel(b), 255],
                         );
                     }
                 }
@@ -341,65 +336,12 @@ async fn main() {
                 if loading_started && loading_index < loading_assets.len() {
                     let (key, path) = loading_assets[loading_index].clone();
                     loading_current = key.clone();
-                    match load_texture(&path).await {
-                        Ok(tex) => {
-                            tex.set_filter(FilterMode::Nearest);
-                            playing_state.assets.insert(key, tex);
-                        }
-                        Err(e) => {
-                            println!("Failed to load {}: {:?}", path, e);
-                        }
-                    }
+                    load_asset_entry(key, path, &mut playing_state).await;
                     loading_index += 1;
                 }
 
                 // transition to Playing when done
                 if loading_started && loading_index >= loading_assets.len() {
-                    // Load weapon 3D models from local filesystem
-                    println!("Loading 3D weapon models...");
-                    let model_files = [
-                        "Pistol_1.obj",
-                        "SubmachineGun_1.obj",
-                        "Shotgun_1.obj",
-                        "AssaultRifle_1.obj",
-                        "SniperRifle_1.obj",
-                    ];
-                    
-                    for model_name in &model_files {
-                        // Try multiple possible paths
-                        let paths = [
-                            format!("assets/models/{}", model_name),
-                            format!("client/assets/models/{}", model_name),
-                            format!("../client/assets/models/{}", model_name),
-                        ];
-                        
-                        let mut loaded = false;
-                        for path in &paths {
-                            match load_obj_mesh_with_materials(path).await {
-                                Ok(mesh) => {
-                                    let vertex_count = mesh.vertices.len();
-                                    playing_state.models.insert(model_name.to_string(), mesh);
-                                    println!(
-                                        "  ✓ Loaded colored 3D model: {} ({} verts) from {}",
-                                        model_name, vertex_count, path
-                                    );
-                                    loaded = true;
-                                    break;
-                                }
-                                Err(_) => continue,
-                            }
-                        }
-                        
-                        if !loaded {
-                            println!("  ✗ Failed to load {} from any path", model_name);
-                        }
-                    }
-
-                    println!("Model loading complete. Loaded {} models", playing_state.models.len());
-                    for key in playing_state.models.keys() {
-                        println!("  - {}", key);
-                    }
-
                     state = GameState::Playing;
                     set_cursor_grab(true);
                     show_mouse(false);
@@ -436,13 +378,7 @@ async fn main() {
                     let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
                     if let Some(entries) = assets {
                         for (key, path) in entries {
-                            match load_texture(&path).await {
-                                Ok(tex) => {
-                                    tex.set_filter(FilterMode::Nearest);
-                                    playing_state.assets.insert(key, tex);
-                                }
-                                Err(_) => {}
-                            }
+                            load_asset_entry(key, path, &mut playing_state).await;
                         }
                     }
                     playing_state.simulate(&config, maze.as_ref());
@@ -472,17 +408,7 @@ async fn main() {
 
                 if let Some(entries) = assets {
                     for (key, path) in entries {
-                        println!("Loading asset: {} -> {}", key, path);
-                        match load_texture(&path).await {
-                            Ok(tex) => {
-                                println!("  Loaded successfully");
-                                tex.set_filter(FilterMode::Nearest);
-                                playing_state.assets.insert(key, tex);
-                            }
-                            Err(e) => {
-                                println!("  FAILED to load: {:?}", e);
-                            }
-                        }
+                        load_asset_entry(key, path, &mut playing_state).await;
                     }
                 }
 
@@ -509,17 +435,7 @@ async fn main() {
 
                 if let Some(entries) = assets {
                     for (key, path) in entries {
-                        println!("Loading asset (paused): {} -> {}", key, path);
-                        match load_texture(&path).await {
-                            Ok(tex) => {
-                                println!("  Loaded successfully");
-                                tex.set_filter(FilterMode::Nearest);
-                                playing_state.assets.insert(key, tex);
-                            }
-                            Err(e) => {
-                                println!("  FAILED to load: {:?}", e);
-                            }
-                        }
+                        load_asset_entry(key, path, &mut playing_state).await;
                     }
                 }
 
@@ -575,13 +491,7 @@ async fn main() {
                 let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
                 if let Some(entries) = assets {
                     for (key, path) in entries {
-                        match load_texture(&path).await {
-                            Ok(tex) => {
-                                tex.set_filter(FilterMode::Nearest);
-                                playing_state.assets.insert(key, tex);
-                            }
-                            Err(_) => {}
-                        }
+                        load_asset_entry(key, path, &mut playing_state).await;
                     }
                 }
                 playing_state.simulate(&config, maze.as_ref());
@@ -641,4 +551,35 @@ fn sync_world(
         return updates.assets;
     }
     None
+}
+
+async fn load_asset_entry(key: String, path: String, playing_state: &mut PlayingState) {
+    let is_model = path.to_lowercase().ends_with(".obj");
+
+    if is_model {
+        match load_obj_mesh_with_materials(&path).await {
+            Ok(mesh) => {
+                let vertex_count = mesh.vertices.len();
+                playing_state.models.insert(key.clone(), mesh);
+                println!(
+                    "Loaded model: {} ({} verts) from {}",
+                    key, vertex_count, path
+                );
+            }
+            Err(e) => {
+                println!("Failed to load model {} from {}: {:?}", key, path, e);
+            }
+        }
+    } else {
+        match load_texture(&path).await {
+            Ok(tex) => {
+                tex.set_filter(FilterMode::Nearest);
+                playing_state.assets.insert(key.clone(), tex);
+                println!("Loaded texture: {} from {}", key, path);
+            }
+            Err(e) => {
+                println!("Failed to load texture {} from {}: {:?}", key, path, e);
+            }
+        }
+    }
 }

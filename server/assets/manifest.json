@@ -1,31 +1,22 @@
 {
   "global": {
-    "weapon_pistol": "assets/images/weapons/pistol.png",
-    "weapon_fp_pistol": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
-    "weapon_smg": "assets/images/weapons/smg.png",
-    "weapon_shotgun": "assets/images/weapons/shotgun.png",
-    "weapon_fp_shotgun": "assets/images/weapons/FPS Weapon Sprites/frames/shotgun3.png",
-    "weapon_ar": "assets/images/weapons/ar.png",
-    "weapon_sniper": "assets/images/weapons/Sniper.png",
-
-    "xhair_pistol_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair062.png",
-    "xhair_pistol_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair063.png",
-
-    "xhair_smg_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair179.png",
-    "xhair_smg_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair180.png",
-
-    "xhair_shotgun_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair038.png",
-    "xhair_shotgun_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair037.png",
-
-    "xhair_ar_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair010.png",
-    "xhair_ar_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair011.png",
-
-    "xhair_sniper_hip": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair048.png",
-    "xhair_sniper_ads": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair049.png",
+    "pistol_icon": "assets/images/weapons/pistol.png",
+    "pistol_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
+    "smg_icon": "assets/images/weapons/smg.png",
+    "shotgun_icon": "assets/images/weapons/shotgun.png",
+    "shotgun_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/shotgun3.png",
+    "ar_icon": "assets/images/weapons/ar.png",
+    "sniper_icon": "assets/images/weapons/Sniper.png",
 
     "xhair_scope_148": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair148.png",
     "xhair_scope_141": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair141.png",
-    "xhair_scope_162": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair162.png"
+    "xhair_scope_162": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair162.png",
+
+    "pistol_model": "assets/models/Pistol_1.obj",
+    "smg_model": "assets/models/SubmachineGun_1.obj",
+    "shotgun_model": "assets/models/Shotgun_1.obj",
+    "ar_model": "assets/models/AssaultRifle_1.obj",
+    "sniper_model": "assets/models/SniperRifle_1.obj"
   },
   "lobby": {
     "floor_texture": "assets/images/textures/rocks.png"
