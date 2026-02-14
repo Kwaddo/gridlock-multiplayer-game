@@ -8,15 +8,13 @@
     crosshair-presets.rs    - predefined crosshair styles for each weapon kind
 */
 
-
 pub mod combat;
 pub mod crosshair;
+pub mod crosshair_presets;
 pub mod effects;
 pub mod recoil;
 pub mod state;
 pub mod stats;
-pub mod crosshair_presets;
-
 
 // exports for convenience
 pub use effects::{BulletTracer, DamageNumber};

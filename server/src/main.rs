@@ -45,7 +45,7 @@ fn main() -> std::io::Result<()> {
     let mut buffer: [u8; 512] = [0; 512];
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
 
-    let maze = MazeData::new(35, 35);
+    let mut maze = MazeData::new(35, 35);
     println!(
         "Maze generated: {}x{} with seed {}",
         maze.width, maze.height, maze.seed
@@ -63,6 +63,7 @@ fn main() -> std::io::Result<()> {
             MSG_WORLD_CHANGE => {
                 handle_world_change(&socket, &maze, &mut players, src_addr, payload);
             }
+            MSG_WALL_BROKEN => handle_wall_broken(&socket, &mut maze, &players, src_addr, payload),
             MSG_DISCOVER => handle_discover(&socket, &players, src_addr),
             _ => println!("Unknown message type: {}", msg_type),
         }
@@ -239,7 +240,12 @@ fn handle_discover(
         .unwrap_or_else(|_| "Unknown".to_string());
     let name = format!("{}'s Server", hostname);
     let name_bytes = name.as_bytes();
-    let mut response = vec![MSG_DISCOVER, player_count, max_players, name_bytes.len() as u8];
+    let mut response = vec![
+        MSG_DISCOVER,
+        player_count,
+        max_players,
+        name_bytes.len() as u8,
+    ];
     response.extend_from_slice(name_bytes);
     let _ = socket.send_to(&response, src_addr);
 }
@@ -278,6 +284,36 @@ fn send_assets(socket: &UdpSocket, addr: SocketAddr) {
                 world_name
             );
             let _ = socket.send_to(&msg, addr);
+        }
+    }
+}
+
+fn handle_wall_broken(
+    socket: &UdpSocket,
+    maze: &mut MazeData,
+    players: &HashMap<SocketAddr, Player>,
+    src_addr: SocketAddr,
+    payload: &[u8],
+) {
+    if payload.len() < 2 {
+        return;
+    }
+
+    let x = payload[0];
+    let y = payload[1];
+
+    if x >= maze.width || y >= maze.height {
+        return;
+    }
+
+    if !maze.break_wall(x, y) {
+        return;
+    }
+
+    let msg = vec![MSG_WALL_BROKEN, x, y];
+    for player in players.values() {
+        if player.socket_addr != src_addr {
+            let _ = socket.send_to(&msg, player.socket_addr);
         }
     }
 }

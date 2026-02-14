@@ -1,5 +1,5 @@
-use macroquad::prelude::*;
 use crate::core::GameConfig;
+use macroquad::prelude::*;
 
 use super::PlayingState;
 
@@ -13,10 +13,9 @@ impl PlayingState {
             self.movement_state.stamina -= self.movement_config.stamina_drain * delta;
         } else {
             if !config.bind_sprint.is_down() {
-                self.movement_state.stamina = (
-                    self.movement_state.stamina +
-                    self.movement_config.stamina_recover * delta
-                ).min(100.0);
+                self.movement_state.stamina = (self.movement_state.stamina
+                    + self.movement_config.stamina_recover * delta)
+                    .min(100.0);
             }
         }
     }
@@ -62,10 +61,10 @@ impl PlayingState {
         };
 
         let saved_vy = self.movement_state.velocity.y;
-        self.movement_state.velocity = self.movement_state.velocity.lerp(
-            target_velocity,
-            rate * delta
-        );
+        self.movement_state.velocity = self
+            .movement_state
+            .velocity
+            .lerp(target_velocity, rate * delta);
         self.movement_state.velocity.y = saved_vy;
 
         self.position.x += self.movement_state.velocity.x * delta;

@@ -1,5 +1,5 @@
-use macroquad::prelude::*;
 use crate::core::GameConfig;
+use macroquad::prelude::*;
 
 use super::PlayingState;
 
@@ -14,13 +14,13 @@ impl PlayingState {
         let forward = vec3(
             self.yaw.cos() * self.pitch.cos(),
             self.pitch.sin(),
-            self.yaw.sin() * self.pitch.cos()
+            self.yaw.sin() * self.pitch.cos(),
         );
 
         let eye_pos = vec3(
             self.position.x,
             self.position.y + self.movement_state.height + bob_offset,
-            self.position.z
+            self.position.z,
         );
 
         // ADS zoom: interpolate FOV based on ads_progress

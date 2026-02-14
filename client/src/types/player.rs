@@ -1,7 +1,6 @@
-use macroquad::prelude::*;
 use crate::types::world::WorldId;
-use crate::weapons::combat::{ CombatEntity, Hitbox, default_player_hitboxes };
-
+use crate::weapons::combat::{default_player_hitboxes, CombatEntity, Hitbox};
+use macroquad::prelude::*;
 
 pub struct OtherPlayer {
     pub id: u32,
@@ -15,7 +14,7 @@ pub struct OtherPlayer {
     pub world: WorldId,
     pub hp: f32,
     pub max_hp: f32,
-    pub hit_timer:f32,
+    pub hit_timer: f32,
     pub hitboxes: Vec<Hitbox>,
 }
 
@@ -30,7 +29,9 @@ impl OtherPlayer {
     pub fn new(id: u32, username: String, world: WorldId) -> Self {
         Self {
             id,
-            x: 0.0, y: 0.0, z: 0.0,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
             yaw: 0.0,
             username,
             skin: None,

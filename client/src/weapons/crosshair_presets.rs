@@ -1,8 +1,8 @@
-use serde::{ Serialize, Deserialize };
-use std::path::PathBuf;
-use super::crosshair::{ CrosshairConfig, CrosshairType };
+use super::crosshair::{CrosshairConfig, CrosshairType};
 use super::stats::WeaponKind;
 use macroquad::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /*
     This module is for storing user created crosshairs,
@@ -17,10 +17,10 @@ pub struct CrosshairPreset {
     pub crosshair_type: CrosshairType,
     pub color: [u8; 4], // we need to store it this way because Color doesn't implement Serialize/Deserialize
     pub dot_enabled: bool,
-    pub dot_size: f32, // % of screen height
-    pub line_length: f32, // % of screen height
+    pub dot_size: f32,       // % of screen height
+    pub line_length: f32,    // % of screen height
     pub line_thickness: f32, // % of screen height
-    pub center_gap: f32, // % of screen height — base hip-fire gap, shrinks to 0 when ADS
+    pub center_gap: f32,     // % of screen height — base hip-fire gap, shrinks to 0 when ADS
     pub outline_enabled: bool,
     pub outline_thickness: f32, // % of screen height
 }
@@ -82,38 +82,48 @@ impl CrosshairPresetManager {
     fn rebuild_defaults(&mut self) {
         self.presets.clear();
 
-        // Cross default 
+        // Cross default
         let cross = CrosshairConfig::for_weapon(WeaponKind::Pistol);
-        self.presets.push(CrosshairPreset::from_config("Cross", &cross, true));
+        self.presets
+            .push(CrosshairPreset::from_config("Cross", &cross, true));
 
-        // 4 Curves 
+        // 4 Curves
         let curves = CrosshairConfig::for_weapon(WeaponKind::Shotgun);
-        self.presets.push(CrosshairPreset::from_config("4 Curves", &curves, true));
+        self.presets
+            .push(CrosshairPreset::from_config("4 Curves", &curves, true));
 
         // Chevron default
         let mut chevron = CrosshairConfig::for_weapon(WeaponKind::Pistol);
         chevron.crosshair_type = CrosshairType::Chevron;
-        self.presets.push(CrosshairPreset::from_config("Chevron", &chevron, true));
+        self.presets
+            .push(CrosshairPreset::from_config("Chevron", &chevron, true));
 
         // Circle default
         let mut circle = CrosshairConfig::for_weapon(WeaponKind::Pistol);
         circle.crosshair_type = CrosshairType::Circle;
-        self.presets.push(CrosshairPreset::from_config("Circle", &circle, true));
+        self.presets
+            .push(CrosshairPreset::from_config("Circle", &circle, true));
 
         // Square default
         let mut square = CrosshairConfig::for_weapon(WeaponKind::Pistol);
         square.crosshair_type = CrosshairType::Square;
-        self.presets.push(CrosshairPreset::from_config("Square", &square, true));
+        self.presets
+            .push(CrosshairPreset::from_config("Square", &square, true));
 
         // Triangle default
         let mut triangle = CrosshairConfig::for_weapon(WeaponKind::Pistol);
         triangle.crosshair_type = CrosshairType::Triangle;
-        self.presets.push(CrosshairPreset::from_config("Triangle", &triangle, true));
+        self.presets
+            .push(CrosshairPreset::from_config("Triangle", &triangle, true));
 
         // Angle Brackets (shotgun-style wider gap)
         let mut brackets = CrosshairConfig::for_weapon(WeaponKind::Shotgun);
         brackets.crosshair_type = CrosshairType::AngleBrackets;
-        self.presets.push(CrosshairPreset::from_config("Angle Brackets", &brackets, true));
+        self.presets.push(CrosshairPreset::from_config(
+            "Angle Brackets",
+            &brackets,
+            true,
+        ));
     }
     // load user presets from JSON and append
     fn load_user_presets(&mut self) {
@@ -129,9 +139,8 @@ impl CrosshairPresetManager {
 
     // save only user non-default presets to JSON
     pub fn save(&self) {
-        let user_only: Vec<&CrosshairPreset> = self.presets.iter()
-        .filter(|p| !p.is_default)
-        .collect();
+        let user_only: Vec<&CrosshairPreset> =
+            self.presets.iter().filter(|p| !p.is_default).collect();
         if let Ok(data) = serde_json::to_string_pretty(&user_only) {
             let _ = std::fs::write(&self.save_path, data);
         }
@@ -139,16 +148,18 @@ impl CrosshairPresetManager {
 
     // create new user preset from config
     pub fn save_as_new(&mut self, name: &str, config: &CrosshairConfig) {
-        self.presets.push(CrosshairPreset::from_config(name, config, false));
+        self.presets
+            .push(CrosshairPreset::from_config(name, config, false));
         self.save();
     }
 
     // overwrite existing user preset
     pub fn overwrite(&mut self, index: usize, config: &CrosshairConfig) {
-        if index < self.presets.len() && !self.presets[index].is_default { // cant overwrite defaults
-            self.presets[index] = CrosshairPreset::from_config(&self.presets[index].name, config, false);
+        if index < self.presets.len() && !self.presets[index].is_default {
+            // cant overwrite defaults
+            self.presets[index] =
+                CrosshairPreset::from_config(&self.presets[index].name, config, false);
             self.save();
-
         }
     }
 
@@ -159,13 +170,16 @@ impl CrosshairPresetManager {
         }
     }
 
-    pub fn default_count(&self) -> usize { // helper to count how many default presets there are, used to separate them in the UI
+    pub fn default_count(&self) -> usize {
+        // helper to count how many default presets there are, used to separate them in the UI
         self.presets.iter().filter(|p| p.is_default).count()
     }
 
     // find a preset by name, returns (index, is_default) if found
     pub fn find_by_name(&self, name: &str) -> Option<(usize, bool)> {
-        self.presets.iter().enumerate()
+        self.presets
+            .iter()
+            .enumerate()
             .find(|(_, p)| p.name == name)
             .map(|(i, p)| (i, p.is_default))
     }

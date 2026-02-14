@@ -1,5 +1,5 @@
-use macroquad::prelude::*;
 use crate::weapons::stats::WeaponStats;
+use macroquad::prelude::*;
 
 /*
     Actual combat entity, we make this a trait so we can apply it to anything we want
@@ -64,7 +64,13 @@ pub struct Hitbox {
     in other words, when a ray is shot, we check if it intersects the AABB (hitbox) of the target enemy,
     and if so, we can determine which hit zone was hit and apply damage accordingly.
 */
-pub fn ray_hit_aabb(origin: Vec3, dir: Vec3, center: Vec3, half: Vec3, max_dist: f32) -> Option<f32> {
+pub fn ray_hit_aabb(
+    origin: Vec3,
+    dir: Vec3,
+    center: Vec3,
+    half: Vec3,
+    max_dist: f32,
+) -> Option<f32> {
     let min = center - half;
     let max = center + half;
 
@@ -132,11 +138,35 @@ pub fn default_player_hitboxes() -> Vec<Hitbox> {
     // Arms:  0.50 → 1.35  (match torso height)
     // Legs:  0.00 → 0.50
     vec![
-        Hitbox { center_offset: vec3(0.0, 1.5, 0.0),    half_extents: vec3(0.15, 0.15, 0.15), zone: HitZone::Head },
-        Hitbox { center_offset: vec3(0.0, 0.925, 0.0),  half_extents: vec3(0.25, 0.425, 0.15), zone: HitZone::Torso },
-        Hitbox { center_offset: vec3(-0.4, 0.925, 0.0), half_extents: vec3(0.1, 0.425, 0.1), zone: HitZone::Limbs },
-        Hitbox { center_offset: vec3(0.4, 0.925, 0.0),  half_extents: vec3(0.1, 0.425, 0.1), zone: HitZone::Limbs },
-        Hitbox { center_offset: vec3(-0.12, 0.25, 0.0), half_extents: vec3(0.1, 0.25, 0.1), zone: HitZone::Limbs },
-        Hitbox { center_offset: vec3(0.12, 0.25, 0.0),  half_extents: vec3(0.1, 0.25, 0.1), zone: HitZone::Limbs },
+        Hitbox {
+            center_offset: vec3(0.0, 1.5, 0.0),
+            half_extents: vec3(0.15, 0.15, 0.15),
+            zone: HitZone::Head,
+        },
+        Hitbox {
+            center_offset: vec3(0.0, 0.925, 0.0),
+            half_extents: vec3(0.25, 0.425, 0.15),
+            zone: HitZone::Torso,
+        },
+        Hitbox {
+            center_offset: vec3(-0.4, 0.925, 0.0),
+            half_extents: vec3(0.1, 0.425, 0.1),
+            zone: HitZone::Limbs,
+        },
+        Hitbox {
+            center_offset: vec3(0.4, 0.925, 0.0),
+            half_extents: vec3(0.1, 0.425, 0.1),
+            zone: HitZone::Limbs,
+        },
+        Hitbox {
+            center_offset: vec3(-0.12, 0.25, 0.0),
+            half_extents: vec3(0.1, 0.25, 0.1),
+            zone: HitZone::Limbs,
+        },
+        Hitbox {
+            center_offset: vec3(0.12, 0.25, 0.0),
+            half_extents: vec3(0.1, 0.25, 0.1),
+            zone: HitZone::Limbs,
+        },
     ]
 }

@@ -62,8 +62,8 @@ pub enum CrosshairStyle {
 // fire mode determines input behaviour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FireMode {
-    SemiAuto, // one shot per click
-    FullAuto, // hold to keep firing
+    SemiAuto,   // one shot per click
+    FullAuto,   // hold to keep firing
     BoltAction, // delay after each shot
 }
 
@@ -77,7 +77,7 @@ pub struct WeaponStats {
     pub damage: f32,
     pub headshot_mult: f32,
     pub pellet_count: u32, // 1 for most guns, >1 for shotgun
-    pub pellet_spread: Option<&'static [(f32,f32)]>, // (radian around circle, how far it deviates from center)
+    pub pellet_spread: Option<&'static [(f32, f32)]>, // (radian around circle, how far it deviates from center)
 
     // --- Fire rate & ammo
     pub fire_rate: f32, // rounds per second
@@ -86,51 +86,51 @@ pub struct WeaponStats {
     pub reload_time: f32, // seconds
 
     // --- Recoil
-    pub recoil_vertical: f32, // pitch kick per shot (radians)
+    pub recoil_vertical: f32,   // pitch kick per shot (radians)
     pub recoil_horizontal: f32, // max random yaw kick per shot (radians)
-    pub recoil_recovery: f32, // how fast recoil settles back (rad/s)
+    pub recoil_recovery: f32,   // how fast recoil settles back (rad/s)
 
     // --- Spread / bloom
-    pub hip_spread: f32, // base spread at hip (radians)
-    pub ads_spread: f32, // base spread when aimed (radians)
-    pub spread_per_shot: f32, // bloom added per shot (radians)
-    pub spread_recovery: f32, // bloom decay rate when not firing (rad/s)
-    pub move_spread_mult: f32, // multiplier applied to spread when moving
+    pub hip_spread: f32,         // base spread at hip (radians)
+    pub ads_spread: f32,         // base spread when aimed (radians)
+    pub spread_per_shot: f32,    // bloom added per shot (radians)
+    pub spread_recovery: f32,    // bloom decay rate when not firing (rad/s)
+    pub move_spread_mult: f32,   // multiplier applied to spread when moving
     pub sprint_spread_mult: f32, // multiplier when sprinting (stacks with move)
     pub crouch_spread_mult: f32, // multiplier when crouching (<1 = tighter)
 
     // --- ADS (aim down sights)
-    pub ads_zoom_fov: f32, // target FOV when ADS (lower = more zoom)
-    pub ads_time: f32, // seconds to reach full ADS
+    pub ads_zoom_fov: f32,            // target FOV when ADS (lower = more zoom)
+    pub ads_time: f32,                // seconds to reach full ADS
     pub ads_sensitivity: Option<f32>, // custom sensitivity multiplier when ADS (None = use default), will only use this for sniper scope
 
     // --- Bullet visual
-    pub bullet_speed: f32, // tracer speed (units/s), purely visual
-    pub bullet_range: f32, // max hitscan distance (units)
-    pub tracer_length: f32, // visible tracer trail length (units)
+    pub bullet_speed: f32,     // tracer speed (units/s), purely visual
+    pub bullet_range: f32,     // max hitscan distance (units)
+    pub tracer_length: f32,    // visible tracer trail length (units)
     pub tracer_color: [u8; 4], // color of the bullet tracer (for visual variety, not necessarily tied to damage or team color)
     pub tracer_thickness: f32, // thickness of the bullet tracer line (units)
-    pub tracer_lifetime: f32, // how long the tracer trail lingers (seconds)
+    pub tracer_lifetime: f32,  // how long the tracer trail lingers (seconds)
 
     // --- Crosshair kick (visual gap expansion on fire, not user-editable)
     pub crosshair_kick_per_shot: f32, // how much gap to add per shot (% of screen height)
-    pub crosshair_kick_decay: f32, // how quickly the gap recovers (units per second)
-    pub crosshair_kick_max: f32, // maximum kick gap
+    pub crosshair_kick_decay: f32,    // how quickly the gap recovers (units per second)
+    pub crosshair_kick_max: f32,      // maximum kick gap
 
     // --- Crosshair
     pub crosshair_style: CrosshairStyle, // which render path (Standard = cross/texture, Scope = sniper overlay)
-    pub fsa_time: Option<f32>, // seconds to reach first shot accuracy, None = never (SMG)
+    pub fsa_time: Option<f32>,           // seconds to reach first shot accuracy, None = never (SMG)
     // visual crosshair config (color, gap, thickness, textures) lives on CrosshairConfig in state.rs
 
     // --- HUD icon
     pub icon_asset_key: &'static str, // key used to look up texture in assets HashMap
-    pub icon_width: f32, // display width in pixels (tweak per weapon)
-    pub icon_height: f32, // display height in pixels
-    pub icon_flip_x: bool, // true if the source image faces left
+    pub icon_width: f32,              // display width in pixels (tweak per weapon)
+    pub icon_height: f32,             // display height in pixels
+    pub icon_flip_x: bool,            // true if the source image faces left
 
     // --- damage falloff
     pub falloff_start: f32, // distance at which damage falloff begins (units)
-    pub falloff_end: f32, // distance at which damage reaches minimum (units)
+    pub falloff_end: f32,   // distance at which damage reaches minimum (units)
     pub falloff_min_mult: f32, // minimum damage multiplier at max falloff (0..1)
 
     // --- spray pattern
@@ -138,9 +138,6 @@ pub struct WeaponStats {
     pub pattern_randomness: f32, // how much random variance to add to the recoil pattern (radians),
     pub randomness_growth: f32, // additional randomness per shot to make the pattern less predictable the longer you fire (radians)
     pub pattern_reset_time: f32, // time in seconds to fully reset after releasing trigger
-
-
-
 }
 
 // --- Weapon definitions
@@ -178,7 +175,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
     bullet_speed: 200.0,
     bullet_range: 40.0,
     tracer_length: 2.0,
-    tracer_color:[255,200,80,255],
+    tracer_color: [255, 200, 80, 255],
     tracer_thickness: 0.01,
     tracer_lifetime: 1.5,
 
@@ -199,7 +196,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
     falloff_min_mult: 0.5,
 
     recoil_pattern: &[
-        (0.018, 0.0), 
+        (0.018, 0.0),
         (0.018, 0.05),
         (0.017, -0.05),
         (0.016, 0.1),
@@ -242,7 +239,7 @@ pub const SMG: WeaponStats = WeaponStats {
     bullet_speed: 180.0,
     bullet_range: 45.0,
     tracer_length: 2.5,
-    tracer_color:[255,200,80,255],
+    tracer_color: [255, 200, 80, 255],
     tracer_thickness: 0.01,
     tracer_lifetime: 1.2,
 
@@ -263,19 +260,19 @@ pub const SMG: WeaponStats = WeaponStats {
     falloff_min_mult: 0.4,
 
     recoil_pattern: &[
-    (0.012, 0.0),    // 1-3: straight up
-    (0.012, 0.0),
-    (0.012, 0.05),
-    (0.011, 0.15),   // 4-6: drift right
-    (0.011, 0.25),
-    (0.010, 0.3),
-    (0.010, 0.1),    // 7-9: swing left
-    (0.009, -0.2),
-    (0.009, -0.35),
-    (0.008, -0.25),  // 10-12: settle back
-    (0.008, -0.1),
-    (0.007, 0.0),
-],
+        (0.012, 0.0), // 1-3: straight up
+        (0.012, 0.0),
+        (0.012, 0.05),
+        (0.011, 0.15), // 4-6: drift right
+        (0.011, 0.25),
+        (0.010, 0.3),
+        (0.010, 0.1), // 7-9: swing left
+        (0.009, -0.2),
+        (0.009, -0.35),
+        (0.008, -0.25), // 10-12: settle back
+        (0.008, -0.1),
+        (0.007, 0.0),
+    ],
     pattern_randomness: 0.3,
     randomness_growth: 0.04,
     pattern_reset_time: 0.35,
@@ -289,8 +286,8 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     headshot_mult: 1.5,
     pellet_count: 9,
     pellet_spread: Some(&[
-        (0.0,0.0), // center pellet
-        (0.4363, 0.9), 
+        (0.0, 0.0), // center pellet
+        (0.4363, 0.9),
         (1.1345, 0.9),
         (2.0071, 0.9),
         (2.7053, 0.9),
@@ -298,7 +295,7 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
         (4.2761, 0.9),
         (5.1487, 0.9),
         (5.8469, 0.9),
-    ]), 
+    ]),
 
     fire_rate: 1.0, // slow pump action
     magazine_size: 7,
@@ -324,7 +321,7 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     bullet_speed: 150.0,
     bullet_range: 20.0, // short range but not useless
     tracer_length: 1.5, // short trails for pellets
-    tracer_color:[255,140,60,255],
+    tracer_color: [255, 140, 60, 255],
     tracer_thickness: 0.008,
     tracer_lifetime: 0.8,
 
@@ -346,7 +343,7 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
 
     recoil_pattern: &[], // invalid for shotgun
     pattern_randomness: 0.0,
-    randomness_growth: 0.0, // no pattern, so randomness doesnt increase
+    randomness_growth: 0.0,  // no pattern, so randomness doesnt increase
     pattern_reset_time: 0.0, // no pattern to reset
 };
 
@@ -368,7 +365,7 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     recoil_horizontal: 0.008,
     recoil_recovery: 3.5,
 
-    hip_spread: 0.03, // worse hipfire than SMG (heavier weapon)
+    hip_spread: 0.03,  // worse hipfire than SMG (heavier weapon)
     ads_spread: 0.006, // but better ADS accuracy
     spread_per_shot: 0.02,
     spread_recovery: 1.8,
@@ -383,7 +380,7 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     bullet_speed: 250.0,
     bullet_range: 70.0, // best range of the auto weapons
     tracer_length: 3.5,
-    tracer_color:[255,230,150,255],
+    tracer_color: [255, 230, 150, 255],
     tracer_thickness: 0.015,
     tracer_lifetime: 1.5,
 
@@ -404,17 +401,17 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     falloff_min_mult: 0.6,
 
     recoil_pattern: &[
-    (0.010, 0.0),    // shot 1: straight up
-    (0.011, 0.0),    // shot 2: straight up
-    (0.012, 0.1),    // shot 3: up, slight right
-    (0.012, 0.2),    // shot 4: up, more right  
-    (0.011, 0.3),    // shot 5: up, right
-    (0.010, 0.1),    // shot 6: up, slight right
-    (0.010, -0.2),   // shot 7: up, pulls left
-    (0.009, -0.4),   // shot 8: up, more left
-    (0.008, -0.3),   // shot 9: less kick, left
-    (0.007, -0.1),   // shot 10: settling
-],
+        (0.010, 0.0),  // shot 1: straight up
+        (0.011, 0.0),  // shot 2: straight up
+        (0.012, 0.1),  // shot 3: up, slight right
+        (0.012, 0.2),  // shot 4: up, more right
+        (0.011, 0.3),  // shot 5: up, right
+        (0.010, 0.1),  // shot 6: up, slight right
+        (0.010, -0.2), // shot 7: up, pulls left
+        (0.009, -0.4), // shot 8: up, more left
+        (0.008, -0.3), // shot 9: less kick, left
+        (0.007, -0.1), // shot 10: settling
+    ],
 
     pattern_randomness: 0.1, // early on its very predictable,
     randomness_growth: 0.06, // but the longer you hold it, the more random it gets to prevent pure pattern memorization
@@ -438,7 +435,7 @@ pub const SNIPER: WeaponStats = WeaponStats {
     recoil_horizontal: 0.01,
     recoil_recovery: 2.0,
 
-    hip_spread: 0.1, // terrible from hip
+    hip_spread: 0.1,   // terrible from hip
     ads_spread: 0.001, // pinpoint when scoped
     spread_per_shot: 0.06,
     spread_recovery: 0.8,
@@ -452,8 +449,8 @@ pub const SNIPER: WeaponStats = WeaponStats {
 
     bullet_speed: 350.0,
     bullet_range: 120.0, // longest range in the game
-    tracer_length: 8.0, // long visible trail — sniper rounds are iconic
-    tracer_color:[180, 200, 255, 255],
+    tracer_length: 8.0,  // long visible trail — sniper rounds are iconic
+    tracer_color: [180, 200, 255, 255],
     tracer_thickness: 0.03,
     tracer_lifetime: 3.5,
 
@@ -475,8 +472,6 @@ pub const SNIPER: WeaponStats = WeaponStats {
 
     recoil_pattern: &[],
     pattern_randomness: 0.0, // sniper has no recoil pattern, just a single strong kick with some randomness
-    randomness_growth: 0.0, // no pattern, so randomness doesnt increase
+    randomness_growth: 0.0,  // no pattern, so randomness doesnt increase
     pattern_reset_time: 0.0, // no pattern to reset
 };
-
-

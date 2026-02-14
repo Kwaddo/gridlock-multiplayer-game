@@ -4,4 +4,5 @@ mod generation;
 pub mod types;
 
 pub use data::MazeData;
-pub use types::{Prop, PropKind, Room};
+#[allow(unused_imports)]
+pub use types::{MazeLight, Prop, PropKind, Room};

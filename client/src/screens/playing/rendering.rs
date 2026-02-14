@@ -1,7 +1,7 @@
-use macroquad::prelude::*;
-use macroquad::models::Vertex;
-use macroquad::window::get_internal_gl;
 use crate::weapons::combat::HitZone;
+use macroquad::models::Vertex;
+use macroquad::prelude::*;
+use macroquad::window::get_internal_gl;
 
 use super::PlayingState;
 
@@ -67,7 +67,13 @@ impl PlayingState {
         let bar_h = 6.0;
         let hp_frac = d.hp / d.max_hp;
 
-        draw_rectangle(sx - bar_w / 2.0, sy, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
+        draw_rectangle(
+            sx - bar_w / 2.0,
+            sy,
+            bar_w,
+            bar_h,
+            Color::from_rgba(40, 40, 40, 200),
+        );
         let hp_color = if hp_frac > 0.5 {
             Color::from_rgba(80, 200, 80, 255)
         } else if hp_frac > 0.25 {
@@ -172,4 +178,4 @@ impl PlayingState {
             }
         }
     }
-}   
+}

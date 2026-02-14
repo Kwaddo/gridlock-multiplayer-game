@@ -1,10 +1,9 @@
 use crate::core::GameConfig;
 use crate::physics::movement::MovementState;
-use macroquad::prelude::*;
 use crate::weapons::*;
+use macroquad::prelude::*;
 
 // process mouse input and update camera orientation
-
 
 pub fn process_mouse(
     last_mouse_pos: &mut (f32, f32),
@@ -83,31 +82,38 @@ pub fn process_jump(config: &GameConfig, is_grounded: bool, weapons: &mut Weapon
 }
 
 // process weapon input and return the desired weapon action
-pub fn process_weapon_input(
-    inventory: &mut WeaponInventory,
-    config: &GameConfig,
-) {
+pub fn process_weapon_input(inventory: &mut WeaponInventory, config: &GameConfig) {
     // weapon switching (configurable bindings)
-    if config.bind_weapon1.is_pressed() { inventory.switch_to(0); }
-    if config.bind_weapon2.is_pressed() { inventory.switch_to(1); }
-    if config.bind_weapon3.is_pressed() { inventory.switch_to(2); }
-    if config.bind_weapon4.is_pressed() { inventory.switch_to(3); }
-    if config.bind_weapon5.is_pressed() { inventory.switch_to(4); }
+    if config.bind_weapon1.is_pressed() {
+        inventory.switch_to(0);
+    }
+    if config.bind_weapon2.is_pressed() {
+        inventory.switch_to(1);
+    }
+    if config.bind_weapon3.is_pressed() {
+        inventory.switch_to(2);
+    }
+    if config.bind_weapon4.is_pressed() {
+        inventory.switch_to(3);
+    }
+    if config.bind_weapon5.is_pressed() {
+        inventory.switch_to(4);
+    }
 
     // mouse wheel switching
     let (_, wheel_y) = mouse_wheel();
-       if wheel_y > 0.0 {
+    if wheel_y > 0.0 {
         inventory.scroll(-1);
     } else if wheel_y < 0.0 {
         inventory.scroll(1);
     }
 
     // reload
-      if config.bind_reload.is_pressed() {
+    if config.bind_reload.is_pressed() {
         inventory.active_mut().start_reload();
     }
 
-   // ADS (only set if grounded — jump cancels ADS elsewhere)
+    // ADS (only set if grounded — jump cancels ADS elsewhere)
     let weapon = inventory.active_mut();
     if !weapon.jump_cancelled_ads {
         weapon.is_aiming = config.bind_aim.is_down();
