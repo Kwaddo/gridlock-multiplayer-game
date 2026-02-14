@@ -1,5 +1,5 @@
 use crate::types::world::WorldId;
-use crate::weapons::combat::{default_player_hitboxes, CombatEntity, Hitbox};
+use crate::weapons::combat::{default_player_hitboxes, CombatEntity, EntityKind, Hitbox};
 use macroquad::prelude::*;
 
 pub struct OtherPlayer {
@@ -46,9 +46,18 @@ impl OtherPlayer {
 }
 
 impl CombatEntity for OtherPlayer {
+    fn entity_kind(&self) -> EntityKind {
+        EntityKind::Player
+    }
+
+    fn entity_id(&self) -> Option<u32> {
+        Some(self.id)
+    }
+
     fn entity_position(&self) -> Vec3 {
         vec3(self.x, self.y, self.z)
     }
+
     fn hitboxes(&self) -> &[Hitbox] {
         &self.hitboxes
     }
@@ -57,7 +66,22 @@ impl CombatEntity for OtherPlayer {
         self.hp = (self.hp - dmg).max(0.0);
         self.hit_timer = 0.3; // flash red for 300ms
     }
+
     fn is_alive(&self) -> bool {
         self.hp > 0.0
+    }
+
+    fn update(&mut self, delta: f32) {
+        if self.hit_timer > 0.0 {
+            self.hit_timer = (self.hit_timer - delta).max(0.0);
+        }
+    }
+
+    fn hit_timer(&self) -> f32 {
+        self.hit_timer
+    }
+
+    fn entity_color(&self) -> Color {
+        self.color
     }
 }
