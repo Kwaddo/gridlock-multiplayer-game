@@ -3,9 +3,20 @@ use macroquad::prelude::*;
 use super::utils::{apply_lighting, CeilingLight};
 use crate::types::maze::{Maze, PropKind};
 
-pub(super) fn draw_props(maze: &Maze, lights: &[CeilingLight]) {
+pub(super) fn draw_props(
+    maze: &Maze,
+    lights: &[CeilingLight],
+    viewer_pos: Vec3,
+    render_dist_sq: f32,
+) {
     for prop in &maze.props {
         let c = maze.cell_to_world(prop.x as i32, prop.y as i32);
+
+        let dx = c.x - viewer_pos.x;
+        let dz = c.z - viewer_pos.z;
+        if dx * dx + dz * dz > render_dist_sq {
+            continue;
+        }
 
         // Helper to apply lighting to colors at specific positions
         let lit = |color: Color, pos: Vec3| apply_lighting(lights, color, pos);
