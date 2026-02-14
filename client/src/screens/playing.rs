@@ -25,7 +25,7 @@ use macroquad::rand::gen_range;
 use std::net::UdpSocket;
 
 use macroquad::models::Mesh;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::dev_mode::DevModeState;
 use super::input;
@@ -426,6 +426,8 @@ impl PlayingState {
         }
         self.tracers.retain(|t| t.lifetime > 0.0);
 
+        self.update_other_players_smoothing(delta);
+
         self.update_stamina(config, delta);
         self.update_crouch_height(config, delta);
         self.apply_jump();
@@ -465,6 +467,79 @@ impl PlayingState {
         }
     }
 
+    pub fn merge_other_players(&mut self, updates: Vec<OtherPlayer>) {
+        let mut seen: HashSet<u32> = HashSet::new();
+
+        for upd in updates {
+            seen.insert(upd.id);
+            if let Some(p) = self.other_players.iter_mut().find(|p| p.id == upd.id) {
+                // Snap if the gap is extreme (e.g., due to lost packets or teleport)
+                let target = vec3(upd.x, upd.y, upd.z);
+                let current = vec3(p.x, p.y, p.z);
+                if (target - current).length() > 8.0 {
+                    p.x = target.x;
+                    p.y = target.y;
+                    p.z = target.z;
+                }
+                p.target_x = upd.x;
+                p.target_y = upd.y;
+                p.target_z = upd.z;
+                p.target_yaw = upd.yaw;
+                p.target_pitch = upd.pitch;
+                p.world = upd.world;
+                p.username = upd.username;
+                p.color = upd.color;
+                p.hitboxes = upd.hitboxes;
+                p.max_hp = upd.max_hp;
+                p.hp = upd.hp;
+            } else {
+                let mut p = upd;
+                p.target_x = p.x;
+                p.target_y = p.y;
+                p.target_z = p.z;
+                p.target_yaw = p.yaw;
+                p.target_pitch = p.pitch;
+                self.other_players.push(p);
+            }
+        }
+
+        self.other_players.retain(|p| seen.contains(&p.id));
+    }
+
+    fn update_other_players_smoothing(&mut self, delta: f32) {
+        // Exponential smoothing toward last network state; keeps rendering stable between packets
+        let pos_rate = 10.0; // higher = snappier
+        let rot_rate = 12.0;
+
+        let pos_t = 1.0 - (-pos_rate * delta).exp();
+        let rot_t = 1.0 - (-rot_rate * delta).exp();
+
+        for p in &mut self.other_players {
+            p.x += (p.target_x - p.x) * pos_t;
+            p.y += (p.target_y - p.y) * pos_t;
+            p.z += (p.target_z - p.z) * pos_t;
+
+            p.yaw = Self::lerp_angle(p.yaw, p.target_yaw, rot_t);
+            p.pitch = Self::lerp_angle(p.pitch, p.target_pitch, rot_t);
+
+            if p.hit_timer > 0.0 {
+                p.hit_timer = (p.hit_timer - delta).max(0.0);
+            }
+        }
+    }
+
+    fn lerp_angle(current: f32, target: f32, t: f32) -> f32 {
+        let mut diff = target - current;
+        // Wrap to [-pi, pi] to choose the shortest path
+        while diff > std::f32::consts::PI {
+            diff -= std::f32::consts::TAU;
+        }
+        while diff < -std::f32::consts::PI {
+            diff += std::f32::consts::TAU;
+        }
+        current + diff * t
+    }
+
     pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
         if let Some(ref s) = socket {
             // send world change request if pending
@@ -483,6 +558,7 @@ impl PlayingState {
             msg.extend_from_slice(&self.position.y.to_be_bytes());
             msg.extend_from_slice(&self.position.z.to_be_bytes());
             msg.extend_from_slice(&self.yaw.to_be_bytes());
+            msg.extend_from_slice(&self.pitch.to_be_bytes());
             let _ = s.send_to(&msg, server_addr);
         }
     }

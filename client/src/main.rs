@@ -533,7 +533,7 @@ fn sync_world(
             // playing_state.position = spawn; // removed because player starts in lobby now
         }
         if let Some(players) = updates.players {
-            playing_state.other_players = players;
+            playing_state.merge_other_players(players);
         }
 
         if let Some((world_id, spawn)) = updates.world_change {
