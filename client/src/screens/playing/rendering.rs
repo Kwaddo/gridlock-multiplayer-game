@@ -1,4 +1,5 @@
 use crate::weapons::combat::HitZone;
+use crate::weapons::stats::CrosshairStyle;
 use macroquad::models::Vertex;
 use macroquad::prelude::*;
 use macroquad::window::get_internal_gl;
@@ -182,6 +183,11 @@ impl PlayingState {
     pub(super) fn draw_viewmodel(&self) {
         let weapon = self.weapons.active();
         let stats = weapon.stats();
+
+        // When fully scoped, the sniper overlay fills the screen; hide the gun model to avoid overlap.
+        if matches!(stats.crosshair_style, CrosshairStyle::Scope) && weapon.ads_progress > 0.85 {
+            return;
+        }
 
         // Debug output
         if let Some(model_key) = stats.viewmodel_model {

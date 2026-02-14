@@ -68,6 +68,9 @@ pub struct GameConfig {
     // Camera (UI value 40-120, default 90)
     pub fov: f32,
 
+    // World rendering
+    pub render_distance: f32, // how far to draw maze/props (world units)
+
     // Player
     pub standing_height: f32,
     pub crouch_height: f32,
@@ -107,6 +110,9 @@ impl GameConfig {
             // Camera - UI value, converted to internal with raw_fov()
             // this is the same as the sensitivity from earlier, just converting it to a more intuitive UI value while raw_fov() converts it back to the actual FOV used in the game
             fov: 90.0,
+
+            // World rendering
+            render_distance: 45.0,
 
             // Player
             standing_height: 1.0,
