@@ -130,7 +130,7 @@ fn handle_position(
     src_addr: SocketAddr,
     payload: &[u8],
 ) {
-    if payload.len() < 16 {
+    if payload.len() < 20 {
         return;
     }
 
@@ -139,8 +139,10 @@ fn handle_position(
         let y = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
         let z = f32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]);
         let yaw = f32::from_be_bytes([payload[12], payload[13], payload[14], payload[15]]);
+        let pitch = f32::from_be_bytes([payload[16], payload[17], payload[18], payload[19]]);
         player.position = (x, y, z);
         player.yaw = yaw;
+        player.pitch = pitch;
         player.last_activity = Instant::now();
     }
 
@@ -164,6 +166,7 @@ fn broadcast_state(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) {
             state_msg.extend_from_slice(&player.position.1.to_be_bytes());
             state_msg.extend_from_slice(&player.position.2.to_be_bytes());
             state_msg.extend_from_slice(&player.yaw.to_be_bytes());
+            state_msg.extend_from_slice(&player.pitch.to_be_bytes());
             state_msg.push(player.world.as_u8());
             let name_bytes = player.username.as_bytes();
             state_msg.push(name_bytes.len() as u8);

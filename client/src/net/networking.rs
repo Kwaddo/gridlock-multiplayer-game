@@ -20,12 +20,13 @@ pub struct NetUpdate {
     pub broken_walls: Option<Vec<(u8, u8)>>,
 }
 
-pub fn send_position(socket: &UdpSocket, server_addr: &str, position: Vec3, yaw: f32) {
+pub fn send_position(socket: &UdpSocket, server_addr: &str, position: Vec3, yaw: f32, pitch: f32) {
     let mut pos_msg = vec![MSG_POSITION];
     pos_msg.extend_from_slice(&position.x.to_be_bytes());
     pos_msg.extend_from_slice(&position.y.to_be_bytes());
     pos_msg.extend_from_slice(&position.z.to_be_bytes());
     pos_msg.extend_from_slice(&yaw.to_be_bytes());
+    pos_msg.extend_from_slice(&pitch.to_be_bytes());
     let _ = socket.send_to(&pos_msg, server_addr);
 }
 
@@ -142,6 +143,9 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 let mut offset = 5;
                 let mut new_players = Vec::new();
                 for _ in 0..player_count {
+                    if size < offset + 26 {
+                        break;
+                    }
                     let id = u32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -177,11 +181,21 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[offset + 3],
                     ]);
                     offset += 4;
+                    let pitch = f32::from_be_bytes([
+                        recv_buf[offset],
+                        recv_buf[offset + 1],
+                        recv_buf[offset + 2],
+                        recv_buf[offset + 3],
+                    ]);
+                    offset += 4;
                     let world_id = recv_buf[offset];
                     offset += 1;
                     let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
                     let name_len = recv_buf[offset] as usize;
                     offset += 1;
+                    if offset + name_len > size {
+                        break;
+                    }
                     let name =
                         String::from_utf8_lossy(&recv_buf[offset..offset + name_len]).to_string();
                     offset += name_len;
@@ -192,6 +206,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.y = y;
                         other_player.z = z;
                         other_player.yaw = yaw;
+                        other_player.pitch = pitch;
                         new_players.push(other_player);
                     }
                 }
