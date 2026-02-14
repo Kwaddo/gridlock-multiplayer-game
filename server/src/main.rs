@@ -1,8 +1,7 @@
 use std::collections::HashMap;
+use std::fs;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
-use std::fs;
-
 
 mod maze;
 mod player;
@@ -15,6 +14,7 @@ use protocols::*;
 use player::WorldId;
 
 const PLAYER_TIMEOUT: Duration = Duration::from_secs(30);
+const MAZE_CELL_SIZE: f32 = 1.8;
 
 fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
     let mut candidate = if requested.is_empty() || requested.len() > 20 {
@@ -45,7 +45,7 @@ fn main() -> std::io::Result<()> {
     let mut buffer: [u8; 512] = [0; 512];
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
 
-    let maze = MazeData::new(45, 45);
+    let mut maze = MazeData::new(35, 35);
     println!(
         "Maze generated: {}x{} with seed {}",
         maze.width, maze.height, maze.seed
@@ -61,8 +61,10 @@ fn main() -> std::io::Result<()> {
             MSG_DISCONNECT => handle_disconnect(&mut players, src_addr),
             MSG_POSITION => handle_position(&socket, &mut players, src_addr, payload),
             MSG_WORLD_CHANGE => {
-                handle_world_change(&socket, &mut players, src_addr, payload);
+                handle_world_change(&socket, &maze, &mut players, src_addr, payload);
             }
+            MSG_WALL_BROKEN => handle_wall_broken(&socket, &mut maze, &players, src_addr, payload),
+            MSG_DISCOVER => handle_discover(&socket, &players, src_addr),
             _ => println!("Unknown message type: {}", msg_type),
         }
 
@@ -145,9 +147,11 @@ fn handle_position(
     broadcast_state(socket, players);
 }
 
-fn broadcast_state(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) { // updated this function to build a separate message per receiver filtered by world
+fn broadcast_state(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) {
+    // updated this function to build a separate message per receiver filtered by world
     for receiver in players.values() {
-        let same_world: Vec<&Player> = players.values()
+        let same_world: Vec<&Player> = players
+            .values()
             .filter(|p| p.world == receiver.world)
             .collect();
 
@@ -192,19 +196,26 @@ fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) {
 
 fn handle_world_change(
     socket: &UdpSocket,
+    maze: &MazeData,
     players: &mut HashMap<SocketAddr, Player>,
     src_addr: SocketAddr,
     payload: &[u8],
 ) {
-    if payload.is_empty() { return; }
-    let Some(target) = WorldId::from_u8(payload[0]) else { return; };
-    let Some(player) = players.get_mut(&src_addr) else { return; };
+    if payload.is_empty() {
+        return;
+    }
+    let Some(target) = WorldId::from_u8(payload[0]) else {
+        return;
+    };
+    let Some(player) = players.get_mut(&src_addr) else {
+        return;
+    };
 
     player.world = target;
 
     let (sx, sy, sz) = match target {
         WorldId::Lobby => (0.0_f32, 0.0_f32, 0.0_f32),
-        WorldId::Maze => (1.5 * 1.8, 0.0, 1.5 * 1.8),
+        WorldId::Maze => maze.teleporter_world(MAZE_CELL_SIZE),
     };
     player.position = (sx, sy, sz);
 
@@ -214,6 +225,28 @@ fn handle_world_change(
     response.extend_from_slice(&sx.to_be_bytes());
     response.extend_from_slice(&sy.to_be_bytes());
     response.extend_from_slice(&sz.to_be_bytes());
+    let _ = socket.send_to(&response, src_addr);
+}
+
+fn handle_discover(
+    socket: &UdpSocket,
+    players: &HashMap<SocketAddr, Player>,
+    src_addr: SocketAddr,
+) {
+    let player_count = players.len().min(255) as u8;
+    let max_players: u8 = 16;
+    let hostname = fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "Unknown".to_string());
+    let name = format!("{}'s Server", hostname);
+    let name_bytes = name.as_bytes();
+    let mut response = vec![
+        MSG_DISCOVER,
+        player_count,
+        max_players,
+        name_bytes.len() as u8,
+    ];
+    response.extend_from_slice(name_bytes);
     let _ = socket.send_to(&response, src_addr);
 }
 
@@ -227,7 +260,7 @@ fn send_assets(socket: &UdpSocket, addr: SocketAddr) {
         return;
     };
 
-    let worlds = [("lobby", 0u8), ("maze", 1u8)];
+    let worlds = [("global", 255u8), ("lobby", 0u8), ("maze", 1u8)];
 
     for (world_name, world_id) in &worlds {
         if let Some(assets) = manifest.get(world_name).and_then(|v| v.as_object()) {
@@ -245,8 +278,42 @@ fn send_assets(socket: &UdpSocket, addr: SocketAddr) {
                     msg.extend_from_slice(path_bytes);
                 }
             }
-            println!("Sending {} asset(s) for world '{}'", assets.len(), world_name);
+            println!(
+                "Sending {} asset(s) for world '{}'",
+                assets.len(),
+                world_name
+            );
             let _ = socket.send_to(&msg, addr);
+        }
+    }
+}
+
+fn handle_wall_broken(
+    socket: &UdpSocket,
+    maze: &mut MazeData,
+    players: &HashMap<SocketAddr, Player>,
+    src_addr: SocketAddr,
+    payload: &[u8],
+) {
+    if payload.len() < 2 {
+        return;
+    }
+
+    let x = payload[0];
+    let y = payload[1];
+
+    if x >= maze.width || y >= maze.height {
+        return;
+    }
+
+    if !maze.break_wall(x, y) {
+        return;
+    }
+
+    let msg = vec![MSG_WALL_BROKEN, x, y];
+    for player in players.values() {
+        if player.socket_addr != src_addr {
+            let _ = socket.send_to(&msg, player.socket_addr);
         }
     }
 }

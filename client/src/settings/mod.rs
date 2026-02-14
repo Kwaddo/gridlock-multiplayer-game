@@ -1,16 +1,28 @@
-mod sliders;
+pub mod crosshair_settings;
+pub mod fov;
 mod keybinds;
 pub mod sensitivity;
-pub mod fov;
+mod sliders;
 
-use macroquad::prelude::*;
 use crate::core::GameConfig;
-use crate::ui::fonts::{text_params, measure_game_text};
+use crate::ui::fonts::{measure_game_text, text_params};
+use crate::weapons::crosshair_presets::CrosshairPresetManager;
+use crate::weapons::WeaponInventory;
+use macroquad::prelude::*;
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum SettingsTab {
+    General,
+    Keybinds,
+    Crosshair,
+}
 
 pub struct SettingsScreen {
     pub rebinding: Option<String>,
     pub saved_config: Option<GameConfig>,
     pub show_unsaved_prompt: bool,
+    pub active_tab: SettingsTab,
+    pub crosshair_state: crosshair_settings::CrosshairSettingsPreview,
 }
 
 impl SettingsScreen {
@@ -19,22 +31,22 @@ impl SettingsScreen {
             rebinding: None,
             saved_config: None,
             show_unsaved_prompt: false,
+            active_tab: SettingsTab::General,
+            crosshair_state: crosshair_settings::CrosshairSettingsPreview::new(),
         }
     }
 
     pub fn enter(&mut self, config: &GameConfig) {
         self.saved_config = Some(config.clone());
         self.show_unsaved_prompt = false;
+        self.crosshair_state.reset_visit();
     }
 
     fn has_duplicates(config: &GameConfig) -> bool {
-        let keys = [
-            config.key_forward, config.key_backward, config.key_left,
-            config.key_right, config.key_sprint, config.key_crouch, config.key_jump,
-        ];
-        for i in 0..keys.len() {
-            for j in (i + 1)..keys.len() {
-                if keys[i] == keys[j] {
+        let bindings = config.all_bindings();
+        for i in 0..bindings.len() {
+            for j in (i + 1)..bindings.len() {
+                if bindings[i].1 == bindings[j].1 {
                     return true;
                 }
             }
@@ -49,18 +61,60 @@ impl SettingsScreen {
         }
     }
 
-    pub fn update(&mut self, config: &mut GameConfig) -> bool {
+    pub fn update(
+        &mut self,
+        config: &mut GameConfig,
+        weapons: &mut WeaponInventory,
+        presets: &mut CrosshairPresetManager,
+    ) -> bool {
         let mouse = mouse_position();
         let clicked = is_mouse_button_pressed(MouseButton::Left);
         let held = is_mouse_button_down(MouseButton::Left);
 
-        // Handle unsaved changes prompt
+        // Handle crosshair save prompt (fullscreen modal, blocks everything)
+        if self.active_tab == SettingsTab::Crosshair && self.crosshair_state.show_save_prompt {
+            if let Some(should_leave) = crosshair_settings::update_crosshair_save_prompt(
+                &mut self.crosshair_state,
+                weapons,
+                presets,
+            ) {
+                if should_leave {
+                    // Check if there's a pending tab switch instead of leaving settings
+                    if let Some(tab_id) = self.crosshair_state.pending_tab.take() {
+                        self.active_tab = match tab_id {
+                            0 => SettingsTab::General,
+                            1 => SettingsTab::Keybinds,
+                            _ => SettingsTab::General,
+                        };
+                        return false;
+                    }
+                    return true;
+                }
+                // Resolved but staying — check pending tab
+                if let Some(tab_id) = self.crosshair_state.pending_tab.take() {
+                    self.active_tab = match tab_id {
+                        0 => SettingsTab::General,
+                        1 => SettingsTab::Keybinds,
+                        _ => SettingsTab::General,
+                    };
+                }
+            }
+            return false; // block all other input while prompt is open
+        }
+
+        // Handle unsaved changes prompt (for non-crosshair tabs)
         if self.show_unsaved_prompt {
             return self.update_unsaved_prompt(config, mouse, clicked);
         }
 
         // ESC tries to go back
         if is_key_pressed(KeyCode::Escape) {
+            if self.active_tab == SettingsTab::Crosshair {
+                self.crosshair_state.show_save_prompt = true;
+                self.crosshair_state.save_prompt_is_leave = true;
+                self.crosshair_state.pending_tab = None;
+                return false;
+            }
             if self.has_unsaved_changes(config) {
                 self.show_unsaved_prompt = true;
                 return false;
@@ -68,31 +122,115 @@ impl SettingsScreen {
             return true;
         }
 
-        // Layout
-        let gap = 20.0;
-        let panel_w = (screen_width() - gap * 3.0) / 2.0;
-        let left_x = gap;
-        let right_x = gap * 2.0 + panel_w;
-        let panel_top = 80.0;
-        let slider_x = left_x + 160.0;
-        let slider_w = panel_w - 220.0;
-        let btn_size = 25.0;
+        // Tab buttons
+        let tab_y = 80.0;
+        let tab_w = 150.0;
+        let tab_h = 40.0;
+        let tab_gap = 20.0;
+        let tabs = [
+            (SettingsTab::General, "General"),
+            (SettingsTab::Keybinds, "Keybinds"),
+            (SettingsTab::Crosshair, "Crosshair"),
+        ];
 
-        // Slider updates
-        sliders::update_sliders(config, slider_x, slider_w, btn_size, panel_top, mouse, clicked, held);
+        for (i, (tab, _)) in tabs.iter().enumerate() {
+            let tab_x = 20.0 + (tab_w + tab_gap) * (i as f32);
+            if clicked
+                && mouse.0 >= tab_x
+                && mouse.0 <= tab_x + tab_w
+                && mouse.1 >= tab_y
+                && mouse.1 <= tab_y + tab_h
+            {
+                if self.active_tab != *tab {
+                    // Switching away from crosshair tab — trigger save prompt
+                    if self.active_tab == SettingsTab::Crosshair {
+                        let pending = match *tab {
+                            SettingsTab::General => 0u8,
+                            SettingsTab::Keybinds => 1u8,
+                            SettingsTab::Crosshair => 2u8,
+                        };
+                        self.crosshair_state.show_save_prompt = true;
+                        self.crosshair_state.save_prompt_is_leave = true;
+                        self.crosshair_state.pending_tab = Some(pending);
+                        break;
+                    }
+                    // Switching to crosshair tab
+                    if *tab == SettingsTab::Crosshair {
+                        self.crosshair_state.reset_visit();
+                    }
+                    self.active_tab = *tab;
+                }
+            }
+        }
 
-        // Keybind updates
-        keybinds::update_keybinds(config, &mut self.rebinding, right_x, panel_top, panel_w, mouse, clicked);
+        let content_top = tab_y + tab_h + 20.0;
+
+        match self.active_tab {
+            SettingsTab::General => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                let slider_x = gap + 160.0;
+                let slider_w = panel_w - 220.0;
+                let btn_size = 25.0;
+
+                sliders::update_sliders(
+                    config,
+                    slider_x,
+                    slider_w,
+                    btn_size,
+                    content_top,
+                    mouse,
+                    clicked,
+                    held,
+                );
+            }
+            SettingsTab::Keybinds => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+
+                keybinds::update_keybinds(
+                    config,
+                    &mut self.rebinding,
+                    gap,
+                    content_top,
+                    panel_w,
+                    mouse,
+                    clicked,
+                );
+            }
+            SettingsTab::Crosshair => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                crosshair_settings::update_crosshair_settings(
+                    &mut self.crosshair_state,
+                    weapons,
+                    presets,
+                    gap,
+                    content_top,
+                    panel_w,
+                    screen_height() - content_top - 100.0,
+                    mouse,
+                    clicked,
+                    held,
+                );
+            }
+        }
 
         // Back button
         let back_y = screen_height() - 60.0;
         let back_w = 150.0;
         let back_x = (screen_width() - back_w) / 2.0;
         if clicked
-            && mouse.0 >= back_x && mouse.0 <= back_x + back_w
-            && mouse.1 >= back_y && mouse.1 <= back_y + 40.0
+            && mouse.0 >= back_x
+            && mouse.0 <= back_x + back_w
+            && mouse.1 >= back_y
+            && mouse.1 <= back_y + 40.0
         {
-            if self.has_unsaved_changes(config) {
+            if self.active_tab == SettingsTab::Crosshair {
+                self.crosshair_state.show_save_prompt = true;
+                self.crosshair_state.save_prompt_is_leave = true;
+                self.crosshair_state.pending_tab = None;
+            } else if self.has_unsaved_changes(config) {
                 self.show_unsaved_prompt = true;
             } else {
                 return true;
@@ -103,19 +241,30 @@ impl SettingsScreen {
         let save_w = 150.0;
         let save_x = back_x + back_w + 20.0;
         let has_dupes = Self::has_duplicates(config);
-        if clicked && !has_dupes
-            && mouse.0 >= save_x && mouse.0 <= save_x + save_w
-            && mouse.1 >= back_y && mouse.1 <= back_y + 40.0
+        if clicked
+            && !has_dupes
+            && mouse.0 >= save_x
+            && mouse.0 <= save_x + save_w
+            && mouse.1 >= back_y
+            && mouse.1 <= back_y + 40.0
         {
-            self.saved_config = Some(config.clone());
+            if self.active_tab == SettingsTab::Crosshair {
+                self.crosshair_state.show_save_prompt = true;
+                self.crosshair_state.save_prompt_is_leave = false;
+                self.crosshair_state.pending_tab = None;
+            } else {
+                self.saved_config = Some(config.clone());
+            }
         }
 
         // Reset button
         let reset_w = 150.0;
         let reset_x = back_x - reset_w - 20.0;
         if clicked
-            && mouse.0 >= reset_x && mouse.0 <= reset_x + reset_w
-            && mouse.1 >= back_y && mouse.1 <= back_y + 40.0
+            && mouse.0 >= reset_x
+            && mouse.0 <= reset_x + reset_w
+            && mouse.1 >= back_y
+            && mouse.1 <= back_y + 40.0
         {
             config.reset();
         }
@@ -123,20 +272,36 @@ impl SettingsScreen {
         false
     }
 
-    fn update_unsaved_prompt(&mut self, config: &mut GameConfig, mouse: (f32, f32), clicked: bool) -> bool {
+    fn update_unsaved_prompt(
+        &mut self,
+        config: &mut GameConfig,
+        mouse: (f32, f32),
+        clicked: bool,
+    ) -> bool {
         let pw = 350.0;
         let ph = 150.0;
         let px = (screen_width() - pw) / 2.0;
         let py = (screen_height() - ph) / 2.0;
 
         // Draw prompt overlay
-        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::from_rgba(0, 0, 0, 150));
+        draw_rectangle(
+            0.0,
+            0.0,
+            screen_width(),
+            screen_height(),
+            Color::from_rgba(0, 0, 0, 150),
+        );
         draw_rectangle(px, py, pw, ph, Color::from_rgba(40, 40, 40, 255));
         draw_rectangle_lines(px, py, pw, ph, 2.0, WHITE);
 
         let msg = "You have unsaved changes!";
         let msg_w = measure_game_text(msg, 20);
-        draw_text_ex(msg, px + (pw - msg_w) / 2.0, py + 35.0, text_params(20, YELLOW));
+        draw_text_ex(
+            msg,
+            px + (pw - msg_w) / 2.0,
+            py + 35.0,
+            text_params(20, YELLOW),
+        );
 
         let btn_w = 150.0;
         let btn_h = 35.0;
@@ -144,11 +309,22 @@ impl SettingsScreen {
         let btn_y = py + ph - btn_h - 20.0;
 
         // "Leave" button
-        draw_rectangle(leave_x, btn_y, btn_w, btn_h, Color::from_rgba(80, 30, 30, 255));
+        draw_rectangle(
+            leave_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            Color::from_rgba(80, 30, 30, 255),
+        );
         draw_rectangle_lines(leave_x, btn_y, btn_w, btn_h, 1.0, WHITE);
         let lt = "Leave";
         let ltw = measure_game_text(lt, 18);
-        draw_text_ex(lt, leave_x + (btn_w - ltw) / 2.0, btn_y + 24.0, text_params(18, WHITE));
+        draw_text_ex(
+            lt,
+            leave_x + (btn_w - ltw) / 2.0,
+            btn_y + 24.0,
+            text_params(18, WHITE),
+        );
 
         // "Save & Leave" button
         let save_x = px + pw - btn_w - 20.0;
@@ -160,7 +336,11 @@ impl SettingsScreen {
         };
         draw_rectangle(save_x, btn_y, btn_w, btn_h, save_color);
         draw_rectangle_lines(save_x, btn_y, btn_w, btn_h, 1.0, WHITE);
-        let st = if has_dupes { "Fix duplicates" } else { "Save & Leave" };
+        let st = if has_dupes {
+            "Fix duplicates"
+        } else {
+            "Save & Leave"
+        };
         let stw = measure_game_text(st, 18);
         draw_text_ex(
             st,
@@ -171,8 +351,10 @@ impl SettingsScreen {
 
         if clicked {
             // Leave without saving
-            if mouse.0 >= leave_x && mouse.0 <= leave_x + btn_w
-                && mouse.1 >= btn_y && mouse.1 <= btn_y + btn_h
+            if mouse.0 >= leave_x
+                && mouse.0 <= leave_x + btn_w
+                && mouse.1 >= btn_y
+                && mouse.1 <= btn_y + btn_h
             {
                 if let Some(saved) = &self.saved_config {
                     *config = saved.clone();
@@ -182,8 +364,10 @@ impl SettingsScreen {
             }
             // Save & Leave
             if !has_dupes
-                && mouse.0 >= save_x && mouse.0 <= save_x + btn_w
-                && mouse.1 >= btn_y && mouse.1 <= btn_y + btn_h
+                && mouse.0 >= save_x
+                && mouse.0 <= save_x + btn_w
+                && mouse.1 >= btn_y
+                && mouse.1 <= btn_y + btn_h
             {
                 self.saved_config = Some(config.clone());
                 self.show_unsaved_prompt = false;
@@ -198,45 +382,127 @@ impl SettingsScreen {
         false
     }
 
-    pub fn draw(&self, config: &GameConfig) {
+    pub fn draw(
+        &self,
+        config: &GameConfig,
+        weapons: &WeaponInventory,
+        presets: &CrosshairPresetManager,
+        assets: &std::collections::HashMap<String, Texture2D>,
+    ) {
         // Title
         let title = "SETTINGS";
         let title_w = measure_game_text(title, 30);
-        draw_text_ex(title, (screen_width() - title_w) / 2.0, 50.0, text_params(30, WHITE));
-
-        // Layout
-        let gap = 20.0;
-        let panel_w = (screen_width() - gap * 3.0) / 2.0;
-        let left_x = gap;
-        let right_x = gap * 2.0 + panel_w;
-        let panel_top = 80.0;
-        let panel_h = screen_height() - 150.0;
-
-        // Left panel - General settings
-        draw_rectangle(left_x, panel_top, panel_w, panel_h, Color::from_rgba(30, 30, 30, 240));
-        draw_rectangle_lines(left_x, panel_top, panel_w, panel_h, 1.0, GRAY);
-
-        let section_title = "General";
-        let section_w = measure_game_text(section_title, 22);
         draw_text_ex(
-            section_title,
-            left_x + (panel_w - section_w) / 2.0,
-            panel_top + 30.0,
-            text_params(22, YELLOW),
+            title,
+            (screen_width() - title_w) / 2.0,
+            50.0,
+            text_params(30, WHITE),
         );
 
-        let slider_x = left_x + 160.0;
-        let slider_w = panel_w - 220.0;
-        let btn_size = 25.0;
-        let label_x = left_x + 20.0;
+        // Tab buttons
+        let tab_y = 80.0;
+        let tab_w = 150.0;
+        let tab_h = 40.0;
+        let tab_gap = 20.0;
+        let tabs = [
+            (SettingsTab::General, "General"),
+            (SettingsTab::Keybinds, "Keybinds"),
+            (SettingsTab::Crosshair, "Crosshair"),
+        ];
+        let mouse = mouse_position();
 
-        sliders::draw_sliders(config, label_x, slider_x, slider_w, btn_size, panel_top);
+        for (i, (tab, name)) in tabs.iter().enumerate() {
+            let tab_x = 20.0 + (tab_w + tab_gap) * (i as f32);
 
-        // Right panel - Key Bindings
-        keybinds::draw_keybinds(config, &self.rebinding, right_x, panel_w, panel_top, panel_h);
+            let tab_color = if *tab == self.active_tab {
+                Color::from_rgba(80, 150, 220, 255)
+            } else {
+                Color::from_rgba(40, 40, 40, 255)
+            };
+
+            draw_rectangle(tab_x, tab_y, tab_w, tab_h, tab_color);
+            draw_rectangle_lines(tab_x, tab_y, tab_w, tab_h, 1.0, GRAY);
+
+            let text_w = measure_game_text(name, 18);
+            draw_text_ex(
+                name,
+                tab_x + (tab_w - text_w) / 2.0,
+                tab_y + 26.0,
+                text_params(18, WHITE),
+            );
+        }
+
+        let content_top = tab_y + tab_h + 20.0;
+
+        match self.active_tab {
+            SettingsTab::General => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                let panel_h = screen_height() - content_top - 70.0;
+
+                draw_rectangle(
+                    gap,
+                    content_top,
+                    panel_w,
+                    panel_h,
+                    Color::from_rgba(30, 30, 30, 240),
+                );
+                draw_rectangle_lines(gap, content_top, panel_w, panel_h, 1.0, GRAY);
+
+                let section_title = "General";
+                let section_w = measure_game_text(section_title, 22);
+                draw_text_ex(
+                    section_title,
+                    gap + (panel_w - section_w) / 2.0,
+                    content_top + 30.0,
+                    text_params(22, YELLOW),
+                );
+
+                let slider_x = gap + 160.0;
+                let slider_w = panel_w - 220.0;
+                let btn_size = 25.0;
+                let label_x = gap + 20.0;
+
+                sliders::draw_sliders(config, label_x, slider_x, slider_w, btn_size, content_top);
+            }
+            SettingsTab::Keybinds => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                let panel_h = screen_height() - content_top - 70.0;
+
+                keybinds::draw_keybinds(
+                    config,
+                    &self.rebinding,
+                    gap,
+                    panel_w,
+                    content_top,
+                    panel_h,
+                );
+            }
+            SettingsTab::Crosshair => {
+                let gap = 20.0;
+                let panel_w = screen_width() - gap * 2.0;
+                crosshair_settings::draw_crosshair_settings(
+                    &self.crosshair_state,
+                    weapons,
+                    presets,
+                    gap,
+                    content_top,
+                    panel_w,
+                    screen_height() - content_top - 100.0,
+                    assets,
+                    mouse,
+                );
+            }
+        }
 
         // Bottom buttons
         self.draw_bottom_buttons(config);
+
+        // Draw save prompt overlay on top of everything (including bottom buttons)
+        if self.active_tab == SettingsTab::Crosshair && self.crosshair_state.show_save_prompt {
+            crosshair_settings::draw_crosshair_save_prompt(&self.crosshair_state, presets);
+        }
     }
 
     fn draw_bottom_buttons(&self, config: &GameConfig) {
@@ -245,17 +511,39 @@ impl SettingsScreen {
         let back_x = (screen_width() - back_w) / 2.0;
 
         // Back button
-        draw_rectangle(back_x, back_y, back_w, 40.0, Color::from_rgba(50, 50, 50, 255));
+        draw_rectangle(
+            back_x,
+            back_y,
+            back_w,
+            40.0,
+            Color::from_rgba(50, 50, 50, 255),
+        );
         draw_rectangle_lines(back_x, back_y, back_w, 40.0, 1.0, WHITE);
         let back_tw = measure_game_text("Back", 20);
-        draw_text_ex("Back", back_x + (back_w - back_tw) / 2.0, back_y + 26.0, text_params(20, WHITE));
+        draw_text_ex(
+            "Back",
+            back_x + (back_w - back_tw) / 2.0,
+            back_y + 26.0,
+            text_params(20, WHITE),
+        );
 
         // Reset button
         let reset_x = back_x - back_w - 20.0;
-        draw_rectangle(reset_x, back_y, back_w, 40.0, Color::from_rgba(80, 60, 20, 255));
+        draw_rectangle(
+            reset_x,
+            back_y,
+            back_w,
+            40.0,
+            Color::from_rgba(80, 60, 20, 255),
+        );
         draw_rectangle_lines(reset_x, back_y, back_w, 40.0, 1.0, WHITE);
         let reset_tw = measure_game_text("Reset", 20);
-        draw_text_ex("Reset", reset_x + (back_w - reset_tw) / 2.0, back_y + 26.0, text_params(20, WHITE));
+        draw_text_ex(
+            "Reset",
+            reset_x + (back_w - reset_tw) / 2.0,
+            back_y + 26.0,
+            text_params(20, WHITE),
+        );
 
         // Save button
         let save_x = back_x + back_w + 20.0;
@@ -270,8 +558,16 @@ impl SettingsScreen {
         };
         draw_rectangle(save_x, back_y, back_w, 40.0, save_color);
         draw_rectangle_lines(
-            save_x, back_y, back_w, 40.0, 1.0,
-            if has_changes && !has_dupes { GREEN } else { WHITE },
+            save_x,
+            back_y,
+            back_w,
+            40.0,
+            1.0,
+            if has_changes && !has_dupes {
+                GREEN
+            } else {
+                WHITE
+            },
         );
         let save_label = if has_dupes { "Fix dupes" } else { "Save" };
         let save_tw = measure_game_text(save_label, 20);

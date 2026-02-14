@@ -1,7 +1,25 @@
 {
-    "lobby": {
-        "floor_texture": "assets/images/rocks.png"
-    },
-    "maze": {
-    }
+  "global": {
+    "pistol_icon": "assets/images/weapons/pistol.png",
+    "pistol_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
+    "smg_icon": "assets/images/weapons/smg.png",
+    "shotgun_icon": "assets/images/weapons/shotgun.png",
+    "shotgun_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/shotgun3.png",
+    "ar_icon": "assets/images/weapons/ar.png",
+    "sniper_icon": "assets/images/weapons/Sniper.png",
+
+    "xhair_scope_148": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair148.png",
+    "xhair_scope_141": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair141.png",
+    "xhair_scope_162": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair162.png",
+
+    "pistol_model": "assets/models/Pistol_1.obj",
+    "smg_model": "assets/models/SubmachineGun_1.obj",
+    "shotgun_model": "assets/models/Shotgun_1.obj",
+    "ar_model": "assets/models/AssaultRifle2_1.obj",
+    "sniper_model": "assets/models/SniperRifle_1.obj"
+  },
+  "lobby": {
+    "floor_texture": "assets/images/textures/rocks.png"
+  },
+  "maze": {}
 }

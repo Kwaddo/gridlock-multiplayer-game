@@ -1,0 +1,163 @@
+HOW BILLBOARD TRACERS WORK — explained simply
+================================================
+
+1. VERTEX (plural: VERTICES)
+-----------------------------
+A vertex is just a point in 3D space. Think of it like a pin on a map.
+It has a position (x, y, z) — where it is in the world.
+It also carries extra info like color and UV (texture coordinates).
+
+Example: a vertex at (3, 5, 0) is a dot floating 3 units right, 5 units up.
+
+
+2. MESH
+--------
+A mesh is a shape made of vertices connected together.
+Think of it like connect-the-dots but in 3D.
+
+A mesh has two parts:
+  - vertices: the dots (positions + colors)
+  - indices: which dots to connect to make triangles
+
+Everything in 3D graphics is made of triangles. A square? Two triangles.
+A cube? 12 triangles. A character model? Thousands of triangles.
+
+
+3. INDICES
+-----------
+Indices tell the GPU "connect vertex 0, vertex 1, and vertex 2 into a triangle."
+
+Example:
+  vertices = [A, B, C, D]     (4 points making a square)
+  indices  = [0, 1, 2,         (triangle 1: A-B-C)
+              0, 2, 3]         (triangle 2: A-C-D)
+
+  That makes a square from 2 triangles:
+
+      A ---- B
+      |    / |
+      |  /   |
+      | /    |
+      D ---- C
+
+Why not just list triangles directly? Because vertices are often shared.
+A square has 4 corners but 2 triangles — indices let us reuse the corners
+instead of duplicating them.
+
+
+4. QUAD
+--------
+A quad is just a rectangle (4 corners, 2 triangles).
+It's the simplest useful flat shape.
+
+Our old tracer was a quad:
+  - 4 vertices making a flat rectangle
+  - tail on one end, head on the other
+  - constant width from tail to head
+
+Our new tracer is a TRIANGLE (3 vertices):
+  - 2 vertices at the tail (left and right, giving it width)
+  - 1 vertex at the head (the point/tip)
+  - this creates the tapered "comet" / "bullet streak" look
+
+      tail-left ___________  tail-right
+                \         /
+                 \       /
+                  \     /
+                   \   /
+                    \ /
+                   head (point)
+
+
+5. BILLBOARD
+-------------
+A billboard is a flat shape that always faces the camera.
+
+Imagine holding a piece of paper in front of someone.
+No matter where they move, you rotate the paper to always face them.
+That's billboarding.
+
+Why? Because our tracer is a flat triangle with no depth.
+If you looked at it from the side, it would be invisible — like looking
+at the edge of a sheet of paper.
+
+By always rotating it to face the camera, it always looks solid.
+
+How we do it:
+  1. We know the tracer's direction (tail -> head)
+  2. We know where the camera is
+  3. We compute a "right" vector perpendicular to both:
+
+         camera
+           |
+           |  (to_cam vector)
+           |
+     right <----[===tracer direction===]----> right
+
+  The cross product of (tracer direction) x (to camera) gives us "right".
+  We offset the tail vertices left and right along this vector.
+
+  As the camera moves, "right" recalculates, so the triangle rotates
+  to always face you.
+
+
+6. DOUBLE-SIDED RENDERING
+---------------------------
+Triangles in 3D graphics have a "front" and a "back".
+The GPU only draws the front by default (called backface culling).
+
+Which side is "front" depends on the order of vertices:
+  - 0, 1, 2 = front (counter-clockwise)
+  - 2, 1, 0 = back (clockwise, same triangle but reversed)
+
+Since our billboard can be seen from either side, we draw both:
+  indices = [0, 1, 2,    <- front face
+             2, 1, 0]    <- back face (same triangle, reversed winding)
+
+
+7. GLOW PASS
+--------------
+We draw the same triangle twice:
+  1. Inner: normal width, full brightness — the visible bullet streak
+  2. Outer: 3x wider, 30% opacity — a soft halo around it
+
+This fakes a glow effect without any shaders. Cheap and effective.
+
+
+8. THE TAPER + FADE
+---------------------
+The tail vertices have full color and opacity.
+The head vertex has 0 opacity (fully transparent).
+
+The GPU automatically blends between vertex colors across the triangle.
+So the tracer smoothly fades from bright at the tail to invisible at the tip.
+
+Combined with the taper (wide tail, narrow head), this creates the
+"bullet streak" look:
+
+  [BRIGHT =========> fading -------> invisible]
+   wide                              point
+
+
+9. DEGENERATE CASE (the "stationary" bug)
+-------------------------------------------
+When you shoot straight ahead, the tracer flies directly away from you.
+The tracer direction and camera direction are parallel.
+
+Cross product of two parallel vectors = zero.
+Zero = no "right" vector = no width = invisible tracer.
+
+Fix: when the cross product is too small, we fall back to using the
+world-up vector (0, 1, 0) to compute "right" instead. This means the
+tracer might not perfectly billboard, but at least it's visible.
+
+
+PUTTING IT ALL TOGETHER
+========================
+Every frame, for each active tracer:
+  1. Calculate head and tail positions based on progress
+  2. Find the "right" direction (billboard facing camera)
+  3. Build 3 vertices: tail-left, tail-right, head-point
+  4. Tell the GPU to draw the triangle (both sides)
+  5. Draw a second bigger, dimmer triangle for glow
+  6. The GPU interpolates colors, creating the smooth fade
