@@ -24,6 +24,7 @@ use macroquad::prelude::*;
 use macroquad::rand::gen_range;
 use std::net::UdpSocket;
 
+use macroquad::models::Mesh;
 use std::collections::HashMap;
 
 use super::dev_mode::DevModeState;
@@ -39,6 +40,7 @@ pub struct PlayingState {
     pub movement_config: MovementConfig,
     pub bob_timer: f32,
     pub assets: HashMap<String, Texture2D>,
+    pub models: HashMap<String, Mesh>,
     pub move_dir: Vec3,
     pub jump_requested: bool,
     pub current_world: WorldId,
@@ -73,6 +75,7 @@ impl PlayingState {
             movement_config: MovementConfig::new(),
             bob_timer: 0.0,
             assets: HashMap::new(),
+            models: HashMap::new(),
             move_dir: Vec3::ZERO,
             jump_requested: false,
             current_world: WorldId::Lobby,
@@ -531,6 +534,9 @@ impl PlayingState {
 
         // has to be after set_default_camera since it's 2D text in a 3d world, also has to be after draw_other_players so that the prompt is on top of other players in case they are between the player and the teleporter
         self.draw_teleporter_prompt(maze);
+
+        // first-person weapon sprite (drawn before HUD so crosshair/ammo sit on top)
+        self.draw_viewmodel();
 
         let forward = vec3(
             self.yaw.cos() * self.pitch.cos(),

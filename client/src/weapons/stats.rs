@@ -128,6 +128,14 @@ pub struct WeaponStats {
     pub icon_height: f32,             // display height in pixels
     pub icon_flip_x: bool,            // true if the source image faces left
 
+    // --- First-person viewmodel (3D model or 2D sprite fallback)
+    pub viewmodel_model: Option<&'static str>, // .obj model path
+    pub viewmodel_asset_key: Option<&'static str>, // 2D sprite fallback
+    pub viewmodel_scale: f32,                  // multiplier for model size
+    pub viewmodel_position: (f32, f32, f32),   // position offset (right, up, forward)
+    pub viewmodel_rotation: (f32, f32, f32),   // rotation (pitch, yaw, roll) in radians
+    pub viewmodel_muzzle_offset: (f32, f32, f32), // muzzle in normalized model space
+
     // --- damage falloff
     pub falloff_start: f32, // distance at which damage falloff begins (units)
     pub falloff_end: f32,   // distance at which damage reaches minimum (units)
@@ -190,6 +198,13 @@ pub const PISTOL: WeaponStats = WeaponStats {
     icon_width: 80.0,
     icon_height: 50.0,
     icon_flip_x: false,
+
+    viewmodel_model: Some("Pistol_1.obj"),
+    viewmodel_asset_key: Some("weapon_fp_pistol"),
+    viewmodel_scale: 0.006,
+    viewmodel_position: (0.0, 0.0, 0.0),
+    viewmodel_rotation: (0.0, -1.57, 0.0),
+    viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
 
     falloff_start: 15.0,
     falloff_end: 35.0,
@@ -254,6 +269,13 @@ pub const SMG: WeaponStats = WeaponStats {
     icon_width: 90.0,
     icon_height: 45.0,
     icon_flip_x: true,
+
+    viewmodel_model: Some("SubmachineGun_1.obj"),
+    viewmodel_asset_key: None,
+    viewmodel_scale: 0.011,
+    viewmodel_position: (0.0, -0.01, 0.0),
+    viewmodel_rotation: (0.0, -1.57, 0.0),
+    viewmodel_muzzle_offset: (-0.90, 0.02, -0.22),
 
     falloff_start: 10.0,
     falloff_end: 30.0,
@@ -337,6 +359,13 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     icon_height: 50.0,
     icon_flip_x: true,
 
+    viewmodel_model: Some("Shotgun_1.obj"),
+    viewmodel_asset_key: Some("weapon_fp_shotgun"),
+    viewmodel_scale: 0.024,
+    viewmodel_position: (0.0, -0.02, 0.0),
+    viewmodel_rotation: (0.0, -1.57, 0.0),
+    viewmodel_muzzle_offset: (-1.10, 0.02, -0.25),
+
     falloff_start: 5.0,
     falloff_end: 15.0,
     falloff_min_mult: 0.2,
@@ -395,6 +424,13 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     icon_width: 100.0,
     icon_height: 45.0,
     icon_flip_x: false,
+
+    viewmodel_model: Some("AssaultRifle_1.obj"),
+    viewmodel_asset_key: None,
+    viewmodel_scale: 0.013,
+    viewmodel_position: (0.0, -0.02, 0.0),
+    viewmodel_rotation: (0.0, -1.57, 0.0),
+    viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
 
     falloff_start: 25.0,
     falloff_end: 70.0,
@@ -465,6 +501,13 @@ pub const SNIPER: WeaponStats = WeaponStats {
     icon_width: 110.0,
     icon_height: 40.0,
     icon_flip_x: false,
+
+    viewmodel_model: Some("SniperRifle_1.obj"),
+    viewmodel_asset_key: None,
+    viewmodel_scale: 0.028,
+    viewmodel_position: (0.0, -0.03, 0.0),
+    viewmodel_rotation: (0.0, -1.57, 0.0),
+    viewmodel_muzzle_offset: (-1.20, 0.02, -0.28),
 
     falloff_start: 1000.0,
     falloff_end: 10000.0,

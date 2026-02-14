@@ -1,8 +1,10 @@
 {
   "global": {
     "weapon_pistol": "assets/images/weapons/pistol.png",
+    "weapon_fp_pistol": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
     "weapon_smg": "assets/images/weapons/smg.png",
     "weapon_shotgun": "assets/images/weapons/shotgun.png",
+    "weapon_fp_shotgun": "assets/images/weapons/FPS Weapon Sprites/frames/shotgun3.png",
     "weapon_ar": "assets/images/weapons/ar.png",
     "weapon_sniper": "assets/images/weapons/Sniper.png",
 
