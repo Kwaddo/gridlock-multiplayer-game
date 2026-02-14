@@ -10,11 +10,12 @@ use crate::physics::{
 };
 use crate::protocols::*;
 use crate::screens::target_dummy::TargetDummy;
+use crate::types::ai::simulated_player::SimulatedPlayer;
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 use crate::ui::hud::draw_hud;
-use crate::weapons::combat::{damage_falloff, CombatEntity, HitZone};
+use crate::weapons::combat::{damage_falloff, CombatEntity, EntityKind, HitZone};
 use crate::weapons::effects::{BulletTracer, DamageNumber};
 use crate::weapons::recoil::{apply_shot_recoil, recover};
 use crate::weapons::{recoil, SpreadContext, WeaponInventory};
@@ -61,6 +62,10 @@ pub struct PlayingState {
 
     // --- Dev mode ---
     pub dev_mode: DevModeState,
+
+    // --- Practice bots ---
+    pub practice_bots: Vec<SimulatedPlayer>,
+    pub next_bot_id: u32,
 }
 
 impl PlayingState {
@@ -89,6 +94,8 @@ impl PlayingState {
             tracers: Vec::new(),
             hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
+            practice_bots: Vec::new(),
+            next_bot_id: 9000
         }
     }
 
@@ -312,39 +319,48 @@ impl PlayingState {
                         tracer_thickness: stats.tracer_thickness,
                     });
 
-                    let mut closest: Option<(usize, HitZone, f32)> = None;
+                    // --- Unified entity hit detection ---
+                    // Build a list of references to all combat entities, then test them all in one loop
+                    let mut closest: Option<(EntityKind, usize, HitZone, f32)> = None;
 
-                    // check hit on target dummy (lobby only)
+                    // test target dummy (lobby only)
                     if self.current_world == WorldId::Lobby {
-                        if let Some((hit_zone, dist)) = self.target_dummy.ray_test(eye, fwd, range)
-                        {
-                            // Only count if not blocked by wall or prop
-                            let blocked =
-                                closest_blocking_dist.map_or(false, |block_dist| block_dist < dist);
+                        if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
+                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
                             if !blocked {
-                                closest = Some((0, hit_zone, dist));
+                                closest = Some((EntityKind::Dummy, 0, zone, dist));
                             }
                         }
                     }
 
-                    // check for hit on other players (allowed in any world)
-                    for (i, p) in self.other_players.iter().enumerate() {
-                        if let Some((hit_zone, dist)) = p.ray_test(eye, fwd, range) {
-                            // Only count if not blocked by wall or prop
-                            let blocked =
-                                closest_blocking_dist.map_or(false, |block_dist| block_dist < dist);
+                    // test all other players (any world)
+                    for (idx, p) in self.other_players.iter().enumerate() {
+                        if let Some((zone, dist)) = p.ray_test(eye, fwd, range) {
+                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
                             if !blocked {
-                                // check if this hit is closer than the best hit we have so far, if so it becomes the new best
-                                let is_closer = closest.map_or(true, |(_, _, d)| dist < d);
+                                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
                                 if is_closer {
-                                    closest = Some((i + 1, hit_zone, dist));
+                                    closest = Some((EntityKind::Player, idx, zone, dist));
                                 }
                             }
                         }
                     }
 
-                    // apply damage to appropriate entity
-                    if let Some((target_idx, zone, dist)) = closest {
+                    // test all practice bots
+                    for (idx, bot) in self.practice_bots.iter().enumerate() {
+                        if let Some((zone, dist)) = bot.ray_test(eye, fwd, range) {
+                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
+                            if !blocked {
+                                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                                if is_closer {
+                                    closest = Some((EntityKind::Bot, idx, zone, dist));
+                                }
+                            }
+                        }
+                    }
+
+                    // apply damage to whichever entity was closest
+                    if let Some((kind, idx, zone, dist)) = closest {
                         let mult = if zone == HitZone::Head {
                             stats.headshot_mult
                         } else {
@@ -352,18 +368,27 @@ impl PlayingState {
                         };
                         let falloff = damage_falloff(dist, stats);
                         let dmg = damage * mult * falloff;
-                        if target_idx == 0 {
-                            if !self.dev_mode.dummy_invincible {
-                                self.target_dummy.take_damage(dmg);
+
+                        match kind {
+                            EntityKind::Dummy => {
+                                if !self.dev_mode.dummy_invincible {
+                                    self.target_dummy.take_damage(dmg);
+                                }
                             }
-                        } else {
-                            self.other_players[target_idx - 1].take_damage(dmg);
+                            EntityKind::Player => {
+                                self.other_players[idx].take_damage(dmg);
+                            }
+                            EntityKind::Bot => {
+                                self.practice_bots[idx].take_damage(dmg);
+                            }
+                            _ => {} // MovingTarget — future entity types
                         }
+
                         total_dmg += dmg;
                         if zone == HitZone::Head {
                             any_headshot = true;
                         }
-                        pellet_mask |= 1 << i; // if this pellet hit, you set the bit mark to one, << is left shift operator, so it sets it left by i, bit 1 is at i zero so it is the first bit if it hits, looks like 0 0 0 0 0 0 0 1 (if 8 pellets) and so on
+                        pellet_mask |= 1 << i;
                     }
                 }
 
@@ -404,8 +429,16 @@ impl PlayingState {
         // recover() is called in process_local_input before firing
         // camera recoil is applied directly on fire in process_local_input
 
-        // NPC + hit marker tick
+        // entity tick (dummy regen, player hit flash decay, etc.)
         self.target_dummy.update(delta);
+        for p in &mut self.other_players {
+            p.update(delta);
+        }
+        for bot in &mut self.practice_bots {
+            bot.update(delta);
+        }
+        // respawn dead bots
+        self.practice_bots.retain(|bot| !bot.is_dead());
         if self.hit_marker_timer > 0.0 {
             self.hit_marker_timer = (self.hit_marker_timer - delta).max(0.0);
         }
@@ -531,6 +564,9 @@ impl PlayingState {
         if self.current_world == WorldId::Lobby {
             self.draw_target_dummy_hud(&camera);
         }
+
+        // Dev mode: health bars for all entities
+        self.draw_entity_health_bars(&camera);
 
         // has to be after set_default_camera since it's 2D text in a 3d world, also has to be after draw_other_players so that the prompt is on top of other players in case they are between the player and the teleporter
         self.draw_teleporter_prompt(maze);

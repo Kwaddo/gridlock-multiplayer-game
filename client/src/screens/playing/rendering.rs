@@ -13,6 +13,14 @@ impl PlayingState {
             draw_cube(vec3(p.x, p.y + 0.6, p.z), vec3(0.6, 1.2, 0.4), None, color);
             draw_cube(vec3(p.x, p.y + 1.4, p.z), vec3(0.4, 0.4, 0.4), None, color);
         }
+
+        // draw practice bots
+        for bot in &self.practice_bots {
+            let p = &bot.player;
+            let color = if p.skin.is_some() { WHITE } else { p.color };
+            draw_cube(vec3(p.x, p.y + 0.6, p.z), vec3(0.6, 1.2, 0.4), None, color);
+            draw_cube(vec3(p.x, p.y + 1.4, p.z), vec3(0.4, 0.4, 0.4), None, color);
+        }
     }
 
     pub(super) fn draw_target_dummy(&self) {
@@ -89,6 +97,89 @@ impl PlayingState {
         let label = "TARGET DUMMY";
         let measure = measure_text(label, None, 14, 1.0);
         draw_text(label, sx - measure.width / 2.0, sy - 4.0, 14.0, WHITE);
+    }
+
+    pub(super) fn draw_entity_health_bars(&self, camera: &Camera3D) {
+        if !self.dev_mode.show_health_bars {
+            return;
+        }
+
+        let forward = (camera.target - camera.position).normalize();
+        let right = forward.cross(camera.up).normalize();
+        let up = right.cross(forward).normalize();
+        let fov_rad = camera.fovy;
+        let fov_scale = screen_height() / (2.0 * (fov_rad / 2.0).tan());
+
+        // draw health bar for target dummy
+        if self.current_world == crate::types::world::WorldId::Lobby {
+            let world_pos = self.target_dummy.position + vec3(0.0, 2.0, 0.0);
+            let rel = world_pos - camera.position;
+            let dot = rel.dot(forward);
+            if dot >= 0.1 {
+                let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
+                let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
+                Self::draw_health_bar(sx, sy, self.target_dummy.hp, self.target_dummy.max_hp, "Target Dummy");
+            }
+        }
+
+        // draw health bars for other players
+        for p in &self.other_players {
+            let world_pos = vec3(p.x, p.y + 2.0, p.z);
+            let rel = world_pos - camera.position;
+            let dot = rel.dot(forward);
+            if dot >= 0.1 {
+                let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
+                let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
+                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
+            }
+        }
+
+        // draw health bars for practice bots
+        for bot in &self.practice_bots {
+            let p = &bot.player;
+            let world_pos = vec3(p.x, p.y + 2.0, p.z);
+            let rel = world_pos - camera.position;
+            let dot = rel.dot(forward);
+            if dot >= 0.1 {
+                let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
+                let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
+                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
+            }
+        }
+    }
+
+    fn draw_health_bar(sx: f32, sy: f32, hp: f32, max_hp: f32, label: &str) {
+        use crate::ui::fonts::{measure_game_text, text_params};
+
+        let bar_w = 60.0;
+        let bar_h = 6.0;
+        let hp_frac = (hp / max_hp).clamp(0.0, 1.0);
+
+        // background
+        draw_rectangle(
+            sx - bar_w / 2.0,
+            sy,
+            bar_w,
+            bar_h,
+            Color::from_rgba(40, 40, 40, 200),
+        );
+
+        // health fill
+        let hp_color = if hp_frac > 0.5 {
+            Color::from_rgba(80, 200, 80, 255)
+        } else if hp_frac > 0.25 {
+            Color::from_rgba(220, 180, 40, 255)
+        } else {
+            RED
+        };
+        draw_rectangle(sx - bar_w / 2.0, sy, bar_w * hp_frac, bar_h, hp_color);
+
+        // border
+        draw_rectangle_lines(sx - bar_w / 2.0, sy, bar_w, bar_h, 1.0, WHITE);
+
+        // label
+        let label_w = measure_game_text(label, 12);
+        draw_text_ex(label, sx - label_w / 2.0, sy - 4.0, text_params(12, WHITE));
     }
 
     pub(super) fn draw_tracers(&self, camera_pos: Vec3) {

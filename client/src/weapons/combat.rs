@@ -6,6 +6,16 @@ use macroquad::prelude::*;
     makes it easy to scale and add new enemy types later, like a moving dummy or a real enemy with AI,
     just implement this trait and it works with the same shooting code
 */
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityKind{
+    Player,
+    Dummy,
+    MovingTarget,
+    Bot,
+}
+
 pub trait CombatEntity {
     fn entity_position(&self) -> Vec3;
     fn hitboxes(&self) -> &[Hitbox];
@@ -27,6 +37,13 @@ pub trait CombatEntity {
         }
         best
     }
+
+    fn entity_kind(&self) -> EntityKind;
+    fn entity_id(&self) -> Option<u32>;
+    fn update(&mut self, delta: f32);
+    fn hit_timer(&self) -> f32; // time since last hit, for hit feedback like flashing redfo
+    fn entity_color(&self) -> Color; // rendering colors since we dont have models yet
+
 }
 
 // Hit zones: split player into head, body, and limbs for multipliers
