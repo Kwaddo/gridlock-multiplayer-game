@@ -194,12 +194,12 @@ pub const PISTOL: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.25),
 
-    icon_asset_key: "weapon_pistol",
+    icon_asset_key: "pistol_icon",
     icon_width: 80.0,
     icon_height: 50.0,
     icon_flip_x: false,
 
-    viewmodel_model: Some("Pistol_1.obj"),
+    viewmodel_model: Some("pistol_model"),
     viewmodel_asset_key: Some("weapon_fp_pistol"),
     viewmodel_scale: 0.006,
     viewmodel_position: (0.0, 0.0, 0.0),
@@ -265,12 +265,12 @@ pub const SMG: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None, // SMG never reaches FSA
 
-    icon_asset_key: "weapon_smg",
+    icon_asset_key: "smg_icon",
     icon_width: 90.0,
     icon_height: 45.0,
     icon_flip_x: true,
 
-    viewmodel_model: Some("SubmachineGun_1.obj"),
+    viewmodel_model: Some("smg_model"),
     viewmodel_asset_key: None,
     viewmodel_scale: 0.011,
     viewmodel_position: (0.0, -0.01, 0.0),
@@ -354,12 +354,12 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None, // shotgun has no FSA
 
-    icon_asset_key: "weapon_shotgun",
+    icon_asset_key: "shotgun_icon",
     icon_width: 100.0,
     icon_height: 50.0,
     icon_flip_x: true,
 
-    viewmodel_model: Some("Shotgun_1.obj"),
+    viewmodel_model: Some("shotgun_model"),
     viewmodel_asset_key: Some("weapon_fp_shotgun"),
     viewmodel_scale: 0.024,
     viewmodel_position: (0.0, -0.02, 0.0),
@@ -420,12 +420,12 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.35),
 
-    icon_asset_key: "weapon_ar",
+    icon_asset_key: "ar_icon",
     icon_width: 100.0,
     icon_height: 45.0,
     icon_flip_x: false,
 
-    viewmodel_model: Some("AssaultRifle_1.obj"),
+    viewmodel_model: Some("ar_model"),
     viewmodel_asset_key: None,
     viewmodel_scale: 0.013,
     viewmodel_position: (0.0, -0.02, 0.0),
@@ -497,12 +497,12 @@ pub const SNIPER: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Scope,
     fsa_time: None, // sniper doesnt use FSA (scope handles accuracy)
 
-    icon_asset_key: "weapon_sniper",
+    icon_asset_key: "sniper_icon",
     icon_width: 110.0,
     icon_height: 40.0,
     icon_flip_x: false,
 
-    viewmodel_model: Some("SniperRifle_1.obj"),
+    viewmodel_model: Some("sniper_model"),
     viewmodel_asset_key: None,
     viewmodel_scale: 0.028,
     viewmodel_position: (0.0, -0.03, 0.0),
