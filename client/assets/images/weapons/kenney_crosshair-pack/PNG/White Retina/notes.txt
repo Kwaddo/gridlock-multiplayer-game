@@ -1,0 +1,35 @@
+current idea for AR:
+
+Find a cross - crosshair that has no gap in the middle,
+when firing, it switches to cross hair 12 or another cross crosshair with a gap,
+Maybe the best idea is to find both these crosshairs online since they are a pair
+The idea is that I want to replicate the fornite 'first shot accuracy' aiming when ur stationary
+Rewarding precise aiming where u wait and "tap" aiming instead of spamming
+When u shoot the Gap is created making it harder for you to aim precisely
+when hipfiring it will follow the same idea as well
+
+
+Current idea for pistol:
+Reference for this is the combat pistol in fortnite (just crosshair)
+Most other guns wont have first shot accuracy as they are not built for range, but for this project id still like to implement it 
+the only difference is that the speed of first shot accuracy will be differen
+but id like to also use a cross for this
+
+The main idea is that while you are hip firing there will be a wider gap and when you aim it will get smaller via a smooth lerp transition
+
+
+Shotgun:
+Id like to keep shotgun as it is
+
+
+SMG:
+
+For smg id like to use the same cross idea
+Obviously though the gap should be bigger since its a fast weapon that sacrifices accuracy
+and it obviously does not get first shot accuracy
+
+sniper stays as is, i just need to implement logic that makes the retical move when u move too, making it harder to mvoe while aiming
+
+
+For first shot accuracy, id like to make the crosshair turn slightly gray when this happens, to signify the shot you are taking will have 100% accuracy, upon firing it will expand again, u can wait a little bit to go again
+this is why each weapon should have different FSA timing
