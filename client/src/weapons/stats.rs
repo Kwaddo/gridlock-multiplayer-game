@@ -201,8 +201,8 @@ pub const PISTOL: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("pistol_model"),
     viewmodel_asset_key: Some("weapon_fp_pistol"),
-    viewmodel_scale: 0.006,
-    viewmodel_position: (0.0, 0.0, 0.0),
+    viewmodel_scale: 0.012,
+    viewmodel_position: (0.15, 0.08, -0.05),
     viewmodel_rotation: (0.0, -1.57, 0.0),
     viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
 
@@ -272,8 +272,8 @@ pub const SMG: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("smg_model"),
     viewmodel_asset_key: None,
-    viewmodel_scale: 0.011,
-    viewmodel_position: (0.0, -0.01, 0.0),
+    viewmodel_scale: 0.018,
+    viewmodel_position: (0.12, 0.05, -0.08),
     viewmodel_rotation: (0.0, -1.57, 0.0),
     viewmodel_muzzle_offset: (-0.90, 0.02, -0.22),
 
@@ -361,8 +361,8 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("shotgun_model"),
     viewmodel_asset_key: Some("weapon_fp_shotgun"),
-    viewmodel_scale: 0.024,
-    viewmodel_position: (0.0, -0.02, 0.0),
+    viewmodel_scale: 0.032,
+    viewmodel_position: (0.10, 0.03, -0.10),
     viewmodel_rotation: (0.0, -1.57, 0.0),
     viewmodel_muzzle_offset: (-1.10, 0.02, -0.25),
 
@@ -427,8 +427,8 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("ar_model"),
     viewmodel_asset_key: None,
-    viewmodel_scale: 0.013,
-    viewmodel_position: (0.0, -0.02, 0.0),
+    viewmodel_scale: 0.022,
+    viewmodel_position: (0.10, 0.03, -0.10),
     viewmodel_rotation: (0.0, -1.57, 0.0),
     viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
 
@@ -504,8 +504,8 @@ pub const SNIPER: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("sniper_model"),
     viewmodel_asset_key: None,
-    viewmodel_scale: 0.028,
-    viewmodel_position: (0.0, -0.03, 0.0),
+    viewmodel_scale: 0.038,
+    viewmodel_position: (0.08, 0.00, -0.12),
     viewmodel_rotation: (0.0, -1.57, 0.0),
     viewmodel_muzzle_offset: (-1.20, 0.02, -0.28),
 

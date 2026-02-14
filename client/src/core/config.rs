@@ -64,6 +64,7 @@ pub struct GameConfig {
     pub bind_weapon3: InputBinding,
     pub bind_weapon4: InputBinding,
     pub bind_weapon5: InputBinding,
+    pub bind_fullscreen: InputBinding,
 
     // Camera (UI value 40-120, default 90)
     pub fov: f32,
@@ -106,6 +107,7 @@ impl GameConfig {
             bind_weapon3: InputBinding::Key(KeyCode::Key3),
             bind_weapon4: InputBinding::Key(KeyCode::Key4),
             bind_weapon5: InputBinding::Key(KeyCode::Key5),
+            bind_fullscreen: InputBinding::Key(KeyCode::F11),
 
             // Camera - UI value, converted to internal with raw_fov()
             // this is the same as the sensitivity from earlier, just converting it to a more intuitive UI value while raw_fov() converts it back to the actual FOV used in the game
@@ -158,6 +160,7 @@ impl GameConfig {
             ("Weapon 3", self.bind_weapon3),
             ("Weapon 4", self.bind_weapon4),
             ("Weapon 5", self.bind_weapon5),
+            ("Fullscreen", self.bind_fullscreen),
         ]
     }
 }

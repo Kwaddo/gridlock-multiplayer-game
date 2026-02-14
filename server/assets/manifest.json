@@ -15,7 +15,7 @@
     "pistol_model": "assets/models/Pistol_1.obj",
     "smg_model": "assets/models/SubmachineGun_1.obj",
     "shotgun_model": "assets/models/Shotgun_1.obj",
-    "ar_model": "assets/models/AssaultRifle_1.obj",
+    "ar_model": "assets/models/AssaultRifle2_1.obj",
     "sniper_model": "assets/models/SniperRifle_1.obj"
   },
   "lobby": {

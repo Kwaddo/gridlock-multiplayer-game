@@ -281,7 +281,7 @@ async fn main() {
     let mut loading_started: bool = false;
 
     loop {
-        if is_key_pressed(KeyCode::F11) {
+        if config.bind_fullscreen.is_pressed() {
             is_fullscreen = !is_fullscreen;
             set_fullscreen(is_fullscreen);
         }

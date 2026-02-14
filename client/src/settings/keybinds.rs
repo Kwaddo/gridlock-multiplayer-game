@@ -20,6 +20,7 @@ const BIND_ACTIONS: &[(&str, &str)] = &[
     ("Weapon 3", "weapon3"),
     ("Weapon 4", "weapon4"),
     ("Weapon 5", "weapon5"),
+    ("Fullscreen", "fullscreen"),
 ];
 
 fn get_binding(config: &GameConfig, action: &str) -> InputBinding {
@@ -40,6 +41,7 @@ fn get_binding(config: &GameConfig, action: &str) -> InputBinding {
         "weapon3" => config.bind_weapon3,
         "weapon4" => config.bind_weapon4,
         "weapon5" => config.bind_weapon5,
+        "fullscreen" => config.bind_fullscreen,
         _ => InputBinding::Key(KeyCode::Unknown),
     }
 }
@@ -62,6 +64,7 @@ fn set_binding(config: &mut GameConfig, action: &str, binding: InputBinding) {
         "weapon3" => config.bind_weapon3 = binding,
         "weapon4" => config.bind_weapon4 = binding,
         "weapon5" => config.bind_weapon5 = binding,
+        "fullscreen" => config.bind_fullscreen = binding,
         _ => {}
     }
 }
