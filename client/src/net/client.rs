@@ -1,4 +1,4 @@
-use crate::net::{MSG_JOIN, MSG_WELCOME, MSG_DISCOVER};
+use crate::net::{MSG_DISCOVER, MSG_JOIN, MSG_WELCOME};
 use std::net::UdpSocket;
 
 pub struct DiscoveredServer {

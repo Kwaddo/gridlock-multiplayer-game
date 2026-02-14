@@ -1,6 +1,6 @@
-use macroquad::prelude::*;
 use crate::core::{GameConfig, InputBinding};
-use crate::ui::fonts::{text_params, measure_game_text};
+use crate::ui::fonts::{measure_game_text, text_params};
+use macroquad::prelude::*;
 
 // all rebindable actions in display order
 const BIND_ACTIONS: &[(&str, &str)] = &[
@@ -127,9 +127,7 @@ pub fn update_keybinds(
 
     // crouch toggle button (after all bind rows)
     let toggle_y = panel_top + 50.0 + (BIND_ACTIONS.len() as f32) * (row_h + row_gap) + 10.0;
-    if mouse.0 >= bx && mouse.0 <= bx + bw
-        && mouse.1 >= toggle_y && mouse.1 <= toggle_y + row_h
-    {
+    if mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= toggle_y && mouse.1 <= toggle_y + row_h {
         config.crouch_toggle = !config.crouch_toggle;
     }
 }
@@ -142,7 +140,13 @@ pub fn draw_keybinds(
     panel_top: f32,
     panel_h: f32,
 ) {
-    draw_rectangle(right_x, panel_top, panel_w, panel_h, Color::from_rgba(30, 30, 30, 240));
+    draw_rectangle(
+        right_x,
+        panel_top,
+        panel_w,
+        panel_h,
+        Color::from_rgba(30, 30, 30, 240),
+    );
     draw_rectangle_lines(right_x, panel_top, panel_w, panel_h, 1.0, GRAY);
 
     let kb_title = "Key Bindings";
@@ -167,9 +171,7 @@ pub fn draw_keybinds(
         let binding = get_binding(config, action_id);
 
         // check if this binding is a duplicate
-        let duplicate = all_bindings.iter()
-            .filter(|(_, b)| *b == binding)
-            .count() > 1;
+        let duplicate = all_bindings.iter().filter(|(_, b)| *b == binding).count() > 1;
 
         let is_rebinding = rebinding.as_deref() == Some(action_id);
         let bg_color = if is_rebinding {
@@ -200,8 +202,8 @@ pub fn draw_keybinds(
     let toggle_y = panel_top + 50.0 + (BIND_ACTIONS.len() as f32) * (row_h + row_gap) + 10.0;
 
     let mouse = mouse_position();
-    let hover = mouse.0 >= bx && mouse.0 <= bx + bw
-        && mouse.1 >= toggle_y && mouse.1 <= toggle_y + row_h;
+    let hover =
+        mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= toggle_y && mouse.1 <= toggle_y + row_h;
 
     let bg = if hover {
         Color::from_rgba(65, 65, 85, 255)
@@ -210,9 +212,18 @@ pub fn draw_keybinds(
     };
     draw_rectangle(bx, toggle_y, bw, row_h, bg);
     draw_rectangle_lines(bx, toggle_y, bw, row_h, 1.0, GRAY);
-    draw_text_ex("Crouch Mode", bx + 10.0, toggle_y + 20.0, text_params(18, WHITE));
+    draw_text_ex(
+        "Crouch Mode",
+        bx + 10.0,
+        toggle_y + 20.0,
+        text_params(18, WHITE),
+    );
 
-    let mode_text = if config.crouch_toggle { "Toggle" } else { "Hold" };
+    let mode_text = if config.crouch_toggle {
+        "Toggle"
+    } else {
+        "Hold"
+    };
     let mode_tw = measure_game_text(mode_text, 18);
     let mode_btn_w = 80.0;
     let mode_btn_x = bx + bw - mode_btn_w - 5.0;
@@ -223,7 +234,13 @@ pub fn draw_keybinds(
     } else {
         Color::from_rgba(100, 60, 20, 255)
     };
-    draw_rectangle(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, mode_btn_color);
+    draw_rectangle(
+        mode_btn_x,
+        mode_btn_y,
+        mode_btn_w,
+        mode_btn_h,
+        mode_btn_color,
+    );
     draw_rectangle_lines(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, 1.0, WHITE);
     draw_text_ex(
         mode_text,

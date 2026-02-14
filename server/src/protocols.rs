@@ -12,4 +12,4 @@ pub const MSG_MAZE: u8 = 8; // server -> client: maze layout
 pub const MSG_WORLD_CHANGE: u8 = 9; // server -> client: bi-directional world transition
 pub const MSG_ASSETS: u8 = 10; // server -> client: asset manifest per world
 pub const MSG_DISCOVER: u8 = 11; // client -> server: LAN discovery broadcast
-
+pub const MSG_WALL_BROKEN: u8 = 12; // client <-> server: breakable wall destroyed (x, y)

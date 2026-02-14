@@ -29,3 +29,10 @@ pub struct Prop {
     pub x: u8,
     pub y: u8,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct MazeLight {
+    pub x: u8,
+    pub y: u8,
+    pub variant: u8,
+}

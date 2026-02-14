@@ -2,8 +2,10 @@ use std::net::UdpSocket;
 
 use macroquad::prelude::*;
 
-use crate::net::protocols::{ MSG_MAZE, MSG_POSITION, MSG_STATE, MSG_WORLD_CHANGE, MSG_ASSETS };
-use crate::types::maze::{Maze, Prop, PropKind, Room};
+use crate::net::protocols::{
+    MSG_ASSETS, MSG_MAZE, MSG_POSITION, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+};
+use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 
@@ -15,6 +17,7 @@ pub struct NetUpdate {
     pub players: Option<Vec<OtherPlayer>>,
     pub world_change: Option<(WorldId, Vec3)>,
     pub assets: Option<Vec<(String, String)>>, // (key, path)
+    pub broken_walls: Option<Vec<(u8, u8)>>,
 }
 
 pub fn send_position(socket: &UdpSocket, server_addr: &str, position: Vec3, yaw: f32) {
@@ -32,6 +35,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         players: None,
         world_change: None,
         assets: None,
+        broken_walls: None,
     };
 
     let mut recv_buf: [u8; 8192] = [0; 8192];
@@ -49,13 +53,17 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     let tele_y = recv_buf[4];
 
                     let mut offset = 5;
-                    if offset >= size { continue; }
+                    if offset >= size {
+                        continue;
+                    }
 
                     let room_count = recv_buf[offset] as usize;
                     offset += 1;
                     let mut rooms = Vec::with_capacity(room_count);
                     for _ in 0..room_count {
-                        if offset + 4 > size { break; }
+                        if offset + 4 > size {
+                            break;
+                        }
                         rooms.push(Room {
                             x: recv_buf[offset],
                             y: recv_buf[offset + 1],
@@ -65,13 +73,17 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 4;
                     }
 
-                    if offset >= size { continue; }
+                    if offset >= size {
+                        continue;
+                    }
 
                     let prop_count = recv_buf[offset] as usize;
                     offset += 1;
                     let mut props = Vec::with_capacity(prop_count);
                     for _ in 0..prop_count {
-                        if offset + 3 > size { break; }
+                        if offset + 3 > size {
+                            break;
+                        }
                         if let Some(kind) = PropKind::from_u8(recv_buf[offset]) {
                             props.push(Prop {
                                 kind,
@@ -82,11 +94,29 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 3;
                     }
 
+                    let mut ceiling_lights = Vec::new();
+                    if offset < size {
+                        let light_count = recv_buf[offset] as usize;
+                        offset += 1;
+                        ceiling_lights.reserve(light_count);
+                        for _ in 0..light_count {
+                            if offset + 3 > size {
+                                break;
+                            }
+                            ceiling_lights.push(CeilingLightInfo {
+                                x: recv_buf[offset],
+                                y: recv_buf[offset + 1],
+                                variant: recv_buf[offset + 2],
+                            });
+                            offset += 3;
+                        }
+                    }
+
                     let cell_count = (width as usize) * (height as usize);
                     if size >= offset + cell_count {
                         let mut cells = vec![0u8; cell_count];
                         cells.copy_from_slice(&recv_buf[offset..offset + cell_count]);
-                        let maze = Maze {
+                        let mut maze = Maze {
                             width,
                             height,
                             cells,
@@ -95,19 +125,20 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                             teleporter: (tele_x, tele_y),
                             rooms,
                             props,
+                            ceiling_lights,
+                            breakable_walls: std::collections::HashMap::new(),
+                            broken_wall_scars: std::collections::HashSet::new(),
                         };
+                        maze.spawn_breakable_walls();
                         let spawn = maze.teleporter_world();
                         update.maze = Some((maze, spawn));
                     }
                 }
             }
             MSG_STATE => {
-                let player_count = u32::from_be_bytes([
-                    recv_buf[1],
-                    recv_buf[2],
-                    recv_buf[3],
-                    recv_buf[4],
-                ]) as usize;
+                let player_count =
+                    u32::from_be_bytes([recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4]])
+                        as usize;
                 let mut offset = 5;
                 let mut new_players = Vec::new();
                 for _ in 0..player_count {
@@ -151,9 +182,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
                     let name_len = recv_buf[offset] as usize;
                     offset += 1;
-                    let name = String::from_utf8_lossy(
-                        &recv_buf[offset..offset + name_len]
-                    ).to_string();
+                    let name =
+                        String::from_utf8_lossy(&recv_buf[offset..offset + name_len]).to_string();
                     offset += name_len;
 
                     if id != player_id {
@@ -171,18 +201,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 if size >= 14 {
                     let world_id = recv_buf[1];
                     let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
-                    let x = f32::from_be_bytes([
-                        recv_buf[2],
-                        recv_buf[3],
-                        recv_buf[4],
-                        recv_buf[5],
-                    ]);
-                    let y = f32::from_be_bytes([
-                        recv_buf[6],
-                        recv_buf[7],
-                        recv_buf[8],
-                        recv_buf[9],
-                    ]);
+                    let x =
+                        f32::from_be_bytes([recv_buf[2], recv_buf[3], recv_buf[4], recv_buf[5]]);
+                    let y =
+                        f32::from_be_bytes([recv_buf[6], recv_buf[7], recv_buf[8], recv_buf[9]]);
                     let z = f32::from_be_bytes([
                         recv_buf[10],
                         recv_buf[11],
@@ -204,15 +226,13 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         }
                         let key_len = recv_buf[offset] as usize;
                         offset += 1;
-                        let key = String::from_utf8_lossy(
-                            &recv_buf[offset..offset + key_len]
-                        ).to_string();
+                        let key = String::from_utf8_lossy(&recv_buf[offset..offset + key_len])
+                            .to_string();
                         offset += key_len;
                         let path_len = recv_buf[offset] as usize;
                         offset += 1;
-                        let path = String::from_utf8_lossy(
-                            &recv_buf[offset..offset + path_len]
-                        ).to_string();
+                        let path = String::from_utf8_lossy(&recv_buf[offset..offset + path_len])
+                            .to_string();
                         offset += path_len;
                         entries.push((key, path));
                     }
@@ -220,6 +240,17 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         existing.extend(entries);
                     } else {
                         update.assets = Some(entries);
+                    }
+                }
+            }
+            MSG_WALL_BROKEN => {
+                if size >= 3 {
+                    let x = recv_buf[1];
+                    let y = recv_buf[2];
+                    if let Some(ref mut walls) = update.broken_walls {
+                        walls.push((x, y));
+                    } else {
+                        update.broken_walls = Some(vec![(x, y)]);
                     }
                 }
             }

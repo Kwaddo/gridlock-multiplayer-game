@@ -1,4 +1,4 @@
-/* 
+/*
     Recoil and bloom (spread) math.
     Handles accumulation from firing and recovery over time.
     Designed so future features (mantling, sliding, etc.) can hook in
@@ -6,7 +6,7 @@
 */
 use super::state::WeaponState; //use super means "use from the parent module" (weapons::state)
 
-/*  
+/*
     Context flags that affect spread calculation.
     This is the extension point — will add new fields here when we add
      mantling, sliding, wall-running, etc. if we ever do
@@ -22,7 +22,10 @@ pub struct SpreadContext {
 
 // apply recoil kick from a single shot — called right after firing.
 pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
-    let fsa_was_active = weapon.stats_data.fsa_time.map_or(false, |t| weapon.fsa_timer >= t);
+    let fsa_was_active = weapon
+        .stats_data
+        .fsa_time
+        .map_or(false, |t| weapon.fsa_timer >= t);
 
     // reset FSA timer on shot (must happen after the check above)
     weapon.fsa_timer = 0.0;
@@ -45,8 +48,8 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
 
     // calculate randomness, increasing mroe as you shoot more in a spray, added on top of existing pattern values
     let rand = (weapon.stats_data.pattern_randomness
-    + weapon.shot_index as f32 * weapon.stats_data.randomness_growth)
-    .clamp(0.0, 1.0); // randomness should be between 0 and 1
+        + weapon.shot_index as f32 * weapon.stats_data.randomness_growth)
+        .clamp(0.0, 1.0); // randomness should be between 0 and 1
 
     // vertical kick
 
@@ -59,7 +62,6 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
     let rand_h = (rng_seed - 0.5) * 2.0 * weapon.stats_data.recoil_horizontal;
     let h_kick = ptrn_h * (1.0 - rand) + rand_h * rand; // h kick is calculated by getting total randomness (1.0 - rand) and applying it to the multiplication of horizontal and effective randomness (we multiply to get a value that is scaled by how much randomness there is, so if randomness is 0 then it has no effect, and if randomness is 1 then it has full effect, and in between it scales linearly)
     weapon.recoil_yaw += h_kick;
-
 
     // bloom accumulation
     weapon.bloom += weapon.stats_data.spread_per_shot;
@@ -103,7 +105,7 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     if weapon.bloom > 0.0 {
         let decay = spread_recovery * 3.0; // initial fast decay
         weapon.bloom *= (1.0 - decay * delta).max(0.0); // exponential decay
-        // snap to zero when tiny
+                                                        // snap to zero when tiny
         if weapon.bloom < 0.001 {
             weapon.bloom = 0.0;
         }
@@ -119,7 +121,7 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
         if reset_time > 0.0 {
             // exponential decay, fast then slow
             let progress = (weapon.pattern_reset_timer / reset_time).clamp(0.0, 1.0);
-            let decayed = ((weapon.shot_index as f32) * (1.0 - progress* progress)) as u32;
+            let decayed = ((weapon.shot_index as f32) * (1.0 - progress * progress)) as u32;
             weapon.shot_index = decayed;
         }
         if weapon.pattern_reset_timer >= reset_time {
@@ -127,7 +129,6 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
             // we dont reset the pattern timer here because it will just stay at the reset time until the next shot, at which point it will be reset to 0, so this just ensures that if you wait long enough between bursts, you always start at the first pattern entry with no bloom or extra randomness from shot index
         }
     }
-
 
     // First shot accuracy logic
     // when timer reaches fsa_time, force bloom to 0
@@ -145,8 +146,9 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     }
 
     // crosshair kick decay
-    if weapon.crosshair_kick > 0.0 { 
-        weapon.crosshair_kick *= (1.0 - weapon.stats().crosshair_kick_decay * delta).max(0.0); // exponential decay
+    if weapon.crosshair_kick > 0.0 {
+        weapon.crosshair_kick *= (1.0 - weapon.stats().crosshair_kick_decay * delta).max(0.0);
+    // exponential decay
     } else {
         weapon.crosshair_kick = 0.0;
     }

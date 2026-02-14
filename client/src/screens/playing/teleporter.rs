@@ -1,7 +1,7 @@
-use macroquad::prelude::*;
 use crate::net::networking::MAZE_CELL_SIZE;
 use crate::types::maze::Maze;
 use crate::types::world::WorldId;
+use macroquad::prelude::*;
 
 use super::PlayingState;
 
@@ -49,7 +49,7 @@ impl PlayingState {
                 screen_width() / 2.0 - measure.width / 2.0,
                 screen_height() / 2.0 + 60.0,
                 24.0,
-                WHITE
+                WHITE,
             );
         }
     }

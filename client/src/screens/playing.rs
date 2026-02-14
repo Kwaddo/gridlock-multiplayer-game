@@ -1,23 +1,25 @@
-mod movement;
 mod camera;
+mod movement;
 mod rendering;
 mod teleporter;
 
-use crate::core::{ GameConfig, GameState };
-use crate::physics::{ collision, movement::{ MovementConfig, MovementState } };
+use crate::core::{GameConfig, GameState};
+use crate::physics::{
+    collision,
+    movement::{MovementConfig, MovementState},
+};
 use crate::protocols::*;
 use crate::screens::target_dummy::TargetDummy;
-use crate::weapons::combat::{ CombatEntity, HitZone, damage_falloff };
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 use crate::ui::hud::draw_hud;
-use crate::weapons::effects::{ BulletTracer, DamageNumber };
-use crate::weapons::recoil::{ apply_shot_recoil, recover };
-use crate::weapons::{ recoil, SpreadContext, WeaponInventory };
-use crate::world::{ draw_maze, lobby::draw_lobby };
+use crate::weapons::combat::{damage_falloff, CombatEntity, HitZone};
+use crate::weapons::effects::{BulletTracer, DamageNumber};
+use crate::weapons::recoil::{apply_shot_recoil, recover};
+use crate::weapons::{recoil, SpreadContext, WeaponInventory};
+use crate::world::{draw_maze, lobby::draw_lobby};
 
-use macroquad::prelude::scene::camera_pos;
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
 use std::net::UdpSocket;
@@ -41,18 +43,19 @@ pub struct PlayingState {
     pub jump_requested: bool,
     pub current_world: WorldId,
     pub pending_world_change: Option<WorldId>,
+    pub pending_broken_walls: Vec<(u8, u8)>,
 
     //  --- Weapon system ---
     pub weapons: WeaponInventory,
 
     // --- NPC target dummy ---
     pub target_dummy: TargetDummy,
-    pub hit_marker_timer: f32, // >0 = show hit X on crosshair
+    pub hit_marker_timer: f32,     // >0 = show hit X on crosshair
     pub hit_marker_headshot: bool, // true = headshot color
     pub damage_numbers: Vec<DamageNumber>,
     pub tracers: Vec<BulletTracer>,
 
-    pub hit_marker_pellet_mask: u16, // bitmasks of shotgun pellets hit, up to 16 | stored as 
+    pub hit_marker_pellet_mask: u16, // bitmasks of shotgun pellets hit, up to 16 | stored as
 
     // --- Dev mode ---
     pub dev_mode: DevModeState,
@@ -74,6 +77,7 @@ impl PlayingState {
             jump_requested: false,
             current_world: WorldId::Lobby,
             pending_world_change: None,
+            pending_broken_walls: Vec::new(),
             weapons: WeaponInventory::new(),
             target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
             hit_marker_timer: 0.0,
@@ -89,7 +93,7 @@ impl PlayingState {
     pub fn process_local_input(
         &mut self,
         config: &GameConfig,
-        maze: Option<&Maze>
+        mut maze: Option<&mut Maze>,
     ) -> Option<GameState> {
         if config.bind_settings.is_pressed() {
             return Some(GameState::Paused);
@@ -108,23 +112,20 @@ impl PlayingState {
         let ads_factor = 1.0 + (fov_scale * ads_mult - 1.0) * weapon.ads_progress;
         let sens = config.raw_sensitivity() * ads_factor;
 
-        input::process_mouse(&mut self.last_mouse_pos, &mut self.yaw, &mut self.pitch, sens);
+        input::process_mouse(
+            &mut self.last_mouse_pos,
+            &mut self.yaw,
+            &mut self.pitch,
+            sens,
+        );
 
         self.move_dir = input::process_movement_keys(self.yaw, config);
-        self.movement_state.is_sprinting = input::process_sprint(
-            config,
-            &self.movement_state,
-            self.move_dir
-        );
-        self.movement_state.is_crouching = input::process_crouch(
-            config,
-            self.movement_state.is_crouching
-        );
-        self.jump_requested = input::process_jump(
-            config,
-            self.movement_state.is_grounded,
-            &mut self.weapons
-        );
+        self.movement_state.is_sprinting =
+            input::process_sprint(config, &self.movement_state, self.move_dir);
+        self.movement_state.is_crouching =
+            input::process_crouch(config, self.movement_state.is_crouching);
+        self.jump_requested =
+            input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons);
 
         // weapon input
         input::process_weapon_input(&mut self.weapons, config);
@@ -177,12 +178,12 @@ impl PlayingState {
                 let eye = vec3(
                     self.position.x,
                     self.position.y + self.movement_state.height,
-                    self.position.z
+                    self.position.z,
                 );
                 let base_fwd = vec3(
                     self.yaw.cos() * self.pitch.cos(),
                     self.pitch.sin(),
-                    self.yaw.sin() * self.pitch.cos()
+                    self.yaw.sin() * self.pitch.cos(),
                 );
 
                 // NOW apply camera kick (visual recoil for next frame)
@@ -196,10 +197,8 @@ impl PlayingState {
                         pattern[idx.min(pattern.len() - 1)]
                     };
 
-                    let rand = (
-                        stats.pattern_randomness +
-                        (idx as f32) * stats.randomness_growth
-                    ).clamp(0.0, 1.0);
+                    let rand = (stats.pattern_randomness + (idx as f32) * stats.randomness_growth)
+                        .clamp(0.0, 1.0);
 
                     self.pitch += ptrn_pitch;
                     let ptrn_h = ptrn_yaw * stats.recoil_horizontal;
@@ -210,61 +209,128 @@ impl PlayingState {
 
                 // hitscan: fire pellet_count rays, each with independent spread.
                 // For most weapons pellet_count=1; shotgun fires 8 pellets.
-                if self.current_world == WorldId::Lobby {
-                    let right_vec = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
-                    let up_vec = right_vec.cross(base_fwd).normalize();
+                let right_vec = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
+                let up_vec = right_vec.cross(base_fwd).normalize();
 
-                    let damage = stats.damage;
-                    let range = stats.bullet_range;
-                    let spread = weapon.computed_spread;
-                    let cx = screen_width() / 2.0;
-                    let cy = screen_height() / 2.0;
+                let damage = stats.damage;
+                let range = stats.bullet_range;
+                let spread = weapon.computed_spread;
+                let cx = screen_width() / 2.0;
+                let cy = screen_height() / 2.0;
 
-                    let mut total_dmg = 0.0f32;
-                    let mut any_headshot = false;
+                let mut total_dmg = 0.0f32;
+                let mut any_headshot = false;
 
-                    let mut pellet_mask: u16 = 0;
+                let mut pellet_mask: u16 = 0;
 
-                    for i in 0..stats.pellet_count as usize {
-                        let mut fwd = base_fwd;
-                        // follow fixed spread pattern
-                        if spread > 0.0001 {
-                            if let Some(ptrn) = stats.pellet_spread {
-                                let (angle, radius) = ptrn.get(i).copied().unwrap_or((0.0, 0.0));
-                                let deviation = spread * radius;
-                                fwd = (fwd + right_vec * (angle.cos() * deviation) + up_vec * (angle.sin() * deviation)).normalize();
-                            } else {
-                                // random spread if no pattern specified (not recommended for competitive weapons since it's less consistent)
-                                let angle = gen_range(0.0f32, std::f32::consts::TAU);
-                                let radius = gen_range(0.0f32, spread);
-                                fwd = (fwd + right_vec * (angle.cos() * radius) + up_vec * (angle.sin() * radius)).normalize();
+                for i in 0..stats.pellet_count as usize {
+                    let mut fwd = base_fwd;
+                    // follow fixed spread pattern
+                    if spread > 0.0001 {
+                        if let Some(ptrn) = stats.pellet_spread {
+                            let (angle, radius) = ptrn.get(i).copied().unwrap_or((0.0, 0.0));
+                            let deviation = spread * radius;
+                            fwd = (fwd
+                                + right_vec * (angle.cos() * deviation)
+                                + up_vec * (angle.sin() * deviation))
+                                .normalize();
+                        } else {
+                            // random spread if no pattern specified (not recommended for competitive weapons since it's less consistent)
+                            let angle = gen_range(0.0f32, std::f32::consts::TAU);
+                            let radius = gen_range(0.0f32, spread);
+                            fwd = (fwd
+                                + right_vec * (angle.cos() * radius)
+                                + up_vec * (angle.sin() * radius))
+                                .normalize();
+                        }
+                    }
+
+                    // Check if bullet hits any walls or props (maze world only)
+                    let closest_blocking_dist = if self.current_world == WorldId::Maze {
+                        let wall_hit = maze
+                            .as_ref()
+                            .and_then(|m| m.ray_test_walls(eye, fwd, range));
+                        let prop_hit_dist = maze
+                            .as_ref()
+                            .and_then(|m| m.ray_test_props(eye, fwd, range));
+
+                        // Determine closest hit (wall or prop)
+                        match (wall_hit, prop_hit_dist) {
+                            (Some(((wx, wy), wall_dist)), Some(prop_dist)) => {
+                                if wall_dist < prop_dist {
+                                    // Wall is closer - apply damage if breakable
+                                    if let Some(m) = maze.as_mut() {
+                                        if m.damage_wall(wx, wy, stats.damage) {
+                                            if !self.pending_broken_walls.contains(&(wx, wy)) {
+                                                self.pending_broken_walls.push((wx, wy));
+                                            }
+                                        }
+                                    }
+                                    Some(wall_dist)
+                                } else {
+                                    Some(prop_dist)
+                                }
+                            }
+                            (Some(((wx, wy), wall_dist)), None) => {
+                                // Only wall was hit
+                                if let Some(m) = maze.as_mut() {
+                                    if m.damage_wall(wx, wy, stats.damage) {
+                                        if !self.pending_broken_walls.contains(&(wx, wy)) {
+                                            self.pending_broken_walls.push((wx, wy));
+                                        }
+                                    }
+                                }
+                                Some(wall_dist)
+                            }
+                            (None, Some(prop_dist)) => Some(prop_dist),
+                            (None, None) => None,
+                        }
+                    } else {
+                        None
+                    };
+
+                    // bullet tracer — tiny offset so billboard quad is never perfectly edge-on
+                    // If wall/prop was hit, end the tracer there instead of at max range
+                    let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
+                    let tracer_end = if let Some(dist) = closest_blocking_dist {
+                        eye + fwd * dist
+                    } else {
+                        eye + fwd * range
+                    };
+
+                    self.tracers.push(BulletTracer {
+                        start: tracer_start,
+                        end: tracer_end,
+                        lifetime: stats.tracer_lifetime,
+                        speed: stats.bullet_speed,
+                        progress: 0.0,
+                        tracer_length: stats.tracer_length,
+                        tracer_color: stats.tracer_color,
+                        tracer_thickness: stats.tracer_thickness,
+                    });
+
+                    let mut closest: Option<(usize, HitZone, f32)> = None;
+
+                    // check hit on target dummy (lobby only)
+                    if self.current_world == WorldId::Lobby {
+                        if let Some((hit_zone, dist)) = self.target_dummy.ray_test(eye, fwd, range)
+                        {
+                            // Only count if not blocked by wall or prop
+                            let blocked =
+                                closest_blocking_dist.map_or(false, |block_dist| block_dist < dist);
+                            if !blocked {
+                                closest = Some((0, hit_zone, dist));
                             }
                         }
-                        
+                    }
 
-                        // bullet tracer — tiny offset so billboard quad is never perfectly edge-on
-                        let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
-                        self.tracers.push(BulletTracer {
-                            start: tracer_start,
-                            end: eye + fwd * range,
-                            lifetime: stats.tracer_lifetime,
-                            speed: stats.bullet_speed,
-                            progress: 0.0,
-                            tracer_length: stats.tracer_length,
-                            tracer_color: stats.tracer_color,
-                            tracer_thickness: stats.tracer_thickness,
-                        });
-
-                        let mut closest: Option<(usize, HitZone, f32)> = None;
-
-                        // check hit on target dummy
-                        if let Some((hit_zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
-                            closest = Some((0, hit_zone, dist));
-                        }
-
-                        // check for hit on other players
-                        for (i, p) in self.other_players.iter().enumerate() {
-                            if let Some((hit_zone, dist)) = p.ray_test(eye, fwd, range) {
+                    // check for hit on other players (allowed in any world)
+                    for (i, p) in self.other_players.iter().enumerate() {
+                        if let Some((hit_zone, dist)) = p.ray_test(eye, fwd, range) {
+                            // Only count if not blocked by wall or prop
+                            let blocked =
+                                closest_blocking_dist.map_or(false, |block_dist| block_dist < dist);
+                            if !blocked {
                                 // check if this hit is closer than the best hit we have so far, if so it becomes the new best
                                 let is_closer = closest.map_or(true, |(_, _, d)| dist < d);
                                 if is_closer {
@@ -272,42 +338,46 @@ impl PlayingState {
                                 }
                             }
                         }
+                    }
 
-                        // apply damage to appropriate entity
-                        if let Some((target_idx, zone, dist)) = closest {
-                            let mult = if zone == HitZone::Head { stats.headshot_mult } else { zone.damage_mult() };
-                            let falloff = damage_falloff(dist, stats);
-                            let dmg = damage * mult * falloff;
-                            if target_idx == 0 {
-                                if !self.dev_mode.dummy_invincible {
-                                    self.target_dummy.take_damage(dmg);
-                                }
-                            } else {
-                                self.other_players[target_idx - 1].take_damage(dmg);
+                    // apply damage to appropriate entity
+                    if let Some((target_idx, zone, dist)) = closest {
+                        let mult = if zone == HitZone::Head {
+                            stats.headshot_mult
+                        } else {
+                            zone.damage_mult()
+                        };
+                        let falloff = damage_falloff(dist, stats);
+                        let dmg = damage * mult * falloff;
+                        if target_idx == 0 {
+                            if !self.dev_mode.dummy_invincible {
+                                self.target_dummy.take_damage(dmg);
                             }
-                            total_dmg += dmg;
-                            if zone == HitZone::Head {
-                                any_headshot = true;
-                            }
-                            pellet_mask |= 1 << i; // if this pellet hit, you set the bit mark to one, << is left shift operator, so it sets it left by i, bit 1 is at i zero so it is the first bit if it hits, looks like 0 0 0 0 0 0 0 1 (if 8 pellets) and so on
+                        } else {
+                            self.other_players[target_idx - 1].take_damage(dmg);
                         }
+                        total_dmg += dmg;
+                        if zone == HitZone::Head {
+                            any_headshot = true;
+                        }
+                        pellet_mask |= 1 << i; // if this pellet hit, you set the bit mark to one, << is left shift operator, so it sets it left by i, bit 1 is at i zero so it is the first bit if it hits, looks like 0 0 0 0 0 0 0 1 (if 8 pellets) and so on
                     }
+                }
 
-                    // show hit marker + damage number for the combined total
-                    if total_dmg > 0.0 {
-                        self.hit_marker_timer = 0.35;
-                        self.hit_marker_headshot = any_headshot;
+                // show hit marker + damage number for the combined total
+                if total_dmg > 0.0 {
+                    self.hit_marker_timer = 0.35;
+                    self.hit_marker_headshot = any_headshot;
 
-                        // pellet shit
-                        self.hit_marker_pellet_mask = pellet_mask;
-                        self.damage_numbers.push(DamageNumber {
-                            amount: total_dmg,
-                            is_headshot: any_headshot,
-                            screen_x: cx + gen_range(-20.0f32, 20.0),
-                            screen_y: cy - 30.0,
-                            lifetime: 1.0,
-                        });
-                    }
+                    // pellet shit
+                    self.hit_marker_pellet_mask = pellet_mask;
+                    self.damage_numbers.push(DamageNumber {
+                        amount: total_dmg,
+                        is_headshot: any_headshot,
+                        screen_x: cx + gen_range(-20.0f32, 20.0),
+                        screen_y: cy - 30.0,
+                        lifetime: 1.0,
+                    });
                 }
             }
             weapon.trigger_held = true;
@@ -316,7 +386,7 @@ impl PlayingState {
         }
 
         // check teleporter input
-        self.check_teleporter(maze);
+        self.check_teleporter(maze.as_ref().map(|m| &**m));
 
         None
     }
@@ -364,13 +434,13 @@ impl PlayingState {
                     &mut self.position,
                     &mut self.movement_state.velocity,
                     self.movement_state.height,
-                    &mut self.movement_state.is_grounded
+                    &mut self.movement_state.is_grounded,
                 );
                 self.apply_movement(delta);
                 collision::resolve_horizontal(
                     &mut self.position,
                     &mut self.movement_state.velocity,
-                    self.movement_state.height
+                    self.movement_state.height,
                 );
             }
             WorldId::Maze => {
@@ -385,7 +455,7 @@ impl PlayingState {
                     collision::resolve_maze(
                         &mut self.position,
                         &mut self.movement_state.velocity,
-                        m
+                        m,
                     );
                 }
             }
@@ -397,6 +467,11 @@ impl PlayingState {
             // send world change request if pending
             if let Some(target) = self.pending_world_change.take() {
                 let msg = vec![MSG_WORLD_CHANGE, target.as_u8()];
+                let _ = s.send_to(&msg, server_addr);
+            }
+
+            while let Some((x, y)) = self.pending_broken_walls.pop() {
+                let msg = vec![MSG_WALL_BROKEN, x, y];
                 let _ = s.send_to(&msg, server_addr);
             }
 
@@ -415,7 +490,7 @@ impl PlayingState {
         config: &GameConfig,
         username: &str,
         player_id: u32,
-        maze: Option<&Maze>
+        maze: Option<&Maze>,
     ) {
         self.update_head_bob(get_frame_time());
         let camera = self.build_camera(config);
@@ -460,7 +535,7 @@ impl PlayingState {
         let forward = vec3(
             self.yaw.cos() * self.pitch.cos(),
             self.pitch.sin(),
-            self.yaw.sin() * self.pitch.cos()
+            self.yaw.sin() * self.pitch.cos(),
         );
         let right = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
 
@@ -478,7 +553,7 @@ impl PlayingState {
             self.hit_marker_timer,
             self.hit_marker_headshot,
             &self.damage_numbers,
-            self.hit_marker_pellet_mask
+            self.hit_marker_pellet_mask,
         );
     }
 

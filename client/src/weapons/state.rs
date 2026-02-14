@@ -2,7 +2,7 @@
  One instance per weapon the player is carrying.
 */
 use super::crosshair::CrosshairConfig;
-use super::stats::{ FireMode, WeaponKind, WeaponStats };
+use super::stats::{FireMode, WeaponKind, WeaponStats};
 
 pub struct WeaponState {
     pub kind: WeaponKind,
@@ -14,17 +14,17 @@ pub struct WeaponState {
 
     // -- Timers
     pub fire_cooldown: f32, // seconds until next shot allowed
-    pub reload_timer: f32, // seconds left in reload (0 = not reloading)
+    pub reload_timer: f32,  // seconds left in reload (0 = not reloading)
     pub is_reloading: bool,
 
     // -- ADS
     pub is_aiming: bool,
-    pub ads_progress: f32, // 0.0 = hip, 1.0 = fully aimed
+    pub ads_progress: f32,        // 0.0 = hip, 1.0 = fully aimed
     pub jump_cancelled_ads: bool, // true when jump cancelled ADS, prevents re-aim until button released
 
     // -- Recoil accumulation (applied to camera)
     pub recoil_pitch: f32, // accumulated vertical recoil (radians)
-    pub recoil_yaw: f32, // accumulated horizontal recoil (radians)
+    pub recoil_yaw: f32,   // accumulated horizontal recoil (radians)
 
     // -- Bloom (spread accumulation beyond base)
     pub bloom: f32, // extra spread from firing (radians)
@@ -41,10 +41,9 @@ pub struct WeaponState {
     // -- Crosshair (runtime config, will be editable in settings later)
     pub crosshair: CrosshairConfig,
     pub crosshair_kick: f32, // visual gap expansion from shooting, decays back to 0 over time, separate from bloom which affects actual spread
-    pub fsa_timer: f32, // time spent not firing when stationary, when >= fsa_time, bloom starts to recover 
+    pub fsa_timer: f32, // time spent not firing when stationary, when >= fsa_time, bloom starts to recover
 
     // -- more recoil stats
-
     pub shot_index: u32, // which bullet in current spray (for recoil patterns)
     pub pattern_reset_timer: f32, // time since triggerer released so it can go back to normal after a while
 }
@@ -128,7 +127,6 @@ impl WeaponState {
         } else {
             self.ads_progress = (self.ads_progress - delta / ads_time).max(0.0);
         }
-
     }
 
     // fire the weapon — consume ammo, set cooldown, return true if fired.
@@ -182,7 +180,8 @@ pub struct WeaponInventory {
 impl WeaponInventory {
     // start with all 5 weapons for now
     pub fn new() -> Self {
-        let weapons = WeaponKind::ALL.iter()
+        let weapons = WeaponKind::ALL
+            .iter()
             .map(|&kind| WeaponState::new(kind))
             .collect();
         Self {

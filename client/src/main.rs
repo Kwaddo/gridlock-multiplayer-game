@@ -1,14 +1,14 @@
 use macroquad::prelude::*;
 use std::net::UdpSocket;
 
-use client::core::{ GameConfig, GameState };
+use client::core::{GameConfig, GameState};
 use client::net::poll_updates;
-use client::screens::{ draw_pause_menu, LoginScreen, PlayingState };
-use client::screens::dev_mode::{ draw_dev_overlay, DevModeState };
+use client::screens::dev_mode::{draw_dev_overlay, DevModeState};
+use client::screens::{draw_pause_menu, LoginScreen, PlayingState};
 use client::settings::SettingsScreen;
-use client::weapons::crosshair_presets::CrosshairPresetManager;
 use client::types::maze::Maze;
 use client::ui::fonts;
+use client::weapons::crosshair_presets::CrosshairPresetManager;
 
 fn window_conf() -> Conf {
     Conf {
@@ -145,8 +145,6 @@ async fn main() {
                     }
                 }
 
-
-
                 // handle code prompt while playing (if F3 was pressed but code not yet verified)
                 if playing_state.dev_mode.show_code_prompt {
                     set_cursor_grab(false); // show cursor to know ur in prompt mode
@@ -155,7 +153,10 @@ async fn main() {
                     if let Some(entries) = assets {
                         for (key, path) in entries {
                             match load_texture(&path).await {
-                                Ok(tex) => { tex.set_filter(FilterMode::Nearest); playing_state.assets.insert(key, tex); }
+                                Ok(tex) => {
+                                    tex.set_filter(FilterMode::Nearest);
+                                    playing_state.assets.insert(key, tex);
+                                }
                                 Err(_) => {}
                             }
                         }
@@ -171,7 +172,9 @@ async fn main() {
                     DevModeState::draw_code_prompt(&playing_state.dev_mode);
 
                     // if prompt was closed (ESC) without entering dev mode, re-grab cursor for gameplay
-                    if !playing_state.dev_mode.show_code_prompt && !matches!(state, GameState::DevMode) {
+                    if !playing_state.dev_mode.show_code_prompt
+                        && !matches!(state, GameState::DevMode)
+                    {
                         set_cursor_grab(true);
                         show_mouse(false);
                         playing_state.last_mouse_pos = mouse_position();
@@ -199,7 +202,7 @@ async fn main() {
                     }
                 }
 
-                if let Some(new_state) = playing_state.process_local_input(&config, maze.as_ref()) {
+                if let Some(new_state) = playing_state.process_local_input(&config, maze.as_mut()) {
                     state = new_state;
                     if matches!(state, GameState::Paused) {
                         set_cursor_grab(false);
@@ -239,7 +242,9 @@ async fn main() {
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
-                if let Some(new_state) = draw_pause_menu(&config, &mut settings_screen, &mut playing_state.dev_mode) {
+                if let Some(new_state) =
+                    draw_pause_menu(&config, &mut settings_screen, &mut playing_state.dev_mode)
+                {
                     state = new_state;
                     if matches!(state, GameState::Playing) {
                         set_cursor_grab(true);
@@ -251,8 +256,17 @@ async fn main() {
 
             GameState::Settings => {
                 clear_background(Color::from_rgba(0, 0, 0, 255));
-                settings_screen.draw(&config, &playing_state.weapons, &preset_manager, &playing_state.assets);
-                if settings_screen.update(&mut config, &mut playing_state.weapons, &mut preset_manager) {
+                settings_screen.draw(
+                    &config,
+                    &playing_state.weapons,
+                    &preset_manager,
+                    &playing_state.assets,
+                );
+                if settings_screen.update(
+                    &mut config,
+                    &mut playing_state.weapons,
+                    &mut preset_manager,
+                ) {
                     state = GameState::Paused;
                 }
             }
@@ -278,7 +292,10 @@ async fn main() {
                 if let Some(entries) = assets {
                     for (key, path) in entries {
                         match load_texture(&path).await {
-                            Ok(tex) => { tex.set_filter(FilterMode::Nearest); playing_state.assets.insert(key, tex); }
+                            Ok(tex) => {
+                                tex.set_filter(FilterMode::Nearest);
+                                playing_state.assets.insert(key, tex);
+                            }
                             Err(_) => {}
                         }
                     }
@@ -313,7 +330,7 @@ fn sync_world(
     socket: &Option<UdpSocket>,
     player_id: u32,
     playing_state: &mut PlayingState,
-    maze: &mut Option<Maze>
+    maze: &mut Option<Maze>,
 ) -> Option<Vec<(String, String)> /* assets to load */> {
     if let Some(ref sock) = socket {
         let updates = poll_updates(sock, player_id);
@@ -329,6 +346,13 @@ fn sync_world(
             playing_state.current_world = world_id;
             playing_state.position = spawn;
             playing_state.movement_state.velocity = Vec3::ZERO;
+        }
+        if let Some(broken) = updates.broken_walls {
+            if let Some(m) = maze.as_mut() {
+                for (x, y) in broken {
+                    m.force_break_wall(x, y);
+                }
+            }
         }
         return updates.assets;
     }

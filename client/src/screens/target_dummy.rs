@@ -1,5 +1,5 @@
+use crate::weapons::combat::{default_player_hitboxes, CombatEntity, Hitbox};
 use macroquad::prelude::*;
-use crate::weapons::combat::{ CombatEntity, Hitbox, default_player_hitboxes };
 
 // NPC Target Dummy
 pub struct TargetDummy {

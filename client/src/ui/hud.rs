@@ -2,13 +2,13 @@ use macroquad::prelude::*;
 use std::collections::HashMap;
 
 use crate::physics::movement::MovementState;
-use crate::ui::fonts::{ measure_game_text, text_params };
+use crate::ui::draw_arc;
+use crate::ui::fonts::{measure_game_text, text_params};
 use crate::ui::OtherPlayer;
-use crate::weapons::WeaponInventory;
-use crate::weapons::stats::CrosshairStyle;
 use crate::weapons::crosshair::CrosshairType;
 use crate::weapons::effects::DamageNumber;
-use crate::ui::draw_arc;
+use crate::weapons::stats::CrosshairStyle;
+use crate::weapons::WeaponInventory;
 
 pub fn draw_hud(
     username: &str,
@@ -69,8 +69,8 @@ pub fn draw_hud(
                 CrosshairType::FourCurves => {
                     // 4-curves crosshair (shotgun)
                     let stats = weapon.stats();
-                    let _base =
-                        stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+                    let _base = stats.hip_spread
+                        + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
                     let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
@@ -93,14 +93,32 @@ pub fn draw_hud(
                         let oc = Color::from_rgba(0, 0, 0, 180);
                         for q in 0..4u32 {
                             let base_angle = q as f32 * quarter;
-                            draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, ot, segs, oc);
+                            draw_arc(
+                                cx,
+                                cy,
+                                radius,
+                                base_angle + gap_angle,
+                                base_angle + quarter - gap_angle,
+                                ot,
+                                segs,
+                                oc,
+                            );
                         }
                     }
 
                     // 4 arcs (one per quadrant, gaps at top/bottom/left/right)
                     for q in 0..4u32 {
                         let base_angle = q as f32 * quarter;
-                        draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, thick, segs, color);
+                        draw_arc(
+                            cx,
+                            cy,
+                            radius,
+                            base_angle + gap_angle,
+                            base_angle + quarter - gap_angle,
+                            thick,
+                            segs,
+                            color,
+                        );
                     }
 
                     // center dot (visible at hip, fades out when ADS)
@@ -110,7 +128,7 @@ pub fn draw_hud(
                             (color.r * 255.0) as u8,
                             (color.g * 255.0) as u8,
                             (color.b * 255.0) as u8,
-                            dot_alpha
+                            dot_alpha,
                         );
                         draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
                     }
@@ -118,8 +136,8 @@ pub fn draw_hud(
                 CrosshairType::Chevron => {
                     // L-bracket crosshair with bezier-chamfered corners
                     let stats = weapon.stats();
-                    let _base =
-                        stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+                    let _base = stats.hip_spread
+                        + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
                     let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
@@ -138,9 +156,9 @@ pub fn draw_hud(
 
                     let corners: [(f32, f32); 4] = [
                         (-1.0, -1.0), // top-left
-                        ( 1.0, -1.0), // top-right
-                        (-1.0,  1.0), // bottom-left
-                        ( 1.0,  1.0), // bottom-right
+                        (1.0, -1.0),  // top-right
+                        (-1.0, 1.0),  // bottom-left
+                        (1.0, 1.0),   // bottom-right
                     ];
 
                     for &(sx, sy) in &corners {
@@ -156,13 +174,18 @@ pub fn draw_hud(
                         let v_near = corner_y - sy * chamfer;
 
                         // quadratic bezier: P0 = (h_near, corner_y), P1 = (corner_x, corner_y), P2 = (corner_x, v_near)
-                        let p0x = h_near; let p0y = corner_y;
-                        let p1x = corner_x; let p1y = corner_y;
-                        let p2x = corner_x; let p2y = v_near;
+                        let p0x = h_near;
+                        let p0y = corner_y;
+                        let p1x = corner_x;
+                        let p1y = corner_y;
+                        let p2x = corner_x;
+                        let p2y = v_near;
                         let bez = |t: f32| -> (f32, f32) {
                             let u = 1.0 - t;
-                            (u*u*p0x + 2.0*u*t*p1x + t*t*p2x,
-                             u*u*p0y + 2.0*u*t*p1y + t*t*p2y)
+                            (
+                                u * u * p0x + 2.0 * u * t * p1x + t * t * p2x,
+                                u * u * p0y + 2.0 * u * t * p1y + t * t * p2y,
+                            )
                         };
 
                         // chamfer curves at ends, long straight diagonal in the middle
@@ -214,7 +237,7 @@ pub fn draw_hud(
                             (color.r * 255.0) as u8,
                             (color.g * 255.0) as u8,
                             (color.b * 255.0) as u8,
-                            dot_alpha
+                            dot_alpha,
                         );
                         draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
                     }
@@ -223,17 +246,18 @@ pub fn draw_hud(
                     // cross crosshair (pistol, AR, SMG)
                     // all values are % of screen height so it scales with resolution
                     let stats = weapon.stats();
-                    let base =
-                        stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+                    let base = stats.hip_spread
+                        + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
                     let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
 
-                    let movement_gap = ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
+                    let movement_gap =
+                        ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
 
                     // resting ads gap, this is so there is ALWAYS a gap unless FSA is active
                     let ads_rest_gap = if fsa_active {
-                          (sh * 0.3) / 100.0 // small fixed gap when FSA is active (~3px at 1080p)
+                        (sh * 0.3) / 100.0 // small fixed gap when FSA is active (~3px at 1080p)
                     } else {
                         ((xhair.center_gap * sh) / 100.0) * 0.7 * weapon.ads_progress
                         // 40% of center gap as minimum gap when fully ADS, scales with ads_progress
@@ -258,11 +282,13 @@ pub fn draw_hud(
                 CrosshairType::Circle => {
                     // Simple circle crosshair
                     let stats = weapon.stats();
-                    let base = stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+                    let base = stats.hip_spread
+                        + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
                     let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
-                    let movement_gap = ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
+                    let movement_gap =
+                        ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
                     let ads_rest_gap = if fsa_active {
                         (sh * 0.3) / 100.0
                     } else {
@@ -285,11 +311,13 @@ pub fn draw_hud(
                 CrosshairType::Square => {
                     // Simple square crosshair
                     let stats = weapon.stats();
-                    let base = stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+                    let base = stats.hip_spread
+                        + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
                     let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
-                    let movement_gap = ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
+                    let movement_gap =
+                        ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
                     let ads_rest_gap = if fsa_active {
                         (sh * 0.3) / 100.0
                     } else {
@@ -301,9 +329,23 @@ pub fn draw_hud(
 
                     if xhair.outline_enabled {
                         let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
-                        draw_rectangle_lines(cx - size/2.0, cy - size/2.0, size, size, ot, Color::from_rgba(0, 0, 0, 180));
+                        draw_rectangle_lines(
+                            cx - size / 2.0,
+                            cy - size / 2.0,
+                            size,
+                            size,
+                            ot,
+                            Color::from_rgba(0, 0, 0, 180),
+                        );
                     }
-                    draw_rectangle_lines(cx - size/2.0, cy - size/2.0, size, size, thick, color);
+                    draw_rectangle_lines(
+                        cx - size / 2.0,
+                        cy - size / 2.0,
+                        size,
+                        size,
+                        thick,
+                        color,
+                    );
 
                     if xhair.dot_enabled {
                         draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, color);
@@ -312,11 +354,13 @@ pub fn draw_hud(
                 CrosshairType::Triangle => {
                     // Simple triangle crosshair (pointing up)
                     let stats = weapon.stats();
-                    let base = stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+                    let base = stats.hip_spread
+                        + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
                     let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
-                    let movement_gap = ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
+                    let movement_gap =
+                        ((weapon.computed_spread - base).max(0.0) * 40.0 * sh) / 100.0;
                     let ads_rest_gap = if fsa_active {
                         (sh * 0.3) / 100.0
                     } else {
@@ -329,8 +373,8 @@ pub fn draw_hud(
                     // Equilateral triangle vertices
                     let height = size * 0.866; // sqrt(3)/2
                     let v1 = (cx, cy - height * 0.67); // top
-                    let v2 = (cx - size/2.0, cy + height * 0.33); // bottom left
-                    let v3 = (cx + size/2.0, cy + height * 0.33); // bottom right
+                    let v2 = (cx - size / 2.0, cy + height * 0.33); // bottom left
+                    let v3 = (cx + size / 2.0, cy + height * 0.33); // bottom right
 
                     if xhair.outline_enabled {
                         let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
@@ -350,7 +394,8 @@ pub fn draw_hud(
                 CrosshairType::AngleBrackets => {
                     // < . > shotgun-style angle brackets
                     let stats = weapon.stats();
-                    let _base = stats.hip_spread + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
+                    let _base = stats.hip_spread
+                        + (stats.ads_spread - stats.hip_spread) * weapon.ads_progress;
 
                     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - weapon.ads_progress);
                     let kick_gap = (weapon.crosshair_kick * sh) / 100.0;
@@ -399,7 +444,7 @@ pub fn draw_hud(
                             (color.r * 255.0) as u8,
                             (color.g * 255.0) as u8,
                             (color.b * 255.0) as u8,
-                            dot_alpha
+                            dot_alpha,
                         );
                         draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
                     }
@@ -452,7 +497,11 @@ pub fn draw_hud(
         let current_size = (gap + len) * 2.0; // full diameter
 
         // fallback for sniper scope (crosshair size is 0)
-        let current_size = if current_size < 10.0 { (sh * 3.0) / 100.0 } else { current_size };
+        let current_size = if current_size < 10.0 {
+            (sh * 3.0) / 100.0
+        } else {
+            current_size
+        };
 
         let pop = 1.0 + 0.4 * t;
         let hm_thick = 2.5; // size of each line in the hit marker X
@@ -467,18 +516,45 @@ pub fn draw_hud(
                     let r = ring_radius * radius;
                     let dx = cx + angle.cos() * r;
                     let dy = cy - angle.sin() * r;
-                    draw_circle(dx,dy,dot_radius, RED);
+                    draw_circle(dx, dy, dot_radius, RED);
                 }
             }
-
         } else {
             // NORMAL: X shape scaled to crosshair
             let hm_size = current_size * 0.4 * pop;
             let hm_gap = current_size * 0.1 * pop;
-            draw_line(cx - hm_size, cy - hm_size, cx - hm_gap, cy - hm_gap, hm_thick, hm_color);
-            draw_line(cx + hm_gap, cy - hm_gap, cx + hm_size, cy - hm_size, hm_thick, hm_color);
-            draw_line(cx - hm_size, cy + hm_size, cx - hm_gap, cy + hm_gap, hm_thick, hm_color);
-            draw_line(cx + hm_gap, cy + hm_gap, cx + hm_size, cy + hm_size, hm_thick, hm_color);
+            draw_line(
+                cx - hm_size,
+                cy - hm_size,
+                cx - hm_gap,
+                cy - hm_gap,
+                hm_thick,
+                hm_color,
+            );
+            draw_line(
+                cx + hm_gap,
+                cy - hm_gap,
+                cx + hm_size,
+                cy - hm_size,
+                hm_thick,
+                hm_color,
+            );
+            draw_line(
+                cx - hm_size,
+                cy + hm_size,
+                cx - hm_gap,
+                cy + hm_gap,
+                hm_thick,
+                hm_color,
+            );
+            draw_line(
+                cx + hm_gap,
+                cy + hm_gap,
+                cx + hm_size,
+                cy + hm_size,
+                hm_thick,
+                hm_color,
+            );
         }
     }
 
@@ -492,7 +568,12 @@ pub fn draw_hud(
         };
         let text = format!("{}", dmg.amount as u32);
         let tw = measure_game_text(&text, size);
-        draw_text_ex(&text, dmg.screen_x - tw / 2.0, dmg.screen_y, text_params(size, color));
+        draw_text_ex(
+            &text,
+            dmg.screen_x - tw / 2.0,
+            dmg.screen_y,
+            text_params(size, color),
+        );
     }
 
     // -- HUD TEXT
@@ -501,13 +582,16 @@ pub fn draw_hud(
         &format!("Player: {} (ID: {})", username, player_id),
         20.0,
         50.0,
-        text_params(20, WHITE)
+        text_params(20, WHITE),
     );
     draw_text_ex(
-        &format!("Pos: {:.2}, {:.2}, {:.2}", position.x, position.y, position.z),
+        &format!(
+            "Pos: {:.2}, {:.2}, {:.2}",
+            position.x, position.y, position.z
+        ),
         20.0,
         70.0,
-        text_params(20, WHITE)
+        text_params(20, WHITE),
     );
 
     // -- STAMINA BAR
@@ -515,7 +599,13 @@ pub fn draw_hud(
     let bar_height = 8.0;
     let bar_x = screen_width() - bar_width - 20.0;
     let bar_y = screen_height() - 40.0;
-    draw_rectangle(bar_x, bar_y, bar_width, bar_height, Color::from_rgba(50, 50, 50, 255));
+    draw_rectangle(
+        bar_x,
+        bar_y,
+        bar_width,
+        bar_height,
+        Color::from_rgba(50, 50, 50, 255),
+    );
     let fill = movement_state.stamina / 100.0;
     let bar_color = if movement_state.stamina < 20.0 {
         RED
@@ -531,7 +621,7 @@ pub fn draw_hud(
             "CROUCHING",
             20.0,
             screen_height() - 20.0,
-            text_params(16, Color::from_rgba(150, 150, 150, 255))
+            text_params(16, Color::from_rgba(150, 150, 150, 255)),
         );
     }
 
@@ -547,7 +637,12 @@ pub fn draw_hud(
             let screen_x = screen_width() / 2.0 + (right_dot / dot) * fov_scale;
             let screen_y = screen_height() / 2.0 - (up_dot / dot) * fov_scale;
             let name_w = measure_game_text(&p.username, 16);
-            draw_text_ex(&p.username, screen_x - name_w / 2.0, screen_y, text_params(16, p.color));
+            draw_text_ex(
+                &p.username,
+                screen_x - name_w / 2.0,
+                screen_y,
+                text_params(16, p.color),
+            );
         }
     }
 
@@ -556,14 +651,14 @@ pub fn draw_hud(
         &format!("Players online: {}", other_players.len() + 1),
         20.0,
         100.0,
-        text_params(20, YELLOW)
+        text_params(20, YELLOW),
     );
     for (i, p) in other_players.iter().enumerate() {
         draw_text_ex(
             &format!("   {} (ID: {})", p.username, p.id),
             20.0,
             120.0 + (i as f32) * 20.0,
-            text_params(18, p.color)
+            text_params(18, p.color),
         );
     }
 
@@ -579,13 +674,25 @@ pub fn draw_hud(
         &ammo_text,
         screen_width() - ammo_w - 20.0,
         screen_height() - 60.0,
-        text_params(24, if weapon.ammo == 0 && !weapon.is_reloading { RED } else { WHITE })
+        text_params(
+            24,
+            if weapon.ammo == 0 && !weapon.is_reloading {
+                RED
+            } else {
+                WHITE
+            },
+        ),
     );
 
     let name_w = measure_game_text(stats.name, 16);
     let name_x = screen_width() - name_w - 20.0;
     let name_y = screen_height() - 80.0;
-    draw_text_ex(stats.name, name_x, name_y, text_params(16, Color::from_rgba(180, 180, 180, 255)));
+    draw_text_ex(
+        stats.name,
+        name_x,
+        name_y,
+        text_params(16, Color::from_rgba(180, 180, 180, 255)),
+    );
 
     // weapon sprite: sits to the left of the weapon name
     let icon_w = stats.icon_width;
@@ -601,13 +708,25 @@ pub fn draw_hud(
     };
 
     if let Some(tex) = assets.get(stats.icon_asset_key) {
-        draw_texture_ex(tex, icon_x, icon_y + kick_y, WHITE, DrawTextureParams {
-            dest_size: Some(vec2(icon_w, icon_h)),
-            flip_x: stats.icon_flip_x,
-            ..Default::default()
-        });
+        draw_texture_ex(
+            tex,
+            icon_x,
+            icon_y + kick_y,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(vec2(icon_w, icon_h)),
+                flip_x: stats.icon_flip_x,
+                ..Default::default()
+            },
+        );
     } else {
-        draw_rectangle(icon_x, icon_y + kick_y, icon_w, icon_h, Color::from_rgba(80, 80, 80, 150));
+        draw_rectangle(
+            icon_x,
+            icon_y + kick_y,
+            icon_w,
+            icon_h,
+            Color::from_rgba(80, 80, 80, 150),
+        );
         draw_rectangle_lines(icon_x, icon_y + kick_y, icon_w, icon_h, 1.0, GRAY);
     }
 
@@ -615,11 +734,25 @@ pub fn draw_hud(
     if weapon.muzzle_flash_timer > 0.0 {
         let t = weapon.muzzle_flash_timer / 0.08;
         let alpha = (t * 255.0) as u8;
-        let flash_x = if stats.icon_flip_x { icon_x + 6.0 } else { icon_x + icon_w - 6.0 };
+        let flash_x = if stats.icon_flip_x {
+            icon_x + 6.0
+        } else {
+            icon_x + icon_w - 6.0
+        };
         let flash_y = icon_y + kick_y + 5.0;
 
-        draw_circle(flash_x, flash_y, 14.0 * t, Color::from_rgba(255, 180, 50, alpha / 2));
-        draw_circle(flash_x, flash_y, 6.0 * t, Color::from_rgba(255, 240, 180, alpha));
+        draw_circle(
+            flash_x,
+            flash_y,
+            14.0 * t,
+            Color::from_rgba(255, 180, 50, alpha / 2),
+        );
+        draw_circle(
+            flash_x,
+            flash_y,
+            6.0 * t,
+            Color::from_rgba(255, 240, 180, alpha),
+        );
         for i in 0..4 {
             let angle = (i as f32) * 0.8 + t * 3.0;
             let len = 10.0 * t;
@@ -629,7 +762,7 @@ pub fn draw_hud(
                 flash_x + angle.cos() * len,
                 flash_y + angle.sin() * len,
                 1.5,
-                Color::from_rgba(255, 200, 80, alpha)
+                Color::from_rgba(255, 200, 80, alpha),
             );
         }
     }
@@ -655,6 +788,17 @@ fn draw_scope_vignette(cx: f32, cy: f32, radius: f32, alpha: u8) {
     }
 
     draw_circle_lines(cx, cy, radius, 3.0, Color::from_rgba(40, 40, 40, alpha));
-    draw_circle_lines(cx, cy, radius - 1.5, 1.0, Color::from_rgba(80, 80, 80, alpha));
-    draw_circle(cx, cy, radius - 2.0, Color::from_rgba(0, 10, 20, ((alpha as f32) * 0.12) as u8));
+    draw_circle_lines(
+        cx,
+        cy,
+        radius - 1.5,
+        1.0,
+        Color::from_rgba(80, 80, 80, alpha),
+    );
+    draw_circle(
+        cx,
+        cy,
+        radius - 2.0,
+        Color::from_rgba(0, 10, 20, ((alpha as f32) * 0.12) as u8),
+    );
 }

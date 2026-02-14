@@ -1,6 +1,6 @@
 use crate::core::GameConfig;
-use crate::settings::sensitivity;
 use crate::settings::fov;
+use crate::settings::sensitivity;
 
 pub fn update_sliders(
     config: &mut GameConfig,
@@ -13,10 +13,28 @@ pub fn update_sliders(
     held: bool,
 ) {
     let row_y = panel_top + 50.0;
-    sensitivity::update(&mut config.sensitivity, slider_x, slider_w, btn_size, row_y, mouse, clicked, held);
+    sensitivity::update(
+        &mut config.sensitivity,
+        slider_x,
+        slider_w,
+        btn_size,
+        row_y,
+        mouse,
+        clicked,
+        held,
+    );
 
     let row_y2 = row_y + 60.0;
-    fov::update(&mut config.fov, slider_x, slider_w, btn_size, row_y2, mouse, clicked, held);
+    fov::update(
+        &mut config.fov,
+        slider_x,
+        slider_w,
+        btn_size,
+        row_y2,
+        mouse,
+        clicked,
+        held,
+    );
 }
 
 pub fn draw_sliders(
@@ -28,7 +46,14 @@ pub fn draw_sliders(
     panel_top: f32,
 ) {
     let row_y = panel_top + 50.0;
-    sensitivity::draw(config.sensitivity, label_x, slider_x, slider_w, btn_size, row_y);
+    sensitivity::draw(
+        config.sensitivity,
+        label_x,
+        slider_x,
+        slider_w,
+        btn_size,
+        row_y,
+    );
 
     let row_y2 = row_y + 60.0;
     fov::draw(config.fov, label_x, slider_x, slider_w, btn_size, row_y2);

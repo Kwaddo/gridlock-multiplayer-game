@@ -37,13 +37,13 @@ pub fn draw_arc(
             vec2(x1_inner, y1_inner),
             vec2(x2_inner, y2_inner),
             vec2(x1_outer, y1_outer),
-            color
+            color,
         );
         draw_triangle(
             vec2(x2_inner, y2_inner),
             vec2(x2_outer, y2_outer),
             vec2(x1_outer, y1_outer),
-            color
+            color,
         );
     }
 }

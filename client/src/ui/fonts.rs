@@ -16,7 +16,6 @@ pub async fn init_font() {
 //     }
 // }
 
-
 // load font or panic if it fails (since the game won't look right without it)
 pub fn game_font() -> Option<&'static Font> {
     GAME_FONT.get()
