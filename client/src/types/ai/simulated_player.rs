@@ -5,7 +5,7 @@
     real server or have another player, will also serve well for testing player models later on
 */
 
-use crate::types::player::OtherPlayer;
+use crate::types::player::{OtherPlayer, PlayerSkin};
 use crate::types::world::WorldId;
 use crate::weapons::combat::{ CombatEntity, EntityKind, Hitbox };
 use macroquad::prelude::*;
@@ -30,12 +30,21 @@ pub struct ActionState {
     pub crouch: bool,
     pub slide: bool,
     pub shoot: bool,
+    pub ads: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum YawMode {
+    Fixed,       // stays at current yaw
+    FacePlayer,  // always rotates to face the local player
+    Spin,        // continuously rotates
 }
 
 pub struct SimulatedPlayer {
     pub player: OtherPlayer,
     pub pattern: MovementPattern,
     pub action_state: ActionState,
+    pub yaw_mode: YawMode,
     movement_timer: f32,
     pattern_change_timer: f32,
     current_random_pattern: MovementPattern,
@@ -56,7 +65,9 @@ impl SimulatedPlayer {
                 crouch: false,
                 slide: false,
                 shoot: false,
+                ads: false,
             },
+            yaw_mode: YawMode::Fixed,
             movement_timer: 0.0,
             pattern_change_timer: gen_range(3.0, 8.0),
             current_random_pattern: MovementPattern::ForwardBack,
@@ -72,6 +83,26 @@ impl SimulatedPlayer {
             4 => MovementPattern::Left,
             5 => MovementPattern::Right,
             _ => MovementPattern::Circle,
+        }
+    }
+
+    pub fn set_yaw(&mut self, yaw: f32) {
+        self.player.yaw = yaw;
+    }
+
+    pub fn simulate_yaw(&mut self, delta: f32, player_pos: Option<Vec3>) {
+        match self.yaw_mode {
+            YawMode::Fixed => {} // manual control only
+            YawMode::FacePlayer => {
+                if let Some(pp) = player_pos {
+                    let dx = pp.x - self.player.x;
+                    let dz = pp.z - self.player.z;
+                    self.player.yaw = dz.atan2(dx);
+                }
+            }
+            YawMode::Spin => {
+                self.player.yaw += 1.5 * delta; // ~90 deg/sec
+            }
         }
     }
 
@@ -126,6 +157,16 @@ impl SimulatedPlayer {
 
         self.player.x = self.player.x.clamp(-50.0, 50.0);
         self.player.z = self.player.z.clamp(-50.0, 50.0);
+
+        // Auto-switch skin based on state
+        let is_moving = active_pattern != MovementPattern::None;
+        self.player.skin_type = if self.action_state.ads {
+            PlayerSkin::RifleAimIdle
+        } else if is_moving {
+            PlayerSkin::RifleWalk
+        } else {
+            PlayerSkin::RifleIdle
+        };
 
         self.player.update(delta);
     }

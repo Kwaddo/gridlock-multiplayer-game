@@ -47,12 +47,34 @@ impl MenuParticle {
 }
 
 // ── main menu struct ───────────────────────────────────────────────────────
+#[derive(Clone, Copy, PartialEq)]
+pub enum ModelQuality {
+    Compressed,
+    Full,
+}
+
+impl ModelQuality {
+    pub fn label(self) -> &'static str {
+        match self {
+            ModelQuality::Compressed => "Compressed",
+            ModelQuality::Full => "Full",
+        }
+    }
+    fn toggle(self) -> Self {
+        match self {
+            ModelQuality::Compressed => ModelQuality::Full,
+            ModelQuality::Full => ModelQuality::Compressed,
+        }
+    }
+}
+
 pub struct LoginScreen {
     pub ip_input: String,
     pub username_input: String,
     pub active_field: LoginField,
     pub error_msg: String,
     pub active_tab: MainMenuTab,
+    pub model_quality: ModelQuality,
 
     // server browser
     discovered_servers: Vec<DiscoveredServer>,
@@ -86,6 +108,7 @@ impl LoginScreen {
             particles,
             anim_time: 0.0,
             connecting: false,
+            model_quality: ModelQuality::Compressed,
         }
     }
 
@@ -512,11 +535,26 @@ impl LoginScreen {
             self.active_field = LoginField::Username;
         }
 
+        // ── model quality toggle ──
+        let mq_y = nm_fy + field_h + 18.0;
+        let mq_label = format!("Model Quality: {}", self.model_quality.label());
+        let mq_w = measure_game_text(&mq_label, 14) + 24.0;
+        let mq_h = 28.0;
+        let mq_x = px + (pw - mq_w) / 2.0;
+        let mq_hover = in_rect(mouse, mq_x, mq_y, mq_w, mq_h);
+        draw_rectangle(mq_x, mq_y, mq_w, mq_h, if mq_hover { Color::new(0.14, 0.16, 0.26, 1.0) } else { Color::new(0.08, 0.10, 0.18, 1.0) });
+        draw_rectangle_lines(mq_x, mq_y, mq_w, mq_h, 1.0, INPUT_BORDER);
+        let mq_tw = measure_game_text(&mq_label, 14);
+        draw_text_ex(&mq_label, mq_x + (mq_w - mq_tw) / 2.0, mq_y + 19.0, text_params(14, TEXT_LABEL));
+        if mq_hover && clicked {
+            self.model_quality = self.model_quality.toggle();
+        }
+
         // ── connect button ──
         let bw = 220.0;
         let bh = 42.0;
         let bx = px + (pw - bw) / 2.0;
-        let by = nm_fy + field_h + 32.0;
+        let by = mq_y + mq_h + 14.0;
         let hover = in_rect(mouse, bx, by, bw, bh);
         draw_rectangle(bx, by, bw, bh, if hover { ACCENT_HOVER } else { ACCENT });
         let ctxt = "CONNECT";

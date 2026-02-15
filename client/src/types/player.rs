@@ -2,6 +2,47 @@ use crate::types::world::WorldId;
 use crate::weapons::combat::{default_player_hitboxes, CombatEntity, EntityKind, Hitbox};
 use macroquad::prelude::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayerSkin {
+    Texture,
+    RifleIdle,
+    RifleAimIdle,
+    RifleWalk,
+}
+
+impl PlayerSkin {
+    pub const fn is_model_based(self) -> bool {
+        !matches!(self, PlayerSkin::Texture)
+    }
+
+    pub const fn model_key(self) -> Option<&'static str> {
+        match self {
+            PlayerSkin::Texture => None,
+            PlayerSkin::RifleIdle => Some("rifle_idle"),
+            PlayerSkin::RifleAimIdle => Some("rifle_aim_idle"),
+            PlayerSkin::RifleWalk => Some("rifle_walk"),
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            PlayerSkin::Texture => "Texture",
+            PlayerSkin::RifleIdle => "Rifle Idle",
+            PlayerSkin::RifleAimIdle => "Rifle Aim",
+            PlayerSkin::RifleWalk => "Rifle Walk",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            PlayerSkin::Texture => PlayerSkin::RifleIdle,
+            PlayerSkin::RifleIdle => PlayerSkin::RifleAimIdle,
+            PlayerSkin::RifleAimIdle => PlayerSkin::RifleWalk,
+            PlayerSkin::RifleWalk => PlayerSkin::Texture,
+        }
+    }
+}
+
 pub struct OtherPlayer {
     pub id: u32,
     pub x: f32,
@@ -10,6 +51,7 @@ pub struct OtherPlayer {
     pub yaw: f32,
     pub username: String,
     pub skin: Option<Texture2D>,
+    pub skin_type: PlayerSkin,
     pub color: Color,
     pub world: WorldId,
     pub hp: f32,
@@ -35,6 +77,7 @@ impl OtherPlayer {
             yaw: 0.0,
             username,
             skin: None,
+            skin_type: PlayerSkin::RifleIdle,
             color: Self::color_for_id(id),
             world,
             hp: 100.0,
@@ -85,3 +128,4 @@ impl CombatEntity for OtherPlayer {
         self.color
     }
 }
+

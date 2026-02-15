@@ -5,13 +5,16 @@ use std::net::UdpSocket;
 use client::core::{GameConfig, GameState};
 use client::net::poll_updates;
 use client::screens::dev_mode::{draw_dev_overlay, DevModeState, draw_section_header_public, draw_toggle_public, draw_action_button_public};
-use client::screens::{draw_pause_menu, LoginScreen, PlayingState};
+use client::screens::{draw_pause_menu, LoginScreen, ModelQuality, PlayingState};
 use client::settings::SettingsScreen;
-use client::types::ai::simulated_player::{SimulatedPlayer, MovementPattern};
+use client::types::ai::simulated_player::{SimulatedPlayer, MovementPattern, YawMode};
+use client::types::animated_model::load_gltf_animated_model;
 use client::types::maze::Maze;
+use client::types::player::PlayerSkin;
 use client::types::world::WorldId;
 use client::ui::fonts;
 use client::weapons::crosshair_presets::CrosshairPresetManager;
+use gltf::mesh::util::ReadIndices;
 
 fn resolve_sibling_path(base_path: &str, sibling_name: &str) -> String {
     if let Some((dir, _)) = base_path.rsplit_once('/') {
@@ -337,11 +340,74 @@ fn draw_bot_tab(
                 };
             }
 
+            let (btn_h, skin_pressed) = draw_action_button_public(
+                &format!("Skin: {}", bot.player.skin_type.label()),
+                x,
+                y,
+                220.0,
+                mouse,
+                clicked,
+            );
+            y += btn_h;
+
+            if skin_pressed {
+                bot.player.skin_type = bot.player.skin_type.next();
+            }
+
+            // Yaw mode
+            let yaw_label = match bot.yaw_mode {
+                YawMode::Fixed => "Fixed",
+                YawMode::FacePlayer => "Face Player",
+                YawMode::Spin => "Spin",
+            };
+            let (btn_h, yaw_pressed) = draw_action_button_public(
+                &format!("Yaw: {}", yaw_label),
+                x,
+                y,
+                220.0,
+                mouse,
+                clicked,
+            );
+            y += btn_h;
+
+            if yaw_pressed {
+                bot.yaw_mode = match bot.yaw_mode {
+                    YawMode::Fixed => YawMode::FacePlayer,
+                    YawMode::FacePlayer => YawMode::Spin,
+                    YawMode::Spin => YawMode::Fixed,
+                };
+            }
+
+            // Manual yaw slider (only in Fixed mode)
+            if bot.yaw_mode == YawMode::Fixed {
+                let yaw_deg = bot.player.yaw.to_degrees();
+                draw_text_ex(
+                    &format!("Yaw: {:.0}°", yaw_deg),
+                    x,
+                    y + 14.0,
+                    text_params(14, WHITE),
+                );
+                y += 20.0;
+
+                // Left/Right buttons for manual yaw
+                let (btn_h, left_pressed) = draw_action_button_public("< -45°", x, y, 100.0, mouse, clicked);
+                let (_, right_pressed) = draw_action_button_public("> +45°", x + 110.0, y, 100.0, mouse, clicked);
+                y += btn_h;
+
+                if left_pressed {
+                    bot.set_yaw(bot.player.yaw - std::f32::consts::FRAC_PI_4);
+                }
+                if right_pressed {
+                    bot.set_yaw(bot.player.yaw + std::f32::consts::FRAC_PI_4);
+                }
+            }
+
             y += draw_section_header_public("Actions", x, y);
             y += draw_toggle_public("Jump Spam", &mut bot.action_state.jump_spam, x, y, mouse, clicked);
             y += draw_toggle_public("Crouch", &mut bot.action_state.crouch, x, y, mouse, clicked);
             y += draw_toggle_public("Slide", &mut bot.action_state.slide, x, y, mouse, clicked);
             y += draw_toggle_public("Shoot", &mut bot.action_state.shoot, x, y, mouse, clicked);
+            y += draw_toggle_public("ADS", &mut bot.action_state.ads, x, y, mouse, clicked);
         }
     }
 }
@@ -358,6 +424,8 @@ fn window_conf() -> Conf {
 async fn main() {
     // Set Nearest filtering globally so all textures (sprites, crosshairs) stay crisp
     set_default_filter_mode(FilterMode::Nearest);
+
+    macroquad::window::gl_set_drawcall_buffer_capacity(200_000, 300_000);
 
     fonts::init_font().await;
 
@@ -437,6 +505,19 @@ async fn main() {
                 // load one texture per frame to keep the progress bar updating
                 if loading_started && loading_index < loading_assets.len() {
                     let (key, path) = loading_assets[loading_index].clone();
+                    // Swap to full-quality GLB if selected (fall back to compressed if _Full doesn't exist)
+                    let path = if path.ends_with(".glb")
+                        && login_screen.model_quality == ModelQuality::Full
+                    {
+                        let full_path = path.replace(".glb", "_Full.glb");
+                        if std::path::Path::new(&full_path).exists() {
+                            full_path
+                        } else {
+                            path
+                        }
+                    } else {
+                        path
+                    };
                     loading_current = key.clone();
                     load_asset_entry(key, path, &mut playing_state).await;
                     loading_index += 1;
@@ -637,7 +718,10 @@ fn sync_world(
             *maze = Some(new_maze);
             // playing_state.position = spawn; // removed because player starts in lobby now
         }
-        if let Some(players) = updates.players {
+        if let Some(mut players) = updates.players {
+            for p in &mut players {
+                p.skin_type = PlayerSkin::RifleIdle;
+            }
             playing_state.other_players = players;
         }
 
@@ -678,9 +762,19 @@ fn sync_world(
 }
 
 async fn load_asset_entry(key: String, path: String, playing_state: &mut PlayingState) {
-    let is_model = path.to_lowercase().ends_with(".obj");
+    // Avoid re-decoding and re-uploading assets if the same key is received again.
+    if playing_state.models.contains_key(&key)
+        || playing_state.animated_models.contains_key(&key)
+        || playing_state.assets.contains_key(&key)
+    {
+        return;
+    }
 
-    if is_model {
+    let lower = path.to_lowercase();
+    let is_obj_model = lower.ends_with(".obj");
+    let is_gltf_model = lower.ends_with(".glb") || lower.ends_with(".gltf");
+
+    if is_obj_model {
         match load_obj_mesh_with_materials(&path).await {
             Ok(mesh) => {
                 let vertex_count = mesh.vertices.len();
@@ -693,6 +787,33 @@ async fn load_asset_entry(key: String, path: String, playing_state: &mut Playing
             Err(e) => {
                 println!("Failed to load model {} from {}: {:?}", key, path, e);
             }
+        }
+    } else if is_gltf_model {
+        match load_gltf_animated_model(&path) {
+            Ok(animated) => {
+                let vertex_count = animated.mesh().vertices.len();
+                playing_state.animated_models.insert(key.clone(), animated);
+                println!(
+                    "Loaded animated GLTF model: {} ({} verts) from {}",
+                    key, vertex_count, path
+                );
+            }
+            Err(anim_err) => match load_gltf_static_mesh(&path).await {
+                Ok(mesh) => {
+                    let vertex_count = mesh.vertices.len();
+                    playing_state.models.insert(key.clone(), mesh);
+                    println!(
+                        "Loaded static GLTF model: {} ({} verts) from {}",
+                        key, vertex_count, path
+                    );
+                }
+                Err(static_err) => {
+                    println!(
+                        "Failed GLTF load {} from {}. animated_err={:?} static_err={:?}",
+                        key, path, anim_err, static_err
+                    );
+                }
+            },
         }
     } else {
         match load_texture(&path).await {
@@ -707,3 +828,194 @@ async fn load_asset_entry(key: String, path: String, playing_state: &mut Playing
         }
     }
 }
+
+
+
+fn gltf_image_to_rgba8(image: &gltf::image::Data) -> Result<Vec<u8>, String> {
+    use gltf::image::Format;
+
+    let pixels = &image.pixels;
+    let out = match image.format {
+        Format::R8G8B8A8 => pixels.clone(),
+        Format::R8G8B8 => {
+            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
+            for chunk in pixels.chunks_exact(3) {
+                out.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
+            }
+            out
+        }
+        Format::R8G8 => {
+            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
+            for chunk in pixels.chunks_exact(2) {
+                out.extend_from_slice(&[chunk[0], chunk[1], 0, 255]);
+            }
+            out
+        }
+        Format::R8 => {
+            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
+            for &v in pixels {
+                out.extend_from_slice(&[v, v, v, 255]);
+            }
+            out
+        }
+        other => {
+            return Err(format!("unsupported gltf image format: {:?}", other));
+        }
+    };
+
+    Ok(out)
+}
+async fn load_gltf_static_mesh(path: &str) -> Result<Mesh, String> {
+    let (doc, buffers, images) = gltf::import(path)
+        .map_err(|e| format!("failed to import gltf '{}': {e}", path))?;
+
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u16> = Vec::new();
+    let mut mesh_texture: Option<Texture2D> = None;
+
+    for mesh in doc.meshes() {
+        for prim in mesh.primitives() {
+            let reader = prim.reader(|buffer| Some(&buffers[buffer.index()]));
+
+            let f = prim.material().pbr_metallic_roughness().base_color_factor();
+            let mat_color = [
+                (f[0] * 255.0) as u8,
+                (f[1] * 255.0) as u8,
+                (f[2] * 255.0) as u8,
+                (f[3] * 255.0) as u8,
+            ];
+
+            if mesh_texture.is_none() {
+                if let Some(base_color) = prim
+                    .material()
+                    .pbr_metallic_roughness()
+                    .base_color_texture()
+                {
+                    let image_index = base_color.texture().source().index();
+                    if let Some(image) = images.get(image_index) {
+                        let rgba = gltf_image_to_rgba8(image)?;
+                        if image.width > u16::MAX as u32 || image.height > u16::MAX as u32 {
+                            return Err(format!(
+                                "texture too large for macroquad: {}x{}",
+                                image.width, image.height
+                            ));
+                        }
+                        let tex = Texture2D::from_rgba8(
+                            image.width as u16,
+                            image.height as u16,
+                            &rgba,
+                        );
+                        tex.set_filter(FilterMode::Nearest);
+                        mesh_texture = Some(tex);
+                    }
+                }
+            }
+
+            let Some(pos_iter) = reader.read_positions() else {
+                continue;
+            };
+
+            let normals: Vec<[f32; 3]> = reader
+                .read_normals()
+                .map(|n| n.collect())
+                .unwrap_or_default();
+            let uvs: Vec<[f32; 2]> = reader
+                .read_tex_coords(0)
+                .map(|uv| uv.into_f32().collect())
+                .unwrap_or_default();
+
+            let base = vertices.len() as u32;
+            for (i, p) in pos_iter.enumerate() {
+                let n = normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]);
+                let uv = uvs.get(i).copied().unwrap_or([0.0, 0.0]);
+                vertices.push(Vertex {
+                    position: vec3(p[0], p[1], p[2]),
+                    uv: vec2(uv[0], uv[1]),
+                    color: mat_color,
+                    normal: vec4(n[0], n[1], n[2], 0.0),
+                });
+            }
+
+            if let Some(read_idx) = reader.read_indices() {
+                match read_idx {
+                    ReadIndices::U8(it) => {
+                        for i in it {
+                            let idx = base + i as u32;
+                            if idx > u16::MAX as u32 {
+                                return Err("too many vertices".into());
+                            }
+                            indices.push(idx as u16);
+                        }
+                    }
+                    ReadIndices::U16(it) => {
+                        for i in it {
+                            let idx = base + i as u32;
+                            if idx > u16::MAX as u32 {
+                                return Err("too many vertices".into());
+                            }
+                            indices.push(idx as u16);
+                        }
+                    }
+                    ReadIndices::U32(it) => {
+                        for i in it {
+                            let idx = base + i;
+                            if idx > u16::MAX as u32 {
+                                return Err("too many vertices".into());
+                            }
+                            indices.push(idx as u16);
+                        }
+                    }
+                }
+            } else {
+                let added = (vertices.len() as u32) - base;
+                for i in 0..added {
+                    let idx = base + i;
+                    if idx > u16::MAX as u32 {
+                        return Err("too many vertices".into());
+                    }
+                    indices.push(idx as u16);
+                }
+            }
+        }
+    }
+
+    if vertices.is_empty() || indices.is_empty() {
+        return Err("GLB produced empty mesh".into());
+    }
+
+    // Normalize imported model so size/origin are consistent across assets.
+    // Target: human-sized model (~1.8 world units tall), feet at y=0, centered on XZ.
+    let mut min = vec3(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+    let mut max = vec3(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for v in &vertices {
+        min.x = min.x.min(v.position.x);
+        min.y = min.y.min(v.position.y);
+        min.z = min.z.min(v.position.z);
+        max.x = max.x.max(v.position.x);
+        max.y = max.y.max(v.position.y);
+        max.z = max.z.max(v.position.z);
+    }
+
+    let size = max - min;
+    let current_height = size.y.max(0.0001);
+    // Match the existing placeholder player silhouette (body+head cubes ~= 1.6 units tall).
+    let target_height = 1.6_f32;
+    let scale = target_height / current_height;
+
+    let center_x = (min.x + max.x) * 0.5;
+    let center_z = (min.z + max.z) * 0.5;
+
+    for v in &mut vertices {
+        v.position.x = (v.position.x - center_x) * scale;
+        v.position.y = (v.position.y - min.y) * scale;
+        v.position.z = (v.position.z - center_z) * scale;
+    }
+
+    Ok(Mesh {
+        vertices,
+        indices,
+        texture: mesh_texture,
+    })
+}
+
+
