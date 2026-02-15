@@ -150,7 +150,14 @@ impl DevModeState {
 
     // TAB NAMES
 
-    const TAB_NAMES: &[&str] = &["Weapon", "Crosshair", "Movement", "Viewmodel", "Debug", "Bots"];
+    const TAB_NAMES: &[&str] = &[
+        "Weapon",
+        "Crosshair",
+        "Movement",
+        "Viewmodel",
+        "Debug",
+        "Bots",
+    ];
 
     // Slider helper
     fn draw_slider(
@@ -436,8 +443,10 @@ pub fn draw_dev_overlay<F>(
 
     // scroll wheel — only when mouse is over the panel
     let (_, scroll_y) = mouse_wheel();
-    if mouse.0 >= panel_x && mouse.0 <= panel_x + panel_w
-        && mouse.1 >= panel_y && mouse.1 <= panel_y + panel_h
+    if mouse.0 >= panel_x
+        && mouse.0 <= panel_x + panel_w
+        && mouse.1 >= panel_y
+        && mouse.1 <= panel_y + panel_h
     {
         dev.scroll_offset += scroll_y * 30.0;
         dev.scroll_offset = dev.scroll_offset.min(0.0); // can't scroll above top
@@ -1198,7 +1207,12 @@ fn draw_viewmodel_tab(
         0.001,
         0.1,
         0.001,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
 
     y += DevModeState::draw_section_header("Position", x, y);
@@ -1208,7 +1222,12 @@ fn draw_viewmodel_tab(
         -0.5,
         0.5,
         0.01,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
     y += DevModeState::draw_slider(
         "pos_y (up)",
@@ -1216,7 +1235,12 @@ fn draw_viewmodel_tab(
         -0.5,
         0.5,
         0.01,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
     y += DevModeState::draw_slider(
         "pos_z (forward)",
@@ -1224,7 +1248,12 @@ fn draw_viewmodel_tab(
         -0.5,
         0.5,
         0.01,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
 
     y += DevModeState::draw_section_header("Rotation (radians)", x, y);
@@ -1234,7 +1263,12 @@ fn draw_viewmodel_tab(
         -3.15,
         3.15,
         0.05,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
     y += DevModeState::draw_slider(
         "yaw (left/right)",
@@ -1242,7 +1276,12 @@ fn draw_viewmodel_tab(
         -3.15,
         3.15,
         0.05,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
     y += DevModeState::draw_slider(
         "roll (tilt)",
@@ -1250,7 +1289,12 @@ fn draw_viewmodel_tab(
         -3.15,
         3.15,
         0.05,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
 
     y += DevModeState::draw_section_header("Muzzle Offset", x, y);
@@ -1260,7 +1304,12 @@ fn draw_viewmodel_tab(
         -2.0,
         2.0,
         0.02,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
     y += DevModeState::draw_slider(
         "muzzle_y",
@@ -1268,7 +1317,12 @@ fn draw_viewmodel_tab(
         -2.0,
         2.0,
         0.02,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
     y += DevModeState::draw_slider(
         "muzzle_z",
@@ -1276,13 +1330,24 @@ fn draw_viewmodel_tab(
         -2.0,
         2.0,
         0.02,
-        x, y, w, mouse, clicked, held,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
     );
 
     // reset button
     y += 8.0;
-    let (_h, pressed) =
-        DevModeState::draw_action_button("Reset Viewmodel to Defaults", x, y, 260.0, mouse, clicked);
+    let (_h, pressed) = DevModeState::draw_action_button(
+        "Reset Viewmodel to Defaults",
+        x,
+        y,
+        260.0,
+        mouse,
+        clicked,
+    );
     if pressed {
         let defaults = weapon.kind.stats();
         weapon.stats_data.viewmodel_scale = defaults.viewmodel_scale;
@@ -1322,7 +1387,14 @@ fn draw_debug_tab(
         mouse,
         clicked,
     );
-y += DevModeState::draw_toggle(`r`n        "Show Health Bars",`r`n        &mut dev.show_health_bars,`r`n        x,`r`n        y,`r`n        mouse,`r`n        clicked,`r`n    );`r`n
+    y += DevModeState::draw_toggle(
+        "Show Health Bars",
+        &mut dev.show_health_bars,
+        x,
+        y,
+        mouse,
+        clicked,
+    );
     y += DevModeState::draw_section_header("Actions", x, y);
 
     let (_h, pressed) =
@@ -1370,4 +1442,3 @@ pub fn draw_action_button_public(
 ) -> (f32, bool) {
     DevModeState::draw_action_button(label, x, y, w, mouse, clicked)
 }
-
