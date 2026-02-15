@@ -65,6 +65,8 @@ fn main() -> std::io::Result<()> {
             }
             MSG_WALL_BROKEN => handle_wall_broken(&socket, &mut maze, &players, src_addr, payload),
             MSG_DISCOVER => handle_discover(&socket, &players, src_addr),
+            MSG_HIT => handle_hit(&socket, &mut players, src_addr, payload),
+            MSG_RESPAWN_REQUEST => handle_respawn_request(&socket, &maze, &mut players, src_addr),
             _ => println!("Unknown message type: {}", msg_type),
         }
 
@@ -316,4 +318,129 @@ fn handle_wall_broken(
             let _ = socket.send_to(&msg, player.socket_addr);
         }
     }
+}
+
+fn handle_hit(
+    socket: &UdpSocket,
+    players: &mut HashMap<SocketAddr, Player>,
+    src_addr: SocketAddr,
+    payload: &[u8],
+) {
+    // Payload: victim_id (4 bytes), damage (4 bytes)
+    if payload.len() < 8 {
+        return;
+    }
+
+    let victim_id = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let damage = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+
+    // Get attacker
+    let Some(attacker) = players.get(&src_addr) else {
+        return;
+    };
+
+    if !attacker.is_alive {
+        return; // Dead players can't deal damage
+    }
+
+    let attacker_id = attacker.id;
+
+    // Find victim by ID
+    let Some(victim_addr) = players.iter().find(|(_, p)| p.id == victim_id).map(|(addr, _)| *addr) else {
+        return;
+    };
+
+    let Some(victim) = players.get_mut(&victim_addr) else {
+        return;
+    };
+
+    if !victim.is_alive {
+        return; // Already dead
+    }
+
+    // Apply damage (shield first, then health)
+    let damage_u32 = damage as u32;
+    let shield_damage = damage_u32.min(victim.shield);
+    victim.shield -= shield_damage;
+    let remaining_damage = damage_u32 - shield_damage;
+
+    if remaining_damage > 0 {
+        victim.health = victim.health.saturating_sub(remaining_damage);
+    }
+
+    println!(
+        "Player {} hit player {} for {} damage (HP: {}, Shield: {})",
+        attacker_id, victim_id, damage, victim.health, victim.shield
+    );
+
+    // Send MSG_DAMAGE to victim
+    let mut damage_msg = vec![MSG_DAMAGE];
+    damage_msg.extend_from_slice(&damage.to_be_bytes());
+    damage_msg.extend_from_slice(&attacker_id.to_be_bytes());
+    let _ = socket.send_to(&damage_msg, victim_addr);
+
+    // Check if victim died
+    if victim.health == 0 {
+        victim.is_alive = false;
+        victim.deaths += 1;
+
+        println!("Player {} killed player {}", attacker_id, victim_id);
+
+        // Send MSG_DEATH to victim
+        let mut death_msg = vec![MSG_DEATH];
+        death_msg.extend_from_slice(&attacker_id.to_be_bytes());
+        let _ = socket.send_to(&death_msg, victim_addr);
+
+        // Send MSG_KILL to attacker
+        if let Some(attacker) = players.get_mut(&src_addr) {
+            attacker.kills += 1;
+            let mut kill_msg = vec![MSG_KILL];
+            kill_msg.extend_from_slice(&victim_id.to_be_bytes());
+            let _ = socket.send_to(&kill_msg, src_addr);
+        }
+
+        // Broadcast kill feed to all players
+        let weapon_name = "Rifle"; // TODO: Get actual weapon from payload
+        let weapon_bytes = weapon_name.as_bytes();
+        let mut kill_feed_msg = vec![MSG_KILL_FEED];
+        kill_feed_msg.extend_from_slice(&attacker_id.to_be_bytes());
+        kill_feed_msg.extend_from_slice(&victim_id.to_be_bytes());
+        kill_feed_msg.push(weapon_bytes.len() as u8);
+        kill_feed_msg.extend_from_slice(weapon_bytes);
+        for player in players.values() {
+            let _ = socket.send_to(&kill_feed_msg, player.socket_addr);
+        }
+    }
+}
+
+fn handle_respawn_request(
+    socket: &UdpSocket,
+    maze: &MazeData,
+    players: &mut HashMap<SocketAddr, Player>,
+    src_addr: SocketAddr,
+) {
+    let Some(player) = players.get_mut(&src_addr) else {
+        return;
+    };
+
+    // Reset player state
+    player.is_alive = true;
+    player.health = player.max_health;
+    player.shield = 0;
+
+    // Choose spawn position based on world
+    let (sx, sy, sz) = match player.world {
+        WorldId::Lobby => (0.0_f32, 0.0_f32, 0.0_f32),
+        WorldId::Maze => maze.teleporter_world(MAZE_CELL_SIZE),
+    };
+    player.position = (sx, sy, sz);
+
+    println!("Player '{}' respawned in {:?}", player.username, player.world);
+
+    // Send MSG_RESPAWN with spawn position
+    let mut respawn_msg = vec![MSG_RESPAWN];
+    respawn_msg.extend_from_slice(&sx.to_be_bytes());
+    respawn_msg.extend_from_slice(&sy.to_be_bytes());
+    respawn_msg.extend_from_slice(&sz.to_be_bytes());
+    let _ = socket.send_to(&respawn_msg, src_addr);
 }

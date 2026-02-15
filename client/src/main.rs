@@ -653,6 +653,25 @@ fn sync_world(
                 }
             }
         }
+        if let Some((damage, attacker_id)) = updates.damage_taken {
+            playing_state.take_damage(damage, attacker_id);
+        }
+        if let Some(kills) = updates.kill_feed {
+            for (killer_id, victim_id, weapon) in kills {
+                playing_state.kill_feed.push(client::screens::playing::KillFeedEntry {
+                    killer_id,
+                    victim_id,
+                    weapon,
+                    timer: 5.0, // Show for 5 seconds
+                });
+            }
+        }
+        if updates.death {
+            playing_state.die(None);
+        }
+        if let Some(spawn_pos) = updates.respawn_pos {
+            playing_state.respawn(spawn_pos);
+        }
         return updates.assets;
     }
     None
