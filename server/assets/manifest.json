@@ -16,7 +16,11 @@
     "smg_model": "assets/models/SubmachineGun_1.obj",
     "shotgun_model": "assets/models/Shotgun_1.obj",
     "ar_model": "assets/models/AssaultRifle2_1.obj",
-    "sniper_model": "assets/models/SniperRifle_1.obj"
+    "sniper_model": "assets/models/SniperRifle_1.obj",
+
+    "rifle_idle": "assets/models/player/Rifle_Idle.glb",
+    "rifle_aim_idle": "assets/models/player/Rifle_Aim_Idle.glb",
+    "rifle_walk": "assets/models/player/Rifle_Walk.glb"
   },
   "lobby": {
     "floor_texture": "assets/images/textures/rocks.png"
