@@ -11,6 +11,7 @@ use crate::physics::{
 use crate::protocols::*;
 use crate::screens::target_dummy::TargetDummy;
 use crate::types::ai::simulated_player::SimulatedPlayer;
+use crate::types::animated_model::AnimatedModel;
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
@@ -42,6 +43,7 @@ pub struct PlayingState {
     pub bob_timer: f32,
     pub assets: HashMap<String, Texture2D>,
     pub models: HashMap<String, Mesh>,
+    pub animated_models: HashMap<String, AnimatedModel>,
     pub move_dir: Vec3,
     pub jump_requested: bool,
     pub current_world: WorldId,
@@ -101,6 +103,7 @@ impl PlayingState {
             bob_timer: 0.0,
             assets: HashMap::new(),
             models: HashMap::new(),
+            animated_models: HashMap::new(),
             move_dir: Vec3::ZERO,
             jump_requested: false,
             current_world: WorldId::Lobby,
@@ -474,6 +477,9 @@ impl PlayingState {
 
         // weapon tick (cooldowns, reloads, recoil recovery, etc)
         self.weapons.update(delta);
+        for model in self.animated_models.values_mut() {
+            model.update(delta);
+        }
         // recover() is called in process_local_input before firing
         // camera recoil is applied directly on fire in process_local_input
 
@@ -482,8 +488,10 @@ impl PlayingState {
         for p in &mut self.other_players {
             p.update(delta);
         }
+        let local_pos = Some(self.position);
         for bot in &mut self.practice_bots {
             bot.update(delta);
+            bot.simulate_yaw(delta, local_pos);
         }
         // respawn dead bots
         self.practice_bots.retain(|bot| !bot.is_dead());

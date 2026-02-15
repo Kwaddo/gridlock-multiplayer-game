@@ -1,6 +1,6 @@
 use crate::weapons::combat::HitZone;
 use crate::weapons::stats::CrosshairStyle;
-use macroquad::models::Vertex;
+use macroquad::models::{ Mesh, Vertex };
 use macroquad::prelude::*;
 use macroquad::window::get_internal_gl;
 
@@ -9,18 +9,54 @@ use super::PlayingState;
 impl PlayingState {
     pub(super) fn draw_other_players(&self) {
         for p in &self.other_players {
-            let color = if p.skin.is_some() { WHITE } else { p.color };
-            draw_cube(vec3(p.x, p.y + 0.6, p.z), vec3(0.6, 1.2, 0.4), None, color);
-            draw_cube(vec3(p.x, p.y + 1.4, p.z), vec3(0.4, 0.4, 0.4), None, color);
+            self.draw_player_model(p);
         }
 
-        // draw practice bots
         for bot in &self.practice_bots {
-            let p = &bot.player;
-            let color = if p.skin.is_some() { WHITE } else { p.color };
-            draw_cube(vec3(p.x, p.y + 0.6, p.z), vec3(0.6, 1.2, 0.4), None, color);
-            draw_cube(vec3(p.x, p.y + 1.4, p.z), vec3(0.4, 0.4, 0.4), None, color);
+            self.draw_player_model(&bot.player);
         }
+    }
+
+    fn draw_player_model(&self, p: &crate::types::player::OtherPlayer) {
+        let desired_key = p.skin_type.model_key();
+
+        // Try animated model first, then static, then fallback to rifle_idle
+        let anim_model = desired_key
+            .and_then(|k| self.animated_models.get(k))
+            .or_else(|| self.animated_models.get("rifle_idle"));
+        let static_mesh = desired_key
+            .and_then(|k| self.models.get(k))
+            .or_else(|| self.models.get("rifle_idle"));
+
+        if p.skin_type.is_model_based() {
+            if let Some(anim) = anim_model {
+                let s = anim.normalize_scale;
+                let transform =
+                    Mat4::from_translation(vec3(p.x, p.y + anim.y_offset, p.z)) *
+                    Mat4::from_rotation_y(-p.yaw) *
+                    Mat4::from_scale(vec3(s, s, s));
+                let gl = unsafe { get_internal_gl() };
+                gl.quad_gl.push_model_matrix(transform);
+                draw_mesh(anim.mesh());
+                gl.quad_gl.pop_model_matrix();
+                return;
+            }
+            if let Some(mesh) = static_mesh {
+                let transform =
+                    Mat4::from_translation(vec3(p.x, p.y, p.z)) *
+                    Mat4::from_rotation_y(-p.yaw);
+                let gl = unsafe { get_internal_gl() };
+                gl.quad_gl.push_model_matrix(transform);
+                draw_mesh(mesh);
+                gl.quad_gl.pop_model_matrix();
+                return;
+            }
+        }
+
+        // Fallback: colored cubes
+        let color = if p.skin.is_some() { WHITE } else { p.color };
+        draw_cube(vec3(p.x, p.y + 0.6, p.z), vec3(0.6, 1.2, 0.4), None, color);
+        draw_cube(vec3(p.x, p.y + 1.4, p.z), vec3(0.4, 0.4, 0.4), None, color);
     }
 
     pub(super) fn draw_target_dummy(&self) {
@@ -76,13 +112,7 @@ impl PlayingState {
         let bar_h = 6.0;
         let hp_frac = d.hp / d.max_hp;
 
-        draw_rectangle(
-            sx - bar_w / 2.0,
-            sy,
-            bar_w,
-            bar_h,
-            Color::from_rgba(40, 40, 40, 200),
-        );
+        draw_rectangle(sx - bar_w / 2.0, sy, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
         let hp_color = if hp_frac > 0.5 {
             Color::from_rgba(80, 200, 80, 255)
         } else if hp_frac > 0.25 {
@@ -118,7 +148,13 @@ impl PlayingState {
             if dot >= 0.1 {
                 let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
                 let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
-                Self::draw_health_bar(sx, sy, self.target_dummy.hp, self.target_dummy.max_hp, "Target Dummy");
+                Self::draw_health_bar(
+                    sx,
+                    sy,
+                    self.target_dummy.hp,
+                    self.target_dummy.max_hp,
+                    "Target Dummy"
+                );
             }
         }
 
@@ -149,20 +185,14 @@ impl PlayingState {
     }
 
     fn draw_health_bar(sx: f32, sy: f32, hp: f32, max_hp: f32, label: &str) {
-        use crate::ui::fonts::{measure_game_text, text_params};
+        use crate::ui::fonts::{ measure_game_text, text_params };
 
         let bar_w = 60.0;
         let bar_h = 6.0;
         let hp_frac = (hp / max_hp).clamp(0.0, 1.0);
 
         // background
-        draw_rectangle(
-            sx - bar_w / 2.0,
-            sy,
-            bar_w,
-            bar_h,
-            Color::from_rgba(40, 40, 40, 200),
-        );
+        draw_rectangle(sx - bar_w / 2.0, sy, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
 
         // health fill
         let hp_color = if hp_frac > 0.5 {
@@ -287,10 +317,7 @@ impl PlayingState {
                 return;
             } else {
                 // Model not loaded, fallback to 2D
-                println!(
-                    "Model '{}' not found in cache, using 2D fallback",
-                    model_key
-                );
+                println!("Model '{}' not found in cache, using 2D fallback", model_key);
             }
         }
 
@@ -302,7 +329,7 @@ impl PlayingState {
         &self,
         mesh: &Mesh,
         weapon: &crate::weapons::WeaponState,
-        stats: &crate::weapons::stats::WeaponStats,
+        stats: &crate::weapons::stats::WeaponStats
     ) {
         // Hide weapon model when fully scoped (sniper scope overlay replaces it)
         if stats.crosshair_style == CrosshairStyle::Scope && weapon.ads_progress > 0.9 {
@@ -310,15 +337,13 @@ impl PlayingState {
         }
 
         // Separate viewmodel camera with wider FOV and very close near plane
-        let vm_fov = 60.0f32.to_radians();
+        let vm_fov = (60.0f32).to_radians();
         let vm_camera = Camera3D {
             position: vec3(0.0, 0.0, 0.0),
             target: vec3(0.0, 0.0, 1.0),
             up: vec3(0.0, 1.0, 0.0),
             fovy: vm_fov,
             aspect: Some(screen_width() / screen_height()),
-            z_near: 0.001,
-            z_far: 8.0,
             projection: Projection::Perspective,
             render_target: None,
             viewport: None,
@@ -335,15 +360,14 @@ impl PlayingState {
         let mut pos = vec3(
             -0.35 + base_x + ads_offset_x,
             -0.25 + base_y + ads_offset_y,
-            0.58 + base_z,
+            0.58 + base_z
         );
 
         // Weapon bob synced to movement
         let horizontal_speed = vec2(
             self.movement_state.velocity.x,
-            self.movement_state.velocity.z,
-        )
-        .length();
+            self.movement_state.velocity.z
+        ).length();
         if horizontal_speed > 0.1 && self.movement_state.is_grounded {
             let t = self.bob_timer;
             pos.x += t.sin() * 0.008;
@@ -362,11 +386,13 @@ impl PlayingState {
         pos.y -= kick * 0.01;
 
         // Build transform matrix
-        let scale_mat = Mat4::from_scale(vec3(
-            stats.viewmodel_scale * 28.0,
-            stats.viewmodel_scale * 28.0,
-            stats.viewmodel_scale * 28.0,
-        ));
+        let scale_mat = Mat4::from_scale(
+            vec3(
+                stats.viewmodel_scale * 28.0,
+                stats.viewmodel_scale * 28.0,
+                stats.viewmodel_scale * 28.0
+            )
+        );
         let rot_mat = Mat4::from_euler(EulerRot::XYZ, rot_pitch, rot_yaw, rot_roll);
         let trans_mat = Mat4::from_translation(pos);
         let transform = trans_mat * rot_mat * scale_mat;
@@ -391,7 +417,7 @@ impl PlayingState {
         let muzzle_local = vec3(
             stats.viewmodel_muzzle_offset.0,
             stats.viewmodel_muzzle_offset.1,
-            stats.viewmodel_muzzle_offset.2,
+            stats.viewmodel_muzzle_offset.2
         );
         let muzzle_world = transform.transform_point3(muzzle_local);
 
@@ -404,14 +430,9 @@ impl PlayingState {
             if let Some((fx, fy)) = Self::project_to_screen(&vm_camera, muzzle_world) {
                 let t = (weapon.muzzle_flash_timer / 0.08).min(1.0);
                 let alpha = (220.0 * t) as u8;
-                let radius = (18.0 * stats.viewmodel_scale * 28.0) * (0.4 + 0.6 * t);
+                let radius = 18.0 * stats.viewmodel_scale * 28.0 * (0.4 + 0.6 * t);
 
-                draw_circle(
-                    fx,
-                    fy,
-                    radius * 1.4,
-                    Color::from_rgba(255, 190, 80, alpha / 2),
-                );
+                draw_circle(fx, fy, radius * 1.4, Color::from_rgba(255, 190, 80, alpha / 2));
                 draw_circle(fx, fy, radius, Color::from_rgba(255, 240, 180, alpha));
             }
         }
@@ -424,7 +445,7 @@ impl PlayingState {
         let up = right.cross(forward).normalize();
 
         let dot = rel.dot(forward);
-        if dot < cam.z_near {
+        if dot < 0.1 {
             return None;
         }
 
@@ -437,20 +458,24 @@ impl PlayingState {
     fn draw_2d_viewmodel(
         &self,
         weapon: &crate::weapons::WeaponState,
-        stats: &crate::weapons::stats::WeaponStats,
+        stats: &crate::weapons::stats::WeaponStats
     ) {
         let key = stats.viewmodel_asset_key.unwrap_or(stats.icon_asset_key);
         let tex = match self.assets.get(key) {
             Some(t) => t,
-            None => return,
+            None => {
+                return;
+            }
         };
 
         let screen_w = screen_width();
         let screen_h = screen_height();
 
         // auto-scale sprite to occupy a fraction of screen height, with per-weapon tuning
-        let target_h =
-            (screen_h * (0.46 - weapon.ads_progress * 0.08)).clamp(160.0, screen_h * 0.8);
+        let target_h = (screen_h * (0.46 - weapon.ads_progress * 0.08)).clamp(
+            160.0,
+            screen_h * 0.8
+        );
         let scale = (target_h / tex.height()).max(0.2) * stats.viewmodel_scale;
         let size = vec2(tex.width() * scale, tex.height() * scale);
 
@@ -462,9 +487,8 @@ impl PlayingState {
         // light bob synced to movement
         let horizontal_speed = vec2(
             self.movement_state.velocity.x,
-            self.movement_state.velocity.z,
-        )
-        .length();
+            self.movement_state.velocity.z
+        ).length();
         if horizontal_speed > 0.1 && self.movement_state.is_grounded {
             let t = self.bob_timer;
             pos.x += t.sin() * 5.0;
@@ -473,24 +497,20 @@ impl PlayingState {
 
         // subtle reload dip
         if weapon.is_reloading {
-            let reload_fraction =
-                (weapon.reload_timer / weapon.stats().reload_time).clamp(0.0, 1.0);
+            let reload_fraction = (weapon.reload_timer / weapon.stats().reload_time).clamp(
+                0.0,
+                1.0
+            );
             pos.y += (reload_fraction * std::f32::consts::PI).sin() * 12.0;
         }
 
         // Position uses bottom-right anchor for gun sprites (typical FPS positioning)
         let draw_pos = vec2(pos.x - size.x, pos.y - size.y);
 
-        draw_texture_ex(
-            tex,
-            draw_pos.x,
-            draw_pos.y,
-            WHITE,
-            DrawTextureParams {
-                dest_size: Some(size),
-                ..Default::default()
-            },
-        );
+        draw_texture_ex(tex, draw_pos.x, draw_pos.y, WHITE, DrawTextureParams {
+            dest_size: Some(size),
+            ..Default::default()
+        });
 
         // simple muzzle flash overlay anchored near the sprite's muzzle
         if weapon.muzzle_flash_timer > 0.0 {
@@ -504,14 +524,10 @@ impl PlayingState {
                 flash_pos.x,
                 flash_pos.y,
                 radius * 1.5,
-                Color::from_rgba(255, 190, 80, alpha / 2),
+                Color::from_rgba(255, 190, 80, alpha / 2)
             );
-            draw_circle(
-                flash_pos.x,
-                flash_pos.y,
-                radius,
-                Color::from_rgba(255, 240, 180, alpha),
-            );
+            draw_circle(flash_pos.x, flash_pos.y, radius, Color::from_rgba(255, 240, 180, alpha));
         }
     }
 }
+
