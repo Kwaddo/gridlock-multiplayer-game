@@ -49,6 +49,11 @@ pub struct OtherPlayer {
     pub y: f32,
     pub z: f32,
     pub yaw: f32,
+    pub render_x: f32,
+    pub render_y: f32,
+    pub render_z: f32,
+    pub render_yaw: f32,
+    has_snapshot: bool,
     pub username: String,
     pub skin: Option<Texture2D>,
     pub skin_type: PlayerSkin,
@@ -61,6 +66,10 @@ pub struct OtherPlayer {
 }
 
 impl OtherPlayer {
+    const POSITION_SMOOTH_RATE: f32 = 14.0;
+    const YAW_SMOOTH_RATE: f32 = 18.0;
+    const SNAP_DISTANCE: f32 = 5.0;
+
     pub fn color_for_id(id: u32) -> Color {
         let r = ((id * 73 + 29) % 256) as u8;
         let g = ((id * 97 + 53) % 256) as u8;
@@ -75,6 +84,11 @@ impl OtherPlayer {
             y: 0.0,
             z: 0.0,
             yaw: 0.0,
+            render_x: 0.0,
+            render_y: 0.0,
+            render_z: 0.0,
+            render_yaw: 0.0,
+            has_snapshot: false,
             username,
             skin: None,
             skin_type: PlayerSkin::RifleIdle,
@@ -85,6 +99,51 @@ impl OtherPlayer {
             hit_timer: 0.0,
             hitboxes: default_player_hitboxes(),
         }
+    }
+
+    pub fn apply_snapshot(&mut self, x: f32, y: f32, z: f32, yaw: f32) {
+        self.x = x;
+        self.y = y;
+        self.z = z;
+        self.yaw = yaw;
+
+        if !self.has_snapshot {
+            self.render_x = x;
+            self.render_y = y;
+            self.render_z = z;
+            self.render_yaw = yaw;
+            self.has_snapshot = true;
+            return;
+        }
+
+        let dx = self.render_x - x;
+        let dy = self.render_y - y;
+        let dz = self.render_z - z;
+        let dist_sq = dx * dx + dy * dy + dz * dz;
+        if dist_sq > Self::SNAP_DISTANCE * Self::SNAP_DISTANCE {
+            self.render_x = x;
+            self.render_y = y;
+            self.render_z = z;
+            self.render_yaw = yaw;
+        }
+    }
+
+    pub fn render_position(&self) -> Vec3 {
+        vec3(self.render_x, self.render_y, self.render_z)
+    }
+
+    pub fn smooth_render_state(&mut self, delta: f32) {
+        if !self.has_snapshot {
+            return;
+        }
+
+        let pos_alpha = 1.0 - (-Self::POSITION_SMOOTH_RATE * delta).exp();
+        self.render_x += (self.x - self.render_x) * pos_alpha;
+        self.render_y += (self.y - self.render_y) * pos_alpha;
+        self.render_z += (self.z - self.render_z) * pos_alpha;
+
+        let yaw_alpha = 1.0 - (-Self::YAW_SMOOTH_RATE * delta).exp();
+        self.render_yaw = lerp_angle(self.render_yaw, self.yaw, yaw_alpha);
     }
 }
 
@@ -115,6 +174,7 @@ impl CombatEntity for OtherPlayer {
     }
 
     fn update(&mut self, delta: f32) {
+        self.smooth_render_state(delta);
         if self.hit_timer > 0.0 {
             self.hit_timer = (self.hit_timer - delta).max(0.0);
         }
@@ -129,3 +189,13 @@ impl CombatEntity for OtherPlayer {
     }
 }
 
+fn lerp_angle(from: f32, to: f32, t: f32) -> f32 {
+    let mut delta = to - from;
+    while delta > std::f32::consts::PI {
+        delta -= std::f32::consts::TAU;
+    }
+    while delta < -std::f32::consts::PI {
+        delta += std::f32::consts::TAU;
+    }
+    from + delta * t
+}

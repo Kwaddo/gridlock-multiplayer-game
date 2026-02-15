@@ -123,10 +123,11 @@ pub struct WeaponStats {
     // visual crosshair config (color, gap, thickness, textures) lives on CrosshairConfig in state.rs
 
     // --- HUD icon
-    pub icon_asset_key: &'static str, // key used to look up texture in assets HashMap
-    pub icon_width: f32,              // display width in pixels (tweak per weapon)
-    pub icon_height: f32,             // display height in pixels
-    pub icon_flip_x: bool,            // true if the source image faces left
+    pub fire_sound_asset_key: &'static str, // key used to look up shot sound in manifest-loaded audio map
+    pub icon_asset_key: &'static str,       // key used to look up texture in assets HashMap
+    pub icon_width: f32,                    // display width in pixels (tweak per weapon)
+    pub icon_height: f32,                   // display height in pixels
+    pub icon_flip_x: bool,                  // true if the source image faces left
 
     // --- First-person viewmodel (3D model or 2D sprite fallback)
     pub viewmodel_model: Option<&'static str>, // .obj model path
@@ -194,6 +195,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.25),
 
+    fire_sound_asset_key: "pistol_shot",
     icon_asset_key: "pistol_icon",
     icon_width: 80.0,
     icon_height: 50.0,
@@ -265,6 +267,7 @@ pub const SMG: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None, // SMG never reaches FSA
 
+    fire_sound_asset_key: "smg_shot",
     icon_asset_key: "smg_icon",
     icon_width: 90.0,
     icon_height: 45.0,
@@ -354,6 +357,7 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None, // shotgun has no FSA
 
+    fire_sound_asset_key: "shotgun_shot",
     icon_asset_key: "shotgun_icon",
     icon_width: 100.0,
     icon_height: 50.0,
@@ -420,6 +424,7 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.35),
 
+    fire_sound_asset_key: "ar_shot",
     icon_asset_key: "ar_icon",
     icon_width: 100.0,
     icon_height: 45.0,
@@ -497,6 +502,7 @@ pub const SNIPER: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Scope,
     fsa_time: None, // sniper doesnt use FSA (scope handles accuracy)
 
+    fire_sound_asset_key: "sniper_shot",
     icon_asset_key: "sniper_icon",
     icon_width: 110.0,
     icon_height: 40.0,

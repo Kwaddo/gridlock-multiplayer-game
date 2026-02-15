@@ -22,7 +22,25 @@ pub fn sync_world(
             for p in &mut players {
                 p.skin_type = PlayerSkin::RifleIdle;
             }
-            playing_state.other_players = players;
+
+            let mut existing = std::mem::take(&mut playing_state.other_players);
+            let mut merged = Vec::with_capacity(players.len());
+
+            for mut incoming in players {
+                if let Some(index) = existing.iter().position(|p| p.id == incoming.id) {
+                    let mut current = existing.swap_remove(index);
+                    current.username = incoming.username;
+                    current.world = incoming.world;
+                    current.skin_type = incoming.skin_type;
+                    current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
+                    merged.push(current);
+                } else {
+                    incoming.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
+                    merged.push(incoming);
+                }
+            }
+
+            playing_state.other_players = merged;
         }
 
         if let Some((world_id, spawn)) = updates.world_change {
@@ -42,12 +60,14 @@ pub fn sync_world(
         }
         if let Some(kills) = updates.kill_feed {
             for (killer_id, victim_id, weapon) in kills {
-                playing_state.kill_feed.push(client::screens::playing::KillFeedEntry {
-                    killer_id,
-                    victim_id,
-                    weapon,
-                    timer: 5.0,
-                });
+                playing_state
+                    .kill_feed
+                    .push(client::screens::playing::KillFeedEntry {
+                        killer_id,
+                        victim_id,
+                        weapon,
+                        timer: 5.0,
+                    });
             }
         }
         if updates.death {
