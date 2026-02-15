@@ -35,6 +35,8 @@ impl PlayingState {
             up: vec3(0.0, 1.0, 0.0),
             fovy: fov.to_radians(),
             aspect: None,
+            z_near: 0.1,
+            z_far: 100.0,
             projection: Projection::Perspective,
             render_target: None,
             viewport: None,

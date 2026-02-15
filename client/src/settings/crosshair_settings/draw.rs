@@ -1,733 +1,19 @@
-/*
-    Crosshair settings tab — customize crosshairs per weapon with live preview.
-    Features: HSV color picker, preset load/save/overwrite/delete, per-weapon config.
-*/
-
 use crate::ui::draw_arc;
 use crate::ui::fonts::{measure_game_text, text_params};
+use crate::weapons::crosshair::CrosshairType;
 use crate::weapons::crosshair_presets::CrosshairPresetManager;
 use crate::weapons::stats::WeaponKind;
 use crate::weapons::WeaponState;
-use crate::weapons::{
-    crosshair::{CrosshairConfig, CrosshairType},
-    WeaponInventory,
-};
+use crate::weapons::WeaponInventory;
 use macroquad::prelude::*;
 use std::collections::HashMap;
 
-const CROSSHAIR_TYPES: &[CrosshairType] = &[
-    CrosshairType::Cross,
-    CrosshairType::FourCurves,
-    CrosshairType::Chevron,
-    CrosshairType::Circle,
-    CrosshairType::Square,
-    CrosshairType::Triangle,
-    CrosshairType::AngleBrackets,
-];
+use super::shared::{crosshair_type_name, hsv_to_rgb, CrosshairSettingsPreview};
 
-fn crosshair_type_name(ct: CrosshairType) -> &'static str {
-    match ct {
-        CrosshairType::Cross => "Cross",
-        CrosshairType::FourCurves => "4-Curves",
-        CrosshairType::Chevron => "Chevron",
-        CrosshairType::Circle => "Circle",
-        CrosshairType::Square => "Square",
-        CrosshairType::Triangle => "Triangle",
-        CrosshairType::AngleBrackets => "Angle Brackets",
-    }
-}
-
-//  HSV to RGB helpers for color picker
-
-fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-    let max = r.max(g).max(b);
-    let min = r.min(g).min(b);
-    let delta = max - min;
-
-    let h = if delta < 0.0001 {
-        0.0
-    } else if max == r {
-        60.0 * (((g - b) / delta) % 6.0)
-    } else if max == g {
-        60.0 * (((b - r) / delta) + 2.0)
-    } else {
-        60.0 * (((r - g) / delta) + 4.0)
-    };
-    let h = if h < 0.0 { h + 360.0 } else { h };
-
-    let s = if max < 0.0001 { 0.0 } else { delta / max };
-    let v = max;
-    (h, s, v)
-}
-
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-    let c = v * s;
-    let hp = h / 60.0;
-    let x = c * (1.0 - ((hp % 2.0) - 1.0).abs());
-    let (r1, g1, b1) = match hp as u32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    let m = v - c;
-    (r1 + m, g1 + m, b1 + m)
-}
-
-/*
-    STATE
-*/
-
-pub struct CrosshairSettingsPreview {
-    pub preview_weapon: WeaponKind,
-    pub preview_ads: bool,
-    pub preview_light_bg: bool,
-    pub shotgun_type_warning: bool,
-    pub shotgun_warning_shown_this_visit: bool,
-    // color picker HSV state
-    pub hue: f32,           // 0..360
-    pub sat: f32,           // 0..1
-    pub val: f32,           // 0..1
-    pub alpha_val: f32,     // 0..255
-    pub color_synced: bool, // false = need to sync HSV from crosshair color
-    // preset state
-    pub selected_preset: usize,
-    pub naming_mode: bool,
-    pub name_input: String,
-    // save prompt state
-    pub show_save_prompt: bool,
-    pub save_prompt_is_leave: bool,
-    pub name_conflict_index: Option<usize>,
-    pub name_error: String,
-    pub pending_tab: Option<u8>, // 0=General, 1=Keybinds — stored as u8 to avoid circular dependency on SettingsTab
-}
-
-impl CrosshairSettingsPreview {
-    pub fn new() -> Self {
-        Self {
-            preview_weapon: WeaponKind::Pistol,
-            preview_ads: false,
-            preview_light_bg: false,
-            shotgun_type_warning: false,
-            shotgun_warning_shown_this_visit: false,
-            hue: 0.0,
-            sat: 0.0,
-            val: 1.0,
-            alpha_val: 255.0,
-            color_synced: false,
-            selected_preset: 0,
-            naming_mode: false,
-            name_input: String::new(),
-            show_save_prompt: false,
-            save_prompt_is_leave: false,
-            name_conflict_index: None,
-            name_error: String::new(),
-            pending_tab: None,
-        }
-    }
-
-    pub fn reset_visit(&mut self) {
-        self.shotgun_warning_shown_this_visit = false;
-        self.color_synced = false;
-        self.show_save_prompt = false;
-        self.naming_mode = false;
-        self.name_input.clear();
-        self.name_conflict_index = None;
-        self.name_error.clear();
-        self.pending_tab = None;
-    }
-
-    fn sync_from_color(&mut self, color: Color) {
-        let (h, s, v) = rgb_to_hsv(color.r, color.g, color.b);
-        self.hue = h;
-        self.sat = s;
-        self.val = v;
-        self.alpha_val = color.a * 255.0;
-        self.color_synced = true;
-    }
-}
-
-/*
-    UPDATE & DRAW
-*/
-
-pub fn update_crosshair_settings(
-    state: &mut CrosshairSettingsPreview,
-    weapons: &mut WeaponInventory,
-    presets: &mut CrosshairPresetManager,
-    x: f32,
-    y: f32,
-    w: f32,
-    _h: f32,
-    mouse: (f32, f32),
-    clicked: bool,
-    held: bool,
-) {
-    // Weapon selector buttons
-    let btn_y = y + 60.0;
-    let btn_w = 100.0;
-    let btn_h = 35.0;
-    let btn_gap = 10.0;
-
-    for (i, kind) in WeaponKind::ALL.iter().enumerate() {
-        let btn_x = x + (btn_w + btn_gap) * (i as f32);
-        if clicked
-            && mouse.0 >= btn_x
-            && mouse.0 <= btn_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            state.preview_weapon = *kind;
-            state.color_synced = false;
-        }
-    }
-
-    if state.preview_weapon == WeaponKind::Sniper {
-        return;
-    }
-
-    // sync HSV from current crosshair color on first frame
-    let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
-    if !state.color_synced {
-        state.sync_from_color(weapon.crosshair.color);
-    }
-
-    let left_w = (w * 0.55) - 20.0;
-
-    // Preset row: dropdown + delete only
-    let preset_y = btn_y + btn_h + 15.0;
-    let preset_dropdown_w = left_w - 100.0;
-    let preset_btn_w = 75.0;
-    let preset_btn_gap = 5.0;
-
-    // Click preset dropdown to cycle
-    if clicked
-        && mouse.0 >= x
-        && mouse.0 <= x + preset_dropdown_w
-        && mouse.1 >= preset_y
-        && mouse.1 <= preset_y + 30.0
-        && !presets.presets.is_empty()
-    {
-        state.selected_preset = (state.selected_preset + 1) % presets.presets.len();
-        let preset = presets.presets[state.selected_preset].clone();
-        let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
-        preset.apply_to(&mut weapon.crosshair);
-        state.color_synced = false;
-    }
-
-    // "Delete" button (only for custom presets)
-    let delete_x = x + preset_dropdown_w + preset_btn_gap;
-    if state.selected_preset < presets.presets.len()
-        && !presets.presets[state.selected_preset].is_default
-    {
-        if clicked
-            && mouse.0 >= delete_x
-            && mouse.0 <= delete_x + preset_btn_w
-            && mouse.1 >= preset_y
-            && mouse.1 <= preset_y + 30.0
-        {
-            presets.delete(state.selected_preset);
-            if state.selected_preset >= presets.presets.len() && !presets.presets.is_empty() {
-                state.selected_preset = presets.presets.len() - 1;
-            }
-        }
-    }
-    /*
-        SLIDERS
-    */
-    let slider_x = x;
-    let mut slider_y = preset_y + 45.0;
-    let slider_w = left_w;
-
-    let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
-    let ch = &mut weapon.crosshair;
-
-    slider_y += draw_toggle(
-        "Enable dot",
-        &mut ch.dot_enabled,
-        slider_x,
-        slider_y,
-        mouse,
-        clicked,
-    );
-    slider_y += draw_slider(
-        "Gap",
-        &mut ch.center_gap,
-        0.0,
-        10.0,
-        0.1,
-        slider_x,
-        slider_y,
-        slider_w,
-        mouse,
-        clicked,
-        held,
-        None,
-    );
-    slider_y += draw_slider(
-        "Length",
-        &mut ch.line_length,
-        0.0,
-        10.0,
-        0.1,
-        slider_x,
-        slider_y,
-        slider_w,
-        mouse,
-        clicked,
-        held,
-        None,
-    );
-    slider_y += draw_slider(
-        "Thickness",
-        &mut ch.line_thickness,
-        0.0,
-        2.0,
-        0.05,
-        slider_x,
-        slider_y,
-        slider_w,
-        mouse,
-        clicked,
-        held,
-        None,
-    );
-    slider_y += draw_slider(
-        "Dot size",
-        &mut ch.dot_size,
-        0.0,
-        5.0,
-        0.1,
-        slider_x,
-        slider_y,
-        slider_w,
-        mouse,
-        clicked,
-        held,
-        None,
-    );
-    slider_y += 5.0;
-    slider_y += draw_toggle(
-        "Outline",
-        &mut ch.outline_enabled,
-        slider_x,
-        slider_y,
-        mouse,
-        clicked,
-    );
-    slider_y += draw_slider(
-        "Thickness",
-        &mut ch.outline_thickness,
-        0.0,
-        2.0,
-        0.05,
-        slider_x,
-        slider_y,
-        slider_w,
-        mouse,
-        clicked,
-        held,
-        None,
-    );
-    slider_y += 5.0;
-
-    // crosshair Type dropdown
-    let type_names: Vec<&str> = CROSSHAIR_TYPES
-        .iter()
-        .map(|t| crosshair_type_name(*t))
-        .collect();
-    let mut selected_idx = CROSSHAIR_TYPES
-        .iter()
-        .position(|t| *t == ch.crosshair_type)
-        .unwrap_or(0);
-    let prev_idx = selected_idx;
-
-    slider_y += draw_dropdown(
-        "Crosshair Type",
-        &type_names,
-        &mut selected_idx,
-        slider_x,
-        slider_y,
-        slider_w,
-        mouse,
-        clicked,
-    );
-
-    if selected_idx < CROSSHAIR_TYPES.len() {
-        ch.crosshair_type = CROSSHAIR_TYPES[selected_idx];
-    }
-
-    if state.preview_weapon == WeaponKind::Shotgun
-        && selected_idx != prev_idx
-        && !state.shotgun_warning_shown_this_visit
-    {
-        state.shotgun_type_warning = true;
-    }
-
-    slider_y += 10.0;
-
-    // Color picker (SV square + hue bar + alpha slider)
-    let picker_size = 140.0;
-    let hue_bar_w = 20.0;
-    let picker_x = slider_x;
-    let picker_y = slider_y + 20.0;
-
-    // SV square interaction
-    let sv_x = picker_x;
-    let sv_y = picker_y;
-    if held
-        && mouse.0 >= sv_x
-        && mouse.0 <= sv_x + picker_size
-        && mouse.1 >= sv_y
-        && mouse.1 <= sv_y + picker_size
-    {
-        state.sat = ((mouse.0 - sv_x) / picker_size).clamp(0.0, 1.0);
-        state.val = 1.0 - ((mouse.1 - sv_y) / picker_size).clamp(0.0, 1.0);
-    }
-
-    // Hue bar interaction
-    let hue_x = sv_x + picker_size + 10.0;
-    let hue_y = sv_y;
-    if held
-        && mouse.0 >= hue_x
-        && mouse.0 <= hue_x + hue_bar_w
-        && mouse.1 >= hue_y
-        && mouse.1 <= hue_y + picker_size
-    {
-        state.hue = (((mouse.1 - hue_y) / picker_size) * 360.0).clamp(0.0, 359.99);
-    }
-
-    // Alpha slider
-    slider_y = picker_y + picker_size + 10.0;
-    draw_slider(
-        "Alpha",
-        &mut state.alpha_val,
-        0.0,
-        255.0,
-        1.0,
-        slider_x,
-        slider_y,
-        picker_size + hue_bar_w + 10.0,
-        mouse,
-        clicked,
-        held,
-        Some(Color::from_rgba(200, 200, 200, 255)),
-    );
-
-    // Apply HSV + alpha back to crosshair
-    let (r, g, b) = hsv_to_rgb(state.hue, state.sat, state.val);
-    let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
-    weapon.crosshair.color = Color::new(r, g, b, state.alpha_val / 255.0);
-
-    // Preview area buttons
-    let preview_x = x + w * 0.55 + 20.0;
-    let preview_h = 300.0;
-    let btn_row_y = y + 60.0 + 35.0 + 15.0 + preview_h + 10.0;
-    let small_btn_w = 90.0;
-    let small_btn_h = 30.0;
-    let small_gap = 8.0;
-
-    // ADS toggle
-    if clicked
-        && mouse.0 >= preview_x
-        && mouse.0 <= preview_x + small_btn_w
-        && mouse.1 >= btn_row_y
-        && mouse.1 <= btn_row_y + small_btn_h
-    {
-        state.preview_ads = !state.preview_ads;
-    }
-
-    // Light/Dark background toggle
-    let bg_btn_x = preview_x + small_btn_w + small_gap;
-    if clicked
-        && mouse.0 >= bg_btn_x
-        && mouse.0 <= bg_btn_x + small_btn_w
-        && mouse.1 >= btn_row_y
-        && mouse.1 <= btn_row_y + small_btn_h
-    {
-        state.preview_light_bg = !state.preview_light_bg;
-    }
-
-    // Reset to defaults
-    let reset_btn_x = bg_btn_x + small_btn_w + small_gap;
-    let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
-    if clicked
-        && mouse.0 >= reset_btn_x
-        && mouse.0 <= reset_btn_x + small_btn_w
-        && mouse.1 >= btn_row_y
-        && mouse.1 <= btn_row_y + small_btn_h
-    {
-        weapon.crosshair = CrosshairConfig::for_weapon(weapon.kind);
-        state.color_synced = false;
-    }
-
-    // Shotgun warning dismiss
-    if state.shotgun_type_warning {
-        let warn_x = preview_x;
-        let warn_y = btn_row_y;
-        if draw_shotgun_type_warning(warn_x, warn_y, 0.0, 0.0, mouse, clicked) {
-            state.shotgun_type_warning = false;
-            state.shotgun_warning_shown_this_visit = true;
-        }
-    }
-}
-
-/*
-    SAVE PROMPT MODAL
-    Fullscreen modal for saving crosshair presets.
-    Called from settings/mod.rs when show_save_prompt is true.
-*/
-
-/// Returns None = still open, Some(true) = done + should leave, Some(false) = done + stay
-pub fn update_crosshair_save_prompt(
-    state: &mut CrosshairSettingsPreview,
-    weapons: &WeaponInventory,
-    presets: &mut CrosshairPresetManager,
-) -> Option<bool> {
-    let mouse = mouse_position();
-    let clicked = is_mouse_button_pressed(MouseButton::Left);
-
-    let pw = 400.0;
-    let ph = 200.0;
-    let px = (screen_width() - pw) / 2.0;
-    let py = (screen_height() - ph) / 2.0;
-
-    // --- Name conflict sub-prompt ---
-    if let Some(conflict_idx) = state.name_conflict_index {
-        // "A preset with this name already exists"
-        // Buttons: Overwrite / Rename / Cancel
-        let btn_w = 110.0;
-        let btn_h = 35.0;
-        let btn_y = py + ph - btn_h - 20.0;
-
-        // Overwrite
-        let ow_x = px + 20.0;
-        if clicked
-            && mouse.0 >= ow_x
-            && mouse.0 <= ow_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
-            presets.overwrite(conflict_idx, &weapon.crosshair);
-            state.selected_preset = conflict_idx;
-            state.name_conflict_index = None;
-            state.naming_mode = false;
-            state.name_input.clear();
-            state.name_error.clear();
-            state.show_save_prompt = false;
-            return if state.save_prompt_is_leave {
-                Some(true)
-            } else {
-                Some(false)
-            };
-        }
-
-        // Rename (go back to naming)
-        let rename_x = px + (pw - btn_w) / 2.0;
-        if clicked
-            && mouse.0 >= rename_x
-            && mouse.0 <= rename_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            state.name_conflict_index = None;
-            // stay in naming_mode with current name_input
-            return None;
-        }
-
-        // Cancel
-        let cancel_x = px + pw - btn_w - 20.0;
-        if clicked
-            && mouse.0 >= cancel_x
-            && mouse.0 <= cancel_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            state.name_conflict_index = None;
-            state.naming_mode = false;
-            state.name_input.clear();
-            state.name_error.clear();
-            // back to main save prompt
-            return None;
-        }
-
-        if is_key_pressed(KeyCode::Escape) {
-            state.name_conflict_index = None;
-            state.naming_mode = false;
-            state.name_input.clear();
-            state.name_error.clear();
-            return None;
-        }
-
-        return None;
-    }
-
-    // --- Naming mode (text input for preset name) ---
-    if state.naming_mode {
-        while let Some(ch) = get_char_pressed() {
-            if ch.is_ascii_graphic() || ch == ' ' {
-                if state.name_input.len() < 24 {
-                    state.name_input.push(ch);
-                    state.name_error.clear();
-                }
-            }
-        }
-        if is_key_pressed(KeyCode::Backspace) {
-            state.name_input.pop();
-            state.name_error.clear();
-        }
-        if is_key_pressed(KeyCode::Enter) && !state.name_input.is_empty() {
-            // Check for name collisions
-            if let Some((idx, is_default)) = presets.find_by_name(&state.name_input) {
-                if is_default {
-                    state.name_error = "Name reserved, choose a different name".to_string();
-                } else {
-                    state.name_conflict_index = Some(idx);
-                }
-            } else {
-                // No collision — save as new
-                let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
-                presets.save_as_new(&state.name_input, &weapon.crosshair);
-                state.selected_preset = presets.presets.len() - 1;
-                state.naming_mode = false;
-                state.name_input.clear();
-                state.name_error.clear();
-                state.show_save_prompt = false;
-                return if state.save_prompt_is_leave {
-                    Some(true)
-                } else {
-                    Some(false)
-                };
-            }
-        }
-        if is_key_pressed(KeyCode::Escape) {
-            state.naming_mode = false;
-            state.name_input.clear();
-            state.name_error.clear();
-            // go back to main save prompt, don't close
-            return None;
-        }
-        return None;
-    }
-
-    // --- Main save prompt ---
-    let is_custom = state.selected_preset < presets.presets.len()
-        && !presets.presets[state.selected_preset].is_default;
-
-    let btn_w = 120.0;
-    let btn_h = 35.0;
-    let btn_y = py + ph - btn_h - 20.0;
-
-    if is_custom {
-        // 3 buttons: Save As New / Overwrite / Don't Save
-        let gap = 15.0;
-        let total = btn_w * 3.0 + gap * 2.0;
-        let start_x = px + (pw - total) / 2.0;
-
-        // Save As New
-        if clicked
-            && mouse.0 >= start_x
-            && mouse.0 <= start_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            state.naming_mode = true;
-            state.name_input = presets.suggest_name();
-            state.name_error.clear();
-            return None;
-        }
-
-        // Overwrite
-        let ow_x = start_x + btn_w + gap;
-        if clicked
-            && mouse.0 >= ow_x
-            && mouse.0 <= ow_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
-            presets.overwrite(state.selected_preset, &weapon.crosshair);
-            state.show_save_prompt = false;
-            return if state.save_prompt_is_leave {
-                Some(true)
-            } else {
-                Some(false)
-            };
-        }
-
-        // Don't Save
-        let ds_x = ow_x + btn_w + gap;
-        if clicked
-            && mouse.0 >= ds_x
-            && mouse.0 <= ds_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            state.show_save_prompt = false;
-            return if state.save_prompt_is_leave {
-                Some(true)
-            } else {
-                Some(false)
-            };
-        }
-    } else {
-        // 2 buttons: Save As New / Don't Save
-        let gap = 20.0;
-        let total = btn_w * 2.0 + gap;
-        let start_x = px + (pw - total) / 2.0;
-
-        // Save As New
-        if clicked
-            && mouse.0 >= start_x
-            && mouse.0 <= start_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            state.naming_mode = true;
-            state.name_input = presets.suggest_name();
-            state.name_error.clear();
-            return None;
-        }
-
-        // Don't Save
-        let ds_x = start_x + btn_w + gap;
-        if clicked
-            && mouse.0 >= ds_x
-            && mouse.0 <= ds_x + btn_w
-            && mouse.1 >= btn_y
-            && mouse.1 <= btn_y + btn_h
-        {
-            state.show_save_prompt = false;
-            return if state.save_prompt_is_leave {
-                Some(true)
-            } else {
-                Some(false)
-            };
-        }
-    }
-
-    // ESC = Don't Save
-    if is_key_pressed(KeyCode::Escape) {
-        state.show_save_prompt = false;
-        return if state.save_prompt_is_leave {
-            Some(true)
-        } else {
-            Some(false)
-        };
-    }
-
-    None
-}
-
-/// Draw the save prompt modal on top of everything
 pub fn draw_crosshair_save_prompt(
     state: &CrosshairSettingsPreview,
     presets: &CrosshairPresetManager,
 ) {
-    // Fullscreen dark overlay
     draw_rectangle(
         0.0,
         0.0,
@@ -748,7 +34,6 @@ pub fn draw_crosshair_save_prompt(
     let btn_h = 35.0;
     let btn_y = py + ph - btn_h - 20.0;
 
-    // --- Name conflict sub-prompt ---
     if state.name_conflict_index.is_some() {
         let title = "Name Already Exists";
         let title_w = measure_game_text(title, 20);
@@ -770,7 +55,6 @@ pub fn draw_crosshair_save_prompt(
 
         let conflict_btn_w = 110.0;
 
-        // Overwrite
         let ow_x = px + 20.0;
         draw_rectangle(
             ow_x,
@@ -788,7 +72,6 @@ pub fn draw_crosshair_save_prompt(
             text_params(16, WHITE),
         );
 
-        // Rename
         let rename_x = px + (pw - conflict_btn_w) / 2.0;
         draw_rectangle(
             rename_x,
@@ -806,7 +89,6 @@ pub fn draw_crosshair_save_prompt(
             text_params(16, WHITE),
         );
 
-        // Cancel
         let cancel_x = px + pw - conflict_btn_w - 20.0;
         draw_rectangle(
             cancel_x,
@@ -827,7 +109,6 @@ pub fn draw_crosshair_save_prompt(
         return;
     }
 
-    // --- Naming mode ---
     if state.naming_mode {
         let title = "Preset Name";
         let title_w = measure_game_text(title, 20);
@@ -838,7 +119,6 @@ pub fn draw_crosshair_save_prompt(
             text_params(20, Color::from_rgba(100, 180, 255, 255)),
         );
 
-        // Text input box
         let input_x = px + 30.0;
         let input_y = py + 60.0;
         let input_w = pw - 60.0;
@@ -864,7 +144,6 @@ pub fn draw_crosshair_save_prompt(
             text_params(16, WHITE),
         );
 
-        // Error text
         if !state.name_error.is_empty() {
             draw_text_ex(
                 &state.name_error,
@@ -886,7 +165,6 @@ pub fn draw_crosshair_save_prompt(
         return;
     }
 
-    // --- Main save prompt ---
     let title = "Save Crosshair Preset";
     let title_w = measure_game_text(title, 20);
     draw_text_ex(
@@ -914,7 +192,6 @@ pub fn draw_crosshair_save_prompt(
         && !presets.presets[state.selected_preset].is_default;
 
     if is_custom {
-        // 3 buttons
         let gap = 15.0;
         let total = btn_w * 3.0 + gap * 2.0;
         let start_x = px + (pw - total) / 2.0;
@@ -957,7 +234,6 @@ pub fn draw_crosshair_save_prompt(
             text_params(14, WHITE),
         );
     } else {
-        // 2 buttons
         let gap = 20.0;
         let total = btn_w * 2.0 + gap;
         let start_x = px + (pw - total) / 2.0;
@@ -991,9 +267,6 @@ pub fn draw_crosshair_save_prompt(
     }
 }
 
-/*
-    DRAW
-*/
 pub fn draw_crosshair_settings(
     state: &CrosshairSettingsPreview,
     weapons: &WeaponInventory,
@@ -1007,7 +280,6 @@ pub fn draw_crosshair_settings(
 ) {
     draw_section_header("Crosshair Settings", x + 20.0, y + 20.0);
 
-    // Weapon selector buttons
     let btn_y = y + 60.0;
     let btn_w = 100.0;
     let btn_h = 35.0;
@@ -1045,13 +317,11 @@ pub fn draw_crosshair_settings(
 
     let left_w = (w * 0.55) - 20.0;
 
-    // Preset row: dropdown + delete
     let preset_y = btn_y + btn_h + 15.0;
     let preset_dropdown_w = left_w - 100.0;
     let preset_btn_w = 75.0;
     let preset_btn_gap = 5.0;
 
-    // Preset dropdown
     let preset_name = if state.selected_preset < presets.presets.len() {
         &presets.presets[state.selected_preset].name
     } else {
@@ -1091,7 +361,6 @@ pub fn draw_crosshair_settings(
         text_params(14, GRAY),
     );
 
-    // "Delete" button
     let delete_x = x + preset_dropdown_w + preset_btn_gap;
     let del_color = if is_custom {
         Color::from_rgba(80, 30, 30, 255)
@@ -1113,7 +382,6 @@ pub fn draw_crosshair_settings(
         text_params(12, del_text_color),
     );
 
-    // Sliders
     let slider_x = x;
     let mut slider_y = preset_y + 45.0;
     let slider_w = left_w;
@@ -1121,52 +389,15 @@ pub fn draw_crosshair_settings(
     let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
     let ch = &weapon.crosshair;
 
-    // draw toggles & sliders (read-only draw; update fn handles mutation)
     draw_toggle_display("Enable dot", ch.dot_enabled, slider_x, slider_y);
     slider_y += 28.0;
-    draw_slider_display(
-        "Gap",
-        ch.center_gap,
-        0.0,
-        10.0,
-        slider_x,
-        slider_y,
-        slider_w,
-        None,
-    );
+    draw_slider_display("Gap", ch.center_gap, 0.0, 10.0, slider_x, slider_y, slider_w, None);
     slider_y += 28.0;
-    draw_slider_display(
-        "Length",
-        ch.line_length,
-        0.0,
-        10.0,
-        slider_x,
-        slider_y,
-        slider_w,
-        None,
-    );
+    draw_slider_display("Length", ch.line_length, 0.0, 10.0, slider_x, slider_y, slider_w, None);
     slider_y += 28.0;
-    draw_slider_display(
-        "Thickness",
-        ch.line_thickness,
-        0.0,
-        2.0,
-        slider_x,
-        slider_y,
-        slider_w,
-        None,
-    );
+    draw_slider_display("Thickness", ch.line_thickness, 0.0, 2.0, slider_x, slider_y, slider_w, None);
     slider_y += 28.0;
-    draw_slider_display(
-        "Dot size",
-        ch.dot_size,
-        0.0,
-        5.0,
-        slider_x,
-        slider_y,
-        slider_w,
-        None,
-    );
+    draw_slider_display("Dot size", ch.dot_size, 0.0, 5.0, slider_x, slider_y, slider_w, None);
     slider_y += 33.0;
     draw_toggle_display("Outline", ch.outline_enabled, slider_x, slider_y);
     slider_y += 28.0;
@@ -1182,12 +413,10 @@ pub fn draw_crosshair_settings(
     );
     slider_y += 33.0;
 
-    // Crosshair type display
     let type_name = crosshair_type_name(ch.crosshair_type);
     draw_dropdown_display("Crosshair Type", type_name, slider_x, slider_y, slider_w);
     slider_y += 40.0;
 
-    //  Color picker
     draw_text_ex(
         "COLOR",
         slider_x,
@@ -1201,7 +430,6 @@ pub fn draw_crosshair_settings(
     let sv_x = slider_x;
     let sv_y = slider_y;
 
-    // SV square: draw with gradient approximation
     let steps = 20u32;
     let cell_w = picker_size / steps as f32;
     let cell_h = picker_size / steps as f32;
@@ -1221,13 +449,11 @@ pub fn draw_crosshair_settings(
     }
     draw_rectangle_lines(sv_x, sv_y, picker_size, picker_size, 1.0, GRAY);
 
-    // SV cursor
     let cursor_x = sv_x + state.sat * picker_size;
     let cursor_y = sv_y + (1.0 - state.val) * picker_size;
     draw_circle_lines(cursor_x, cursor_y, 5.0, 2.0, WHITE);
     draw_circle_lines(cursor_x, cursor_y, 4.0, 1.0, BLACK);
 
-    // Hue bar
     let hue_x = sv_x + picker_size + 10.0;
     let hue_steps = 36u32;
     let hue_cell_h = picker_size / hue_steps as f32;
@@ -1244,7 +470,6 @@ pub fn draw_crosshair_settings(
     }
     draw_rectangle_lines(hue_x, sv_y, hue_bar_w, picker_size, 1.0, GRAY);
 
-    // Hue cursor
     let hue_cursor_y = sv_y + (state.hue / 360.0) * picker_size;
     draw_rectangle(hue_x - 2.0, hue_cursor_y - 2.0, hue_bar_w + 4.0, 4.0, WHITE);
     draw_rectangle_lines(
@@ -1256,10 +481,8 @@ pub fn draw_crosshair_settings(
         BLACK,
     );
 
-    // Color preview swatch
     let swatch_x = hue_x + hue_bar_w + 15.0;
     let swatch_size = 40.0;
-    // checkerboard behind swatch (to show alpha)
     let check = 10.0;
     for cy_i in 0..4 {
         for cx_i in 0..4 {
@@ -1287,7 +510,6 @@ pub fn draw_crosshair_settings(
     );
     draw_rectangle_lines(swatch_x, sv_y, swatch_size, swatch_size, 1.0, WHITE);
 
-    // Alpha slider below picker
     let alpha_y = sv_y + picker_size + 10.0;
     draw_slider_display(
         "Alpha",
@@ -1300,23 +522,18 @@ pub fn draw_crosshair_settings(
         Some(Color::from_rgba(200, 200, 200, 255)),
     );
 
-    //  Preview box
     let preview_x = x + w * 0.55 + 20.0;
     let preview_y = btn_y + btn_h + 15.0;
     let preview_w = w * 0.45 - 40.0;
     let preview_h = 300.0;
 
-    draw_crosshair_preview(
-        weapon, state, preview_x, preview_y, preview_w, preview_h, _assets,
-    );
+    draw_crosshair_preview(weapon, state, preview_x, preview_y, preview_w, preview_h, _assets);
 
-    //  Preview buttons
     let btn_row_y = preview_y + preview_h + 10.0;
     let small_btn_w = 90.0;
     let small_btn_h = 30.0;
     let small_gap = 8.0;
 
-    // ADS toggle
     let ads_color = if state.preview_ads {
         Color::from_rgba(80, 150, 220, 255)
     } else {
@@ -1324,11 +541,7 @@ pub fn draw_crosshair_settings(
     };
     draw_rectangle(preview_x, btn_row_y, small_btn_w, small_btn_h, ads_color);
     draw_rectangle_lines(preview_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
-    let ads_text = if state.preview_ads {
-        "ADS: ON"
-    } else {
-        "ADS: OFF"
-    };
+    let ads_text = if state.preview_ads { "ADS: ON" } else { "ADS: OFF" };
     let ads_tw = measure_game_text(ads_text, 12);
     draw_text_ex(
         ads_text,
@@ -1337,7 +550,6 @@ pub fn draw_crosshair_settings(
         text_params(12, WHITE),
     );
 
-    // Background toggle
     let bg_btn_x = preview_x + small_btn_w + small_gap;
     let bg_color = if state.preview_light_bg {
         Color::from_rgba(180, 180, 180, 255)
@@ -1346,11 +558,7 @@ pub fn draw_crosshair_settings(
     };
     draw_rectangle(bg_btn_x, btn_row_y, small_btn_w, small_btn_h, bg_color);
     draw_rectangle_lines(bg_btn_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
-    let bg_text = if state.preview_light_bg {
-        "Light"
-    } else {
-        "Dark"
-    };
+    let bg_text = if state.preview_light_bg { "Light" } else { "Dark" };
     let bg_tw = measure_game_text(bg_text, 12);
     let bg_text_color = if state.preview_light_bg { BLACK } else { WHITE };
     draw_text_ex(
@@ -1360,7 +568,6 @@ pub fn draw_crosshair_settings(
         text_params(12, bg_text_color),
     );
 
-    // Reset button
     let reset_btn_x = bg_btn_x + small_btn_w + small_gap;
     draw_rectangle(
         reset_btn_x,
@@ -1378,15 +585,10 @@ pub fn draw_crosshair_settings(
         text_params(12, WHITE),
     );
 
-    // Shotgun warning
     if state.preview_weapon == WeaponKind::Shotgun && state.shotgun_type_warning {
         draw_shotgun_type_warning(preview_x, btn_row_y, 0.0, 0.0, _mouse, false);
     }
 }
-
-/*
-    PREVIEW BOX
-*/
 
 fn draw_crosshair_preview(
     weapon: &WeaponState,
@@ -1443,8 +645,6 @@ fn draw_crosshair_preview(
 
     match xhair.crosshair_type {
         CrosshairType::FourCurves => {
-            let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
-            let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
             let radius = hip_gap + ads_rest_gap;
             let thick = (xhair.line_thickness * sh) / 100.0;
             let gap_angle: f32 = 20.0_f32.to_radians();
@@ -1493,8 +693,6 @@ fn draw_crosshair_preview(
             }
         }
         CrosshairType::Chevron => {
-            let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
-            let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
             let radius = hip_gap + ads_rest_gap;
             let thick = (xhair.line_thickness * sh) / 100.0;
             let arm = ((xhair.line_length / 2.0) * sh) / 100.0;
@@ -1572,8 +770,6 @@ fn draw_crosshair_preview(
             }
         }
         CrosshairType::Cross => {
-            let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
-            let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
             let gap = hip_gap + ads_rest_gap;
             let len = (xhair.line_length * sh) / 100.0;
             let thick = (xhair.line_thickness * sh) / 100.0;
@@ -1693,7 +889,6 @@ fn draw_crosshair_preview(
         }
     }
 
-    // Weapon name
     let name_color = if state.preview_light_bg { BLACK } else { WHITE };
     draw_text_ex(
         weapon.kind.stats().name,
@@ -1703,9 +898,7 @@ fn draw_crosshair_preview(
     );
 }
 
-//  Shotgun warning
-
-fn draw_shotgun_type_warning(
+pub(super) fn draw_shotgun_type_warning(
     x: f32,
     y: f32,
     _btn_w: f32,
@@ -1768,7 +961,6 @@ fn draw_shotgun_type_warning(
         && mouse.1 <= ok_y + ok_h
 }
 
-//  HELPER WIDGETS
 fn draw_section_header(label: &str, x: f32, y: f32) -> f32 {
     draw_text_ex(
         label,
@@ -1780,7 +972,7 @@ fn draw_section_header(label: &str, x: f32, y: f32) -> f32 {
     35.0
 }
 
-fn draw_slider(
+pub(super) fn draw_slider(
     label: &str,
     value: &mut f32,
     min: f32,
@@ -1850,7 +1042,6 @@ fn draw_slider(
     row_h
 }
 
-// draw-only version of slider (doesn't handle input, just displays the value)
 fn draw_slider_display(
     label: &str,
     value: f32,
@@ -1910,7 +1101,7 @@ fn draw_slider_display(
     );
 }
 
-fn draw_toggle(
+pub(super) fn draw_toggle(
     label: &str,
     value: &mut bool,
     x: f32,
@@ -1961,7 +1152,7 @@ fn draw_toggle_display(label: &str, value: bool, x: f32, y: f32) {
     draw_text_ex(label, x + box_size + 8.0, y + 14.0, text_params(14, WHITE));
 }
 
-fn draw_dropdown(
+pub(super) fn draw_dropdown(
     label: &str,
     options: &[&str],
     selected: &mut usize,
