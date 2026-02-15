@@ -353,9 +353,7 @@ impl PlayingState {
                         let falloff = damage_falloff(dist, stats);
                         let dmg = damage * mult * falloff;
                         if target_idx == 0 {
-                            if !self.dev_mode.dummy_invincible {
-                                self.target_dummy.take_damage(dmg);
-                            }
+                            self.target_dummy.take_damage(dmg);
                         } else {
                             self.other_players[target_idx - 1].take_damage(dmg);
                         }
