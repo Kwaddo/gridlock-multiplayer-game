@@ -706,7 +706,7 @@ pub fn draw_hud(
 
     // -- NAMETAGS
     for p in other_players {
-        let head_pos = vec3(p.x, p.y + 1.8, p.z);
+        let head_pos = p.render_position() + vec3(0.0, 1.8, 0.0);
         let rel = head_pos - position;
         let dot = rel.dot(forward);
         if dot > 0.1 {
