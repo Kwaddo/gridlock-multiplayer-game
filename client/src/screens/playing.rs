@@ -10,11 +10,12 @@ use crate::physics::{
 };
 use crate::protocols::*;
 use crate::screens::target_dummy::TargetDummy;
+use crate::types::ai::simulated_player::SimulatedPlayer;
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 use crate::ui::hud::draw_hud;
-use crate::weapons::combat::{damage_falloff, CombatEntity, HitZone};
+use crate::weapons::combat::{damage_falloff, CombatEntity, EntityKind, HitZone};
 use crate::weapons::effects::{BulletTracer, DamageNumber};
 use crate::weapons::recoil::{apply_shot_recoil, recover};
 use crate::weapons::{recoil, SpreadContext, WeaponInventory};
@@ -46,6 +47,7 @@ pub struct PlayingState {
     pub current_world: WorldId,
     pub pending_world_change: Option<WorldId>,
     pub pending_broken_walls: Vec<(u8, u8)>,
+    pub pending_respawn: bool,
 
     //  --- Weapon system ---
     pub weapons: WeaponInventory,
@@ -61,6 +63,29 @@ pub struct PlayingState {
 
     // --- Dev mode ---
     pub dev_mode: DevModeState,
+
+    // --- Practice bots ---
+    pub practice_bots: Vec<SimulatedPlayer>,
+    pub next_bot_id: u32,
+
+    // --- Health tracking ---
+    pub hp: f32,
+    pub shield: f32,
+    pub max_shield:f32,
+    pub max_hp: f32,
+    pub is_dead: bool,
+    pub death_timer: f32, // time before showing respawn prompt
+    pub invulnerability_timer: f32, // time after taking damage during which player can't be hurt again
+
+    // --- Kill feed ---
+    pub kill_feed: Vec<KillFeedEntry>,
+}
+
+pub struct KillFeedEntry {
+    pub killer_id: u32,
+    pub victim_id: u32,
+    pub weapon: String, // weapon name
+    pub timer: f32, // how long to show (counts down)
 }
 
 impl PlayingState {
@@ -81,6 +106,7 @@ impl PlayingState {
             current_world: WorldId::Lobby,
             pending_world_change: None,
             pending_broken_walls: Vec::new(),
+            pending_respawn: false,
             weapons: WeaponInventory::new(),
             target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
             hit_marker_timer: 0.0,
@@ -89,6 +115,16 @@ impl PlayingState {
             tracers: Vec::new(),
             hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
+            practice_bots: Vec::new(),
+            next_bot_id: 9000,
+            hp: 100.0,
+            max_hp: 100.0,
+            shield: 0.0,
+            max_shield: 100.0,
+            is_dead: false,
+            death_timer: 0.0,
+            invulnerability_timer: 0.0,
+            kill_feed: Vec::new(),
         }
     }
 
@@ -312,39 +348,48 @@ impl PlayingState {
                         tracer_thickness: stats.tracer_thickness,
                     });
 
-                    let mut closest: Option<(usize, HitZone, f32)> = None;
+                    // --- Unified entity hit detection ---
+                    // Build a list of references to all combat entities, then test them all in one loop
+                    let mut closest: Option<(EntityKind, usize, HitZone, f32)> = None;
 
-                    // check hit on target dummy (lobby only)
+                    // test target dummy (lobby only)
                     if self.current_world == WorldId::Lobby {
-                        if let Some((hit_zone, dist)) = self.target_dummy.ray_test(eye, fwd, range)
-                        {
-                            // Only count if not blocked by wall or prop
-                            let blocked =
-                                closest_blocking_dist.map_or(false, |block_dist| block_dist < dist);
+                        if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
+                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
                             if !blocked {
-                                closest = Some((0, hit_zone, dist));
+                                closest = Some((EntityKind::Dummy, 0, zone, dist));
                             }
                         }
                     }
 
-                    // check for hit on other players (allowed in any world)
-                    for (i, p) in self.other_players.iter().enumerate() {
-                        if let Some((hit_zone, dist)) = p.ray_test(eye, fwd, range) {
-                            // Only count if not blocked by wall or prop
-                            let blocked =
-                                closest_blocking_dist.map_or(false, |block_dist| block_dist < dist);
+                    // test all other players (any world)
+                    for (idx, p) in self.other_players.iter().enumerate() {
+                        if let Some((zone, dist)) = p.ray_test(eye, fwd, range) {
+                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
                             if !blocked {
-                                // check if this hit is closer than the best hit we have so far, if so it becomes the new best
-                                let is_closer = closest.map_or(true, |(_, _, d)| dist < d);
+                                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
                                 if is_closer {
-                                    closest = Some((i + 1, hit_zone, dist));
+                                    closest = Some((EntityKind::Player, idx, zone, dist));
                                 }
                             }
                         }
                     }
 
-                    // apply damage to appropriate entity
-                    if let Some((target_idx, zone, dist)) = closest {
+                    // test all practice bots
+                    for (idx, bot) in self.practice_bots.iter().enumerate() {
+                        if let Some((zone, dist)) = bot.ray_test(eye, fwd, range) {
+                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
+                            if !blocked {
+                                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                                if is_closer {
+                                    closest = Some((EntityKind::Bot, idx, zone, dist));
+                                }
+                            }
+                        }
+                    }
+
+                    // apply damage to whichever entity was closest
+                    if let Some((kind, idx, zone, dist)) = closest {
                         let mult = if zone == HitZone::Head {
                             stats.headshot_mult
                         } else {
@@ -352,16 +397,13 @@ impl PlayingState {
                         };
                         let falloff = damage_falloff(dist, stats);
                         let dmg = damage * mult * falloff;
-                        if target_idx == 0 {
-                            self.target_dummy.take_damage(dmg);
-                        } else {
-                            self.other_players[target_idx - 1].take_damage(dmg);
-                        }
+match kind {`r`n                            EntityKind::Dummy => {`r`n                                self.target_dummy.take_damage(dmg);`r`n                            }`r`n                            EntityKind::Player => {`r`n                                self.other_players[idx].take_damage(dmg);`r`n                            }`r`n                            EntityKind::Bot => {`r`n                                self.practice_bots[idx].take_damage(dmg);`r`n                            }`r`n                            _ => {} // MovingTarget - future entity types`r`n                        }
+
                         total_dmg += dmg;
                         if zone == HitZone::Head {
                             any_headshot = true;
                         }
-                        pellet_mask |= 1 << i; // if this pellet hit, you set the bit mark to one, << is left shift operator, so it sets it left by i, bit 1 is at i zero so it is the first bit if it hits, looks like 0 0 0 0 0 0 0 1 (if 8 pellets) and so on
+                        pellet_mask |= 1 << i;
                     }
                 }
 
@@ -397,13 +439,42 @@ impl PlayingState {
         // updated this function to handle different physics for lobby vs maze, and also added a pending_world_change field to PlayingState to handle world transitions smoothly
         let delta = get_frame_time();
 
+        // Death timer countdown and respawn input
+        if self.is_dead {
+            if self.death_timer > 0.0 {
+                self.death_timer -= delta;
+            } else {
+                // Death timer expired - allow respawn in Lobby with SPACE
+                if self.current_world == WorldId::Lobby && is_key_pressed(KeyCode::Space) {
+                    // Set a flag to send respawn request in send_network
+                    self.pending_respawn = true;
+                }
+            }
+            // Don't process input/movement while dead
+            return;
+        }
+
+        // Decrement kill feed timers
+        for entry in &mut self.kill_feed {
+            entry.timer -= delta;
+        }
+        self.kill_feed.retain(|entry| entry.timer > 0.0);
+
         // weapon tick (cooldowns, reloads, recoil recovery, etc)
         self.weapons.update(delta);
         // recover() is called in process_local_input before firing
         // camera recoil is applied directly on fire in process_local_input
 
-        // NPC + hit marker tick
+        // entity tick (dummy regen, player hit flash decay, etc.)
         self.target_dummy.update(delta);
+        for p in &mut self.other_players {
+            p.update(delta);
+        }
+        for bot in &mut self.practice_bots {
+            bot.update(delta);
+        }
+        // respawn dead bots
+        self.practice_bots.retain(|bot| !bot.is_dead());
         if self.hit_marker_timer > 0.0 {
             self.hit_marker_timer = (self.hit_marker_timer - delta).max(0.0);
         }
@@ -540,6 +611,12 @@ impl PlayingState {
 
     pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
         if let Some(ref s) = socket {
+            // send respawn request if pending
+            if self.pending_respawn {
+                self.pending_respawn = false;
+                self.request_respawn(s, server_addr);
+            }
+
             // send world change request if pending
             if let Some(target) = self.pending_world_change.take() {
                 let msg = vec![MSG_WORLD_CHANGE, target.as_u8()];
@@ -606,6 +683,9 @@ impl PlayingState {
             self.draw_target_dummy_hud(&camera);
         }
 
+        // Dev mode: health bars for all entities
+        self.draw_entity_health_bars(&camera);
+
         // has to be after set_default_camera since it's 2D text in a 3d world, also has to be after draw_other_players so that the prompt is on top of other players in case they are between the player and the teleporter
         self.draw_teleporter_prompt(maze);
 
@@ -634,7 +714,17 @@ impl PlayingState {
             self.hit_marker_headshot,
             &self.damage_numbers,
             self.hit_marker_pellet_mask,
+            self.hp,
+            self.max_hp,
+            self.shield,
+            self.max_shield,
+            &self.kill_feed,
         );
+
+        // Draw death screen overlay if dead
+        if self.is_dead {
+            self.draw_death_screen();
+        }
     }
 
     // clear movement intent (for pause) just means that we stop applying movement input, but we still want to simulate physics so that the player doesn't get stuck in walls or fall through the floor when they unpause
@@ -643,4 +733,133 @@ impl PlayingState {
         self.movement_state.is_sprinting = false;
         self.jump_requested = false;
     }
+
+    // Function for player (you) to take damage
+    pub fn take_damage(&mut self, damage: f32, attacker_id: Option<u32>) { // attacker ID to check who killed u if the damage u took lead to your death
+
+        // invinvibility checks
+        if self.dev_mode.god_mode || self.is_dead || self.invulnerability_timer > 0.0 {
+            return;
+        }
+
+        // apply damage to shields first if available
+        if self.shield > 0.0 {
+            let shield_damage = damage.min(self.shield); // .min so we dont go below zero, remaining damage will be applied to hp
+            self.shield -= shield_damage;
+            let remaining_damage = damage - shield_damage; // the new shield_damage will be the remainder of total damage - damage removed from shields
+
+            if remaining_damage > 0.0 {
+                self.hp -= remaining_damage;
+            }
+        } else {
+            self.hp = (self.hp - damage).max(0.0);
+        }
+
+        // TODO
+        // Screen shake, damage effects, different effects for shield vs hp damage, etc.
+
+
+        if self.hp <= 0.0  {
+            self.die(attacker_id)
+        }
+    }
+    pub fn die(&mut self, killer_id: Option<u32>) {
+        self.is_dead = true;
+        self.hp = 0.0;
+        self.death_timer = 3.0; // show respawn prompt after 3 seconds
+
+        // HERE: Send MSG_DEATH to server
+        // PLAY: Death or sound animation
+    }
+
+    pub fn draw_death_screen(&self) {
+        use crate::ui::fonts::{measure_game_text, text_params};
+
+        // semi-transparent black overlay
+        draw_rectangle(
+            0.0,
+            0.0,
+            screen_width(),
+            screen_height(),
+            Color::from_rgba(0, 0, 0, 180),
+        );
+
+        let cx = screen_width() / 2.0;
+        let cy = screen_height() / 2.0;
+
+        // "YOU DIED" text
+        let death_text = "YOU DIED";
+        let text_w = measure_game_text(death_text, 48);
+        draw_text_ex(
+            death_text,
+            cx - text_w / 2.0,
+            cy - 80.0,
+            text_params(48, RED),
+        );
+
+        // show respawn options based on world
+        if self.current_world == WorldId::Lobby {
+            // Lobby: instant respawn
+            if self.death_timer <= 0.0 {
+                let respawn_text = "Press SPACE to Respawn";
+                let tw = measure_game_text(respawn_text, 24);
+                draw_text_ex(
+                    respawn_text,
+                    cx - tw / 2.0,
+                    cy + 20.0,
+                    text_params(24, WHITE),
+                );
+            } else {
+                let timer_text = format!("Respawning in {:.1}s", self.death_timer);
+                let tw = measure_game_text(&timer_text, 24);
+                draw_text_ex(&timer_text, cx - tw / 2.0, cy + 20.0, text_params(24, GRAY));
+            }
+        } else if self.current_world == WorldId::Maze {
+            // Maze: game mode specific respawn can be handled here later
+            if self.death_timer <= 0.0 {
+                let respawn_text = "Waiting to Respawn...";
+                let tw = measure_game_text(respawn_text, 24);
+                draw_text_ex(
+                    respawn_text,
+                    cx - tw / 2.0,
+                    cy + 20.0,
+                    text_params(24, GRAY),
+                );
+
+                let hint_text = "(Game mode will respawn you)";
+                let hw = measure_game_text(hint_text, 16);
+                draw_text_ex(
+                    hint_text,
+                    cx - hw / 2.0,
+                    cy + 50.0,
+                    text_params(16, DARKGRAY),
+                );
+            } else {
+                let timer_text = format!("{:.1}s", self.death_timer);
+                let tw = measure_game_text(&timer_text, 48);
+                draw_text_ex(
+                    &timer_text,
+                    cx - tw / 2.0,
+                    cy + 20.0,
+                    text_params(48, Color::from_rgba(255, 100, 100, 255)),
+                );
+            }
+        }
+    }
+
+    pub fn request_respawn(&self, socket: &std::net::UdpSocket, server_addr: &str) {
+        use crate::protocols::MSG_RESPAWN_REQUEST;
+        let msg = vec![MSG_RESPAWN_REQUEST];
+        let _ = socket.send_to(&msg, server_addr);
+    }
+
+    pub fn respawn(&mut self, spawn_pos: Vec3) {
+        self.is_dead = false;
+        self.hp = self.max_hp;
+        self.shield = 0.0; // Respawn without shield
+        self.death_timer = 0.0;
+        self.position = spawn_pos;
+        self.movement_state.velocity = Vec3::ZERO;
+    }
 }
+
