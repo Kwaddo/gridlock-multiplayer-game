@@ -150,7 +150,7 @@ impl DevModeState {
 
     // TAB NAMES
 
-    const TAB_NAMES: &[&str] = &["Weapon", "Crosshair", "Movement", "Viewmodel", "Debug"];
+    const TAB_NAMES: &[&str] = &["Weapon", "Crosshair", "Movement", "Viewmodel", "Debug", "Bots"];
 
     // Slider helper
     fn draw_slider(
@@ -346,13 +346,15 @@ impl DevModeState {
 }
 
 // --- Main overlay
-pub fn draw_dev_overlay(
+pub fn draw_dev_overlay<F>(
     dev: &mut DevModeState,
     inventory: &mut WeaponInventory,
     move_config: &mut MovementConfig,
     _game_config: &mut GameConfig,
-) {
-    let sw = screen_width();
+    mut draw_bot_tab: F,
+) where
+    F: FnMut(f32, f32, f32, (f32, f32), bool, bool),
+{
     let sh = screen_height();
     let mouse = mouse_position();
     let clicked = is_mouse_button_pressed(MouseButton::Left);
@@ -468,6 +470,9 @@ pub fn draw_dev_overlay(
         4 => draw_debug_tab(
             dev, inventory, content_x, content_y, content_w, mouse, clicked, held,
         ),
+        5 => {
+            draw_bot_tab(content_x, content_y, content_w, mouse, clicked, held);
+        }
         _ => {}
     }
 }
@@ -1317,6 +1322,7 @@ fn draw_debug_tab(
         mouse,
         clicked,
     );
+y += DevModeState::draw_toggle(`r`n        "Show Health Bars",`r`n        &mut dev.show_health_bars,`r`n        x,`r`n        y,`r`n        mouse,`r`n        clicked,`r`n    );`r`n
     y += DevModeState::draw_section_header("Actions", x, y);
 
     let (_h, pressed) =
@@ -1337,3 +1343,31 @@ fn draw_debug_tab(
         }
     }
 }
+
+// ── Tab 5: Bots (exported helpers) ───────────────────────────────────────
+pub fn draw_section_header_public(label: &str, x: f32, y: f32) -> f32 {
+    DevModeState::draw_section_header(label, x, y)
+}
+
+pub fn draw_toggle_public(
+    label: &str,
+    value: &mut bool,
+    x: f32,
+    y: f32,
+    mouse: (f32, f32),
+    clicked: bool,
+) -> f32 {
+    DevModeState::draw_toggle(label, value, x, y, mouse, clicked)
+}
+
+pub fn draw_action_button_public(
+    label: &str,
+    x: f32,
+    y: f32,
+    w: f32,
+    mouse: (f32, f32),
+    clicked: bool,
+) -> (f32, bool) {
+    DevModeState::draw_action_button(label, x, y, w, mouse, clicked)
+}
+
