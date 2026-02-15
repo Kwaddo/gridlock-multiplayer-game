@@ -25,6 +25,11 @@ pub fn draw_hud(
     hit_marker_headshot: bool,
     damage_numbers: &[DamageNumber],
     hit_marker_pellet_mask: u16,
+    hp: f32,
+    max_hp: f32,
+    shield: f32,
+    max_shield: f32,
+    kill_feed: &[crate::screens::playing::KillFeedEntry],
 ) {
     let cx = screen_width() / 2.0;
     let cy = screen_height() / 2.0;
@@ -594,6 +599,80 @@ pub fn draw_hud(
         text_params(20, WHITE),
     );
 
+    // -- HEALTH BAR
+    let hp_bar_x = 20.0;
+    let hp_bar_y = screen_height() - 120.0;
+    let hp_bar_w = 200.0;
+    let hp_bar_h = 20.0;
+    let hp_frac = (hp / max_hp).clamp(0.0, 1.0);
+
+    // Background
+    draw_rectangle(
+        hp_bar_x,
+        hp_bar_y,
+        hp_bar_w,
+        hp_bar_h,
+        Color::from_rgba(40, 40, 40, 200),
+    );
+
+    // Health fill (green -> yellow -> red gradient)
+    let hp_color = if hp_frac > 0.5 {
+        Color::from_rgba(80, 200, 80, 255) // green
+    } else if hp_frac > 0.25 {
+        Color::from_rgba(220, 180, 40, 255) // yellow
+    } else {
+        RED // critical
+    };
+    draw_rectangle(hp_bar_x, hp_bar_y, hp_bar_w * hp_frac, hp_bar_h, hp_color);
+
+    // Border
+    draw_rectangle_lines(hp_bar_x, hp_bar_y, hp_bar_w, hp_bar_h, 2.0, WHITE);
+
+    // HP text
+    let hp_text = format!("{:.0} HP", hp);
+    draw_text_ex(
+        &hp_text,
+        hp_bar_x + 5.0,
+        hp_bar_y + 15.0,
+        text_params(16, WHITE),
+    );
+
+    // -- SHIELD BAR (only if player has shield capacity)
+    if max_shield > 0.0 {
+        let shield_bar_y = hp_bar_y - 25.0;
+        let shield_frac = (shield / max_shield).clamp(0.0, 1.0);
+
+        // Background
+        draw_rectangle(
+            hp_bar_x,
+            shield_bar_y,
+            hp_bar_w,
+            hp_bar_h,
+            Color::from_rgba(40, 40, 40, 200),
+        );
+
+        // Shield fill (cyan/blue)
+        draw_rectangle(
+            hp_bar_x,
+            shield_bar_y,
+            hp_bar_w * shield_frac,
+            hp_bar_h,
+            Color::from_rgba(80, 180, 255, 255),
+        );
+
+        // Border
+        draw_rectangle_lines(hp_bar_x, shield_bar_y, hp_bar_w, hp_bar_h, 2.0, WHITE);
+
+        // Shield text
+        let shield_text = format!("{:.0} SHIELD", shield);
+        draw_text_ex(
+            &shield_text,
+            hp_bar_x + 5.0,
+            shield_bar_y + 15.0,
+            text_params(16, WHITE),
+        );
+    }
+
     // -- STAMINA BAR
     let bar_width = 200.0;
     let bar_height = 8.0;
@@ -765,6 +844,63 @@ pub fn draw_hud(
                 Color::from_rgba(255, 200, 80, alpha),
             );
         }
+    }
+
+    // -- KILL FEED (top right)
+    let feed_x = screen_width() - 400.0;
+    let mut feed_y = 20.0;
+    for entry in kill_feed.iter().rev().take(5) {
+        // Show last 5 kills, newest at top
+        let alpha = ((entry.timer / 5.0).min(1.0) * 255.0) as u8;
+        let text_color = Color::from_rgba(255, 255, 255, alpha);
+
+        // Find player names from other_players list
+        let killer_name = other_players
+            .iter()
+            .find(|p| p.id == entry.killer_id)
+            .map(|p| p.username.as_str())
+            .unwrap_or("Player");
+        let victim_name = other_players
+            .iter()
+            .find(|p| p.id == entry.victim_id)
+            .map(|p| p.username.as_str())
+            .unwrap_or("Player");
+
+        let mut x_offset = feed_x;
+
+        // Draw killer name
+        draw_text_ex(killer_name, x_offset, feed_y, text_params(14, text_color));
+        x_offset += measure_game_text(killer_name, 14) + 5.0;
+
+        // Draw weapon icon (16x16)
+        let weapon_icon_key = format!("{}_icon", entry.weapon.to_lowercase());
+        if let Some(icon_tex) = assets.get(&weapon_icon_key) {
+            draw_texture_ex(
+                icon_tex,
+                x_offset,
+                feed_y - 12.0,
+                Color::from_rgba(255, 255, 255, alpha),
+                DrawTextureParams {
+                    dest_size: Some(vec2(16.0, 16.0)),
+                    ..Default::default()
+                },
+            );
+        } else {
+            // Fallback: draw weapon name in brackets
+            let weapon_text = format!("[{}]", entry.weapon);
+            draw_text_ex(&weapon_text, x_offset, feed_y, text_params(12, text_color));
+        }
+        x_offset += 20.0;
+
+        // TODO: Draw skull icon here (death icon)
+        // if let Some(skull_tex) = assets.get("skull_icon") {
+        //     draw_texture_ex(...);
+        // }
+
+        // Draw victim name
+        draw_text_ex(victim_name, x_offset, feed_y, text_params(14, text_color));
+
+        feed_y += 20.0;
     }
 }
 
