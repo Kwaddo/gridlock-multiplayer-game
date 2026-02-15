@@ -16,7 +16,6 @@ pub struct DevModeState {
     pub infinite_ammo: bool,
     pub no_recoil: bool,
     pub show_hitboxes: bool,
-    pub dummy_invincible: bool,
     pub god_mode: bool,
     pub show_health_bars: bool,
 
@@ -34,7 +33,6 @@ impl DevModeState {
             infinite_ammo: false,
             no_recoil: false,
             show_hitboxes: false,
-            dummy_invincible: false,
             god_mode: false,
             show_health_bars: false,
             code_input: String::new(),
@@ -1319,14 +1317,6 @@ fn draw_debug_tab(
     y += DevModeState::draw_toggle(
         "Show Hitboxes",
         &mut dev.show_hitboxes,
-        x,
-        y,
-        mouse,
-        clicked,
-    );
-    y += DevModeState::draw_toggle(
-        "Dummy Invincible",
-        &mut dev.dummy_invincible,
         x,
         y,
         mouse,

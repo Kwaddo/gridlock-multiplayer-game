@@ -1,0 +1,898 @@
+# Complete Gameplay Mechanics Implementation Plan
+
+## Context
+
+Currently the game has shooting mechanics, movement, weapons, and basic entity systems (players, target dummy, simulated bots). However, there's no death/respawn system, health tracking for the local player, or proper game mode structure. The lobby allows infinite respawning while the maze will need structured game modes with rules.
+
+This plan implements ALL the core gameplay mechanics needed for a fully functional FPS game, preparing the architecture for future game modes while keeping lobby and maze behavior distinct.
+
+---
+
+## Phase 1: Player Health & Death System
+
+### 1.1 Local Player Health Tracking
+
+**Files to modify:**
+- `client/src/screens/playing.rs` - Add health fields to PlayingState
+- `client/src/net/protocols.rs` - Add death/respawn messages
+- `server/src/protocols.rs` - Add death/respawn messages
+
+**Changes:**
+
+Add to `PlayingState` struct:
+```rust
+// --- Player Health ---
+pub hp: f32,
+pub max_hp: f32,
+pub is_dead: bool,
+pub death_timer: f32, // countdown before showing respawn UI
+pub invulnerable_timer: f32, // spawn protection
+```
+
+Add to `PlayingState::new()`:
+```rust
+hp: 100.0,
+max_hp: 100.0,
+is_dead: false,
+death_timer: 0.0,
+invulnerable_timer: 0.0,
+```
+
+Add network protocol constants:
+```rust
+pub const MSG_DEATH: u8 = 13; // server -> client: you died (killer_id, weapon)
+pub const MSG_RESPAWN_REQUEST: u8 = 14; // client -> server: i want to respawn
+pub const MSG_RESPAWN: u8 = 15; // server -> client: respawn at position (x, y, z)
+pub const MSG_DAMAGE: u8 = 16; // server -> client: you took damage (amount, attacker_id)
+pub const MSG_KILL: u8 = 17; // server -> client: you killed someone (victim_id, weapon)
+```
+
+### 1.2 God Mode Check
+
+When god mode is enabled, skip all damage. Add to damage handling:
+```rust
+if self.dev_mode.god_mode {
+    return; // invulnerable
+}
+```
+
+### 1.3 Health HUD
+
+**Files to modify:**
+- `client/src/ui/hud.rs` - Add health bar rendering
+
+Add health bar to HUD (top-left or bottom-left):
+```rust
+// Health bar (100 HP max, red when low)
+let hp_bar_x = 20.0;
+let hp_bar_y = screen_height() - 120.0;
+let hp_bar_w = 200.0;
+let hp_bar_h = 20.0;
+let hp_frac = (hp / max_hp).clamp(0.0, 1.0);
+
+// Background
+draw_rectangle(hp_bar_x, hp_bar_y, hp_bar_w, hp_bar_h, Color::from_rgba(40, 40, 40, 200));
+
+// Health fill (green -> yellow -> red gradient)
+let hp_color = if hp_frac > 0.5 {
+    Color::from_rgba(80, 200, 80, 255) // green
+} else if hp_frac > 0.25 {
+    Color::from_rgba(220, 180, 40, 255) // yellow
+} else {
+    RED // critical
+};
+draw_rectangle(hp_bar_x, hp_bar_y, hp_bar_w * hp_frac, hp_bar_h, hp_color);
+
+// Border
+draw_rectangle_lines(hp_bar_x, hp_bar_y, hp_bar_w, hp_bar_h, 2.0, WHITE);
+
+// HP text
+let hp_text = format!("{:.0} HP", hp);
+draw_text_ex(&hp_text, hp_bar_x + 5.0, hp_bar_y + 15.0, text_params(16, WHITE));
+```
+
+Pass `hp` and `max_hp` to `draw_hud()` function signature.
+
+### 1.4 Taking Damage
+
+**Files to modify:**
+- `client/src/screens/playing.rs` - Add take_damage method
+
+Add method to PlayingState:
+```rust
+pub fn take_damage(&mut self, damage: f32, attacker_id: Option<u32>) {
+    if self.dev_mode.god_mode || self.is_dead || self.invulnerable_timer > 0.0 {
+        return;
+    }
+
+    self.hp = (self.hp - damage).max(0.0);
+
+    // Screen shake / damage effect (optional)
+    // TODO: Add screen flash red effect
+
+    if self.hp <= 0.0 {
+        self.die(attacker_id);
+    }
+}
+
+fn die(&mut self, killer_id: Option<u32>) {
+    self.is_dead = true;
+    self.hp = 0.0;
+    self.death_timer = 3.0; // 3 seconds before showing respawn UI
+
+    // Drop weapon, play death animation, etc.
+    // For now just stop movement
+    self.movement_state.velocity = Vec3::ZERO;
+}
+```
+
+### 1.5 Network Damage Handling
+
+Server tracks all player health and sends damage messages. Client receives:
+```rust
+MSG_DAMAGE => {
+    let damage = f32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let attacker_id = if payload.len() >= 8 {
+        Some(u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]))
+    } else {
+        None
+    };
+    playing_state.take_damage(damage, attacker_id);
+}
+```
+
+---
+
+## Phase 2: Death Screen & Respawn UI
+
+### 2.1 Death Screen Overlay
+
+**Files to modify:**
+- `client/src/screens/playing.rs` - Add death screen rendering
+
+When `is_dead == true`, draw overlay on top of everything:
+
+```rust
+pub fn draw_death_screen(&self) {
+    // Semi-transparent black overlay
+    draw_rectangle(0.0, 0.0, screen_width(), screen_height(),
+        Color::from_rgba(0, 0, 0, 180));
+
+    let cx = screen_width() / 2.0;
+    let cy = screen_height() / 2.0;
+
+    // "YOU DIED" text
+    let death_text = "YOU DIED";
+    let text_w = measure_game_text(death_text, 48);
+    draw_text_ex(death_text, cx - text_w / 2.0, cy - 80.0,
+        text_params(48, RED));
+
+    // Show respawn options based on world
+    if self.current_world == WorldId::Lobby {
+        // Lobby: instant respawn
+        if self.death_timer <= 0.0 {
+            let respawn_text = "Press SPACE to Respawn";
+            let tw = measure_game_text(respawn_text, 24);
+            draw_text_ex(respawn_text, cx - tw / 2.0, cy + 20.0,
+                text_params(24, WHITE));
+        } else {
+            let timer_text = format!("Respawning in {:.1}s", self.death_timer);
+            let tw = measure_game_text(&timer_text, 24);
+            draw_text_ex(&timer_text, cx - tw / 2.0, cy + 20.0,
+                text_params(24, GRAY));
+        }
+    } else if self.current_world == WorldId::Maze {
+        // Maze: game mode specific respawn
+        if self.death_timer <= 0.0 {
+            let respawn_text = "Waiting to Respawn...";
+            let tw = measure_game_text(respawn_text, 24);
+            draw_text_ex(respawn_text, cx - tw / 2.0, cy + 20.0,
+                text_params(24, GRAY));
+
+            let hint_text = "(Game mode will respawn you)";
+            let hw = measure_game_text(hint_text, 16);
+            draw_text_ex(hint_text, cx - hw / 2.0, cy + 50.0,
+                text_params(16, DARKGRAY));
+        } else {
+            let timer_text = format!("{:.1}s", self.death_timer);
+            let tw = measure_game_text(&timer_text, 48);
+            draw_text_ex(&timer_text, cx - tw / 2.0, cy + 20.0,
+                text_params(48, Color::from_rgba(255, 100, 100, 255)));
+        }
+    }
+
+    // Kill feed info (who killed you)
+    // TODO: Show killer name, weapon, distance
+}
+```
+
+Call `draw_death_screen()` in `render()` after HUD if `is_dead == true`.
+
+### 2.2 Death Timer Update
+
+In `simulate()`:
+```rust
+if self.is_dead {
+    if self.death_timer > 0.0 {
+        self.death_timer -= delta;
+    }
+
+    // Lobby: auto-respawn after timer or manual with spacebar
+    if self.current_world == WorldId::Lobby {
+        if self.death_timer <= 0.0 {
+            if is_key_pressed(KeyCode::Space) {
+                self.request_respawn();
+            }
+        }
+    }
+
+    // Maze: game mode handles respawn (no manual trigger)
+
+    return; // Don't process input/movement while dead
+}
+```
+
+### 2.3 Respawn Logic
+
+```rust
+fn request_respawn(&mut self) {
+    // Send respawn request to server
+    // Server will send MSG_RESPAWN with position
+}
+
+pub fn respawn(&mut self, spawn_pos: Vec3) {
+    self.is_dead = false;
+    self.hp = self.max_hp;
+    self.position = spawn_pos;
+    self.movement_state.velocity = Vec3::ZERO;
+    self.invulnerable_timer = 3.0; // 3 seconds spawn protection
+    self.death_timer = 0.0;
+
+    // Reset weapon state
+    self.weapons.active_mut().ammo = self.weapons.active().stats_data.magazine_size;
+}
+```
+
+In `simulate()`:
+```rust
+if self.invulnerable_timer > 0.0 {
+    self.invulnerable_timer -= delta;
+}
+```
+
+---
+
+## Phase 3: Kill Feed & Death Messages
+
+### 3.1 Kill Feed Data Structure
+
+**Files to modify:**
+- `client/src/screens/playing.rs` - Add kill feed
+
+Add to PlayingState:
+```rust
+pub kill_feed: Vec<KillFeedEntry>,
+```
+
+```rust
+pub struct KillFeedEntry {
+    pub killer_name: String,
+    pub victim_name: String,
+    pub weapon_name: String,
+    pub is_headshot: bool,
+    pub lifetime: f32, // fade out after 5 seconds
+}
+```
+
+### 3.2 Kill Feed Rendering
+
+In `render()` or HUD:
+```rust
+pub fn draw_kill_feed(&self) {
+    let feed_x = screen_width() - 320.0;
+    let mut feed_y = 100.0;
+
+    for entry in &self.kill_feed {
+        let alpha = (entry.lifetime.min(1.0) * 255.0) as u8;
+
+        // "[Killer] killed [Victim] with [Weapon]"
+        let text = if entry.is_headshot {
+            format!("{} ◈ {} ({})", entry.killer_name, entry.victim_name, entry.weapon_name)
+        } else {
+            format!("{} killed {} ({})", entry.killer_name, entry.victim_name, entry.weapon_name)
+        };
+
+        let color = if entry.is_headshot {
+            Color::from_rgba(255, 215, 0, alpha) // gold headshot
+        } else {
+            Color::from_rgba(255, 255, 255, alpha)
+        };
+
+        draw_text_ex(&text, feed_x, feed_y, text_params(16, color));
+        feed_y += 24.0;
+    }
+}
+```
+
+In `simulate()`:
+```rust
+// Fade out kill feed entries
+for entry in &mut self.kill_feed {
+    entry.lifetime -= delta;
+}
+self.kill_feed.retain(|e| e.lifetime > 0.0);
+```
+
+### 3.3 Network Kill Messages
+
+When receiving MSG_KILL or MSG_DEATH:
+```rust
+MSG_KILL => {
+    let victim_id = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let weapon_id = payload[4];
+    let is_headshot = payload[5] != 0;
+
+    let victim_name = self.get_player_name(victim_id);
+    let weapon_name = self.get_weapon_name(weapon_id);
+
+    self.kill_feed.push(KillFeedEntry {
+        killer_name: username.clone(),
+        victim_name,
+        weapon_name,
+        is_headshot,
+        lifetime: 5.0,
+    });
+}
+
+MSG_DEATH => {
+    let killer_id = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let weapon_id = payload[4];
+    let is_headshot = payload[5] != 0;
+
+    let killer_name = self.get_player_name(killer_id);
+    let weapon_name = self.get_weapon_name(weapon_id);
+
+    self.kill_feed.push(KillFeedEntry {
+        killer_name,
+        victim_name: username.clone(),
+        weapon_name,
+        is_headshot,
+        lifetime: 5.0,
+    });
+
+    self.die(Some(killer_id));
+}
+```
+
+---
+
+## Phase 4: Spawn Points System
+
+### 4.1 Spawn Points Data
+
+**Files to modify:**
+- `client/src/types/world.rs` - Add spawn point utilities
+- `server/src/main.rs` - Add spawn logic
+
+Server-side spawn logic:
+```rust
+fn get_spawn_point(world: WorldId, maze: &MazeData) -> (f32, f32, f32) {
+    match world {
+        WorldId::Lobby => {
+            // Fixed spawn in lobby
+            (0.0, 0.5, 0.0)
+        }
+        WorldId::Maze => {
+            // Random valid spawn in maze (open cell, away from walls)
+            // For now, start at maze entrance
+            let spawn_x = 1.5 * MAZE_CELL_SIZE;
+            let spawn_z = 1.5 * MAZE_CELL_SIZE;
+            (spawn_x, 0.5, spawn_z)
+        }
+    }
+}
+```
+
+When server receives MSG_RESPAWN_REQUEST:
+```rust
+fn handle_respawn(socket: &UdpSocket, players: &mut HashMap<SocketAddr, Player>,
+                  maze: &MazeData, src_addr: SocketAddr) {
+    if let Some(player) = players.get_mut(&src_addr) {
+        player.health = 100;
+        player.is_alive = true;
+
+        let spawn = get_spawn_point(player.world, maze);
+        player.position = spawn;
+
+        let mut response = vec![MSG_RESPAWN];
+        response.extend_from_slice(&spawn.0.to_be_bytes());
+        response.extend_from_slice(&spawn.1.to_be_bytes());
+        response.extend_from_slice(&spawn.2.to_be_bytes());
+
+        let _ = socket.send_to(&response, src_addr);
+    }
+}
+```
+
+---
+
+## Phase 5: Game Mode Architecture
+
+### 5.1 Game Mode Types
+
+**Files to create:**
+- `client/src/types/game_mode.rs` - Game mode definitions
+
+```rust
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GameMode {
+    Lobby,          // Free-for-all practice, infinite respawns
+    Deathmatch,     // FFA, first to X kills wins
+    TeamDeathmatch, // Team-based, first team to X kills
+    Elimination,    // Last player standing, no respawns
+    KingOfTheHill,  // Control zone for points
+    CaptureTheFlag, // Capture enemy flag
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchState {
+    Waiting,     // Waiting for players
+    Starting,    // Countdown before match
+    InProgress,  // Match is live
+    Ended,       // Match over, show results
+}
+
+pub struct GameModeConfig {
+    pub mode: GameMode,
+    pub score_limit: u32,      // Kills to win
+    pub time_limit: f32,       // Seconds until match ends
+    pub respawn_time: f32,     // Seconds until respawn (0 = instant)
+    pub team_mode: bool,       // Team-based or FFA
+}
+```
+
+### 5.2 Match State Tracking
+
+Add to PlayingState:
+```rust
+pub game_mode: GameMode,
+pub match_state: MatchState,
+pub match_timer: f32,        // Time remaining in match
+pub match_countdown: f32,    // Starting countdown
+pub score: u32,              // Player's score
+pub team_scores: [u32; 2],   // Team scores [red, blue]
+```
+
+### 5.3 Lobby vs Maze Logic
+
+In `simulate()`:
+```rust
+match self.current_world {
+    WorldId::Lobby => {
+        // Lobby is always in freeplay mode
+        // Infinite respawns, no score tracking, no match timer
+        self.game_mode = GameMode::Lobby;
+        self.match_state = MatchState::InProgress;
+    }
+    WorldId::Maze => {
+        // Maze uses configured game mode
+        // Update match timer, check win conditions, etc.
+        self.update_match_state(delta);
+    }
+}
+```
+
+### 5.4 Match State Update
+
+```rust
+fn update_match_state(&mut self, delta: f32) {
+    match self.match_state {
+        MatchState::Waiting => {
+            // Wait for minimum players
+            // Server decides when to start
+        }
+        MatchState::Starting => {
+            self.match_countdown -= delta;
+            if self.match_countdown <= 0.0 {
+                self.match_state = MatchState::InProgress;
+            }
+        }
+        MatchState::InProgress => {
+            self.match_timer -= delta;
+
+            // Check win conditions
+            if self.match_timer <= 0.0 {
+                self.match_state = MatchState::Ended;
+            }
+
+            // Check score limit
+            if self.game_mode == GameMode::Deathmatch && self.score >= 20 {
+                self.match_state = MatchState::Ended;
+            }
+        }
+        MatchState::Ended => {
+            // Show scoreboard, wait for next match
+        }
+    }
+}
+```
+
+### 5.5 Respawn Behavior by Mode
+
+```rust
+fn can_respawn(&self) -> bool {
+    match self.game_mode {
+        GameMode::Lobby => true, // Always respawn in lobby
+        GameMode::Deathmatch | GameMode::TeamDeathmatch => {
+            self.match_state == MatchState::InProgress
+        }
+        GameMode::Elimination => false, // No respawns in elimination
+        GameMode::KingOfTheHill | GameMode::CaptureTheFlag => {
+            self.match_state == MatchState::InProgress
+        }
+    }
+}
+
+fn get_respawn_delay(&self) -> f32 {
+    match self.game_mode {
+        GameMode::Lobby => 0.0, // Instant in lobby
+        GameMode::Deathmatch => 3.0, // 3 second delay
+        GameMode::TeamDeathmatch => 5.0, // 5 second delay
+        GameMode::Elimination => 0.0, // N/A
+        GameMode::KingOfTheHill => 7.0, // Longer delay
+        GameMode::CaptureTheFlag => 5.0,
+    }
+}
+```
+
+---
+
+## Phase 6: Scoreboard UI
+
+### 6.1 Scoreboard Data
+
+Add to PlayingState:
+```rust
+pub show_scoreboard: bool, // Toggle with TAB
+pub scoreboard: Vec<ScoreEntry>,
+```
+
+```rust
+pub struct ScoreEntry {
+    pub player_id: u32,
+    pub username: String,
+    pub kills: u32,
+    pub deaths: u32,
+    pub score: u32,
+    pub ping: u32,
+    pub team: Option<u32>, // None for FFA, Some(0/1) for teams
+}
+```
+
+### 6.2 Scoreboard Rendering
+
+```rust
+pub fn draw_scoreboard(&self) {
+    if !self.show_scoreboard {
+        return;
+    }
+
+    let sw = screen_width();
+    let sh = screen_height();
+
+    // Semi-transparent background
+    draw_rectangle(0.0, 0.0, sw, sh, Color::from_rgba(0, 0, 0, 160));
+
+    let panel_w = 700.0;
+    let panel_h = 500.0;
+    let panel_x = (sw - panel_w) / 2.0;
+    let panel_y = (sh - panel_h) / 2.0;
+
+    draw_rectangle(panel_x, panel_y, panel_w, panel_h,
+        Color::from_rgba(20, 20, 20, 240));
+    draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 2.0,
+        Color::from_rgba(80, 150, 220, 255));
+
+    // Title
+    let title = match self.game_mode {
+        GameMode::Lobby => "LOBBY - FREE PRACTICE",
+        GameMode::Deathmatch => "DEATHMATCH",
+        GameMode::TeamDeathmatch => "TEAM DEATHMATCH",
+        _ => "SCOREBOARD",
+    };
+    let title_w = measure_game_text(title, 28);
+    draw_text_ex(title, panel_x + (panel_w - title_w) / 2.0, panel_y + 40.0,
+        text_params(28, Color::from_rgba(80, 150, 220, 255)));
+
+    // Match info
+    if self.match_state == MatchState::InProgress {
+        let time_text = format!("Time: {:.0}s", self.match_timer);
+        draw_text_ex(&time_text, panel_x + 20.0, panel_y + 70.0,
+            text_params(18, WHITE));
+    }
+
+    // Column headers
+    let header_y = panel_y + 100.0;
+    draw_text_ex("Player", panel_x + 20.0, header_y, text_params(16, GRAY));
+    draw_text_ex("Kills", panel_x + 350.0, header_y, text_params(16, GRAY));
+    draw_text_ex("Deaths", panel_x + 450.0, header_y, text_params(16, GRAY));
+    draw_text_ex("K/D", panel_x + 550.0, header_y, text_params(16, GRAY));
+    draw_text_ex("Ping", panel_x + 630.0, header_y, text_params(16, GRAY));
+
+    // Player rows
+    let mut row_y = header_y + 30.0;
+    for entry in &self.scoreboard {
+        let kd = if entry.deaths > 0 {
+            entry.kills as f32 / entry.deaths as f32
+        } else {
+            entry.kills as f32
+        };
+
+        // Highlight local player
+        let is_local = entry.player_id == player_id;
+        if is_local {
+            draw_rectangle(panel_x + 10.0, row_y - 18.0, panel_w - 20.0, 24.0,
+                Color::from_rgba(80, 150, 220, 60));
+        }
+
+        draw_text_ex(&entry.username, panel_x + 20.0, row_y,
+            text_params(16, if is_local { YELLOW } else { WHITE }));
+        draw_text_ex(&entry.kills.to_string(), panel_x + 360.0, row_y,
+            text_params(16, WHITE));
+        draw_text_ex(&entry.deaths.to_string(), panel_x + 460.0, row_y,
+            text_params(16, WHITE));
+        draw_text_ex(&format!("{:.2}", kd), panel_x + 560.0, row_y,
+            text_params(16, WHITE));
+        draw_text_ex(&format!("{}ms", entry.ping), panel_x + 630.0, row_y,
+            text_params(16, WHITE));
+
+        row_y += 28.0;
+    }
+
+    // Footer
+    draw_text_ex("Hold TAB to view", panel_x + 20.0, panel_y + panel_h - 20.0,
+        text_params(14, GRAY));
+}
+```
+
+In `process_local_input()`:
+```rust
+self.show_scoreboard = config.bind_scoreboard.is_down();
+```
+
+Add to GameConfig:
+```rust
+pub bind_scoreboard: InputBinding, // Default: Tab
+```
+
+---
+
+## Phase 7: Bot Death & Respawn
+
+### 7.1 Bot Health in Dev Mode
+
+Practice bots already have health via OtherPlayer. When they die:
+```rust
+// In simulate() after bot.update(delta)
+if bot.is_dead() {
+    // Remove dead bot
+    // Optionally respawn immediately in dev mode
+    let spawn_pos = vec3(
+        gen_range(-10.0, 10.0),
+        0.0,
+        gen_range(-10.0, 10.0)
+    );
+    let new_bot = SimulatedPlayer::new(
+        self.next_bot_id,
+        format!("Bot{}", self.next_bot_id),
+        self.current_world,
+        spawn_pos
+    );
+    self.next_bot_id += 1;
+    self.practice_bots.push(new_bot);
+}
+```
+
+---
+
+## Phase 8: Network Protocol Updates
+
+### 8.1 Complete Protocol List
+
+**client/src/net/protocols.rs and server/src/protocols.rs:**
+
+```rust
+pub const MSG_JOIN: u8 = 1;
+pub const MSG_WELCOME: u8 = 2;
+pub const MSG_POSITION: u8 = 3;
+pub const MSG_STATE: u8 = 4;
+pub const MSG_SHOOT: u8 = 5;
+pub const MSG_HIT: u8 = 6;
+pub const MSG_DISCONNECT: u8 = 7;
+pub const MSG_MAZE: u8 = 8;
+pub const MSG_WORLD_CHANGE: u8 = 9;
+pub const MSG_ASSETS: u8 = 10;
+pub const MSG_DISCOVER: u8 = 11;
+pub const MSG_WALL_BROKEN: u8 = 12;
+pub const MSG_DEATH: u8 = 13;
+pub const MSG_RESPAWN_REQUEST: u8 = 14;
+pub const MSG_RESPAWN: u8 = 15;
+pub const MSG_DAMAGE: u8 = 16;
+pub const MSG_KILL: u8 = 17;
+pub const MSG_MATCH_STATE: u8 = 18; // server -> client: match state update
+pub const MSG_SCOREBOARD: u8 = 19; // server -> client: full scoreboard
+```
+
+### 8.2 Server Health Tracking
+
+**server/src/player.rs already has:**
+- `health: u32`
+- `is_alive: bool`
+- `kills: u32`
+- `deaths: u32`
+
+Server needs to:
+1. Track when players shoot and hit
+2. Calculate damage server-side
+3. Send MSG_DAMAGE to victim
+4. Send MSG_DEATH when HP reaches 0
+5. Send MSG_KILL to killer
+6. Broadcast kill to all players for kill feed
+
+---
+
+## Phase 9: UI Improvements
+
+### 9.1 Damage Direction Indicator
+
+Show red directional indicators when taking damage:
+```rust
+pub damage_indicators: Vec<DamageIndicator>,
+
+pub struct DamageIndicator {
+    pub angle: f32, // Direction damage came from
+    pub lifetime: f32,
+    pub intensity: f32,
+}
+
+// In take_damage()
+let attacker_pos = self.get_player_position(attacker_id);
+let angle = (attacker_pos - self.position).normalize().angle_between(forward);
+self.damage_indicators.push(DamageIndicator {
+    angle,
+    lifetime: 0.5,
+    intensity: damage / 100.0,
+});
+```
+
+Draw as red arcs around screen edges pointing toward damage source.
+
+### 9.2 Low Health Vignette
+
+When HP < 30%, draw pulsing red vignette:
+```rust
+if self.hp < 30.0 && !self.is_dead {
+    let intensity = (1.0 - self.hp / 30.0) * 0.4;
+    let pulse = (get_time() * 2.0).sin() * 0.1 + 0.9;
+    let alpha = (intensity * pulse * 255.0) as u8;
+
+    // Draw vignette (dark red edges)
+    // Use gradient rectangles or circle at edges
+}
+```
+
+### 9.3 Spawn Protection Visual
+
+While `invulnerable_timer > 0.0`:
+```rust
+// Glowing outline around player
+// Or shield effect
+// Or just show "SPAWN PROTECTED" text
+```
+
+---
+
+## Phase 10: Testing Checklist
+
+### 10.1 Health & Death
+- [ ] Player takes damage when shot
+- [ ] Health bar updates correctly
+- [ ] God mode prevents all damage
+- [ ] Death screen appears when HP = 0
+- [ ] Death timer counts down
+- [ ] Can't move/shoot while dead
+
+### 10.2 Respawn
+- [ ] Lobby: Instant respawn with spacebar
+- [ ] Maze: Respawn with delay (game mode dependent)
+- [ ] Spawn protection works (3 seconds)
+- [ ] HP resets to max on respawn
+- [ ] Position resets to spawn point
+
+### 10.3 Bots
+- [ ] Bots can be killed
+- [ ] Bots respawn in dev mode
+- [ ] Bot death increments player score
+- [ ] Bot kills show in kill feed
+
+### 10.4 UI
+- [ ] Health bar renders correctly
+- [ ] Kill feed shows kills/deaths
+- [ ] Scoreboard toggles with TAB
+- [ ] Death screen shows correct info
+- [ ] Damage indicators point to attacker
+
+### 10.5 Network
+- [ ] Server tracks player health
+- [ ] Damage messages sync properly
+- [ ] Death/respawn messages work
+- [ ] Scoreboard updates from server
+- [ ] Kill feed syncs across clients
+
+---
+
+## Phase 11: Future Enhancements
+
+### 11.1 Game Modes (Post-Launch)
+- Implement team assignment
+- Add objective modes (CTF, KOTH)
+- Round-based modes
+- Spectator mode when dead (elimination)
+
+### 11.2 Advanced Features
+- Killstreaks (UAV, airstrike, etc.)
+- Power-ups (armor, damage boost)
+- Weapon pickups in maze
+- Loadout selection before match
+- Leaderboards (persistent stats)
+
+### 11.3 Polish
+- Death animations (ragdoll)
+- Kill replay/killcam
+- Victory/defeat music
+- MVP screen after match
+- Weapon drop on death
+
+---
+
+## Implementation Order
+
+1. **Start with Phase 1** - Player health tracking and taking damage
+2. **Phase 2** - Death screen and respawn UI
+3. **Phase 3** - Kill feed
+4. **Phase 4** - Spawn points
+5. **Phase 6** - Scoreboard (can skip Phase 5 game modes initially)
+6. **Phase 7** - Bot death/respawn
+8. **Phase 9** - UI polish
+9. **Phase 5** - Game mode architecture (after basics work)
+10. **Phase 8** - Network sync (throughout, test each phase)
+
+---
+
+## Quick Start Guide
+
+To test the system:
+1. Add health fields to PlayingState
+2. Implement take_damage() method
+3. Add health bar to HUD
+4. Test with dev mode god_mode toggle
+5. Implement death screen
+6. Add respawn button in lobby
+7. Test with simulated bots
+
+For network testing:
+1. Add protocol constants
+2. Implement server-side health tracking
+3. Send damage messages on hit
+4. Test with 2 clients shooting each other
+
+---
+
+## Notes
+
+- Lobby is always in "freeplay" mode - no win conditions, infinite respawns
+- Maze uses structured game modes with rules, timers, and score limits
+- Dev mode dummy_invincible toggle is redundant (dummy never dies anyway) - remove it
+- Simulated bots are perfect for testing death/respawn without needing 2 clients
+- Server should be authoritative for all health/damage calculations (prevents cheating)
+- Client-side health is just for display - server tracks real values
