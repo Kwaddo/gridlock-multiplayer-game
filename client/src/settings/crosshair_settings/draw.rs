@@ -274,16 +274,25 @@ pub fn draw_crosshair_settings(
     x: f32,
     y: f32,
     w: f32,
-    _h: f32,
+    h: f32,
     _assets: &HashMap<String, Texture2D>,
     _mouse: (f32, f32),
+    s: f32,
 ) {
-    draw_section_header("Crosshair Settings", x + 20.0, y + 20.0);
+    let pad = 15.0 * s;
+    let x = x + pad;
+    let w = w - pad * 2.0;
 
-    let btn_y = y + 60.0;
-    let btn_w = 100.0;
-    let btn_h = 35.0;
-    let btn_gap = 10.0;
+    // Apply scroll offset
+    let y = y - state.crosshair_scroll;
+
+    draw_section_header("Crosshair Settings", x, y + 15.0 * s, s);
+
+    let btn_y = y + 50.0 * s;
+    let btn_w = 90.0 * s;
+    let btn_h = 35.0 * s;
+    let btn_gap = 10.0 * s;
+    let btn_fs = (14.0 * s) as u16;
 
     for (i, kind) in WeaponKind::ALL.iter().enumerate() {
         let btn_x = x + (btn_w + btn_gap) * (i as f32);
@@ -295,32 +304,35 @@ pub fn draw_crosshair_settings(
         draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
         draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, GRAY);
         let name = kind.stats().name;
-        let text_w = measure_game_text(name, 14);
+        let text_w = measure_game_text(name, btn_fs);
         draw_text_ex(
             name,
             btn_x + (btn_w - text_w) / 2.0,
-            btn_y + 22.0,
-            text_params(14, WHITE),
+            btn_y + btn_h * 0.63,
+            text_params(btn_fs, WHITE),
         );
     }
 
     if state.preview_weapon == WeaponKind::Sniper {
-        let sniper_y = btn_y + btn_h + 60.0;
+        let sniper_y = btn_y + btn_h + 60.0 * s;
+        let sniper_fs = (16.0 * s) as u16;
         draw_text_ex(
             "Sniper scope customization coming soon",
-            x + 20.0,
+            x + 20.0 * s,
             sniper_y,
-            text_params(16, YELLOW),
+            text_params(sniper_fs, YELLOW),
         );
         return;
     }
 
-    let left_w = (w * 0.55) - 20.0;
+    let left_w = (w * 0.55) - 20.0 * s;
 
-    let preset_y = btn_y + btn_h + 15.0;
-    let preset_dropdown_w = left_w - 100.0;
-    let preset_btn_w = 75.0;
-    let preset_btn_gap = 5.0;
+    let preset_y = btn_y + btn_h + 15.0 * s;
+    let preset_dropdown_w = left_w - 100.0 * s;
+    let preset_btn_w = 75.0 * s;
+    let preset_btn_gap = 5.0 * s;
+    let small_fs = (14.0 * s) as u16;
+    let tiny_fs = (12.0 * s) as u16;
 
     let preset_name = if state.selected_preset < presets.presets.len() {
         &presets.presets[state.selected_preset].name
@@ -330,35 +342,36 @@ pub fn draw_crosshair_settings(
     let is_custom = state.selected_preset < presets.presets.len()
         && !presets.presets[state.selected_preset].is_default;
 
+    let dropdown_h = 30.0 * s;
     draw_rectangle(
         x,
         preset_y,
         preset_dropdown_w,
-        30.0,
+        dropdown_h,
         Color::from_rgba(35, 35, 35, 255),
     );
     draw_rectangle_lines(
         x,
         preset_y,
         preset_dropdown_w,
-        30.0,
+        dropdown_h,
         1.0,
         Color::from_rgba(80, 80, 80, 255),
     );
-    let preset_tw = measure_game_text(preset_name, 14);
+    let preset_tw = measure_game_text(preset_name, small_fs);
     draw_text_ex(
         preset_name,
         x + (preset_dropdown_w - preset_tw) / 2.0,
-        preset_y + 20.0,
-        text_params(14, WHITE),
+        preset_y + dropdown_h * 0.67,
+        text_params(small_fs, WHITE),
     );
-    draw_text_ex("<", x + 6.0, preset_y + 20.0, text_params(14, GRAY));
-    let arrow_r = measure_game_text(">", 14);
+    draw_text_ex("<", x + 6.0 * s, preset_y + dropdown_h * 0.67, text_params(small_fs, GRAY));
+    let arrow_r = measure_game_text(">", small_fs);
     draw_text_ex(
         ">",
-        x + preset_dropdown_w - arrow_r - 6.0,
-        preset_y + 20.0,
-        text_params(14, GRAY),
+        x + preset_dropdown_w - arrow_r - 6.0 * s,
+        preset_y + dropdown_h * 0.67,
+        text_params(small_fs, GRAY),
     );
 
     let delete_x = x + preset_dropdown_w + preset_btn_gap;
@@ -367,9 +380,9 @@ pub fn draw_crosshair_settings(
     } else {
         Color::from_rgba(30, 30, 30, 255)
     };
-    draw_rectangle(delete_x, preset_y, preset_btn_w, 30.0, del_color);
-    draw_rectangle_lines(delete_x, preset_y, preset_btn_w, 30.0, 1.0, GRAY);
-    let del_tw = measure_game_text("Delete", 12);
+    draw_rectangle(delete_x, preset_y, preset_btn_w, dropdown_h, del_color);
+    draw_rectangle_lines(delete_x, preset_y, preset_btn_w, dropdown_h, 1.0, GRAY);
+    let del_tw = measure_game_text("Delete", tiny_fs);
     let del_text_color = if is_custom {
         WHITE
     } else {
@@ -378,29 +391,31 @@ pub fn draw_crosshair_settings(
     draw_text_ex(
         "Delete",
         delete_x + (preset_btn_w - del_tw) / 2.0,
-        preset_y + 19.0,
-        text_params(12, del_text_color),
+        preset_y + dropdown_h * 0.63,
+        text_params(tiny_fs, del_text_color),
     );
 
     let slider_x = x;
-    let mut slider_y = preset_y + 45.0;
+    let mut slider_y = preset_y + 45.0 * s;
     let slider_w = left_w;
+    let row_step = 28.0 * s;
+    let section_step = 33.0 * s;
 
     let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
     let ch = &weapon.crosshair;
 
-    draw_toggle_display("Enable dot", ch.dot_enabled, slider_x, slider_y);
-    slider_y += 28.0;
-    draw_slider_display("Gap", ch.center_gap, 0.0, 10.0, slider_x, slider_y, slider_w, None);
-    slider_y += 28.0;
-    draw_slider_display("Length", ch.line_length, 0.0, 10.0, slider_x, slider_y, slider_w, None);
-    slider_y += 28.0;
-    draw_slider_display("Thickness", ch.line_thickness, 0.0, 2.0, slider_x, slider_y, slider_w, None);
-    slider_y += 28.0;
-    draw_slider_display("Dot size", ch.dot_size, 0.0, 5.0, slider_x, slider_y, slider_w, None);
-    slider_y += 33.0;
-    draw_toggle_display("Outline", ch.outline_enabled, slider_x, slider_y);
-    slider_y += 28.0;
+    draw_toggle_display("Enable dot", ch.dot_enabled, slider_x, slider_y, s);
+    slider_y += row_step;
+    draw_slider_display("Gap", ch.center_gap, 0.0, 10.0, slider_x, slider_y, slider_w, None, s);
+    slider_y += row_step;
+    draw_slider_display("Length", ch.line_length, 0.0, 10.0, slider_x, slider_y, slider_w, None, s);
+    slider_y += row_step;
+    draw_slider_display("Thickness", ch.line_thickness, 0.0, 2.0, slider_x, slider_y, slider_w, None, s);
+    slider_y += row_step;
+    draw_slider_display("Dot size", ch.dot_size, 0.0, 5.0, slider_x, slider_y, slider_w, None, s);
+    slider_y += section_step;
+    draw_toggle_display("Outline", ch.outline_enabled, slider_x, slider_y, s);
+    slider_y += row_step;
     draw_slider_display(
         "Thickness",
         ch.outline_thickness,
@@ -410,23 +425,25 @@ pub fn draw_crosshair_settings(
         slider_y,
         slider_w,
         None,
+        s,
     );
-    slider_y += 33.0;
+    slider_y += section_step;
 
     let type_name = crosshair_type_name(ch.crosshair_type);
-    draw_dropdown_display("Crosshair Type", type_name, slider_x, slider_y, slider_w);
-    slider_y += 40.0;
+    draw_dropdown_display("Crosshair Type", type_name, slider_x, slider_y, slider_w, s);
+    slider_y += 40.0 * s;
 
+    let color_fs = (14.0 * s) as u16;
     draw_text_ex(
         "COLOR",
         slider_x,
-        slider_y + 14.0,
-        text_params(14, Color::from_rgba(100, 180, 255, 255)),
+        slider_y + 14.0 * s,
+        text_params(color_fs, Color::from_rgba(100, 180, 255, 255)),
     );
-    slider_y += 20.0;
+    slider_y += 20.0 * s;
 
-    let picker_size = 140.0;
-    let hue_bar_w = 20.0;
+    let picker_size = 120.0 * s;
+    let hue_bar_w = 20.0 * s;
     let sv_x = slider_x;
     let sv_y = slider_y;
 
@@ -435,9 +452,9 @@ pub fn draw_crosshair_settings(
     let cell_h = picker_size / steps as f32;
     for sy in 0..steps {
         for sx in 0..steps {
-            let s = (sx as f32 + 0.5) / steps as f32;
+            let sv_s = (sx as f32 + 0.5) / steps as f32;
             let v = 1.0 - (sy as f32 + 0.5) / steps as f32;
-            let (r, g, b) = hsv_to_rgb(state.hue, s, v);
+            let (r, g, b) = hsv_to_rgb(state.hue, sv_s, v);
             draw_rectangle(
                 sv_x + sx as f32 * cell_w,
                 sv_y + sy as f32 * cell_h,
@@ -451,10 +468,10 @@ pub fn draw_crosshair_settings(
 
     let cursor_x = sv_x + state.sat * picker_size;
     let cursor_y = sv_y + (1.0 - state.val) * picker_size;
-    draw_circle_lines(cursor_x, cursor_y, 5.0, 2.0, WHITE);
-    draw_circle_lines(cursor_x, cursor_y, 4.0, 1.0, BLACK);
+    draw_circle_lines(cursor_x, cursor_y, 5.0 * s, 2.0, WHITE);
+    draw_circle_lines(cursor_x, cursor_y, 4.0 * s, 1.0, BLACK);
 
-    let hue_x = sv_x + picker_size + 10.0;
+    let hue_x = sv_x + picker_size + 10.0 * s;
     let hue_steps = 36u32;
     let hue_cell_h = picker_size / hue_steps as f32;
     for i in 0..hue_steps {
@@ -481,9 +498,9 @@ pub fn draw_crosshair_settings(
         BLACK,
     );
 
-    let swatch_x = hue_x + hue_bar_w + 15.0;
-    let swatch_size = 40.0;
-    let check = 10.0;
+    let swatch_x = hue_x + hue_bar_w + 15.0 * s;
+    let swatch_size = 40.0 * s;
+    let check = 10.0 * s;
     for cy_i in 0..4 {
         for cx_i in 0..4 {
             let col = if (cx_i + cy_i) % 2 == 0 {
@@ -510,7 +527,7 @@ pub fn draw_crosshair_settings(
     );
     draw_rectangle_lines(swatch_x, sv_y, swatch_size, swatch_size, 1.0, WHITE);
 
-    let alpha_y = sv_y + picker_size + 10.0;
+    let alpha_y = sv_y + picker_size + 10.0 * s;
     draw_slider_display(
         "Alpha",
         state.alpha_val,
@@ -518,21 +535,22 @@ pub fn draw_crosshair_settings(
         255.0,
         slider_x,
         alpha_y,
-        picker_size + hue_bar_w + 10.0,
+        picker_size + hue_bar_w + 10.0 * s,
         Some(Color::from_rgba(200, 200, 200, 255)),
+        s,
     );
 
-    let preview_x = x + w * 0.55 + 20.0;
-    let preview_y = btn_y + btn_h + 15.0;
-    let preview_w = w * 0.45 - 40.0;
-    let preview_h = 300.0;
+    let preview_x = x + w * 0.55 + 20.0 * s;
+    let preview_y = btn_y + btn_h + 15.0 * s;
+    let preview_w = w * 0.45 - 40.0 * s;
+    let preview_h = (h - 150.0 * s).max(100.0 * s);
 
-    draw_crosshair_preview(weapon, state, preview_x, preview_y, preview_w, preview_h, _assets);
+    draw_crosshair_preview(weapon, state, preview_x, preview_y, preview_w, preview_h, _assets, s);
 
-    let btn_row_y = preview_y + preview_h + 10.0;
-    let small_btn_w = 90.0;
-    let small_btn_h = 30.0;
-    let small_gap = 8.0;
+    let btn_row_y = preview_y + preview_h + 10.0 * s;
+    let small_btn_w = 90.0 * s;
+    let small_btn_h = 30.0 * s;
+    let small_gap = 8.0 * s;
 
     let ads_color = if state.preview_ads {
         Color::from_rgba(80, 150, 220, 255)
@@ -542,12 +560,12 @@ pub fn draw_crosshair_settings(
     draw_rectangle(preview_x, btn_row_y, small_btn_w, small_btn_h, ads_color);
     draw_rectangle_lines(preview_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
     let ads_text = if state.preview_ads { "ADS: ON" } else { "ADS: OFF" };
-    let ads_tw = measure_game_text(ads_text, 12);
+    let ads_tw = measure_game_text(ads_text, tiny_fs);
     draw_text_ex(
         ads_text,
         preview_x + (small_btn_w - ads_tw) / 2.0,
-        btn_row_y + 20.0,
-        text_params(12, WHITE),
+        btn_row_y + small_btn_h * 0.67,
+        text_params(tiny_fs, WHITE),
     );
 
     let bg_btn_x = preview_x + small_btn_w + small_gap;
@@ -559,13 +577,13 @@ pub fn draw_crosshair_settings(
     draw_rectangle(bg_btn_x, btn_row_y, small_btn_w, small_btn_h, bg_color);
     draw_rectangle_lines(bg_btn_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
     let bg_text = if state.preview_light_bg { "Light" } else { "Dark" };
-    let bg_tw = measure_game_text(bg_text, 12);
+    let bg_tw = measure_game_text(bg_text, tiny_fs);
     let bg_text_color = if state.preview_light_bg { BLACK } else { WHITE };
     draw_text_ex(
         bg_text,
         bg_btn_x + (small_btn_w - bg_tw) / 2.0,
-        btn_row_y + 20.0,
-        text_params(12, bg_text_color),
+        btn_row_y + small_btn_h * 0.67,
+        text_params(tiny_fs, bg_text_color),
     );
 
     let reset_btn_x = bg_btn_x + small_btn_w + small_gap;
@@ -577,16 +595,16 @@ pub fn draw_crosshair_settings(
         Color::from_rgba(60, 40, 40, 255),
     );
     draw_rectangle_lines(reset_btn_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
-    let reset_tw = measure_game_text("Reset", 12);
+    let reset_tw = measure_game_text("Reset", tiny_fs);
     draw_text_ex(
         "Reset",
         reset_btn_x + (small_btn_w - reset_tw) / 2.0,
-        btn_row_y + 20.0,
-        text_params(12, WHITE),
+        btn_row_y + small_btn_h * 0.67,
+        text_params(tiny_fs, WHITE),
     );
 
     if state.preview_weapon == WeaponKind::Shotgun && state.shotgun_type_warning {
-        draw_shotgun_type_warning(preview_x, btn_row_y, 0.0, 0.0, _mouse, false);
+        draw_shotgun_type_warning(preview_x, btn_row_y, 0.0, 0.0, _mouse, false, s);
     }
 }
 
@@ -598,6 +616,7 @@ fn draw_crosshair_preview(
     w: f32,
     h: f32,
     assets: &HashMap<String, Texture2D>,
+    s: f32,
 ) {
     const PREVIEW_BG_TEXTURE_KEY: &str = "crosshair_preview_bg";
 
@@ -626,11 +645,12 @@ fn draw_crosshair_preview(
     let cy = y + h / 2.0;
 
     if weapon.kind == WeaponKind::Sniper {
+        let fs = (14.0 * s) as u16;
         draw_text_ex(
             "Scope preview coming soon",
-            cx - 80.0,
+            cx - 80.0 * s,
             cy,
-            text_params(14, YELLOW),
+            text_params(fs, YELLOW),
         );
         return;
     }
@@ -656,39 +676,16 @@ fn draw_crosshair_preview(
                 let oc = Color::from_rgba(0, 0, 0, 180);
                 for q in 0..4 {
                     let base_angle = q as f32 * quarter;
-                    draw_arc(
-                        cx,
-                        cy,
-                        radius,
-                        base_angle + gap_angle,
-                        base_angle + quarter - gap_angle,
-                        ot,
-                        segs,
-                        oc,
-                    );
+                    draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, ot, segs, oc);
                 }
             }
             for q in 0..4 {
                 let base_angle = q as f32 * quarter;
-                draw_arc(
-                    cx,
-                    cy,
-                    radius,
-                    base_angle + gap_angle,
-                    base_angle + quarter - gap_angle,
-                    thick,
-                    segs,
-                    color,
-                );
+                draw_arc(cx, cy, radius, base_angle + gap_angle, base_angle + quarter - gap_angle, thick, segs, color);
             }
             if xhair.dot_enabled {
                 let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
-                let dot_color = Color::from_rgba(
-                    (color.r * 255.0) as u8,
-                    (color.g * 255.0) as u8,
-                    (color.b * 255.0) as u8,
-                    dot_alpha,
-                );
+                let dot_color = Color::from_rgba((color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha);
                 draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
             }
         }
@@ -696,9 +693,7 @@ fn draw_crosshair_preview(
             let radius = hip_gap + ads_rest_gap;
             let thick = (xhair.line_thickness * sh) / 100.0;
             let arm = ((xhair.line_length / 2.0) * sh) / 100.0;
-
             let corners: [(f32, f32); 4] = [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
-
             for &(sx, sy) in &corners {
                 let corner_x = cx + sx * radius;
                 let corner_y = cy + sy * radius;
@@ -707,45 +702,32 @@ fn draw_crosshair_preview(
                 let chamfer = arm * 0.35;
                 let h_near = corner_x - sx * chamfer;
                 let v_near = corner_y - sy * chamfer;
-
-                let p0x = h_near;
-                let p0y = corner_y;
-                let p1x = corner_x;
-                let p1y = corner_y;
-                let p2x = corner_x;
-                let p2y = v_near;
+                let p0x = h_near; let p0y = corner_y;
+                let p1x = corner_x; let p1y = corner_y;
+                let p2x = corner_x; let p2y = v_near;
                 let bez = |t: f32| -> (f32, f32) {
                     let u = 1.0 - t;
-                    (
-                        u * u * p0x + 2.0 * u * t * p1x + t * t * p2x,
-                        u * u * p0y + 2.0 * u * t * p1y + t * t * p2y,
-                    )
+                    (u * u * p0x + 2.0 * u * t * p1x + t * t * p2x, u * u * p0y + 2.0 * u * t * p1y + t * t * p2y)
                 };
-
-                let t_a = 0.10_f32;
-                let t_b = 0.90_f32;
+                let t_a = 0.10_f32; let t_b = 0.90_f32;
                 let (mid_ax, mid_ay) = bez(t_a);
                 let (mid_bx, mid_by) = bez(t_b);
                 let chamfer_segs = 4;
-
                 let draw_corner_shape = |thickness: f32, col: Color| {
                     for i in 0..chamfer_segs {
                         let s0 = t_a * (i as f32 / chamfer_segs as f32);
                         let s1 = t_a * ((i + 1) as f32 / chamfer_segs as f32);
-                        let (x0, y0) = bez(s0);
-                        let (x1, y1) = bez(s1);
+                        let (x0, y0) = bez(s0); let (x1, y1) = bez(s1);
                         draw_line(x0, y0, x1, y1, thickness, col);
                     }
                     draw_line(mid_ax, mid_ay, mid_bx, mid_by, thickness, col);
                     for i in 0..chamfer_segs {
                         let s0 = t_b + (1.0 - t_b) * (i as f32 / chamfer_segs as f32);
                         let s1 = t_b + (1.0 - t_b) * ((i + 1) as f32 / chamfer_segs as f32);
-                        let (x0, y0) = bez(s0);
-                        let (x1, y1) = bez(s1);
+                        let (x0, y0) = bez(s0); let (x1, y1) = bez(s1);
                         draw_line(x0, y0, x1, y1, thickness, col);
                     }
                 };
-
                 if xhair.outline_enabled {
                     let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
                     let oc = Color::from_rgba(0, 0, 0, 180);
@@ -757,15 +739,9 @@ fn draw_crosshair_preview(
                 draw_line(corner_x, v_near, corner_x, v_end_y, thick, color);
                 draw_corner_shape(thick, color);
             }
-
             if xhair.dot_enabled {
                 let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
-                let dot_color = Color::from_rgba(
-                    (color.r * 255.0) as u8,
-                    (color.g * 255.0) as u8,
-                    (color.b * 255.0) as u8,
-                    dot_alpha,
-                );
+                let dot_color = Color::from_rgba((color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha);
                 draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
             }
         }
@@ -773,7 +749,6 @@ fn draw_crosshair_preview(
             let gap = hip_gap + ads_rest_gap;
             let len = (xhair.line_length * sh) / 100.0;
             let thick = (xhair.line_thickness * sh) / 100.0;
-
             if xhair.outline_enabled {
                 let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
                 let oc = Color::from_rgba(0, 0, 0, 180);
@@ -786,15 +761,9 @@ fn draw_crosshair_preview(
             draw_rectangle(cx - thick / 2.0, cy + gap, thick, len, color);
             draw_rectangle(cx - gap - len, cy - thick / 2.0, len, thick, color);
             draw_rectangle(cx + gap, cy - thick / 2.0, len, thick, color);
-
             if xhair.dot_enabled {
                 let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
-                let dot_color = Color::from_rgba(
-                    (color.r * 255.0) as u8,
-                    (color.g * 255.0) as u8,
-                    (color.b * 255.0) as u8,
-                    dot_alpha,
-                );
+                let dot_color = Color::from_rgba((color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha);
                 draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
             }
         }
@@ -815,14 +784,7 @@ fn draw_crosshair_preview(
             let thick = (xhair.line_thickness * sh) / 100.0;
             if xhair.outline_enabled {
                 let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
-                draw_rectangle_lines(
-                    cx - size / 2.0,
-                    cy - size / 2.0,
-                    size,
-                    size,
-                    ot,
-                    Color::from_rgba(0, 0, 0, 180),
-                );
+                draw_rectangle_lines(cx - size / 2.0, cy - size / 2.0, size, size, ot, Color::from_rgba(0, 0, 0, 180));
             }
             draw_rectangle_lines(cx - size / 2.0, cy - size / 2.0, size, size, thick, color);
             if xhair.dot_enabled {
@@ -878,23 +840,19 @@ fn draw_crosshair_preview(
             draw_line(right_tip_x, cy, right_base_x, bot_y, thick, color);
             if xhair.dot_enabled {
                 let dot_alpha = ((1.0 - ads_progress) * 255.0) as u8;
-                let dot_color = Color::from_rgba(
-                    (color.r * 255.0) as u8,
-                    (color.g * 255.0) as u8,
-                    (color.b * 255.0) as u8,
-                    dot_alpha,
-                );
+                let dot_color = Color::from_rgba((color.r * 255.0) as u8, (color.g * 255.0) as u8, (color.b * 255.0) as u8, dot_alpha);
                 draw_circle(cx, cy, (xhair.dot_size * sh) / 100.0, dot_color);
             }
         }
     }
 
     let name_color = if state.preview_light_bg { BLACK } else { WHITE };
+    let name_fs = (16.0 * s) as u16;
     draw_text_ex(
         weapon.kind.stats().name,
-        x + 10.0,
-        y + 20.0,
-        text_params(16, name_color),
+        x + 10.0 * s,
+        y + 20.0 * s,
+        text_params(name_fs, name_color),
     );
 }
 
@@ -905,53 +863,43 @@ pub(super) fn draw_shotgun_type_warning(
     _btn_h: f32,
     mouse: (f32, f32),
     clicked: bool,
+    s: f32,
 ) -> bool {
-    let box_w = 340.0;
-    let box_h = 80.0;
+    let box_w = 340.0 * s;
+    let box_h = 80.0 * s;
     let box_x = x;
-    let box_y = y - box_h - 10.0;
+    let box_y = y - box_h - 10.0 * s;
+    let fs = (14.0 * s) as u16;
+    let ok_fs = (14.0 * s) as u16;
 
-    draw_rectangle(
-        box_x,
-        box_y,
-        box_w,
-        box_h,
-        Color::from_rgba(60, 30, 10, 240),
-    );
-    draw_rectangle_lines(
-        box_x,
-        box_y,
-        box_w,
-        box_h,
-        2.0,
-        Color::from_rgba(255, 160, 0, 255),
-    );
+    draw_rectangle(box_x, box_y, box_w, box_h, Color::from_rgba(60, 30, 10, 240));
+    draw_rectangle_lines(box_x, box_y, box_w, box_h, 2.0, Color::from_rgba(255, 160, 0, 255));
     draw_text_ex(
         "Switching to a non-standard crosshair",
-        box_x + 10.0,
-        box_y + 22.0,
-        text_params(14, Color::from_rgba(255, 200, 80, 255)),
+        box_x + 10.0 * s,
+        box_y + 22.0 * s,
+        text_params(fs, Color::from_rgba(255, 200, 80, 255)),
     );
     draw_text_ex(
         "for shotgun may affect gameplay.",
-        box_x + 10.0,
-        box_y + 42.0,
-        text_params(14, Color::from_rgba(255, 200, 80, 255)),
+        box_x + 10.0 * s,
+        box_y + 42.0 * s,
+        text_params(fs, Color::from_rgba(255, 200, 80, 255)),
     );
 
-    let ok_w = 50.0;
-    let ok_h = 25.0;
-    let ok_x = box_x + box_w - ok_w - 10.0;
-    let ok_y = box_y + box_h - ok_h - 8.0;
+    let ok_w = 50.0 * s;
+    let ok_h = 25.0 * s;
+    let ok_x = box_x + box_w - ok_w - 10.0 * s;
+    let ok_y = box_y + box_h - ok_h - 8.0 * s;
 
     draw_rectangle(ok_x, ok_y, ok_w, ok_h, Color::from_rgba(80, 150, 220, 255));
     draw_rectangle_lines(ok_x, ok_y, ok_w, ok_h, 1.0, GRAY);
-    let ok_tw = measure_game_text("OK", 14);
+    let ok_tw = measure_game_text("OK", ok_fs);
     draw_text_ex(
         "OK",
         ok_x + (ok_w - ok_tw) / 2.0,
-        ok_y + 17.0,
-        text_params(14, WHITE),
+        ok_y + ok_h * 0.68,
+        text_params(ok_fs, WHITE),
     );
 
     clicked
@@ -961,15 +909,11 @@ pub(super) fn draw_shotgun_type_warning(
         && mouse.1 <= ok_y + ok_h
 }
 
-fn draw_section_header(label: &str, x: f32, y: f32) -> f32 {
-    draw_text_ex(
-        label,
-        x,
-        y + 18.0,
-        text_params(18, Color::from_rgba(100, 180, 255, 255)),
-    );
-    draw_line(x, y + 25.0, x + 300.0, y + 25.0, 1.0, GRAY);
-    35.0
+fn draw_section_header(label: &str, x: f32, y: f32, s: f32) -> f32 {
+    let fs = (18.0 * s) as u16;
+    draw_text_ex(label, x, y + 18.0 * s, text_params(fs, Color::from_rgba(100, 180, 255, 255)));
+    draw_line(x, y + 25.0 * s, x + 300.0 * s, y + 25.0 * s, 1.0, GRAY);
+    35.0 * s
 }
 
 pub(super) fn draw_slider(
@@ -985,33 +929,23 @@ pub(super) fn draw_slider(
     _clicked: bool,
     held: bool,
     fill_color: Option<Color>,
+    s: f32,
 ) -> f32 {
-    let label_w = 100.0;
+    let label_w = 100.0 * s;
     let slider_x = x + label_w;
-    let slider_w = width - label_w - 50.0;
-    let slider_h = 14.0;
-    let row_h = 28.0;
+    let slider_w = width - label_w - 50.0 * s;
+    let slider_h = 14.0 * s;
+    let row_h = 28.0 * s;
+    let fs = (14.0 * s) as u16;
+    let val_fs = (12.0 * s) as u16;
 
-    draw_text_ex(label, x, y + 14.0, text_params(14, WHITE));
+    draw_text_ex(label, x, y + 14.0 * s, text_params(fs, WHITE));
 
-    draw_rectangle(
-        slider_x,
-        y + 1.0,
-        slider_w,
-        slider_h,
-        Color::from_rgba(35, 35, 35, 255),
-    );
+    draw_rectangle(slider_x, y + 1.0, slider_w, slider_h, Color::from_rgba(35, 35, 35, 255));
     let t = ((*value - min) / (max - min)).clamp(0.0, 1.0);
     let fc = fill_color.unwrap_or(Color::from_rgba(80, 150, 220, 255));
     draw_rectangle(slider_x, y + 1.0, slider_w * t, slider_h, fc);
-    draw_rectangle_lines(
-        slider_x,
-        y + 1.0,
-        slider_w,
-        slider_h,
-        1.0,
-        Color::from_rgba(60, 60, 60, 255),
-    );
+    draw_rectangle_lines(slider_x, y + 1.0, slider_w, slider_h, 1.0, Color::from_rgba(60, 60, 60, 255));
 
     if held
         && mouse.1 >= y
@@ -1024,20 +958,9 @@ pub(super) fn draw_slider(
         *value = value.clamp(min, max);
     }
 
-    let precision = if step >= 1.0 {
-        0
-    } else if step >= 0.1 {
-        1
-    } else {
-        2
-    };
+    let precision = if step >= 1.0 { 0 } else if step >= 0.1 { 1 } else { 2 };
     let txt = format!("{:.*}", precision, *value);
-    draw_text_ex(
-        &txt,
-        slider_x + slider_w + 6.0,
-        y + 12.0,
-        text_params(12, GRAY),
-    );
+    draw_text_ex(&txt, slider_x + slider_w + 6.0 * s, y + 12.0 * s, text_params(val_fs, GRAY));
 
     row_h
 }
@@ -1051,54 +974,27 @@ fn draw_slider_display(
     y: f32,
     width: f32,
     fill_color: Option<Color>,
+    s: f32,
 ) {
-    let label_w = 100.0;
+    let label_w = 100.0 * s;
     let slider_x = x + label_w;
-    let slider_w = width - label_w - 50.0;
-    let slider_h = 14.0;
+    let slider_w = width - label_w - 50.0 * s;
+    let slider_h = 14.0 * s;
+    let fs = (14.0 * s) as u16;
+    let val_fs = (12.0 * s) as u16;
 
-    draw_text_ex(label, x, y + 14.0, text_params(14, WHITE));
+    draw_text_ex(label, x, y + 14.0 * s, text_params(fs, WHITE));
 
-    draw_rectangle(
-        slider_x,
-        y + 1.0,
-        slider_w,
-        slider_h,
-        Color::from_rgba(35, 35, 35, 255),
-    );
+    draw_rectangle(slider_x, y + 1.0, slider_w, slider_h, Color::from_rgba(35, 35, 35, 255));
     let t = ((value - min) / (max - min)).clamp(0.0, 1.0);
     let fc = fill_color.unwrap_or(Color::from_rgba(80, 150, 220, 255));
     draw_rectangle(slider_x, y + 1.0, slider_w * t, slider_h, fc);
-    draw_rectangle_lines(
-        slider_x,
-        y + 1.0,
-        slider_w,
-        slider_h,
-        1.0,
-        Color::from_rgba(60, 60, 60, 255),
-    );
+    draw_rectangle_lines(slider_x, y + 1.0, slider_w, slider_h, 1.0, Color::from_rgba(60, 60, 60, 255));
 
-    let step = if max > 100.0 {
-        1.0
-    } else if max > 5.0 {
-        0.1
-    } else {
-        0.05
-    };
-    let precision = if step >= 1.0 {
-        0
-    } else if step >= 0.1 {
-        1
-    } else {
-        2
-    };
+    let step = if max > 100.0 { 1.0 } else if max > 5.0 { 0.1 } else { 0.05 };
+    let precision = if step >= 1.0 { 0 } else if step >= 0.1 { 1 } else { 2 };
     let txt = format!("{:.*}", precision, value);
-    draw_text_ex(
-        &txt,
-        slider_x + slider_w + 6.0,
-        y + 12.0,
-        text_params(12, GRAY),
-    );
+    draw_text_ex(&txt, slider_x + slider_w + 6.0 * s, y + 12.0 * s, text_params(val_fs, GRAY));
 }
 
 pub(super) fn draw_toggle(
@@ -1108,48 +1004,36 @@ pub(super) fn draw_toggle(
     y: f32,
     mouse: (f32, f32),
     clicked: bool,
+    s: f32,
 ) -> f32 {
-    let box_size = 18.0;
-    let row_h = 28.0;
+    let box_size = 18.0 * s;
+    let row_h = 28.0 * s;
+    let fs = (14.0 * s) as u16;
     let checkbox_color = if *value {
         Color::from_rgba(80, 150, 220, 255)
     } else {
         Color::from_rgba(35, 35, 35, 255)
     };
     draw_rectangle(x, y, box_size, box_size, checkbox_color);
-    draw_rectangle_lines(
-        x,
-        y,
-        box_size,
-        box_size,
-        1.0,
-        Color::from_rgba(60, 60, 60, 255),
-    );
-    if clicked && mouse.0 >= x && mouse.0 <= x + box_size && mouse.1 >= y && mouse.1 <= y + box_size
-    {
+    draw_rectangle_lines(x, y, box_size, box_size, 1.0, Color::from_rgba(60, 60, 60, 255));
+    if clicked && mouse.0 >= x && mouse.0 <= x + box_size && mouse.1 >= y && mouse.1 <= y + box_size {
         *value = !*value;
     }
-    draw_text_ex(label, x + box_size + 8.0, y + 14.0, text_params(14, WHITE));
+    draw_text_ex(label, x + box_size + 8.0 * s, y + 14.0 * s, text_params(fs, WHITE));
     row_h
 }
 
-fn draw_toggle_display(label: &str, value: bool, x: f32, y: f32) {
-    let box_size = 18.0;
+fn draw_toggle_display(label: &str, value: bool, x: f32, y: f32, s: f32) {
+    let box_size = 18.0 * s;
+    let fs = (14.0 * s) as u16;
     let checkbox_color = if value {
         Color::from_rgba(80, 150, 220, 255)
     } else {
         Color::from_rgba(35, 35, 35, 255)
     };
     draw_rectangle(x, y, box_size, box_size, checkbox_color);
-    draw_rectangle_lines(
-        x,
-        y,
-        box_size,
-        box_size,
-        1.0,
-        Color::from_rgba(60, 60, 60, 255),
-    );
-    draw_text_ex(label, x + box_size + 8.0, y + 14.0, text_params(14, WHITE));
+    draw_rectangle_lines(x, y, box_size, box_size, 1.0, Color::from_rgba(60, 60, 60, 255));
+    draw_text_ex(label, x + box_size + 8.0 * s, y + 14.0 * s, text_params(fs, WHITE));
 }
 
 pub(super) fn draw_dropdown(
@@ -1161,37 +1045,21 @@ pub(super) fn draw_dropdown(
     width: f32,
     mouse: (f32, f32),
     clicked: bool,
+    s: f32,
 ) -> f32 {
-    let label_w = 100.0;
+    let label_w = 100.0 * s;
     let dropdown_x = x + label_w;
-    let dropdown_w = width - label_w - 10.0;
-    let dropdown_h = 28.0;
+    let dropdown_w = width - label_w - 10.0 * s;
+    let dropdown_h = 28.0 * s;
+    let fs = (14.0 * s) as u16;
 
-    draw_text_ex(label, x, y + 18.0, text_params(14, WHITE));
-    draw_rectangle(
-        dropdown_x,
-        y,
-        dropdown_w,
-        dropdown_h,
-        Color::from_rgba(35, 35, 35, 255),
-    );
-    draw_rectangle_lines(
-        dropdown_x,
-        y,
-        dropdown_w,
-        dropdown_h,
-        1.0,
-        Color::from_rgba(60, 60, 60, 255),
-    );
+    draw_text_ex(label, x, y + 18.0 * s, text_params(fs, WHITE));
+    draw_rectangle(dropdown_x, y, dropdown_w, dropdown_h, Color::from_rgba(35, 35, 35, 255));
+    draw_rectangle_lines(dropdown_x, y, dropdown_w, dropdown_h, 1.0, Color::from_rgba(60, 60, 60, 255));
 
     let current_text = options[*selected];
-    let text_w = measure_game_text(current_text, 14);
-    draw_text_ex(
-        current_text,
-        dropdown_x + (dropdown_w - text_w) / 2.0,
-        y + 18.0,
-        text_params(14, WHITE),
-    );
+    let text_w = measure_game_text(current_text, fs);
+    draw_text_ex(current_text, dropdown_x + (dropdown_w - text_w) / 2.0, y + 18.0 * s, text_params(fs, WHITE));
 
     if clicked
         && mouse.0 >= dropdown_x
@@ -1201,37 +1069,20 @@ pub(super) fn draw_dropdown(
     {
         *selected = (*selected + 1) % options.len();
     }
-    32.0
+    32.0 * s
 }
 
-fn draw_dropdown_display(label: &str, value: &str, x: f32, y: f32, width: f32) {
-    let label_w = 100.0;
+fn draw_dropdown_display(label: &str, value: &str, x: f32, y: f32, width: f32, s: f32) {
+    let label_w = 100.0 * s;
     let dropdown_x = x + label_w;
-    let dropdown_w = width - label_w - 10.0;
-    let dropdown_h = 28.0;
+    let dropdown_w = width - label_w - 10.0 * s;
+    let dropdown_h = 28.0 * s;
+    let fs = (14.0 * s) as u16;
 
-    draw_text_ex(label, x, y + 18.0, text_params(14, WHITE));
-    draw_rectangle(
-        dropdown_x,
-        y,
-        dropdown_w,
-        dropdown_h,
-        Color::from_rgba(35, 35, 35, 255),
-    );
-    draw_rectangle_lines(
-        dropdown_x,
-        y,
-        dropdown_w,
-        dropdown_h,
-        1.0,
-        Color::from_rgba(60, 60, 60, 255),
-    );
+    draw_text_ex(label, x, y + 18.0 * s, text_params(fs, WHITE));
+    draw_rectangle(dropdown_x, y, dropdown_w, dropdown_h, Color::from_rgba(35, 35, 35, 255));
+    draw_rectangle_lines(dropdown_x, y, dropdown_w, dropdown_h, 1.0, Color::from_rgba(60, 60, 60, 255));
 
-    let text_w = measure_game_text(value, 14);
-    draw_text_ex(
-        value,
-        dropdown_x + (dropdown_w - text_w) / 2.0,
-        y + 18.0,
-        text_params(14, WHITE),
-    );
+    let text_w = measure_game_text(value, fs);
+    draw_text_ex(value, dropdown_x + (dropdown_w - text_w) / 2.0, y + 18.0 * s, text_params(fs, WHITE));
 }

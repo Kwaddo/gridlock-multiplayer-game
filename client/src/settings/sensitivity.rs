@@ -14,11 +14,12 @@ pub fn update(
     mouse: (f32, f32),
     clicked: bool,
     held: bool,
+    s: f32,
 ) {
-    let slider_h = 20.0;
+    let slider_h = 20.0 * s;
 
     // < button
-    let lt_x = slider_x - btn_size - 5.0;
+    let lt_x = slider_x - btn_size - 5.0 * s;
     if clicked
         && mouse.0 >= lt_x
         && mouse.0 <= lt_x + btn_size
@@ -29,7 +30,7 @@ pub fn update(
     }
 
     // > button
-    let gt_x = slider_x + slider_w + 5.0;
+    let gt_x = slider_x + slider_w + 5.0 * s;
     if clicked
         && mouse.0 >= gt_x
         && mouse.0 <= gt_x + btn_size
@@ -51,24 +52,35 @@ pub fn update(
     }
 }
 
-pub fn draw(value: f32, label_x: f32, slider_x: f32, slider_w: f32, btn_size: f32, row_y: f32) {
-    let slider_h = 20.0;
+pub fn draw(
+    value: f32,
+    label_x: f32,
+    slider_x: f32,
+    slider_w: f32,
+    btn_size: f32,
+    row_y: f32,
+    s: f32,
+) {
+    let slider_h = 20.0 * s;
+    let label_fs = (18.0 * s) as u16;
+    let btn_fs = (20.0 * s) as u16;
+    let val_fs = (16.0 * s) as u16;
 
-    draw_text_ex("Sensitivity", label_x, row_y + 16.0, text_params(18, WHITE));
+    draw_text_ex(
+        "Sensitivity",
+        label_x,
+        row_y + 16.0 * s,
+        text_params(label_fs, WHITE),
+    );
 
     // < button
-    draw_rectangle(
-        slider_x - btn_size - 5.0,
-        row_y,
-        btn_size,
-        btn_size,
-        Color::from_rgba(60, 60, 60, 255),
-    );
+    let lt_x = slider_x - btn_size - 5.0 * s;
+    draw_rectangle(lt_x, row_y, btn_size, btn_size, Color::from_rgba(60, 60, 60, 255));
     draw_text_ex(
         "<",
-        slider_x - btn_size + 3.0,
-        row_y + 18.0,
-        text_params(20, WHITE),
+        lt_x + btn_size * 0.2,
+        row_y + btn_size * 0.72,
+        text_params(btn_fs, WHITE),
     );
 
     // Slider bar
@@ -90,25 +102,20 @@ pub fn draw(value: f32, label_x: f32, slider_x: f32, slider_w: f32, btn_size: f3
     draw_rectangle_lines(slider_x, row_y, slider_w, slider_h, 1.0, GRAY);
 
     // > button
-    draw_rectangle(
-        slider_x + slider_w + 5.0,
-        row_y,
-        btn_size,
-        btn_size,
-        Color::from_rgba(60, 60, 60, 255),
-    );
+    let gt_x = slider_x + slider_w + 5.0 * s;
+    draw_rectangle(gt_x, row_y, btn_size, btn_size, Color::from_rgba(60, 60, 60, 255));
     draw_text_ex(
         ">",
-        slider_x + slider_w + 13.0,
-        row_y + 18.0,
-        text_params(20, WHITE),
+        gt_x + btn_size * 0.3,
+        row_y + btn_size * 0.72,
+        text_params(btn_fs, WHITE),
     );
 
     // Value text
     draw_text_ex(
         &format!("{:.0}", value),
-        slider_x + slider_w + 40.0,
-        row_y + 16.0,
-        text_params(16, WHITE),
+        slider_x + slider_w + btn_size + 15.0 * s,
+        row_y + 16.0 * s,
+        text_params(val_fs, WHITE),
     );
 }

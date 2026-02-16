@@ -69,6 +69,9 @@ pub struct GameConfig {
     // Camera (UI value 40-120, default 90)
     pub fov: f32,
 
+    // GUI Scale (0=Auto, 1-4=fixed scale)
+    pub gui_scale: u8,
+
     // World rendering
     pub render_distance: f32, // how far to draw maze/props (world units)
 
@@ -113,6 +116,9 @@ impl GameConfig {
             // this is the same as the sensitivity from earlier, just converting it to a more intuitive UI value while raw_fov() converts it back to the actual FOV used in the game
             fov: 90.0,
 
+            // GUI Scale
+            gui_scale: 0, // Auto
+
             // World rendering
             render_distance: 45.0,
 
@@ -140,6 +146,42 @@ impl GameConfig {
     // Uses the value directly clamped to reasonable range
     pub fn raw_fov(&self) -> f32 {
         self.fov.clamp(40.0, 120.0)
+    }
+
+    pub fn gui_scale_factor(&self) -> f32 {
+        let effective = if self.gui_scale == 0 {
+            Self::auto_gui_scale()
+        } else {
+            self.gui_scale
+        };
+        match effective {
+            1 => 0.75,
+            2 => 1.0,
+            3 => 1.25,
+            4 => 1.5,
+            _ => 1.0,
+        }
+    }
+
+    fn auto_gui_scale() -> u8 {
+        let h = screen_height();
+        if h >= 2160.0 {
+            4
+        } else if h >= 1440.0 {
+            3
+        } else if h >= 900.0 {
+            2
+        } else {
+            1
+        }
+    }
+
+    pub fn effective_gui_scale(&self) -> u8 {
+        if self.gui_scale == 0 {
+            Self::auto_gui_scale()
+        } else {
+            self.gui_scale
+        }
     }
 
     // collect all bindings into a vec for duplicate detection

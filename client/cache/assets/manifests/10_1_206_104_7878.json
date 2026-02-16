@@ -1,0 +1,102 @@
+{
+  "server_addr": "10.1.206.104:7878",
+  "updated_at_unix_secs": 1771238206,
+  "entries": [
+    {
+      "key": "ar_icon",
+      "path": "assets/images/weapons/ar.png"
+    },
+    {
+      "key": "ar_model",
+      "path": "assets/models/AssaultRifle2_1.obj"
+    },
+    {
+      "key": "ar_shot",
+      "path": "assets/sounds/pew.ogg"
+    },
+    {
+      "key": "pistol_fp_sprite",
+      "path": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png"
+    },
+    {
+      "key": "pistol_icon",
+      "path": "assets/images/weapons/pistol.png"
+    },
+    {
+      "key": "pistol_model",
+      "path": "assets/models/Pistol_1.obj"
+    },
+    {
+      "key": "pistol_shot",
+      "path": "assets/sounds/pew.ogg"
+    },
+    {
+      "key": "rifle_aim_idle",
+      "path": "assets/models/player/Rifle_Aim_Idle.glb"
+    },
+    {
+      "key": "rifle_idle",
+      "path": "assets/models/player/Rifle_Idle.glb"
+    },
+    {
+      "key": "rifle_walk",
+      "path": "assets/models/player/Rifle_Walk.glb"
+    },
+    {
+      "key": "shotgun_fp_sprite",
+      "path": "assets/images/weapons/FPS Weapon Sprites/frames/shotgun3.png"
+    },
+    {
+      "key": "shotgun_icon",
+      "path": "assets/images/weapons/shotgun.png"
+    },
+    {
+      "key": "shotgun_model",
+      "path": "assets/models/Shotgun_1.obj"
+    },
+    {
+      "key": "shotgun_shot",
+      "path": "assets/sounds/pew.ogg"
+    },
+    {
+      "key": "smg_icon",
+      "path": "assets/images/weapons/smg.png"
+    },
+    {
+      "key": "smg_model",
+      "path": "assets/models/SubmachineGun_1.obj"
+    },
+    {
+      "key": "smg_shot",
+      "path": "assets/sounds/pew.ogg"
+    },
+    {
+      "key": "sniper_icon",
+      "path": "assets/images/weapons/Sniper.png"
+    },
+    {
+      "key": "sniper_model",
+      "path": "assets/models/SniperRifle_1.obj"
+    },
+    {
+      "key": "sniper_shot",
+      "path": "assets/sounds/pew.ogg"
+    },
+    {
+      "key": "xhair_scope_141",
+      "path": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair141.png"
+    },
+    {
+      "key": "xhair_scope_148",
+      "path": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair148.png"
+    },
+    {
+      "key": "xhair_scope_162",
+      "path": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair162.png"
+    },
+    {
+      "key": "floor_texture",
+      "path": "assets/images/textures/rocks.png"
+    }
+  ]
+}
