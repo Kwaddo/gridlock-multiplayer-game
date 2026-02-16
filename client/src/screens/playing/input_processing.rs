@@ -9,6 +9,8 @@ use crate::weapons::{recoil, SpreadContext};
 
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
+use rodio::{Decoder, Sink};
+use std::io::Cursor;
 
 use super::PlayingState;
 
@@ -18,6 +20,16 @@ impl PlayingState {
         config: &GameConfig,
         mut maze: Option<&mut Maze>,
     ) -> Option<GameState> {
+        let raw_delta = get_frame_time();
+        if raw_delta > 0.20 {
+            self.clear_input();
+            self.move_dir = Vec3::ZERO;
+            self.jump_requested = false;
+            self.movement_state.velocity = Vec3::ZERO;
+            self.last_mouse_pos = mouse_position();
+            return None;
+        }
+
         if config.bind_settings.is_pressed() {
             return Some(GameState::Paused);
         }
@@ -48,7 +60,7 @@ impl PlayingState {
 
         input::process_weapon_input(&mut self.weapons, config);
 
-        let delta = get_frame_time();
+        let delta = raw_delta.min(0.05);
         let vel = self.movement_state.velocity;
         let is_moving = vec2(vel.x, vel.z).length() > 0.5;
         recover(self.weapons.active_mut(), delta, is_moving);
@@ -63,9 +75,12 @@ impl PlayingState {
         let spread = recoil::current_spread(self.weapons.active(), &ctx);
         self.weapons.active_mut().computed_spread = spread;
 
+        let mut fire_sound_key: Option<&'static str> = None;
         let weapon = self.weapons.active_mut();
         if config.bind_fire.is_down() {
             if weapon.fire() {
+                fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
+
                 if self.dev_mode.infinite_ammo {
                     weapon.ammo = weapon.stats_data.magazine_size;
                     weapon.is_reloading = false;
@@ -284,8 +299,35 @@ impl PlayingState {
             weapon.trigger_held = false;
         }
 
+        if let Some(sound_key) = fire_sound_key {
+            self.play_weapon_shot_sound(sound_key);
+        }
+
         self.check_teleporter(maze.as_ref().map(|m| &**m));
 
         None
+    }
+
+    fn play_weapon_shot_sound(&self, sound_key: &str) {
+        let Some(sample_bytes) = self.sound_samples.get(sound_key) else {
+            return;
+        };
+        let Some(audio_handle) = self.audio_stream_handle.as_ref() else {
+            return;
+        };
+
+        let pitch = gen_range(0.94f32, 1.06f32);
+        let volume = gen_range(0.70f32, 0.82f32);
+        let cursor = Cursor::new(sample_bytes.clone());
+        let Ok(source) = Decoder::new(cursor) else {
+            return;
+        };
+        let Ok(sink) = Sink::try_new(audio_handle) else {
+            return;
+        };
+        sink.set_speed(pitch);
+        sink.set_volume(volume);
+        sink.append(source);
+        sink.detach();
     }
 }
