@@ -10,7 +10,15 @@ use super::PlayingState;
 
 impl PlayingState {
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
-        let delta = get_frame_time();
+        let raw_delta = get_frame_time();
+        if raw_delta > 0.20 {
+            self.move_dir = Vec3::ZERO;
+            self.jump_requested = false;
+            self.movement_state.velocity = Vec3::ZERO;
+            return;
+        }
+
+        let delta = raw_delta.min(0.05);
 
         if self.is_dead {
             if self.death_timer > 0.0 {

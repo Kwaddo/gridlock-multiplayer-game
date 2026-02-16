@@ -17,6 +17,8 @@ impl PlayingState {
     }
 
     fn draw_player_model(&self, p: &crate::types::player::OtherPlayer) {
+        let render_pos = p.render_position();
+        let render_yaw = p.render_yaw;
         let desired_key = p.skin_type.model_key();
 
         let anim_model = desired_key
@@ -29,8 +31,9 @@ impl PlayingState {
         if p.skin_type.is_model_based() {
             if let Some(anim) = anim_model {
                 let s = anim.normalize_scale;
-                let transform = Mat4::from_translation(vec3(p.x, p.y + anim.y_offset, p.z))
-                    * Mat4::from_rotation_y(-p.yaw)
+                let transform =
+                    Mat4::from_translation(render_pos + vec3(0.0, anim.y_offset, 0.0))
+                    * Mat4::from_rotation_y(-render_yaw)
                     * Mat4::from_scale(vec3(s, s, s));
                 let gl = unsafe { get_internal_gl() };
                 gl.quad_gl.push_model_matrix(transform);
@@ -39,8 +42,7 @@ impl PlayingState {
                 return;
             }
             if let Some(mesh) = static_mesh {
-                let transform =
-                    Mat4::from_translation(vec3(p.x, p.y, p.z)) * Mat4::from_rotation_y(-p.yaw);
+                let transform = Mat4::from_translation(render_pos) * Mat4::from_rotation_y(-render_yaw);
                 let gl = unsafe { get_internal_gl() };
                 gl.quad_gl.push_model_matrix(transform);
                 draw_mesh(mesh);
@@ -50,8 +52,8 @@ impl PlayingState {
         }
 
         let color = if p.skin.is_some() { WHITE } else { p.color };
-        draw_cube(vec3(p.x, p.y + 0.6, p.z), vec3(0.6, 1.2, 0.4), None, color);
-        draw_cube(vec3(p.x, p.y + 1.4, p.z), vec3(0.4, 0.4, 0.4), None, color);
+        draw_cube(render_pos + vec3(0.0, 0.6, 0.0), vec3(0.6, 1.2, 0.4), None, color);
+        draw_cube(render_pos + vec3(0.0, 1.4, 0.0), vec3(0.4, 0.4, 0.4), None, color);
     }
 
     pub(crate) fn draw_target_dummy(&self) {

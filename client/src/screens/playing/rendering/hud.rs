@@ -77,7 +77,7 @@ impl PlayingState {
         }
 
         for p in &self.other_players {
-            let world_pos = vec3(p.x, p.y + 2.0, p.z);
+            let world_pos = p.render_position() + vec3(0.0, 2.0, 0.0);
             let rel = world_pos - camera.position;
             let dot = rel.dot(forward);
             if dot >= 0.1 {
