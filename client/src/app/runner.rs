@@ -10,6 +10,7 @@ use client::types::maze::Maze;
 use client::ui::fonts;
 use client::weapons::crosshair_presets::CrosshairPresetManager;
 
+use super::asset_cache::{load_cached_manifest, save_cached_manifest};
 use super::asset_loader::load_asset_entry;
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
@@ -56,11 +57,11 @@ pub async fn run() {
 
                     preset_manager = CrosshairPresetManager::new(&username);
 
-                    loading_assets.clear();
+                    loading_assets = load_cached_manifest(&server_addr);
                     loading_index = 0;
                     loading_current.clear();
                     loading_stable_frames = 0;
-                    loading_started = false;
+                    loading_started = !loading_assets.is_empty();
                     state = GameState::Loading;
                 }
                 login_screen.draw();
@@ -72,7 +73,8 @@ pub async fn run() {
                 let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
                 if let Some(entries) = assets {
                     if !entries.is_empty() {
-                        loading_assets.extend(entries);
+                        merge_manifest_entries(&mut loading_assets, entries);
+                        save_cached_manifest(&server_addr, &loading_assets);
                         loading_stable_frames = 0;
                     }
                 }
@@ -289,5 +291,15 @@ pub async fn run() {
         }
 
         next_frame().await;
+    }
+}
+
+fn merge_manifest_entries(existing: &mut Vec<(String, String)>, incoming: Vec<(String, String)>) {
+    for (key, path) in incoming {
+        if let Some((_, existing_path)) = existing.iter_mut().find(|(k, _)| *k == key) {
+            *existing_path = path;
+        } else {
+            existing.push((key, path));
+        }
     }
 }
