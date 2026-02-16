@@ -9,7 +9,9 @@ use crate::weapons::WeaponInventory;
 
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
+use rodio::{OutputStream, OutputStreamHandle};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
 
@@ -22,9 +24,13 @@ pub struct PlayingState {
     pub movement_state: MovementState,
     pub movement_config: MovementConfig,
     pub bob_timer: f32,
+    pub audio_stream: Option<OutputStream>,
+    pub audio_stream_handle: Option<OutputStreamHandle>,
+    pub sound_samples: HashMap<String, Arc<[u8]>>,
     pub assets: HashMap<String, Texture2D>,
     pub models: HashMap<String, Mesh>,
     pub animated_models: HashMap<String, AnimatedModel>,
+    pub asset_source_paths: HashMap<String, String>,
     pub move_dir: Vec3,
     pub jump_requested: bool,
     pub current_world: WorldId,
@@ -67,6 +73,14 @@ pub struct KillFeedEntry {
 
 impl PlayingState {
     pub async fn new() -> Self {
+        let (audio_stream, audio_stream_handle) = match OutputStream::try_default() {
+            Ok((stream, handle)) => (Some(stream), Some(handle)),
+            Err(err) => {
+                println!("Failed to initialize audio output stream: {:?}", err);
+                (None, None)
+            }
+        };
+
         Self {
             position: vec3(0.0, 0.0, 0.0),
             yaw: 0.0,
@@ -76,9 +90,13 @@ impl PlayingState {
             movement_state: MovementState::new(),
             movement_config: MovementConfig::new(),
             bob_timer: 0.0,
+            audio_stream,
+            audio_stream_handle,
+            sound_samples: HashMap::new(),
             assets: HashMap::new(),
             models: HashMap::new(),
             animated_models: HashMap::new(),
+            asset_source_paths: HashMap::new(),
             move_dir: Vec3::ZERO,
             jump_requested: false,
             current_world: WorldId::Lobby,
