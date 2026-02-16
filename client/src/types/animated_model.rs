@@ -3,6 +3,13 @@ use gltf::mesh::util::ReadIndices;
 use macroquad::models::{Mesh, Vertex};
 use macroquad::prelude::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipSelectionMode {
+    LongestDuration,
+    MostMotion,
+    LeastMotion,
+}
+
 #[derive(Clone, Copy)]
 struct LocalTransform {
     translation: Vec3,
@@ -237,6 +244,13 @@ fn gltf_image_to_rgba8(image: &gltf::image::Data) -> Result<Vec<u8>, String> {
 }
 
 pub fn load_gltf_animated_model(path: &str) -> Result<AnimatedModel, String> {
+    load_gltf_animated_model_with_mode(path, ClipSelectionMode::LongestDuration)
+}
+
+pub fn load_gltf_animated_model_with_mode(
+    path: &str,
+    mode: ClipSelectionMode,
+) -> Result<AnimatedModel, String> {
     let (doc, buffers, images) = gltf::import(path)
         .map_err(|e| format!("failed to import gltf '{}': {e}", path))?;
 
@@ -269,10 +283,16 @@ pub fn load_gltf_animated_model(path: &str) -> Result<AnimatedModel, String> {
     let first_prim_index = skinned_prims[0].1.index();
     let mut selected_anim = None;
     let mut selected_duration = 0.0f32;
+    let mut selected_motion = match mode {
+        ClipSelectionMode::MostMotion => -1.0,
+        ClipSelectionMode::LeastMotion => f32::INFINITY,
+        ClipSelectionMode::LongestDuration => 0.0,
+    };
     for anim in doc.animations() {
         let mut has_channels = false;
         let mut first_t = f32::INFINITY;
         let mut last_t = f32::NEG_INFINITY;
+        let mut motion_score = 0.0f32;
         for channel in anim.channels() {
             has_channels = true;
             let r = channel.reader(|buffer| Some(&buffers[buffer.index()]));
@@ -284,6 +304,16 @@ pub fn load_gltf_animated_model(path: &str) -> Result<AnimatedModel, String> {
                     }
                     first_t = first_t.min(first);
                     last_t = last_t.max(last);
+                }
+            }
+            if let Some(ReadOutputs::Translations(v)) = r.read_outputs() {
+                let mut prev: Option<Vec3> = None;
+                for t in v {
+                    let cur = vec3(t[0], t[1], t[2]);
+                    if let Some(p) = prev {
+                        motion_score += (cur - p).length();
+                    }
+                    prev = Some(cur);
                 }
             }
         }

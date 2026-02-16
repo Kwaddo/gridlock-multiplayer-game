@@ -103,6 +103,29 @@ pub fn draw_bot_tab(
                 };
             }
 
+            let skin_mode_label = if bot.skin_override.is_some() {
+                "Manual"
+            } else {
+                "Auto"
+            };
+            let (btn_h, mode_pressed) = draw_action_button_public(
+                &format!("Skin Mode: {}", skin_mode_label),
+                x,
+                y,
+                220.0,
+                mouse,
+                clicked,
+            );
+            y += btn_h;
+
+            if mode_pressed {
+                if bot.skin_override.is_some() {
+                    bot.skin_override = None;
+                } else {
+                    bot.skin_override = Some(bot.player.skin_type);
+                }
+            }
+
             let (btn_h, skin_pressed) = draw_action_button_public(
                 &format!("Skin: {}", bot.player.skin_type.label()),
                 x,
@@ -114,7 +137,9 @@ pub fn draw_bot_tab(
             y += btn_h;
 
             if skin_pressed {
-                bot.player.skin_type = bot.player.skin_type.next();
+                let next_skin = bot.player.skin_type.next();
+                bot.player.skin_type = next_skin;
+                bot.skin_override = Some(next_skin);
             }
 
             let yaw_label = match bot.yaw_mode {
