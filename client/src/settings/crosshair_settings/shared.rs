@@ -1,5 +1,6 @@
+use crate::weapons::crosshair::{CrosshairConfig, CrosshairType};
 use crate::weapons::stats::WeaponKind;
-use crate::weapons::crosshair::CrosshairType;
+use crate::weapons::WeaponInventory;
 use macroquad::prelude::*;
 
 pub(super) const CROSSHAIR_TYPES: &[CrosshairType] = &[
@@ -80,6 +81,8 @@ pub struct CrosshairSettingsPreview {
     pub name_conflict_index: Option<usize>,
     pub name_error: String,
     pub pending_tab: Option<u8>,
+    pub saved_crosshairs: Option<Vec<CrosshairConfig>>,
+    pub crosshair_scroll: f32,
 }
 
 impl CrosshairSettingsPreview {
@@ -103,6 +106,8 @@ impl CrosshairSettingsPreview {
             name_conflict_index: None,
             name_error: String::new(),
             pending_tab: None,
+            saved_crosshairs: None,
+            crosshair_scroll: 0.0,
         }
     }
 
@@ -115,6 +120,24 @@ impl CrosshairSettingsPreview {
         self.name_conflict_index = None;
         self.name_error.clear();
         self.pending_tab = None;
+        self.saved_crosshairs = None;
+        self.crosshair_scroll = 0.0;
+    }
+
+    pub fn snapshot_crosshairs(&mut self, weapons: &WeaponInventory) {
+        self.saved_crosshairs =
+            Some(weapons.weapons.iter().map(|w| w.crosshair.clone()).collect());
+    }
+
+    pub fn has_crosshair_changes(&self, weapons: &WeaponInventory) -> bool {
+        match &self.saved_crosshairs {
+            Some(saved) => weapons
+                .weapons
+                .iter()
+                .zip(saved.iter())
+                .any(|(w, s)| w.crosshair != *s),
+            None => false,
+        }
     }
 
     pub(super) fn sync_from_color(&mut self, color: Color) {

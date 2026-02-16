@@ -19,6 +19,7 @@ pub enum CrosshairType {
     AngleBrackets,
 }
 
+#[derive(Clone, PartialEq)]
 pub struct CrosshairConfig {
     pub color: Color,
     pub dot_enabled: bool,

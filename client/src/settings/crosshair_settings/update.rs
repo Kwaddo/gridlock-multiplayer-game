@@ -14,15 +14,51 @@ pub fn update_crosshair_settings(
     x: f32,
     y: f32,
     w: f32,
-    _h: f32,
+    h: f32,
     mouse: (f32, f32),
     clicked: bool,
     held: bool,
+    s: f32,
 ) {
-    let btn_y = y + 60.0;
-    let btn_w = 100.0;
-    let btn_h = 35.0;
-    let btn_gap = 10.0;
+    let pad = 15.0 * s;
+    let x = x + pad;
+    let w = w - pad * 2.0;
+
+    // Mouse wheel scroll within the panel area
+    let in_panel = mouse.0 >= x && mouse.0 <= x + w && mouse.1 >= y && mouse.1 <= y + h;
+    if in_panel {
+        let wheel = mouse_wheel().1;
+        state.crosshair_scroll -= wheel * 20.0 * s;
+    }
+
+    // Compute total content height for clamping scroll
+    let picker_size = 120.0 * s;
+    let total_h = 50.0 * s      // header → weapon buttons
+        + 35.0 * s              // weapon buttons height
+        + 15.0 * s              // gap to preset
+        + 30.0 * s              // preset row
+        + 15.0 * s              // gap to sliders
+        + 24.0 * s * 5.0        // 5 slider rows
+        + 5.0 * s               // section gap
+        + 24.0 * s * 2.0        // outline toggle + thickness
+        + 5.0 * s               // section gap
+        + 30.0 * s              // dropdown
+        + 10.0 * s              // gap
+        + 20.0 * s              // "COLOR" label
+        + picker_size            // color picker
+        + 10.0 * s              // gap
+        + 24.0 * s              // alpha slider
+        + 10.0 * s;             // bottom padding
+    let max_scroll = (total_h - h).max(0.0);
+    state.crosshair_scroll = state.crosshair_scroll.clamp(0.0, max_scroll);
+
+    // Apply scroll offset
+    let y = y - state.crosshair_scroll;
+
+    let btn_y = y + 50.0 * s;
+    let btn_w = 90.0 * s;
+    let btn_h = 35.0 * s;
+    let btn_gap = 10.0 * s;
 
     for (i, kind) in WeaponKind::ALL.iter().enumerate() {
         let btn_x = x + (btn_w + btn_gap) * (i as f32);
@@ -46,17 +82,18 @@ pub fn update_crosshair_settings(
         state.sync_from_color(weapon.crosshair.color);
     }
 
-    let left_w = (w * 0.55) - 20.0;
-    let preset_y = btn_y + btn_h + 15.0;
-    let preset_dropdown_w = left_w - 100.0;
-    let preset_btn_w = 75.0;
-    let preset_btn_gap = 5.0;
+    let left_w = (w * 0.55) - 20.0 * s;
+    let preset_y = btn_y + btn_h + 15.0 * s;
+    let preset_dropdown_w = left_w - 100.0 * s;
+    let preset_btn_w = 75.0 * s;
+    let preset_btn_gap = 5.0 * s;
+    let dropdown_h = 30.0 * s;
 
     if clicked
         && mouse.0 >= x
         && mouse.0 <= x + preset_dropdown_w
         && mouse.1 >= preset_y
-        && mouse.1 <= preset_y + 30.0
+        && mouse.1 <= preset_y + dropdown_h
         && !presets.presets.is_empty()
     {
         state.selected_preset = (state.selected_preset + 1) % presets.presets.len();
@@ -74,7 +111,7 @@ pub fn update_crosshair_settings(
             && mouse.0 >= delete_x
             && mouse.0 <= delete_x + preset_btn_w
             && mouse.1 >= preset_y
-            && mouse.1 <= preset_y + 30.0
+            && mouse.1 <= preset_y + dropdown_h
         {
             presets.delete(state.selected_preset);
             if state.selected_preset >= presets.presets.len() && !presets.presets.is_empty() {
@@ -84,21 +121,21 @@ pub fn update_crosshair_settings(
     }
 
     let slider_x = x;
-    let mut slider_y = preset_y + 45.0;
+    let mut slider_y = preset_y + 45.0 * s;
     let slider_w = left_w;
 
     let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
     let ch = &mut weapon.crosshair;
 
-    slider_y += draw_toggle("Enable dot", &mut ch.dot_enabled, slider_x, slider_y, mouse, clicked);
-    slider_y += draw_slider("Gap", &mut ch.center_gap, 0.0, 10.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None);
-    slider_y += draw_slider("Length", &mut ch.line_length, 0.0, 10.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None);
-    slider_y += draw_slider("Thickness", &mut ch.line_thickness, 0.0, 2.0, 0.05, slider_x, slider_y, slider_w, mouse, clicked, held, None);
-    slider_y += draw_slider("Dot size", &mut ch.dot_size, 0.0, 5.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None);
-    slider_y += 5.0;
-    slider_y += draw_toggle("Outline", &mut ch.outline_enabled, slider_x, slider_y, mouse, clicked);
-    slider_y += draw_slider("Thickness", &mut ch.outline_thickness, 0.0, 2.0, 0.05, slider_x, slider_y, slider_w, mouse, clicked, held, None);
-    slider_y += 5.0;
+    slider_y += draw_toggle("Enable dot", &mut ch.dot_enabled, slider_x, slider_y, mouse, clicked, s);
+    slider_y += draw_slider("Gap", &mut ch.center_gap, 0.0, 10.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
+    slider_y += draw_slider("Length", &mut ch.line_length, 0.0, 10.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
+    slider_y += draw_slider("Thickness", &mut ch.line_thickness, 0.0, 2.0, 0.05, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
+    slider_y += draw_slider("Dot size", &mut ch.dot_size, 0.0, 5.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
+    slider_y += 5.0 * s;
+    slider_y += draw_toggle("Outline", &mut ch.outline_enabled, slider_x, slider_y, mouse, clicked, s);
+    slider_y += draw_slider("Thickness", &mut ch.outline_thickness, 0.0, 2.0, 0.05, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
+    slider_y += 5.0 * s;
 
     let type_names: Vec<&str> = CROSSHAIR_TYPES.iter().map(|t| crosshair_type_name(*t)).collect();
     let mut selected_idx = CROSSHAIR_TYPES
@@ -107,7 +144,7 @@ pub fn update_crosshair_settings(
         .unwrap_or(0);
     let prev_idx = selected_idx;
 
-    slider_y += draw_dropdown("Crosshair Type", &type_names, &mut selected_idx, slider_x, slider_y, slider_w, mouse, clicked);
+    slider_y += draw_dropdown("Crosshair Type", &type_names, &mut selected_idx, slider_x, slider_y, slider_w, mouse, clicked, s);
 
     if selected_idx < CROSSHAIR_TYPES.len() {
         ch.crosshair_type = CROSSHAIR_TYPES[selected_idx];
@@ -120,12 +157,11 @@ pub fn update_crosshair_settings(
         state.shotgun_type_warning = true;
     }
 
-    slider_y += 10.0;
+    slider_y += 10.0 * s;
 
-    let picker_size = 140.0;
-    let hue_bar_w = 20.0;
+    let hue_bar_w = 20.0 * s;
     let picker_x = slider_x;
-    let picker_y = slider_y + 20.0;
+    let picker_y = slider_y + 20.0 * s;
 
     let sv_x = picker_x;
     let sv_y = picker_y;
@@ -139,7 +175,7 @@ pub fn update_crosshair_settings(
         state.val = 1.0 - ((mouse.1 - sv_y) / picker_size).clamp(0.0, 1.0);
     }
 
-    let hue_x = sv_x + picker_size + 10.0;
+    let hue_x = sv_x + picker_size + 10.0 * s;
     let hue_y = sv_y;
     if held
         && mouse.0 >= hue_x
@@ -150,7 +186,7 @@ pub fn update_crosshair_settings(
         state.hue = (((mouse.1 - hue_y) / picker_size) * 360.0).clamp(0.0, 359.99);
     }
 
-    slider_y = picker_y + picker_size + 10.0;
+    slider_y = picker_y + picker_size + 10.0 * s;
     draw_slider(
         "Alpha",
         &mut state.alpha_val,
@@ -159,23 +195,25 @@ pub fn update_crosshair_settings(
         1.0,
         slider_x,
         slider_y,
-        picker_size + hue_bar_w + 10.0,
+        picker_size + hue_bar_w + 10.0 * s,
         mouse,
         clicked,
         held,
         Some(Color::from_rgba(200, 200, 200, 255)),
+        s,
     );
 
     let (r, g, b) = hsv_to_rgb(state.hue, state.sat, state.val);
     let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
     weapon.crosshair.color = Color::new(r, g, b, state.alpha_val / 255.0);
 
-    let preview_x = x + w * 0.55 + 20.0;
-    let preview_h = 300.0;
-    let btn_row_y = y + 60.0 + 35.0 + 15.0 + preview_h + 10.0;
-    let small_btn_w = 90.0;
-    let small_btn_h = 30.0;
-    let small_gap = 8.0;
+    // Right column buttons (preview area)
+    let preview_x = x + w * 0.55 + 20.0 * s;
+    let preview_h = (h - 150.0 * s).max(100.0 * s);
+    let btn_row_y = btn_y + btn_h + 15.0 * s + preview_h + 10.0 * s;
+    let small_btn_w = 90.0 * s;
+    let small_btn_h = 30.0 * s;
+    let small_gap = 8.0 * s;
 
     if clicked
         && mouse.0 >= preview_x
@@ -211,7 +249,7 @@ pub fn update_crosshair_settings(
     if state.shotgun_type_warning {
         let warn_x = preview_x;
         let warn_y = btn_row_y;
-        if draw_shotgun_type_warning(warn_x, warn_y, 0.0, 0.0, mouse, clicked) {
+        if draw_shotgun_type_warning(warn_x, warn_y, 0.0, 0.0, mouse, clicked, s) {
             state.shotgun_type_warning = false;
             state.shotgun_warning_shown_this_visit = true;
         }
