@@ -45,6 +45,7 @@ pub struct SimulatedPlayer {
     pub pattern: MovementPattern,
     pub action_state: ActionState,
     pub yaw_mode: YawMode,
+    pub skin_override: Option<PlayerSkin>,
     movement_timer: f32,
     pattern_change_timer: f32,
     current_random_pattern: MovementPattern,
@@ -68,6 +69,7 @@ impl SimulatedPlayer {
                 ads: false,
             },
             yaw_mode: YawMode::Fixed,
+            skin_override: None,
             movement_timer: 0.0,
             pattern_change_timer: gen_range(3.0, 8.0),
             current_random_pattern: MovementPattern::ForwardBack,
@@ -158,15 +160,20 @@ impl SimulatedPlayer {
         self.player.x = self.player.x.clamp(-50.0, 50.0);
         self.player.z = self.player.z.clamp(-50.0, 50.0);
 
-        // Auto-switch skin based on state
-        let is_moving = active_pattern != MovementPattern::None;
-        self.player.skin_type = if self.action_state.ads {
-            PlayerSkin::RifleAimIdle
-        } else if is_moving {
-            PlayerSkin::RifleWalk
+        // If dev mode set a manual override, keep that skin locked.
+        if let Some(override_skin) = self.skin_override {
+            self.player.skin_type = override_skin;
         } else {
-            PlayerSkin::RifleIdle
-        };
+            // Auto-switch skin based on state.
+            let is_moving = active_pattern != MovementPattern::None;
+            self.player.skin_type = if self.action_state.ads {
+                PlayerSkin::RifleAimIdle
+            } else if is_moving {
+                PlayerSkin::RifleWalk
+            } else {
+                PlayerSkin::RifleIdle
+            };
+        }
 
         self.player.update(delta);
     }

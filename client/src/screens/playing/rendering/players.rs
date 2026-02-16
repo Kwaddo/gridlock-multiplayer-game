@@ -18,15 +18,52 @@ impl PlayingState {
 
     fn draw_player_model(&self, p: &crate::types::player::OtherPlayer) {
         let desired_key = p.skin_type.model_key();
+        let desired_anim = desired_key.and_then(|k| self.animated_models.get(k));
+        let desired_static = desired_key.and_then(|k| self.models.get(k));
 
-        let anim_model = desired_key
-            .and_then(|k| self.animated_models.get(k))
-            .or_else(|| self.animated_models.get("rifle_idle"));
-        let static_mesh = desired_key
-            .and_then(|k| self.models.get(k))
-            .or_else(|| self.models.get("rifle_idle"));
+        let anim_model = desired_anim.or_else(|| self.animated_models.get("rifle_idle"));
+        let static_mesh = desired_static.or_else(|| self.models.get("rifle_idle"));
+
+        if let Some(key) = desired_key {
+            if desired_anim.is_some() || desired_static.is_some() {
+                let source = if desired_anim.is_some() {
+                    "animated"
+                } else {
+                    "static"
+                };
+                println!(
+                    "[model-debug] key hit key='{}' source={} skin='{}' player_id={}",
+                    key,
+                    source,
+                    p.skin_type.label(),
+                    p.id
+                );
+            }
+            if desired_anim.is_none() && desired_static.is_none() {
+                println!(
+                    "[model-debug] missing requested key='{}' skin='{}' player_id={} -> trying fallback 'rifle_idle'",
+                    key,
+                    p.skin_type.label(),
+                    p.id
+                );
+            }
+        }
 
         if p.skin_type.is_model_based() {
+            if desired_anim.is_none() && anim_model.is_some() {
+                println!(
+                    "[model-debug] using animated fallback 'rifle_idle' for skin='{}' player_id={}",
+                    p.skin_type.label(),
+                    p.id
+                );
+            }
+            if desired_anim.is_none() && desired_static.is_none() && static_mesh.is_some() {
+                println!(
+                    "[model-debug] using static fallback 'rifle_idle' for skin='{}' player_id={}",
+                    p.skin_type.label(),
+                    p.id
+                );
+            }
             if let Some(anim) = anim_model {
                 let s = anim.normalize_scale;
                 let transform = Mat4::from_translation(vec3(p.x, p.y + anim.y_offset, p.z))
