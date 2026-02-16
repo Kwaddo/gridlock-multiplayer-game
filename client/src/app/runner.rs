@@ -205,7 +205,23 @@ pub async fn run() {
             }
 
             GameState::Settings => {
-                clear_background(Color::from_rgba(0, 0, 0, 255));
+                let assets = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                if let Some(entries) = assets {
+                    for (key, path) in entries {
+                        load_asset_entry(key, path, &mut playing_state).await;
+                    }
+                }
+                playing_state.simulate(&config, maze.as_ref());
+                playing_state.render(&config, &username, player_id, maze.as_ref());
+
+                draw_rectangle(
+                    0.0,
+                    0.0,
+                    screen_width(),
+                    screen_height(),
+                    Color::from_rgba(0, 0, 0, 180),
+                );
+
                 settings_screen.draw(
                     &config,
                     &playing_state.weapons,
