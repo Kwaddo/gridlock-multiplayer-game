@@ -1,5 +1,10 @@
 {
   "global": {
+    "pistol_shot": "assets/sounds/pew.ogg",
+    "smg_shot": "assets/sounds/pew.ogg",
+    "shotgun_shot": "assets/sounds/pew.ogg",
+    "ar_shot": "assets/sounds/pew.ogg",
+    "sniper_shot": "assets/sounds/pew.ogg",
     "pistol_icon": "assets/images/weapons/pistol.png",
     "pistol_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
     "smg_icon": "assets/images/weapons/smg.png",
