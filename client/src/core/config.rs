@@ -78,6 +78,11 @@ pub struct GameConfig {
     // Player
     pub standing_height: f32,
     pub crouch_height: f32,
+
+    // Minimap (0=Small, 1=Medium, 2=Large)
+    pub minimap_size: u8,
+    // Minimap shape (0=Circle, 1=Square)
+    pub minimap_shape: u8,
 }
 
 impl GameConfig {
@@ -125,6 +130,10 @@ impl GameConfig {
             // Player
             standing_height: 1.0,
             crouch_height: 0.5,
+
+            // Minimap
+            minimap_size: 1,  // Medium
+            minimap_shape: 0, // Circle
         }
     }
 

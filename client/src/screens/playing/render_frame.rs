@@ -63,6 +63,7 @@ impl PlayingState {
             username,
             player_id,
             self.position,
+            self.yaw,
             forward,
             right,
             self.pitch,
@@ -79,6 +80,9 @@ impl PlayingState {
             self.shield,
             self.max_shield,
             &self.kill_feed,
+            maze,
+            self.current_world,
+            config,
         );
 
         if self.is_dead {

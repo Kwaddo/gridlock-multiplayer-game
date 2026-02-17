@@ -5,6 +5,8 @@ use crate::ui::fonts::{measure_game_text, text_params};
 use macroquad::prelude::*;
 
 const GUI_SCALE_OPTIONS: &[(&str, u8)] = &[("Auto", 0), ("1", 1), ("2", 2), ("3", 3)];
+const MINIMAP_SIZE_OPTIONS: &[(&str, u8)] = &[("Small", 0), ("Medium", 1), ("Large", 2)];
+const MINIMAP_SHAPE_OPTIONS: &[(&str, u8)] = &[("Circle", 0), ("Square", 1)];
 
 pub fn update_sliders(
     config: &mut GameConfig,
@@ -64,6 +66,36 @@ pub fn update_sliders(
         held,
         s,
     );
+
+    // Minimap Size row
+    let minimap_row_y = row_y2 + 60.0 * s;
+    if clicked {
+        for (i, &(_, value)) in MINIMAP_SIZE_OPTIONS.iter().enumerate() {
+            let bx = gui_start_x + (gui_btn_w + gui_btn_gap) * (i as f32);
+            if mouse.0 >= bx
+                && mouse.0 <= bx + gui_btn_w
+                && mouse.1 >= minimap_row_y
+                && mouse.1 <= minimap_row_y + gui_btn_h
+            {
+                config.minimap_size = value;
+            }
+        }
+    }
+
+    // Minimap Shape row
+    let shape_row_y = minimap_row_y + gui_btn_h + 12.0 * s;
+    if clicked {
+        for (i, &(_, value)) in MINIMAP_SHAPE_OPTIONS.iter().enumerate() {
+            let bx = gui_start_x + (gui_btn_w + gui_btn_gap) * (i as f32);
+            if mouse.0 >= bx
+                && mouse.0 <= bx + gui_btn_w
+                && mouse.1 >= shape_row_y
+                && mouse.1 <= shape_row_y + gui_btn_h
+            {
+                config.minimap_shape = value;
+            }
+        }
+    }
 }
 
 pub fn draw_sliders(
@@ -138,4 +170,71 @@ pub fn draw_sliders(
     // FOV row
     let row_y2 = row_y + 60.0 * s;
     fov::draw(config.fov, label_x, slider_x, slider_w, btn_size, row_y2, s);
+
+    // Minimap Size row
+    let minimap_row_y = row_y2 + 60.0 * s;
+    draw_text_ex(
+        "Minimap Size",
+        label_x,
+        minimap_row_y + 20.0 * s,
+        text_params(label_fs, WHITE),
+    );
+    draw_button_row(
+        MINIMAP_SIZE_OPTIONS,
+        config.minimap_size,
+        slider_x,
+        minimap_row_y,
+        gui_btn_w,
+        gui_btn_h,
+        gui_btn_gap,
+        btn_fs,
+    );
+
+    // Minimap Shape row
+    let shape_row_y = minimap_row_y + gui_btn_h + 12.0 * s;
+    draw_text_ex(
+        "Minimap Shape",
+        label_x,
+        shape_row_y + 20.0 * s,
+        text_params(label_fs, WHITE),
+    );
+    draw_button_row(
+        MINIMAP_SHAPE_OPTIONS,
+        config.minimap_shape,
+        slider_x,
+        shape_row_y,
+        gui_btn_w,
+        gui_btn_h,
+        gui_btn_gap,
+        btn_fs,
+    );
+}
+
+fn draw_button_row(
+    options: &[(&str, u8)],
+    active: u8,
+    start_x: f32,
+    row_y: f32,
+    btn_w: f32,
+    btn_h: f32,
+    gap: f32,
+    fs: u16,
+) {
+    for (i, &(label, value)) in options.iter().enumerate() {
+        let bx = start_x + (btn_w + gap) * (i as f32);
+        let bg = if active == value {
+            Color::from_rgba(80, 150, 220, 255)
+        } else {
+            Color::from_rgba(45, 45, 45, 255)
+        };
+        draw_rectangle(bx, row_y, btn_w, btn_h, bg);
+        draw_rectangle_lines(bx, row_y, btn_w, btn_h, 1.0, GRAY);
+        let tw = measure_game_text(label, fs);
+        draw_text_ex(
+            label,
+            bx + (btn_w - tw) / 2.0,
+            row_y + btn_h * 0.68,
+            text_params(fs, WHITE),
+        );
+    }
 }
