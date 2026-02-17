@@ -449,7 +449,7 @@ impl SettingsScreen {
                 Color::from_rgba(40, 40, 40, 255)
             };
             draw_rectangle(tab_x, tab_y, tab_w, tab_h, tab_color);
-            draw_rectangle_lines(tab_x, tab_y, tab_w, tab_h, 1.0, GRAY);
+            draw_rectangle_lines(tab_x, tab_y, tab_w, tab_h, 2.0, WHITE);
             let text_w = measure_game_text(name, tab_fs);
             draw_text_ex(
                 name,
@@ -469,6 +469,15 @@ impl SettingsScreen {
     ) {
         let s = config.gui_scale_factor();
 
+        // Full-screen dark overlay matching pause menu style
+        draw_rectangle(
+            0.0,
+            0.0,
+            screen_width(),
+            screen_height(),
+            Color::from_rgba(0, 0, 0, 180),
+        );
+
         self.draw_header(s);
 
         let tab_h = 36.0 * s;
@@ -484,7 +493,7 @@ impl SettingsScreen {
                     panel_h,
                     Color::from_rgba(30, 30, 30, 240),
                 );
-                draw_rectangle_lines(panel_x, content_top, panel_w, panel_h, 1.0, GRAY);
+                draw_rectangle_lines(panel_x, content_top, panel_w, panel_h, 2.0, WHITE);
 
                 let section_fs = (20.0 * s) as u16;
                 let section_title = "General";
@@ -539,28 +548,23 @@ impl SettingsScreen {
                     s,
                 );
 
-                // Clip overflow above and below the panel
-                draw_rectangle(
-                    panel_x - 1.0,
-                    0.0,
-                    panel_w + 2.0,
-                    content_top,
-                    Color::from_rgba(0, 0, 0, 255),
-                );
+                // Clip overflow above and below the panel (full-screen width)
+                let clip_color = Color::from_rgba(0, 0, 0, 180);
+                draw_rectangle(0.0, 0.0, screen_width(), content_top, clip_color);
                 let panel_bottom = content_top + panel_h;
                 draw_rectangle(
-                    panel_x - 1.0,
+                    0.0,
                     panel_bottom,
-                    panel_w + 2.0,
+                    screen_width(),
                     screen_height() - panel_bottom,
-                    Color::from_rgba(0, 0, 0, 255),
+                    clip_color,
                 );
 
                 // Redraw title and tabs over the top mask
                 self.draw_header(s);
 
                 // Redraw panel border
-                draw_rectangle_lines(panel_x, content_top, panel_w, panel_h, 1.0, GRAY);
+                draw_rectangle_lines(panel_x, content_top, panel_w, panel_h, 2.0, WHITE);
             }
         }
 

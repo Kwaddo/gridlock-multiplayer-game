@@ -639,7 +639,7 @@ fn draw_crosshair_preview(
         };
         draw_rectangle(x, y, w, h, bg_color);
     }
-    draw_rectangle_lines(x, y, w, h, 2.0, GRAY);
+    draw_rectangle_lines(x, y, w, h, 2.0, WHITE);
 
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
@@ -846,14 +846,6 @@ fn draw_crosshair_preview(
         }
     }
 
-    let name_color = if state.preview_light_bg { BLACK } else { WHITE };
-    let name_fs = (16.0 * s) as u16;
-    draw_text_ex(
-        weapon.kind.stats().name,
-        x + 10.0 * s,
-        y + 20.0 * s,
-        text_params(name_fs, name_color),
-    );
 }
 
 pub(super) fn draw_shotgun_type_warning(

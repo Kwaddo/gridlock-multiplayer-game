@@ -169,7 +169,7 @@ pub fn draw_keybinds(
         panel_h,
         Color::from_rgba(30, 30, 30, 240),
     );
-    draw_rectangle_lines(right_x, panel_top, panel_w, panel_h, 1.0, GRAY);
+    draw_rectangle_lines(right_x, panel_top, panel_w, panel_h, 2.0, WHITE);
 
     let title_fs = (22.0 * s) as u16;
     let kb_title = "Key Bindings";
