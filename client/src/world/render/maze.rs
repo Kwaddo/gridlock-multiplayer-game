@@ -5,8 +5,20 @@ use crate::types::maze::Maze;
 use super::props::draw_props;
 use super::utils::{apply_lighting, tint_color, CeilingLight};
 
-pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32) {
+pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32, show_hitboxes: bool) {
     if let Some(m) = maze {
+        // Reset GL state to a known-good configuration before doing any
+        // maze rendering. Debug draws (wireframes/tracers/viewmodel) can
+        // leave global GL state in a non-default state which causes some
+        // meshes to be skipped when `show_hitboxes` is toggled.
+        {
+            use macroquad::window::get_internal_gl;
+            let gl = unsafe { get_internal_gl() };
+            gl.quad_gl.draw_mode(DrawMode::Triangles);
+            gl.quad_gl.depth_test(true);
+            gl.quad_gl.texture(None);
+        }
+
         let effective_render = render_distance.max(m.cell_size * 10.0);
         let render_dist_sq = effective_render * effective_render;
         let wall_dist_sq =
@@ -260,7 +272,13 @@ pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32) {
             );
         }
 
-        draw_props(m, &ceiling_lights, viewer_pos, render_dist_sq);
+        draw_props(
+            m,
+            &ceiling_lights,
+            viewer_pos,
+            render_dist_sq,
+            show_hitboxes,
+        );
     } else {
         draw_cube(vec3(0.0, -1.0, 0.0), vec3(20.0, 0.1, 20.0), None, GRAY);
     }

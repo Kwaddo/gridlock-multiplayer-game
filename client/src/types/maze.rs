@@ -11,7 +11,7 @@ pub struct Room {
     pub h: u8,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum PropKind {
     Crate = 1,
     Barrel = 2,
