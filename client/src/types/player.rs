@@ -129,8 +129,48 @@ impl PlayerSkin {
     }
 
     pub fn next(self) -> Self {
-        let idx = Self::ALL.iter().position(|skin| *skin == self).unwrap_or(0);
-        Self::ALL[(idx + 1) % Self::ALL.len()]
+        // Hardcoded test flow:
+        // Walk -> Sprint -> Jump -> StandDeath
+        // Crouch -> CrouchDeath
+        // Prone -> ProneDeath
+        // Extras
+        // Edit this match when you want a different manual animation sequence.
+        match self {
+            PlayerSkin::Texture => PlayerSkin::RifleIdle,
+
+            // Walk / sprint / jump -> stand death
+            PlayerSkin::RifleIdle => PlayerSkin::RifleAimIdle,
+            PlayerSkin::RifleAimIdle => PlayerSkin::RifleWalk,
+            PlayerSkin::RifleWalk => PlayerSkin::WalkBack,
+            PlayerSkin::WalkBack => PlayerSkin::WalkLeft,
+            PlayerSkin::WalkLeft => PlayerSkin::WalkRight,
+            PlayerSkin::WalkRight => PlayerSkin::SprintForward,
+            PlayerSkin::SprintForward => PlayerSkin::SprintLeft,
+            PlayerSkin::SprintLeft => PlayerSkin::SprintRight,
+            PlayerSkin::SprintRight => PlayerSkin::Jump,
+            PlayerSkin::Jump => PlayerSkin::StandDeath,
+            PlayerSkin::StandDeath => PlayerSkin::Crouch,
+
+            // Crouch -> crouch death
+            PlayerSkin::Crouch => PlayerSkin::CrouchAim,
+            PlayerSkin::CrouchAim => PlayerSkin::CrouchForward,
+            PlayerSkin::CrouchForward => PlayerSkin::CrouchBack,
+            PlayerSkin::CrouchBack => PlayerSkin::CrouchLeft,
+            PlayerSkin::CrouchLeft => PlayerSkin::CrouchRight,
+            PlayerSkin::CrouchRight => PlayerSkin::CrouchDeath,
+            PlayerSkin::CrouchDeath => PlayerSkin::ProneIdle,
+
+            // Prone -> prone death
+            PlayerSkin::ProneIdle => PlayerSkin::ProneForward,
+            PlayerSkin::ProneForward => PlayerSkin::ProneTurnRight,
+            PlayerSkin::ProneTurnRight => PlayerSkin::ProneTurnLeft,
+            PlayerSkin::ProneTurnLeft => PlayerSkin::ProneDeath,
+
+            // Extras
+            PlayerSkin::ProneDeath => PlayerSkin::Slide,
+            PlayerSkin::Slide => PlayerSkin::Twerk,
+            PlayerSkin::Twerk => PlayerSkin::RifleIdle,
+        }
     }
 }
 
@@ -144,7 +184,7 @@ pub struct OtherPlayer {
     pub render_y: f32,
     pub render_z: f32,
     pub render_yaw: f32,
-    has_snapshot: bool,
+    has_snapshot: bool, 
     pub username: String,
     pub skin: Option<Texture2D>,
     pub skin_type: PlayerSkin,

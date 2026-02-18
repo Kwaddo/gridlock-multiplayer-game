@@ -49,8 +49,8 @@ impl PlayingState {
         }
         let local_pos = Some(self.position);
         for bot in &mut self.practice_bots {
-            bot.update(delta);
             bot.simulate_yaw(delta, local_pos);
+            bot.update(delta);
         }
         self.practice_bots.retain(|bot| !bot.is_dead());
         if self.hit_marker_timer > 0.0 {

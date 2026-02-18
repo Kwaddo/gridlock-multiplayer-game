@@ -52,6 +52,7 @@ pub struct SimulatedPlayer {
     pattern_change_timer: f32,
     current_random_pattern: MovementPattern,
     jump_event_timer: f32,
+    circle_center: Vec2,
 }
 
 impl SimulatedPlayer {
@@ -60,6 +61,7 @@ impl SimulatedPlayer {
         player.x = spawn_pos.x;
         player.y = spawn_pos.y;
         player.z = spawn_pos.z;
+        player.apply_snapshot(spawn_pos.x, spawn_pos.y, spawn_pos.z, player.yaw);
 
         Self {
             player,
@@ -78,6 +80,7 @@ impl SimulatedPlayer {
             pattern_change_timer: gen_range(3.0, 8.0),
             current_random_pattern: MovementPattern::ForwardBack,
             jump_event_timer: 0.0,
+            circle_center: vec2(spawn_pos.x, spawn_pos.z),
         }
     }
 
@@ -104,8 +107,8 @@ impl SimulatedPlayer {
                 if let Some(pp) = player_pos {
                     let dx = pp.x - self.player.x;
                     let dz = pp.z - self.player.z;
-                    // Model forward is 180deg off from gameplay forward in current rig.
-                    self.player.yaw = dz.atan2(dx) + std::f32::consts::PI;
+                    // Match gameplay yaw convention (forward = (cos(yaw), sin(yaw))).
+                    self.player.yaw = dz.atan2(dx);
                 }
             }
             YawMode::Spin => {
@@ -160,10 +163,11 @@ impl SimulatedPlayer {
                 self.player.x += move_speed * delta;
             }
             MovementPattern::Circle => {
-                let radius = 5.0;
+                // Keep circle movement close for easier visual/aim testing.
+                let radius = 2.0;
                 let angle = self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0;
-                self.player.x = angle.cos() * radius;
-                self.player.z = angle.sin() * radius;
+                self.player.x = self.circle_center.x + angle.cos() * radius;
+                self.player.z = self.circle_center.y + angle.sin() * radius;
             }
             MovementPattern::Random => unreachable!(),
         }
@@ -197,6 +201,9 @@ impl SimulatedPlayer {
         );
         self.player.skin_type = AnimState::skin_from_state(anim_state, self.skin_override);
 
+        // Keep render snapshot in sync so model draw position matches gameplay position.
+        self.player
+            .apply_snapshot(self.player.x, self.player.y, self.player.z, self.player.yaw);
         self.player.update(delta);
     }
 
