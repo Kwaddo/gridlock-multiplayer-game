@@ -28,7 +28,12 @@ impl PlayingState {
             }
             WorldId::Maze => {
                 if let Some(m) = maze {
-                    draw_maze(Some(m), self.position, config.render_distance);
+                    draw_maze(
+                        Some(m),
+                        self.position,
+                        config.render_distance,
+                        self.dev_mode.show_hitboxes,
+                    );
                 }
             }
         }
