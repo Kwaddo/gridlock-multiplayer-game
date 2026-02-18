@@ -1,10 +1,11 @@
 use crate::weapons::combat::HitZone;
-use crate::weapons::combat::CombatEntity;
 
 use macroquad::prelude::*;
 use macroquad::window::get_internal_gl;
 
 use super::super::PlayingState;
+
+const WORLD_PLAYER_RENDER_SCALE: f32 = 0.67;
 
 impl PlayingState {
     pub(crate) fn draw_other_players(&self) {
@@ -29,9 +30,10 @@ impl PlayingState {
 
         if p.skin_type.is_model_based() {
             if let Some(anim) = anim_model {
-                let s = anim.normalize_scale;
+                let s = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
+                let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
                 let transform =
-                    Mat4::from_translation(render_pos + vec3(0.0, anim.y_offset, 0.0))
+                    Mat4::from_translation(render_pos + vec3(0.0, y_offset, 0.0))
                     * Mat4::from_rotation_y(-render_yaw)
                     * Mat4::from_scale(vec3(s, s, s));
                 let gl = unsafe { get_internal_gl() };
@@ -41,7 +43,13 @@ impl PlayingState {
                 return;
             }
             if let Some(mesh) = static_mesh {
-                let transform = Mat4::from_translation(render_pos) * Mat4::from_rotation_y(-render_yaw);
+                let transform = Mat4::from_translation(render_pos)
+                    * Mat4::from_rotation_y(-render_yaw)
+                    * Mat4::from_scale(vec3(
+                        WORLD_PLAYER_RENDER_SCALE,
+                        WORLD_PLAYER_RENDER_SCALE,
+                        WORLD_PLAYER_RENDER_SCALE,
+                    ));
                 let gl = unsafe { get_internal_gl() };
                 gl.quad_gl.push_model_matrix(transform);
                 draw_mesh(mesh);
@@ -88,10 +96,10 @@ impl PlayingState {
         }
 
         for p in &self.other_players {
-            Self::draw_entity_hitboxes(p.entity_position(), &p.hitboxes);
+            Self::draw_entity_hitboxes(p.render_position(), &p.hitboxes);
         }
         for bot in &self.practice_bots {
-            Self::draw_entity_hitboxes(bot.player.entity_position(), &bot.player.hitboxes);
+            Self::draw_entity_hitboxes(bot.player.render_position(), &bot.player.hitboxes);
         }
     }
 

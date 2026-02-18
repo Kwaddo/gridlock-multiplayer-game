@@ -31,7 +31,7 @@
     "anim_crouch_left": "assets/models/player/Crouch_Left.glb",
     "anim_crouch_right": "assets/models/player/Crouch_Right.glb",
     "anim_jump": "assets/models/player/Jump.glb",
-    "anim_pron_turn_left": "assets/models/player/Pron_Turn_Left.glb",
+    "anim_prone_turn_left": "assets/models/player/Prone_Turn_Left.glb",
     "anim_prone_death": "assets/models/player/Prone_Death.glb",
     "anim_prone_forward": "assets/models/player/Prone_Forward.glb",
     "anim_prone_idle": "assets/models/player/Prone_Idle.glb",
