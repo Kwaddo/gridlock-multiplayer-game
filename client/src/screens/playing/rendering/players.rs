@@ -5,7 +5,7 @@ use macroquad::window::get_internal_gl;
 
 use super::super::PlayingState;
 
-const WORLD_PLAYER_RENDER_SCALE: f32 = 0.94;
+const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 // Mixamo-style rigs are authored facing +Z, while gameplay yaw uses +X as forward.
 // Keep this offset centralized so yaw logic and movement math stay in gameplay space.
 const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
