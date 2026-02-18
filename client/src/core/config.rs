@@ -130,7 +130,7 @@ impl GameConfig {
             crouch_height: 0.5,
 
             // Audio
-            mute_audio: false,
+            mute_audio: true,
         }
     }
 

@@ -11,7 +11,8 @@ use std::collections::HashMap;
 
 use super::PlayingState;
 
-const WORLD_PLAYER_RENDER_SCALE: f32 = 0.94;
+const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
+const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
 
 impl PlayingState {
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
@@ -168,7 +169,7 @@ impl PlayingState {
         }
 
         let to_offset = |p: Vec3| -> Vec3 {
-            let rotated = Mat3::from_rotation_y(-yaw) * (p * scale);
+            let rotated = Mat3::from_rotation_y(-yaw + PLAYER_MODEL_YAW_OFFSET) * (p * scale);
             rotated + vec3(0.0, y_offset, 0.0)
         };
 
@@ -176,78 +177,54 @@ impl PlayingState {
         let chest = any_joint(anim, &[&["spine2"], &["chest"], &["spine1"]])?;
         let hips = any_joint(anim, &[&["hips"], &["pelvis"]])?;
 
-        let l_foot = any_joint(anim, &[&["left", "foot"], &["left", "toe"]]);
-        let r_foot = any_joint(anim, &[&["right", "foot"], &["right", "toe"]]);
-        let l_shoulder = any_joint(anim, &[&["left", "shoulder"], &["left", "arm"]]);
-        let r_shoulder = any_joint(anim, &[&["right", "shoulder"], &["right", "arm"]]);
+        let l_foot = any_joint(anim, &[&["left", "foot"], &["left", "toe"]]).unwrap_or(hips);
+        let r_foot = any_joint(anim, &[&["right", "foot"], &["right", "toe"]]).unwrap_or(hips);
+        let l_shoulder = any_joint(anim, &[&["left", "shoulder"], &["left", "arm"]]).unwrap_or(chest);
+        let r_shoulder = any_joint(anim, &[&["right", "shoulder"], &["right", "arm"]]).unwrap_or(chest);
 
         let head_o = to_offset(head);
         let chest_o = to_offset(chest);
         let hips_o = to_offset(hips);
-        let feet_y = [l_foot.map(to_offset), r_foot.map(to_offset)]
-            .into_iter()
-            .flatten()
-            .map(|v| v.y)
-            .fold(0.0_f32, f32::min);
+        let l_foot_o = to_offset(l_foot);
+        let r_foot_o = to_offset(r_foot);
+        let l_shoulder_o = to_offset(l_shoulder);
+        let r_shoulder_o = to_offset(r_shoulder);
 
-        let shoulder_span = match (l_shoulder.map(to_offset), r_shoulder.map(to_offset)) {
-            (Some(l), Some(r)) => (l - r).length(),
-            _ => 0.45,
+        // Segment-driven AABB approximation works across standing/crouch/prone/death poses.
+        // It avoids relying on Y-only "height" deltas, which collapse on horizontal animations.
+        let segment_box = |a: Vec3, b: Vec3, pad: Vec3, min_half: Vec3, zone: HitZone| -> Hitbox {
+            let center = (a + b) * 0.5;
+            let axis_half = (b - a).abs() * 0.5;
+            let half = vec3(
+                (axis_half.x + pad.x).max(min_half.x),
+                (axis_half.y + pad.y).max(min_half.y),
+                (axis_half.z + pad.z).max(min_half.z),
+            );
+            Hitbox {
+                center_offset: center,
+                half_extents: half,
+                zone,
+            }
         };
 
-        // Gameplay-friendly inflation: keep pose-driven centers, but make volumes forgiving.
-        let head_h = ((head_o.y - chest_o.y) * 0.95).clamp(0.13, 0.24);
-        let torso_h = ((chest_o.y - hips_o.y) * 0.72).clamp(0.22, 0.40);
-        let leg_h = ((hips_o.y - feet_y) * 0.58).clamp(0.24, 0.52);
-
-        let torso_half_x = (shoulder_span * 0.46).clamp(0.17, 0.30);
-        let torso_half_z = (torso_half_x * 0.88).clamp(0.15, 0.26);
-        let shoulder_half_x = (shoulder_span * 0.52).clamp(0.20, 0.34);
-
-        let head_center = vec3(head_o.x, head_o.y - head_h * 0.55, head_o.z);
-        let upper_torso_center = vec3(
-            chest_o.x * 0.65 + hips_o.x * 0.35,
-            chest_o.y * 0.65 + hips_o.y * 0.35,
-            chest_o.z * 0.65 + hips_o.z * 0.35,
-        );
-        let lower_torso_center = vec3(
-            (chest_o.x + hips_o.x) * 0.5,
-            (chest_o.y + hips_o.y) * 0.5,
-            (chest_o.z + hips_o.z) * 0.5,
-        );
-        let shoulder_center = vec3(chest_o.x, chest_o.y + torso_h * 0.15, chest_o.z);
-        let leg_center = vec3(
-            hips_o.x,
-            (hips_o.y + feet_y) * 0.5,
-            hips_o.z,
-        );
+        let shoulder_width = (l_shoulder_o - r_shoulder_o).length().clamp(0.25, 0.65);
+        let head_radius = ((head_o - chest_o).length() * 0.40).clamp(0.12, 0.20);
+        let torso_min = vec3(shoulder_width * 0.24, 0.12, shoulder_width * 0.20);
+        let limb_min = vec3(0.10, 0.10, 0.10);
+        let head_up = (head_o - chest_o).normalize_or_zero();
+        let head_center = head_o + head_up * (head_radius * 0.25);
 
         Some(vec![
             Hitbox {
                 center_offset: head_center,
-                half_extents: vec3(torso_half_x * 0.88, head_h, torso_half_z * 0.92),
+                half_extents: vec3(head_radius, head_radius, head_radius),
                 zone: HitZone::Head,
             },
-            Hitbox {
-                center_offset: shoulder_center,
-                half_extents: vec3(shoulder_half_x, torso_h * 0.45, torso_half_z),
-                zone: HitZone::Torso,
-            },
-            Hitbox {
-                center_offset: upper_torso_center,
-                half_extents: vec3(torso_half_x, torso_h, torso_half_z),
-                zone: HitZone::Torso,
-            },
-            Hitbox {
-                center_offset: lower_torso_center,
-                half_extents: vec3(torso_half_x * 0.9, torso_h * 0.8, torso_half_z * 0.9),
-                zone: HitZone::Torso,
-            },
-            Hitbox {
-                center_offset: leg_center,
-                half_extents: vec3(torso_half_x * 0.9, leg_h, torso_half_z * 0.88),
-                zone: HitZone::Limbs,
-            },
+            segment_box(chest_o, hips_o, vec3(0.08, 0.08, 0.08), torso_min, HitZone::Torso),
+            segment_box(l_shoulder_o, hips_o, vec3(0.05, 0.05, 0.05), torso_min * 0.8, HitZone::Torso),
+            segment_box(r_shoulder_o, hips_o, vec3(0.05, 0.05, 0.05), torso_min * 0.8, HitZone::Torso),
+            segment_box(hips_o, l_foot_o, vec3(0.05, 0.05, 0.05), limb_min, HitZone::Limbs),
+            segment_box(hips_o, r_foot_o, vec3(0.05, 0.05, 0.05), limb_min, HitZone::Limbs),
         ])
     }
 }
