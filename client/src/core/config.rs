@@ -78,6 +78,9 @@ pub struct GameConfig {
     // Player
     pub standing_height: f32,
     pub crouch_height: f32,
+
+    // Audio
+    pub mute_audio: bool,
 }
 
 impl GameConfig {
@@ -125,6 +128,9 @@ impl GameConfig {
             // Player
             standing_height: 1.0,
             crouch_height: 0.5,
+
+            // Audio
+            mute_audio: false,
         }
     }
 

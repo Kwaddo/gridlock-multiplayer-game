@@ -40,6 +40,7 @@ impl PlayingState {
         }
 
         self.draw_other_players();
+        self.draw_player_hitboxes();
         self.draw_tracers(camera.position);
 
         set_default_camera();

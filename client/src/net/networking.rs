@@ -3,6 +3,12 @@ use std::net::UdpSocket;
 use macroquad::prelude::*;
 
 use crate::net::protocols::{
+    EVT_JUMP_START,
+    EVT_LANDED,
+    FLAG_ADS,
+    FLAG_AIRBORNE,
+    FLAG_CROUCHING,
+    FLAG_SPRINTING,
     MSG_ASSETS,
     MSG_DAMAGE,
     MSG_DEATH,
@@ -200,6 +206,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     let world_id = recv_buf[offset];
                     offset += 1;
                     let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
+                    let state_flags = recv_buf[offset];
+                    offset += 1;
+                    let event_flags = recv_buf[offset];
+                    offset += 1;
                     let name_len = recv_buf[offset] as usize;
                     offset += 1;
                     let name = String::from_utf8_lossy(
@@ -213,6 +223,12 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.y = y;
                         other_player.z = z;
                         other_player.yaw = yaw;
+                        other_player.is_sprinting = (state_flags & FLAG_SPRINTING) != 0;
+                        other_player.is_crouching = (state_flags & FLAG_CROUCHING) != 0;
+                        other_player.is_ads = (state_flags & FLAG_ADS) != 0;
+                        other_player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
+                        other_player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
+                        other_player.evt_landed = (event_flags & EVT_LANDED) != 0;
                         new_players.push(other_player);
                     }
                 }

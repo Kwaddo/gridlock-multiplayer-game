@@ -14,11 +14,20 @@ impl PlayingState {
         if raw_delta > 0.20 {
             self.move_dir = Vec3::ZERO;
             self.jump_requested = false;
+            self.just_jumped = false;
+            self.just_landed = false;
             self.movement_state.velocity = Vec3::ZERO;
             return;
         }
 
         let delta = raw_delta.min(0.05);
+        self.just_jumped = false;
+        self.just_landed = false;
+
+        for entry in &mut self.kill_feed {
+            entry.timer -= delta;
+        }
+        self.kill_feed.retain(|entry| entry.timer > 0.0);
 
         if self.is_dead {
             if self.death_timer > 0.0 {
@@ -28,11 +37,6 @@ impl PlayingState {
             }
             return;
         }
-
-        for entry in &mut self.kill_feed {
-            entry.timer -= delta;
-        }
-        self.kill_feed.retain(|entry| entry.timer > 0.0);
 
         self.weapons.update(delta);
         for model in self.animated_models.values_mut() {
@@ -70,6 +74,7 @@ impl PlayingState {
 
         self.update_stamina(config, delta);
         self.update_crouch_height(config, delta);
+        let was_grounded = self.movement_state.is_grounded;
         self.apply_jump();
         self.apply_gravity(delta);
 
@@ -108,6 +113,10 @@ impl PlayingState {
                     self.position = clamped;
                 }
             }
+        }
+
+        if !was_grounded && self.movement_state.is_grounded {
+            self.just_landed = true;
         }
     }
 }
