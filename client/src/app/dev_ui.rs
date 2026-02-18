@@ -65,6 +65,19 @@ pub fn draw_bot_tab(
             );
             y += 24.0;
 
+            let skin_key = bot.player.skin_type.model_key().unwrap_or("None");
+            draw_text_ex(
+                &format!(
+                    "Skin Debug: {} ({})",
+                    bot.player.skin_type.label(),
+                    skin_key
+                ),
+                x,
+                y + 14.0,
+                text_params(13, Color::from_rgba(180, 220, 255, 255)),
+            );
+            y += 20.0;
+
             y += draw_section_header_public("Movement Pattern", x, y);
 
             let pattern_label = match bot.pattern {
@@ -199,6 +212,7 @@ pub fn draw_bot_tab(
                 clicked,
             );
             y += draw_toggle_public("Crouch", &mut bot.action_state.crouch, x, y, mouse, clicked);
+            y += draw_toggle_public("Sprint", &mut bot.action_state.sprint, x, y, mouse, clicked);
             y += draw_toggle_public("Slide", &mut bot.action_state.slide, x, y, mouse, clicked);
             y += draw_toggle_public("Shoot", &mut bot.action_state.shoot, x, y, mouse, clicked);
             y += draw_toggle_public("ADS", &mut bot.action_state.ads, x, y, mouse, clicked);

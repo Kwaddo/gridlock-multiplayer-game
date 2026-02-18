@@ -1,5 +1,8 @@
-use crate::protocols::{MSG_POSITION, MSG_WALL_BROKEN, MSG_WORLD_CHANGE};
-
+use crate::net::protocols::{
+    EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS, FLAG_AIRBORNE,
+    FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MSG_HIT, MSG_POSITION,
+    MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+};
 use std::net::UdpSocket;
 
 use super::PlayingState;
@@ -22,11 +25,58 @@ impl PlayingState {
                 let _ = s.send_to(&msg, server_addr);
             }
 
+            while let Some((victim_id, damage)) = self.pending_hits.pop() {
+                let mut msg = vec![MSG_HIT];
+                msg.extend_from_slice(&victim_id.to_be_bytes());
+                msg.extend_from_slice(&damage.to_be_bytes());
+                let _ = s.send_to(&msg, server_addr);
+            }
+
+            // Continuous state flags
+            let mut state_flags = 0u8;
+            if self.movement_state.is_sprinting {
+                state_flags |= FLAG_SPRINTING;
+            }
+            if self.movement_state.is_crouching {
+                state_flags |= FLAG_CROUCHING;
+            }
+            if self.weapons.active().ads_progress > 0.5 {
+                state_flags |= FLAG_ADS;
+            }
+            if !self.movement_state.is_grounded {
+                state_flags |= FLAG_AIRBORNE;
+            }
+            // Placeholders for future states (currently not implemented)
+            if false {
+                state_flags |= FLAG_PRONE;
+            }
+            if false {
+                state_flags |= FLAG_SLIDING;
+            }
+
+            // One-frame event flags
+            let mut event_flags = 0u8;
+            if self.just_jumped {
+                event_flags |= EVT_JUMP_START;
+            }
+            if self.just_landed {
+                event_flags |= EVT_LANDED;
+            }
+            // Placeholders for future events
+            if false {
+                event_flags |= EVT_SLIDE_START;
+            }
+            if false {
+                event_flags |= EVT_SLIDE_END;
+            }
+
             let mut msg = vec![MSG_POSITION];
             msg.extend_from_slice(&self.position.x.to_be_bytes());
             msg.extend_from_slice(&self.position.y.to_be_bytes());
             msg.extend_from_slice(&self.position.z.to_be_bytes());
             msg.extend_from_slice(&self.yaw.to_be_bytes());
+            msg.push(state_flags);
+            msg.push(event_flags);
             let _ = s.send_to(&msg, server_addr);
         }
     }

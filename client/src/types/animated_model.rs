@@ -281,13 +281,21 @@ pub fn load_gltf_animated_model_with_mode(
     }
     let mesh = skinned_prims[0].0.clone();
     let first_prim_index = skinned_prims[0].1.index();
+    let file_stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let stem_tokens: Vec<String> = file_stem
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+        .collect();
+
     let mut selected_anim = None;
-    let mut selected_duration = 0.0f32;
-    let mut selected_motion = match mode {
-        ClipSelectionMode::MostMotion => -1.0,
-        ClipSelectionMode::LeastMotion => f32::INFINITY,
-        ClipSelectionMode::LongestDuration => 0.0,
-    };
+    let mut best_name_score = -1i32;
+    let mut best_metric = f32::NEG_INFINITY;
+    let mut best_duration = f32::NEG_INFINITY;
     for anim in doc.animations() {
         let mut has_channels = false;
         let mut first_t = f32::INFINITY;
@@ -322,14 +330,39 @@ pub fn load_gltf_animated_model_with_mode(
         } else {
             0.0
         };
+        let anim_name = anim.name().unwrap_or("").to_lowercase();
+        let mut name_score = 0i32;
+        if !anim_name.is_empty() && !stem_tokens.is_empty() {
+            for t in &stem_tokens {
+                if anim_name.contains(t) {
+                    name_score += 1;
+                }
+            }
+        }
+        let metric = match mode {
+            ClipSelectionMode::MostMotion => motion_score,
+            ClipSelectionMode::LeastMotion => -motion_score,
+            ClipSelectionMode::LongestDuration => clip_duration,
+        };
         println!(
-            "[anim] {} candidate anim={} duration={}",
+            "[anim] {} candidate anim={} name='{}' name_score={} duration={} motion={}",
             path,
             anim.index(),
-            clip_duration
+            anim.name().unwrap_or(""),
+            name_score,
+            clip_duration,
+            motion_score
         );
-        if has_channels && clip_duration > selected_duration {
-            selected_duration = clip_duration;
+        if has_channels
+            && (name_score > best_name_score
+                || (name_score == best_name_score && metric > best_metric)
+                || (name_score == best_name_score
+                    && (metric - best_metric).abs() <= f32::EPSILON
+                    && clip_duration > best_duration))
+        {
+            best_name_score = name_score;
+            best_metric = metric;
+            best_duration = clip_duration;
             selected_anim = Some(anim);
         }
     }

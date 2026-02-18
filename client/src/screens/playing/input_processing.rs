@@ -10,6 +10,7 @@ use crate::weapons::{recoil, SpreadContext};
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
 use rodio::{Decoder, Sink};
+use std::collections::HashMap;
 use std::io::Cursor;
 
 use super::PlayingState;
@@ -32,6 +33,11 @@ impl PlayingState {
 
         if config.bind_settings.is_pressed() {
             return Some(GameState::Paused);
+        }
+
+        if self.is_dead {
+            self.clear_input();
+            return None;
         }
 
         let weapon = self.weapons.active();
@@ -137,6 +143,7 @@ impl PlayingState {
                 let mut total_dmg = 0.0f32;
                 let mut any_headshot = false;
                 let mut pellet_mask: u16 = 0;
+                let mut player_damage_by_id: HashMap<u32, f32> = HashMap::new();
 
                 for i in 0..stats.pellet_count as usize {
                     let mut fwd = base_fwd;
@@ -265,7 +272,9 @@ impl PlayingState {
                                 self.target_dummy.take_damage(dmg);
                             }
                             EntityKind::Player => {
-                                self.other_players[idx].take_damage(dmg);
+                                if let Some(victim_id) = self.other_players[idx].entity_id() {
+                                    *player_damage_by_id.entry(victim_id).or_insert(0.0) += dmg;
+                                }
                             }
                             EntityKind::Bot => {
                                 self.practice_bots[idx].take_damage(dmg);
@@ -293,6 +302,12 @@ impl PlayingState {
                         lifetime: 1.0,
                     });
                 }
+
+                for (victim_id, damage) in player_damage_by_id {
+                    if damage > 0.0 {
+                        self.pending_hits.push((victim_id, damage));
+                    }
+                }
             }
             weapon.trigger_held = true;
         } else {
@@ -300,7 +315,7 @@ impl PlayingState {
         }
 
         if let Some(sound_key) = fire_sound_key {
-            self.play_weapon_shot_sound(sound_key);
+            self.play_weapon_shot_sound(sound_key, config);
         }
 
         self.check_teleporter(maze.as_ref().map(|m| &**m));
@@ -308,7 +323,10 @@ impl PlayingState {
         None
     }
 
-    fn play_weapon_shot_sound(&self, sound_key: &str) {
+    fn play_weapon_shot_sound(&self, sound_key: &str, config: &GameConfig) {
+        if config.mute_audio {
+            return;
+        }
         let Some(sample_bytes) = self.sound_samples.get(sound_key) else {
             return;
         };

@@ -34,6 +34,7 @@ impl PlayingState {
             self.movement_state.velocity.y = self.movement_config.jump_strength;
             self.movement_state.is_grounded = false;
             self.jump_requested = false;
+            self.just_jumped = true;
         }
     }
 

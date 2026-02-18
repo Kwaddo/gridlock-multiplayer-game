@@ -10,6 +10,8 @@ pub(super) fn draw_weapon_and_kill_feed(
     assets: &HashMap<String, Texture2D>,
     other_players: &[OtherPlayer],
     kill_feed: &[crate::screens::playing::KillFeedEntry],
+    local_player_id: u32,
+    local_username: &str,
 ) {
     let weapon = weapons.active();
     let stats = weapon.stats();
@@ -121,16 +123,24 @@ pub(super) fn draw_weapon_and_kill_feed(
         let alpha = ((entry.timer / 5.0).min(1.0) * 255.0) as u8;
         let text_color = Color::from_rgba(255, 255, 255, alpha);
 
-        let killer_name = other_players
-            .iter()
-            .find(|p| p.id == entry.killer_id)
-            .map(|p| p.username.as_str())
-            .unwrap_or("Player");
-        let victim_name = other_players
-            .iter()
-            .find(|p| p.id == entry.victim_id)
-            .map(|p| p.username.as_str())
-            .unwrap_or("Player");
+        let killer_name = if entry.killer_id == local_player_id {
+            local_username
+        } else {
+            other_players
+                .iter()
+                .find(|p| p.id == entry.killer_id)
+                .map(|p| p.username.as_str())
+                .unwrap_or("Player")
+        };
+        let victim_name = if entry.victim_id == local_player_id {
+            local_username
+        } else {
+            other_players
+                .iter()
+                .find(|p| p.id == entry.victim_id)
+                .map(|p| p.username.as_str())
+                .unwrap_or("Player")
+        };
 
         let mut x_offset = feed_x;
 
