@@ -63,6 +63,8 @@ pub struct AnimatedModel {
     node_global_valid: Vec<bool>,
     node_tracks: Vec<NodeAnimationTrack>,
     joint_nodes: Vec<usize>,
+    joint_names: Vec<String>,
+    joint_positions: Vec<Vec3>,
     inverse_bind: Vec<Mat4>,
     skin_mats: Vec<Mat4>,
     duration: f32,
@@ -111,6 +113,7 @@ impl AnimatedModel {
         for i in 0..self.joint_nodes.len() {
             let node_idx = self.joint_nodes[i];
             let global = self.global_for_node(node_idx);
+            self.joint_positions[i] = global.transform_point3(Vec3::ZERO);
             self.skin_mats[i] = global * self.inverse_bind[i];
         }
 
@@ -164,6 +167,19 @@ impl AnimatedModel {
         self.node_global[node_idx] = global;
         self.node_global_valid[node_idx] = true;
         global
+    }
+
+    pub fn joint_position_with_tokens(&self, tokens: &[&str]) -> Option<Vec3> {
+        self.joint_names
+            .iter()
+            .zip(self.joint_positions.iter())
+            .find_map(|(name, pos)| {
+                if tokens.iter().all(|t| name.contains(t)) {
+                    Some(*pos)
+                } else {
+                    None
+                }
+            })
     }
 }
 
@@ -692,6 +708,14 @@ Add one in animation_override_index_for_stem().",
     }
 
     let joint_nodes: Vec<usize> = skin.joints().map(|j| j.index()).collect();
+    let node_names: Vec<String> = doc
+        .nodes()
+        .map(|n| n.name().unwrap_or("").to_ascii_lowercase())
+        .collect();
+    let joint_names: Vec<String> = joint_nodes
+        .iter()
+        .map(|&i| node_names.get(i).cloned().unwrap_or_default())
+        .collect();
     let inverse_bind: Vec<Mat4> = match skin
         .reader(|buffer| Some(&buffers[buffer.index()]))
         .read_inverse_bind_matrices()
@@ -735,6 +759,8 @@ Add one in animation_override_index_for_stem().",
         node_global_valid: vec![false; node_count],
         node_tracks,
         joint_nodes,
+        joint_names,
+        joint_positions: vec![Vec3::ZERO; skin.joints().len()],
         inverse_bind,
         skin_mats: vec![Mat4::IDENTITY; skin.joints().len()],
         duration,

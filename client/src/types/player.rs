@@ -300,7 +300,7 @@ impl CombatEntity for OtherPlayer {
     }
 
     fn entity_position(&self) -> Vec3 {
-        vec3(self.x, self.y, self.z)
+        self.render_position()
     }
 
     fn hitboxes(&self) -> &[Hitbox] {

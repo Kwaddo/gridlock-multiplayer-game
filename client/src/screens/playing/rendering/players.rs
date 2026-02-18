@@ -5,7 +5,10 @@ use macroquad::window::get_internal_gl;
 
 use super::super::PlayingState;
 
-const WORLD_PLAYER_RENDER_SCALE: f32 = 0.67;
+const WORLD_PLAYER_RENDER_SCALE: f32 = 0.94;
+// Mixamo-style rigs are authored facing +Z, while gameplay yaw uses +X as forward.
+// Keep this offset centralized so yaw logic and movement math stay in gameplay space.
+const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
 
 impl PlayingState {
     pub(crate) fn draw_other_players(&self) {
@@ -34,7 +37,7 @@ impl PlayingState {
                 let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
                 let transform =
                     Mat4::from_translation(render_pos + vec3(0.0, y_offset, 0.0))
-                    * Mat4::from_rotation_y(-render_yaw)
+                    * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                     * Mat4::from_scale(vec3(s, s, s));
                 let gl = unsafe { get_internal_gl() };
                 gl.quad_gl.push_model_matrix(transform);
@@ -44,7 +47,7 @@ impl PlayingState {
             }
             if let Some(mesh) = static_mesh {
                 let transform = Mat4::from_translation(render_pos)
-                    * Mat4::from_rotation_y(-render_yaw)
+                    * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                     * Mat4::from_scale(vec3(
                         WORLD_PLAYER_RENDER_SCALE,
                         WORLD_PLAYER_RENDER_SCALE,
