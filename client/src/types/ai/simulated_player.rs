@@ -139,28 +139,36 @@ impl SimulatedPlayer {
 
         let move_speed = 3.0;
         let oscillation_period = 2.0;
+        let forward = vec2(self.player.yaw.cos(), self.player.yaw.sin());
+        let right = vec2(-forward.y, forward.x);
 
         match active_pattern {
             MovementPattern::None => {},
             MovementPattern::ForwardBack => {
                 let t = (self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0).sin();
-                self.player.z += t * move_speed * delta;
+                self.player.x += forward.x * t * move_speed * delta;
+                self.player.z += forward.y * t * move_speed * delta;
             }
             MovementPattern::SideToSide => {
                 let t = (self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0).sin();
-                self.player.x += t * move_speed * delta;
+                self.player.x += right.x * t * move_speed * delta;
+                self.player.z += right.y * t * move_speed * delta;
             }
             MovementPattern::Forward => {
-                self.player.z += move_speed * delta;
+                self.player.x += forward.x * move_speed * delta;
+                self.player.z += forward.y * move_speed * delta;
             }
             MovementPattern::Back => {
-                self.player.z -= move_speed * delta;
+                self.player.x -= forward.x * move_speed * delta;
+                self.player.z -= forward.y * move_speed * delta;
             }
             MovementPattern::Left => {
-                self.player.x -= move_speed * delta;
+                self.player.x -= right.x * move_speed * delta;
+                self.player.z -= right.y * move_speed * delta;
             }
             MovementPattern::Right => {
-                self.player.x += move_speed * delta;
+                self.player.x += right.x * move_speed * delta;
+                self.player.z += right.y * move_speed * delta;
             }
             MovementPattern::Circle => {
                 // Keep circle movement close for easier visual/aim testing.
