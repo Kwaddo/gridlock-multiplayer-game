@@ -4,3 +4,4 @@ pub mod maze;
 pub mod orientation;
 pub mod player;
 pub mod world;
+pub mod animation_state;

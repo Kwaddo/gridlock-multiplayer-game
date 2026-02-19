@@ -15,6 +15,7 @@ use player::WorldId;
 
 const PLAYER_TIMEOUT: Duration = Duration::from_secs(30);
 const MAZE_CELL_SIZE: f32 = 1.8;
+const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 
 fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
     let mut candidate = if requested.is_empty() || requested.len() > 20 {
@@ -40,6 +41,7 @@ fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> St
 
 fn main() -> std::io::Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:7878")?;
+    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
     println!("UDP server started on port 7878");
 
     let mut buffer: [u8; 512] = [0; 512];
@@ -52,25 +54,72 @@ fn main() -> std::io::Result<()> {
     );
 
     loop {
-        let (bytes_rcv, src_addr) = socket.recv_from(&mut buffer)?;
-        let msg_type = buffer[0];
-        let payload = &buffer[1..bytes_rcv];
+        match socket.recv_from(&mut buffer) {
+            Ok((bytes_rcv, src_addr)) => {
+                let msg_type = buffer[0];
+                let payload = &buffer[1..bytes_rcv];
 
-        match msg_type {
-            MSG_JOIN => handle_join(&socket, &mut players, &maze, src_addr, payload),
-            MSG_DISCONNECT => handle_disconnect(&mut players, src_addr),
-            MSG_POSITION => handle_position(&socket, &mut players, src_addr, payload),
-            MSG_WORLD_CHANGE => {
-                handle_world_change(&socket, &maze, &mut players, src_addr, payload);
+                match msg_type {
+                    MSG_JOIN => handle_join(&socket, &mut players, &maze, src_addr, payload),
+                    MSG_DISCONNECT => handle_disconnect(&mut players, src_addr),
+                    MSG_POSITION => handle_position(&socket, &mut players, src_addr, payload),
+                    MSG_WORLD_CHANGE => {
+                        handle_world_change(&socket, &maze, &mut players, src_addr, payload);
+                    }
+                    MSG_WALL_BROKEN => {
+                        handle_wall_broken(&socket, &mut maze, &players, src_addr, payload)
+                    }
+                    MSG_DISCOVER => handle_discover(&socket, &players, src_addr),
+                    MSG_HIT => handle_hit(&socket, &mut players, src_addr, payload),
+                    MSG_RESPAWN_REQUEST => {
+                        handle_respawn_request(&socket, &maze, &mut players, src_addr)
+                    }
+                    _ => println!("Unknown message type: {}", msg_type),
+                }
             }
-            MSG_WALL_BROKEN => handle_wall_broken(&socket, &mut maze, &players, src_addr, payload),
-            MSG_DISCOVER => handle_discover(&socket, &players, src_addr),
-            MSG_HIT => handle_hit(&socket, &mut players, src_addr, payload),
-            MSG_RESPAWN_REQUEST => handle_respawn_request(&socket, &maze, &mut players, src_addr),
-            _ => println!("Unknown message type: {}", msg_type),
+            Err(err)
+                if err.kind() == std::io::ErrorKind::WouldBlock
+                    || err.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(err) => return Err(err),
         }
 
+        process_auto_respawns(&socket, &maze, &mut players);
         cleanup_inactive_players(&mut players);
+    }
+}
+
+fn process_auto_respawns(socket: &UdpSocket, maze: &MazeData, players: &mut HashMap<SocketAddr, Player>) {
+    let now = Instant::now();
+    let mut to_respawn: Vec<(SocketAddr, f32, f32, f32, String)> = Vec::new();
+
+    for player in players.values_mut() {
+        if player.is_alive || player.world != WorldId::Maze {
+            continue;
+        }
+
+        let Some(death_time) = player.death_time else {
+            continue;
+        };
+
+        if now.duration_since(death_time) >= MAZE_AUTO_RESPAWN_DELAY {
+            player.is_alive = true;
+            player.health = player.max_health;
+            player.shield = 0;
+            player.death_time = None;
+
+            let (sx, sy, sz) = maze.teleporter_world(MAZE_CELL_SIZE);
+            player.position = (sx, sy, sz);
+            to_respawn.push((player.socket_addr, sx, sy, sz, player.username.clone()));
+        }
+    }
+
+    for (socket_addr, sx, sy, sz, username) in to_respawn {
+        println!("Player '{}' auto-respawned in {:?}", username, WorldId::Maze);
+        let mut respawn_msg = vec![MSG_RESPAWN];
+        respawn_msg.extend_from_slice(&sx.to_be_bytes());
+        respawn_msg.extend_from_slice(&sy.to_be_bytes());
+        respawn_msg.extend_from_slice(&sz.to_be_bytes());
+        let _ = socket.send_to(&respawn_msg, socket_addr);
     }
 }
 
@@ -146,6 +195,23 @@ fn handle_position(
         player.last_activity = Instant::now();
     }
 
+    if payload.len() >= 17 {
+        let state_flags = payload[16];
+        if let Some(player) = players.get_mut(&src_addr) {
+            player.is_sprinting = (state_flags & FLAG_SPRINTING) != 0;
+            player.is_crouched = (state_flags & FLAG_CROUCHING) != 0;
+            player.is_ads = (state_flags & FLAG_ADS) != 0;
+            player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
+        }
+    }
+    if payload.len() >= 18 {
+        let event_flags = payload[17];
+        if let Some(player) = players.get_mut(&src_addr) {
+            player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
+            player.evt_landed = (event_flags & EVT_LANDED) != 0;
+        }
+    }
+
     broadcast_state(socket, players);
 }
 
@@ -167,6 +233,29 @@ fn broadcast_state(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) {
             state_msg.extend_from_slice(&player.position.2.to_be_bytes());
             state_msg.extend_from_slice(&player.yaw.to_be_bytes());
             state_msg.push(player.world.as_u8());
+            let mut state_flags = 0u8;
+            if player.is_sprinting {
+                state_flags |= FLAG_SPRINTING;
+            }
+            if player.is_crouched {
+                state_flags |= FLAG_CROUCHING;
+            }
+            if player.is_ads {
+                state_flags |= FLAG_ADS;
+            }
+            if player.is_airborne {
+                state_flags |= FLAG_AIRBORNE;
+            }
+            state_msg.push(state_flags);
+
+            let mut event_flags = 0u8;
+            if player.evt_jump_start {
+                event_flags |= EVT_JUMP_START;
+            }
+            if player.evt_landed {
+                event_flags |= EVT_LANDED;
+            }
+            state_msg.push(event_flags);
             let name_bytes = player.username.as_bytes();
             state_msg.push(name_bytes.len() as u8);
             state_msg.extend_from_slice(name_bytes);
@@ -383,6 +472,7 @@ fn handle_hit(
     if victim.health == 0 {
         victim.is_alive = false;
         victim.deaths += 1;
+        victim.death_time = Some(Instant::now());
 
         println!("Player {} killed player {}", attacker_id, victim_id);
 
@@ -427,6 +517,7 @@ fn handle_respawn_request(
     player.is_alive = true;
     player.health = player.max_health;
     player.shield = 0;
+    player.death_time = None;
 
     // Choose spawn position based on world
     let (sx, sy, sz) = match player.world {

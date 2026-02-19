@@ -36,7 +36,17 @@ pub struct Player {
     pub gun_level: u32,
     pub socket_addr: SocketAddr,
     pub last_activity: Instant,
+    pub death_time: Option<Instant>,
     pub world: WorldId, // where is this player right now? lobby, maze, etc
+
+    // anim state
+    pub is_sprinting: bool,
+    pub is_ads: bool,
+    pub is_crouched: bool,
+    pub is_airborne: bool,
+
+    pub evt_jump_start: bool, // for precise jump animation timing
+    pub evt_landed: bool, // for precise landing animation timing
 }
 
 impl Player {
@@ -57,7 +67,15 @@ impl Player {
             gun_level: 1,
             socket_addr: addr,
             last_activity: Instant::now(),
+            death_time: None,
             world: WorldId::Lobby, // start in the lobby by default
+
+            is_sprinting: false,
+            is_ads: false,
+            is_crouched: false,
+            is_airborne: false,
+            evt_jump_start: false,
+            evt_landed: false,
         }
     }
 }

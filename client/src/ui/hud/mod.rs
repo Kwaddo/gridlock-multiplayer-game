@@ -75,7 +75,14 @@ pub fn draw_hud(
 
     players::draw_players_overlay(position, forward, right, pitch, other_players);
 
-    weapon_feed::draw_weapon_and_kill_feed(weapons, assets, other_players, kill_feed);
+    weapon_feed::draw_weapon_and_kill_feed(
+        weapons,
+        assets,
+        other_players,
+        kill_feed,
+        player_id,
+        username,
+    );
 
     minimap::draw_minimap(maze, position, yaw, other_players, current_world, config);
 }
