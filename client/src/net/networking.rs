@@ -34,6 +34,9 @@ pub struct NetUpdate {
     pub player_list: Option<Vec<(u32, String, u32, WorldId, bool)>>,
     pub self_kills: Option<u32>,
     pub death: bool, // You died
+
+    // true if poll_updates read at least one packet from the socket during this call
+    pub received_any: bool,
 }
 
 pub fn send_position(socket: &UdpSocket, server_addr: &str, position: Vec3, yaw: f32) {
@@ -65,11 +68,15 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         player_list: None,
         self_kills: None,
         death: false,
+        received_any: false,
     };
 
     let mut recv_buf: [u8; 8192] = [0; 8192];
 
     while let Ok((size, _)) = socket.recv_from(&mut recv_buf) {
+        // mark that we received at least one packet during this poll
+        update.received_any = true;
+
         if size == 0 {
             continue;
         }
