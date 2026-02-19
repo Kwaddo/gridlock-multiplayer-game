@@ -45,6 +45,11 @@ pub struct PlayingState {
 
     pub weapons: WeaponInventory,
 
+    // countdown timers (server-synchronized)
+    pub match_start_countdown_timer: f32,
+    pub match_end_countdown_timer: f32,
+    pub match_end_winner: Option<String>,
+
     pub target_dummy: TargetDummy,
     pub hit_marker_timer: f32,
     pub hit_marker_headshot: bool,
@@ -71,6 +76,8 @@ pub struct PlayingState {
     pub invulnerability_timer: f32,
 
     pub kill_feed: Vec<KillFeedEntry>,
+    pub local_kills: u32,
+    pub connected_players: Vec<(u32, String, u32)>,
 
     // short bottom-left announcements (message, timer)
     pub announcements: Vec<(String, f32)>,
@@ -140,11 +147,17 @@ impl PlayingState {
             death_timer: 0.0,
             invulnerability_timer: 0.0,
             kill_feed: Vec::new(),
+            local_kills: 0,
+            // countdown timers
+            match_start_countdown_timer: 0.0,
+            match_end_countdown_timer: 0.0,
+            match_end_winner: None,
             spawn_feedback_message: None,
             spawn_feedback_timer: 0.0,
             lobby_console_message: None,
             lobby_console_message_timer: 0.0,
             announcements: Vec::new(),
+            connected_players: Vec::new(),
         }
     }
 }

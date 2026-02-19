@@ -200,6 +200,7 @@ pub struct OtherPlayer {
     pub max_hp: f32,
     pub hit_timer: f32,
     pub hitboxes: Vec<Hitbox>,
+    pub kills: u32,
 }
 
 impl OtherPlayer {
@@ -241,6 +242,7 @@ impl OtherPlayer {
             max_hp: 100.0,
             hit_timer: 0.0,
             hitboxes: default_player_hitboxes(),
+            kills: 0,
         }
     }
 

@@ -1,5 +1,6 @@
 use std::net::UdpSocket;
 
+use client::types::world::WorldId;
 use macroquad::prelude::*;
 
 use client::net::poll_updates;
@@ -42,6 +43,8 @@ pub fn sync_world(
                     current.world = incoming.world;
                     current.skin_type = AnimState::skin_from_state(anim_state, None);
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
+                    // preserve updated kills
+                    current.kills = incoming.kills;
                     merged.push(current);
                 } else {
                     let anim_state = AnimState::from_movement(
@@ -64,6 +67,24 @@ pub fn sync_world(
             }
 
             playing_state.other_players = merged;
+        }
+
+        // Update local player's kill count when server provides it via MSG_STATE
+        if let Some(k) = updates.self_kills {
+            playing_state.local_kills = k;
+        }
+
+        // Handle match end broadcast
+        let match_end_winner_cloned = updates.match_end_winner.clone();
+        if let Some(winner_name) = match_end_winner_cloned {
+            // move client back to lobby view and clear local maze
+            playing_state.announcements.push((
+                format!("{} won the match! Returning to lobby.", winner_name),
+                6.0,
+            ));
+            playing_state.current_world = WorldId::Lobby;
+            *maze = None;
+            playing_state.local_kills = 0;
         }
 
         if let Some((world_id, spawn)) = updates.world_change {
@@ -113,10 +134,43 @@ pub fn sync_world(
             playing_state.lobby_console_message_timer = 3.0;
         }
 
+        // Match start countdown (server-sent) — show large center countdown
+        if let Some(secs) = updates.match_start_countdown {
+            playing_state.match_start_countdown_timer = secs as f32;
+        }
+
         // Match-join announcement broadcast (show bottom-left)
         if let Some(msg) = updates.match_join_announce {
             playing_state.announcements.push((msg, 4.0));
         }
+
+        // Match-end winner + countdown (server-sent). Do NOT change world locally; server will send WorldChange when it executes the return.
+        if let Some(winner) = updates.match_end_winner {
+            playing_state.match_end_winner = Some(winner.clone());
+            if let Some(cd) = updates.match_end_countdown {
+                playing_state.match_end_countdown_timer = cd as f32;
+                playing_state.announcements.push((
+                    format!("{} won the match! Returning to lobby in {}s", winner, cd),
+                    playing_state.match_end_countdown_timer.max(4.0),
+                ));
+            } else {
+                playing_state.match_end_countdown_timer = 4.0;
+                playing_state.announcements.push((
+                    format!("{} won the match! Returning to lobby.", winner),
+                    4.0,
+                ));
+            }
+            playing_state.local_kills = 0;
+        }
+
+        // Global connected player list (for Tab / scoreboard)
+        if let Some(list) = updates.player_list {
+            playing_state.connected_players = list
+                .into_iter()
+                .map(|(id, name, kills, _world, _alive)| (id, name, kills))
+                .collect();
+        }
+
         return updates.assets;
     }
     None
