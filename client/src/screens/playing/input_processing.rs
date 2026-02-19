@@ -163,9 +163,11 @@ impl PlayingState {
                     let mut any_headshot = false;
                     let mut pellet_mask: u16 = 0;
                     let mut player_damage_by_id: HashMap<u32, f32> = HashMap::new();
-                    let mut closest: Option<(EntityKind, usize, HitZone, f32)> = None;
 
                     for i in 0..stats.pellet_count as usize {
+                        // per-pellet nearest-target (reset for each pellet)
+                        let mut closest: Option<(EntityKind, usize, HitZone, f32)> = None;
+
                         let mut fwd = base_fwd;
                         if spread > 0.0001 {
                             if let Some(ptrn) = stats.pellet_spread {
@@ -242,6 +244,32 @@ impl PlayingState {
                             tracer_color: stats.tracer_color,
                             tracer_thickness: stats.tracer_thickness,
                         });
+
+                        // check target dummy first
+                        if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
+                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
+                            if !blocked {
+                                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                                if is_closer {
+                                    closest = Some((EntityKind::Dummy, 0, zone, dist));
+                                }
+                            }
+                        }
+
+                        // check other players (client-side prediction / hit registration)
+                        for (idx, other) in self.other_players.iter().enumerate() {
+                            if let Some((zone, dist)) = other.ray_test(eye, fwd, range) {
+                                let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
+                                if !blocked {
+                                    let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                                    if is_closer {
+                                        closest = Some((EntityKind::Player, idx, zone, dist));
+                                    }
+                                }
+                            }
+                        }
+
+                        // check practice bots
                         for (idx, bot) in self.practice_bots.iter().enumerate() {
                             if let Some((zone, dist)) = bot.ray_test(eye, fwd, range) {
                                 let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
