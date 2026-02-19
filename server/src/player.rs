@@ -39,6 +39,9 @@ pub struct Player {
     pub death_time: Option<Instant>,
     pub world: WorldId, // where is this player right now? lobby, maze, etc
 
+    // per-player post-teleport freeze (server-side): when set, player cannot move or shoot until Instant
+    pub post_teleport_freeze_until: Option<Instant>,
+
     // anim state
     pub is_sprinting: bool,
     pub is_ads: bool,
@@ -46,7 +49,7 @@ pub struct Player {
     pub is_airborne: bool,
 
     pub evt_jump_start: bool, // for precise jump animation timing
-    pub evt_landed: bool, // for precise landing animation timing
+    pub evt_landed: bool,     // for precise landing animation timing
 }
 
 impl Player {
@@ -69,6 +72,7 @@ impl Player {
             last_activity: Instant::now(),
             death_time: None,
             world: WorldId::Lobby, // start in the lobby by default
+            post_teleport_freeze_until: None,
 
             is_sprinting: false,
             is_ads: false,
