@@ -20,7 +20,6 @@ pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32, sh
         }
 
         let effective_render = render_distance.max(m.cell_size * 10.0);
-        let render_dist_sq = effective_render * effective_render;
         let wall_dist_sq =
             (effective_render + m.cell_size * 1.5) * (effective_render + m.cell_size * 1.5);
 
@@ -272,13 +271,7 @@ pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32, sh
             );
         }
 
-        draw_props(
-            m,
-            &ceiling_lights,
-            viewer_pos,
-            render_dist_sq,
-            show_hitboxes,
-        );
+        draw_props(m, &ceiling_lights, show_hitboxes);
     } else {
         draw_cube(vec3(0.0, -1.0, 0.0), vec3(20.0, 0.1, 20.0), None, GRAY);
     }

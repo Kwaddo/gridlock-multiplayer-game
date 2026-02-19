@@ -3,24 +3,12 @@ use std::net::UdpSocket;
 use macroquad::prelude::*;
 
 use crate::net::protocols::{
-    EVT_JUMP_START,
-    EVT_LANDED,
-    FLAG_ADS,
-    FLAG_AIRBORNE,
-    FLAG_CROUCHING,
-    FLAG_SPRINTING,
-    MSG_ASSETS,
-    MSG_DAMAGE,
-    MSG_DEATH,
-    MSG_KILL_FEED,
-    MSG_MAZE,
-    MSG_POSITION,
-    MSG_RESPAWN,
-    MSG_STATE,
-    MSG_WALL_BROKEN,
-    MSG_WORLD_CHANGE,
+    EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_SPRINTING,
+    MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN, MSG_MATCH_END,
+    MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN,
+    MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
-use crate::types::maze::{ CeilingLightInfo, Maze, Prop, PropKind, Room };
+use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 
@@ -35,8 +23,20 @@ pub struct NetUpdate {
     pub broken_walls: Option<Vec<(u8, u8)>>,
     pub damage_taken: Option<(f32, Option<u32>)>, // (damage amount, attacker_id)
     pub kill_feed: Option<Vec<(u32, u32, String)>>, // (killer_id, victim_id, weapon)
-    pub respawn_pos: Option<Vec3>, // (x, y, z)
+    pub respawn_pos: Option<Vec3>,                // (x, y, z)
+    pub respawn_fallback: Option<bool>,           // true if server fell back to teleporter
+    pub lobby_console_message: Option<String>,
+    pub match_join_announce: Option<String>,
+    pub match_start_countdown: Option<u8>,
+    pub match_time_left: Option<u8>,
+    pub match_end_winner: Option<String>,
+    pub match_end_countdown: Option<u8>,
+    pub player_list: Option<Vec<(u32, String, u32, WorldId, bool)>>,
+    pub self_kills: Option<u32>,
     pub death: bool, // You died
+
+    // true if poll_updates read at least one packet from the socket during this call
+    pub received_any: bool,
 }
 
 pub fn send_position(socket: &UdpSocket, server_addr: &str, position: Vec3, yaw: f32) {
@@ -58,12 +58,25 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         damage_taken: None,
         kill_feed: None,
         respawn_pos: None,
+        respawn_fallback: None,
+        lobby_console_message: None,
+        match_join_announce: None,
+        match_start_countdown: None,
+        match_time_left: None,
+        match_end_winner: None,
+        match_end_countdown: None,
+        player_list: None,
+        self_kills: None,
         death: false,
+        received_any: false,
     };
 
     let mut recv_buf: [u8; 8192] = [0; 8192];
 
     while let Ok((size, _)) = socket.recv_from(&mut recv_buf) {
+        // mark that we received at least one packet during this poll
+        update.received_any = true;
+
         if size == 0 {
             continue;
         }
@@ -159,12 +172,9 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 }
             }
             MSG_STATE => {
-                let player_count = u32::from_be_bytes([
-                    recv_buf[1],
-                    recv_buf[2],
-                    recv_buf[3],
-                    recv_buf[4],
-                ]) as usize;
+                let player_count =
+                    u32::from_be_bytes([recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4]])
+                        as usize;
                 let mut offset = 5;
                 let mut new_players = Vec::new();
                 for _ in 0..player_count {
@@ -210,11 +220,20 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     offset += 1;
                     let event_flags = recv_buf[offset];
                     offset += 1;
+
+                    // new: kills (u32)
+                    let kills = u32::from_be_bytes([
+                        recv_buf[offset],
+                        recv_buf[offset + 1],
+                        recv_buf[offset + 2],
+                        recv_buf[offset + 3],
+                    ]);
+                    offset += 4;
+
                     let name_len = recv_buf[offset] as usize;
                     offset += 1;
-                    let name = String::from_utf8_lossy(
-                        &recv_buf[offset..offset + name_len]
-                    ).to_string();
+                    let name =
+                        String::from_utf8_lossy(&recv_buf[offset..offset + name_len]).to_string();
                     offset += name_len;
 
                     if id != player_id {
@@ -229,7 +248,11 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
                         other_player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
                         other_player.evt_landed = (event_flags & EVT_LANDED) != 0;
+                        other_player.kills = kills;
                         new_players.push(other_player);
+                    } else {
+                        // update own-kills value for local UI/scoreboard
+                        update.self_kills = Some(kills);
                     }
                 }
                 update.players = Some(new_players);
@@ -238,18 +261,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 if size >= 14 {
                     let world_id = recv_buf[1];
                     let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
-                    let x = f32::from_be_bytes([
-                        recv_buf[2],
-                        recv_buf[3],
-                        recv_buf[4],
-                        recv_buf[5],
-                    ]);
-                    let y = f32::from_be_bytes([
-                        recv_buf[6],
-                        recv_buf[7],
-                        recv_buf[8],
-                        recv_buf[9],
-                    ]);
+                    let x =
+                        f32::from_be_bytes([recv_buf[2], recv_buf[3], recv_buf[4], recv_buf[5]]);
+                    let y =
+                        f32::from_be_bytes([recv_buf[6], recv_buf[7], recv_buf[8], recv_buf[9]]);
                     let z = f32::from_be_bytes([
                         recv_buf[10],
                         recv_buf[11],
@@ -257,6 +272,92 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[13],
                     ]);
                     update.world_change = Some((world, vec3(x, y, z)));
+                }
+            }
+            MSG_START_DENIED => {
+                // server says: match running and full (or otherwise deny start)
+                update.lobby_console_message = Some("Match already running and full".to_string());
+            }
+            MSG_MATCH_JOINED => {
+                // format: [MSG_MATCH_JOINED][player_id:4][name_len:1][name bytes]
+                if size >= 6 {
+                    let name_len = recv_buf[5] as usize;
+                    if size >= 6 + name_len {
+                        let name = String::from_utf8_lossy(&recv_buf[6..6 + name_len]).to_string();
+                        update.match_join_announce = Some(format!("{} joined the match", name));
+                    }
+                }
+            }
+            MSG_MATCH_COUNTDOWN => {
+                // format: [MSG_MATCH_COUNTDOWN][seconds:1]
+                if size >= 2 {
+                    let secs = recv_buf[1];
+                    update.match_start_countdown = Some(secs);
+                }
+            }
+            MSG_MATCH_TIMER => {
+                // format: [MSG_MATCH_TIMER][seconds:1] -- authoritative remaining match time
+                if size >= 2 {
+                    let secs = recv_buf[1];
+                    update.match_time_left = Some(secs);
+                }
+            }
+            MSG_MATCH_END => {
+                // format: [MSG_MATCH_END][winner_id:4][name_len:1][name bytes][countdown?:1]
+                if size >= 6 {
+                    let name_len = recv_buf[5] as usize;
+                    if size >= 6 + name_len {
+                        let name = String::from_utf8_lossy(&recv_buf[6..6 + name_len]).to_string();
+                        update.match_end_winner = Some(name.clone());
+                        // optional trailing countdown byte
+                        if size >= 6 + name_len + 1 {
+                            let cd = recv_buf[6 + name_len];
+                            update.match_end_countdown = Some(cd);
+                        }
+                    }
+                }
+            }
+            MSG_PLAYER_LIST => {
+                // format: [MSG_PLAYER_LIST][count:1][entries...]
+                // entry: [id:4][name_len:1][name bytes][kills:4][world:1][alive:1]
+                if size >= 2 {
+                    let count = recv_buf[1] as usize;
+                    let mut offset = 2usize;
+                    let mut list = Vec::new();
+                    for _ in 0..count {
+                        if offset + 6 > size {
+                            break;
+                        }
+                        let id = u32::from_be_bytes([
+                            recv_buf[offset],
+                            recv_buf[offset + 1],
+                            recv_buf[offset + 2],
+                            recv_buf[offset + 3],
+                        ]);
+                        offset += 4;
+                        let name_len = recv_buf[offset] as usize;
+                        offset += 1;
+                        if offset + name_len + 6 > size {
+                            break;
+                        }
+                        let name = String::from_utf8_lossy(&recv_buf[offset..offset + name_len])
+                            .to_string();
+                        offset += name_len;
+                        let kills = u32::from_be_bytes([
+                            recv_buf[offset],
+                            recv_buf[offset + 1],
+                            recv_buf[offset + 2],
+                            recv_buf[offset + 3],
+                        ]);
+                        offset += 4;
+                        let world_id = recv_buf[offset];
+                        offset += 1;
+                        let alive = recv_buf[offset] != 0;
+                        offset += 1;
+                        let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
+                        list.push((id, name, kills, world, alive));
+                    }
+                    update.player_list = Some(list);
                 }
             }
             MSG_ASSETS => {
@@ -271,15 +372,13 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         }
                         let key_len = recv_buf[offset] as usize;
                         offset += 1;
-                        let key = String::from_utf8_lossy(
-                            &recv_buf[offset..offset + key_len]
-                        ).to_string();
+                        let key = String::from_utf8_lossy(&recv_buf[offset..offset + key_len])
+                            .to_string();
                         offset += key_len;
                         let path_len = recv_buf[offset] as usize;
                         offset += 1;
-                        let path = String::from_utf8_lossy(
-                            &recv_buf[offset..offset + path_len]
-                        ).to_string();
+                        let path = String::from_utf8_lossy(&recv_buf[offset..offset + path_len])
+                            .to_string();
                         offset += path_len;
                         entries.push((key, path));
                     }
@@ -303,16 +402,15 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
             }
             MSG_DAMAGE => {
                 if size >= 5 {
-                    let damage = f32::from_be_bytes([
-                        recv_buf[1],
-                        recv_buf[2],
-                        recv_buf[3],
-                        recv_buf[4],
-                    ]);
+                    let damage =
+                        f32::from_be_bytes([recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4]]);
                     let attacker_id = if size >= 9 {
-                        Some(
-                            u32::from_be_bytes([recv_buf[5], recv_buf[6], recv_buf[7], recv_buf[8]])
-                        )
+                        Some(u32::from_be_bytes([
+                            recv_buf[5],
+                            recv_buf[6],
+                            recv_buf[7],
+                            recv_buf[8],
+                        ]))
                     } else {
                         None
                     };
@@ -321,18 +419,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
             }
             MSG_KILL_FEED => {
                 if size >= 10 {
-                    let killer_id = u32::from_be_bytes([
-                        recv_buf[1],
-                        recv_buf[2],
-                        recv_buf[3],
-                        recv_buf[4],
-                    ]);
-                    let victim_id = u32::from_be_bytes([
-                        recv_buf[5],
-                        recv_buf[6],
-                        recv_buf[7],
-                        recv_buf[8],
-                    ]);
+                    let killer_id =
+                        u32::from_be_bytes([recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4]]);
+                    let victim_id =
+                        u32::from_be_bytes([recv_buf[5], recv_buf[6], recv_buf[7], recv_buf[8]]);
                     let weapon_len = recv_buf[9] as usize;
                     let weapon = if size >= 10 + weapon_len {
                         String::from_utf8_lossy(&recv_buf[10..10 + weapon_len]).to_string()
@@ -351,10 +441,17 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
             }
             MSG_RESPAWN => {
                 if size >= 13 {
-                    let x = f32::from_be_bytes([recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4]]);
-                    let y = f32::from_be_bytes([recv_buf[5], recv_buf[6], recv_buf[7], recv_buf[8]]);
-                    let z = f32::from_be_bytes([recv_buf[9], recv_buf[10], recv_buf[11], recv_buf[12]]);
+                    let x =
+                        f32::from_be_bytes([recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4]]);
+                    let y =
+                        f32::from_be_bytes([recv_buf[5], recv_buf[6], recv_buf[7], recv_buf[8]]);
+                    let z =
+                        f32::from_be_bytes([recv_buf[9], recv_buf[10], recv_buf[11], recv_buf[12]]);
                     update.respawn_pos = Some(vec3(x, y, z));
+                    if size >= 14 {
+                        let kind = recv_buf[13];
+                        update.respawn_fallback = Some(kind == 1);
+                    }
                 }
             }
             _ => {}

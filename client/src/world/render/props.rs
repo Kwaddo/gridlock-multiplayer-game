@@ -3,13 +3,7 @@ use macroquad::prelude::*;
 use super::utils::{apply_lighting, CeilingLight};
 use crate::types::maze::{Maze, PropKind};
 
-pub(super) fn draw_props(
-    maze: &Maze,
-    lights: &[CeilingLight],
-    viewer_pos: Vec3,
-    render_dist_sq: f32,
-    show_hitboxes: bool,
-) {
+pub(super) fn draw_props(maze: &Maze, lights: &[CeilingLight], show_hitboxes: bool) {
     for prop in &maze.props {
         // Ensure GL is in a known-good state before drawing *each* prop. Some
         // earlier draw paths (wireframes, tracers, viewmodel) can modify

@@ -38,7 +38,7 @@ impl PlayingState {
             }
         }
 
-        self.draw_teleporter(maze);
+        // in-world teleporter removed
 
         if self.current_world == WorldId::Lobby {
             self.draw_target_dummy();
@@ -55,7 +55,11 @@ impl PlayingState {
         }
 
         self.draw_entity_health_bars(&camera);
-        self.draw_teleporter_prompt(maze);
+        self.draw_lobby_console_prompt();
+
+        // Lobby console (Start Game) overlay
+        self.draw_lobby_console();
+
         self.draw_viewmodel();
 
         let forward = vec3(
@@ -65,31 +69,131 @@ impl PlayingState {
         );
         let right = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
 
-        draw_hud(
-            username,
-            player_id,
-            self.position,
-            self.yaw,
-            forward,
-            right,
-            self.pitch,
-            &self.movement_state,
-            &self.other_players,
-            &self.weapons,
-            &self.assets,
-            self.hit_marker_timer,
-            self.hit_marker_headshot,
-            &self.damage_numbers,
-            self.hit_marker_pellet_mask,
-            self.hp,
-            self.max_hp,
-            self.shield,
-            self.max_shield,
-            &self.kill_feed,
-            maze,
-            self.current_world,
-            config,
-        );
+        // When lobby console is open, suppress regular HUD (crosshair, minimap, status panels, etc.)
+        if !self.lobby_console_open {
+            draw_hud(
+                username,
+                player_id,
+                self.position,
+                self.yaw,
+                forward,
+                right,
+                self.pitch,
+                &self.movement_state,
+                &self.other_players,
+                &self.weapons,
+                &self.assets,
+                self.hit_marker_timer,
+                self.hit_marker_headshot,
+                &self.damage_numbers,
+                self.hit_marker_pellet_mask,
+                self.hp,
+                self.max_hp,
+                self.shield,
+                self.max_shield,
+                &self.kill_feed,
+                self.match_time_left,
+                self.damage_flash_timer,
+                self.last_damage_attacker.as_deref(),
+                maze,
+                self.current_world,
+                config,
+            );
+        }
+
+        // Show player list / scoreboard while holding Tab
+        if is_key_down(KeyCode::Tab) {
+            crate::ui::hud::draw_player_list(
+                &self.connected_players,
+                player_id,
+                self.local_kills,
+                self.current_world == WorldId::Maze,
+            );
+        }
+
+        // Spawn feedback toast (e.g. teleporter fallback)
+        if let Some(msg) = &self.spawn_feedback_message {
+            let alpha = (self.spawn_feedback_timer / 3.0).clamp(0.0, 1.0);
+            let color = Color::from_rgba(255, 200, 100, (200.0 * alpha) as u8);
+            let w = crate::ui::fonts::measure_game_text(msg, 18);
+            draw_text_ex(
+                msg,
+                (screen_width() - w) / 2.0,
+                80.0,
+                crate::ui::fonts::text_params(18, color),
+            );
+        }
+
+        // Match-start countdown (large center number)
+        if self.match_start_countdown_timer > 0.0 {
+            let secs = self.match_start_countdown_timer.ceil() as i32;
+            let txt = format!("{}", secs);
+            let w = crate::ui::fonts::measure_game_text(&txt, 96);
+            // when shown in the Lobby (before teleport), nudge the countdown slightly upward
+            let y_center = if self.current_world == WorldId::Lobby {
+                screen_height() / 2.0 - 40.0
+            } else {
+                screen_height() / 2.0
+            };
+            draw_text_ex(
+                &txt,
+                (screen_width() - w) / 2.0,
+                y_center,
+                crate::ui::fonts::text_params(96, Color::from_rgba(255, 220, 120, 255)),
+            );
+            let sub = "Match starts in".to_string();
+            let sw = crate::ui::fonts::measure_game_text(&sub, 20);
+            draw_text_ex(
+                &sub,
+                (screen_width() - sw) / 2.0,
+                y_center - 80.0,
+                crate::ui::fonts::text_params(20, Color::from_rgba(200, 200, 200, 200)),
+            );
+        }
+
+        // Post-teleport freeze indicator (players cannot move for a short time after being moved into the Maze)
+        if self.post_teleport_freeze_timer > 0.0 && self.current_world == WorldId::Maze {
+            let secs = self.post_teleport_freeze_timer.ceil() as i32;
+            let txt = format!("Movement & firing locked for {}s", secs);
+            let sw = crate::ui::fonts::measure_game_text(&txt, 20);
+            draw_text_ex(
+                &txt,
+                (screen_width() - sw) / 2.0,
+                screen_height() / 2.0 + 60.0,
+                crate::ui::fonts::text_params(20, Color::from_rgba(200, 200, 200, 200)),
+            );
+        }
+
+        // Match-end countdown / winner banner
+        if self.match_end_countdown_timer > 0.0 {
+            if let Some(winner) = &self.match_end_winner {
+                let secs = self.match_end_countdown_timer.ceil() as i32;
+                let txt = format!("{} won — returning to lobby in {}s", winner, secs);
+                let w = crate::ui::fonts::measure_game_text(&txt, 22);
+                draw_rectangle(
+                    (screen_width() - w) / 2.0 - 12.0,
+                    40.0 - 24.0,
+                    w + 24.0,
+                    44.0,
+                    Color::from_rgba(8, 10, 12, 200),
+                );
+                draw_text_ex(
+                    &txt,
+                    (screen_width() - w) / 2.0,
+                    40.0,
+                    crate::ui::fonts::text_params(22, YELLOW),
+                );
+            }
+        }
+
+        // Bottom-left announcements (recent events like "PlayerX joined the match")
+        let mut y = screen_height() - 24.0;
+        for (txt, timer) in &self.announcements {
+            let alpha = (timer / 4.0).clamp(0.0, 1.0);
+            let col = Color::from_rgba(200, 200, 200, (220.0 * alpha) as u8);
+            draw_text_ex(txt, 12.0, y, crate::ui::fonts::text_params(14, col));
+            y -= 18.0;
+        }
 
         if self.is_dead {
             self.draw_death_screen();

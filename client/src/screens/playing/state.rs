@@ -37,11 +37,24 @@ pub struct PlayingState {
     pub just_landed: bool, // for precise landing animation timing
     pub current_world: WorldId,
     pub pending_world_change: Option<WorldId>,
+    pub pending_start_request: bool,
+    pub lobby_console_open: bool,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
     pub pending_hits: Vec<(u32, f32)>,
 
     pub weapons: WeaponInventory,
+
+    // countdown timers (server-synchronized)
+    pub match_start_countdown_timer: f32,
+    pub match_end_countdown_timer: f32,
+    pub post_teleport_freeze_timer: f32, // seconds players cannot move immediately after teleport into Maze
+    pub match_time_left: f32,            // client-side remaining match time (seconds)
+    pub match_end_winner: Option<String>,
+
+    // damage / hit feedback (client-side)
+    pub damage_flash_timer: f32, // short red flash when we take damage
+    pub last_damage_attacker: Option<String>,
 
     pub target_dummy: TargetDummy,
     pub hit_marker_timer: f32,
@@ -52,6 +65,10 @@ pub struct PlayingState {
     pub hit_marker_pellet_mask: u16,
 
     pub dev_mode: DevModeState,
+
+    // respawn feedback (e.g. teleporter fallback message)
+    pub spawn_feedback_message: Option<String>,
+    pub spawn_feedback_timer: f32,
 
     pub practice_bots: Vec<SimulatedPlayer>,
     pub next_bot_id: u32,
@@ -65,6 +82,13 @@ pub struct PlayingState {
     pub invulnerability_timer: f32,
 
     pub kill_feed: Vec<KillFeedEntry>,
+    pub local_kills: u32,
+    pub connected_players: Vec<(u32, String, u32)>,
+
+    // short bottom-left announcements (message, timer)
+    pub announcements: Vec<(String, f32)>,
+    pub lobby_console_message: Option<String>,
+    pub lobby_console_message_timer: f32,
 }
 
 pub struct KillFeedEntry {
@@ -106,6 +130,8 @@ impl PlayingState {
             just_landed: false,
             current_world: WorldId::Lobby,
             pending_world_change: None,
+            pending_start_request: false,
+            lobby_console_open: false,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
             pending_hits: Vec::new(),
@@ -127,6 +153,24 @@ impl PlayingState {
             death_timer: 0.0,
             invulnerability_timer: 0.0,
             kill_feed: Vec::new(),
+            local_kills: 0,
+            // countdown timers
+            match_start_countdown_timer: 0.0,
+            match_end_countdown_timer: 0.0,
+            post_teleport_freeze_timer: 0.0,
+            match_time_left: 0.0,
+            match_end_winner: None,
+
+            // damage / hit feedback (client-side)
+            damage_flash_timer: 0.0,
+            last_damage_attacker: None,
+
+            spawn_feedback_message: None,
+            spawn_feedback_timer: 0.0,
+            lobby_console_message: None,
+            lobby_console_message_timer: 0.0,
+            announcements: Vec::new(),
+            connected_players: Vec::new(),
         }
     }
 }
