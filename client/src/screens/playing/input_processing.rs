@@ -98,99 +98,117 @@ impl PlayingState {
 
         let mut fire_sound_key: Option<&'static str> = None;
         let weapon = self.weapons.active_mut();
-        if config.bind_fire.is_down() {
-            if weapon.fire() {
-                fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 
-                if self.dev_mode.infinite_ammo {
-                    weapon.ammo = weapon.stats_data.magazine_size;
-                    weapon.is_reloading = false;
-                    weapon.reload_timer = 0.0;
-                }
+        // Firing: blocked while in post-teleport freeze inside the Maze
+        if self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze {
+            if config.bind_fire.is_down() {
+                if weapon.fire() {
+                    fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 
-                let rng = gen_range(0.0f32, 1.0);
-                let fsa_shot = if self.dev_mode.no_recoil {
-                    false
-                } else {
-                    apply_shot_recoil(weapon, rng)
-                };
-
-                let stats = weapon.stats();
-                let eye = vec3(
-                    self.position.x,
-                    self.position.y + self.movement_state.height,
-                    self.position.z,
-                );
-                let base_fwd = vec3(
-                    self.yaw.cos() * self.pitch.cos(),
-                    self.pitch.sin(),
-                    self.yaw.sin() * self.pitch.cos(),
-                );
-
-                if !fsa_shot && !self.dev_mode.no_recoil {
-                    let pattern = stats.recoil_pattern;
-                    let idx = weapon.shot_index.saturating_sub(1) as usize;
-                    let (ptrn_pitch, ptrn_yaw) = if pattern.is_empty() {
-                        (stats.recoil_vertical, 0.0)
-                    } else {
-                        pattern[idx.min(pattern.len() - 1)]
-                    };
-
-                    let rand = (stats.pattern_randomness + (idx as f32) * stats.randomness_growth)
-                        .clamp(0.0, 1.0);
-
-                    self.pitch += ptrn_pitch;
-                    let ptrn_h = ptrn_yaw * stats.recoil_horizontal;
-                    let rand_h = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
-                    self.yaw += ptrn_h * (1.0 - rand) + rand_h * rand;
-                    self.pitch = self.pitch.clamp(-1.55, 1.55);
-                }
-
-                let right_vec = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
-                let up_vec = right_vec.cross(base_fwd).normalize();
-
-                let damage = stats.damage;
-                let range = stats.bullet_range;
-                let spread = weapon.computed_spread;
-                let cx = screen_width() / 2.0;
-                let cy = screen_height() / 2.0;
-
-                let mut total_dmg = 0.0f32;
-                let mut any_headshot = false;
-                let mut pellet_mask: u16 = 0;
-                let mut player_damage_by_id: HashMap<u32, f32> = HashMap::new();
-
-                for i in 0..stats.pellet_count as usize {
-                    let mut fwd = base_fwd;
-                    if spread > 0.0001 {
-                        if let Some(ptrn) = stats.pellet_spread {
-                            let (angle, radius) = ptrn.get(i).copied().unwrap_or((0.0, 0.0));
-                            let deviation = spread * radius;
-                            fwd = (fwd
-                                + right_vec * (angle.cos() * deviation)
-                                + up_vec * (angle.sin() * deviation))
-                                .normalize();
-                        } else {
-                            let angle = gen_range(0.0f32, std::f32::consts::TAU);
-                            let radius = gen_range(0.0f32, spread);
-                            fwd = (fwd
-                                + right_vec * (angle.cos() * radius)
-                                + up_vec * (angle.sin() * radius))
-                                .normalize();
-                        }
+                    if self.dev_mode.infinite_ammo {
+                        weapon.ammo = weapon.stats_data.magazine_size;
+                        weapon.is_reloading = false;
+                        weapon.reload_timer = 0.0;
                     }
 
-                    let closest_blocking_dist = if self.current_world == WorldId::Maze {
-                        let wall_hit = maze
-                            .as_ref()
-                            .and_then(|m| m.ray_test_walls(eye, fwd, range));
-                        let prop_hit_dist = maze
-                            .as_ref()
-                            .and_then(|m| m.ray_test_props(eye, fwd, range));
+                    let rng = gen_range(0.0f32, 1.0);
+                    let fsa_shot = if self.dev_mode.no_recoil {
+                        false
+                    } else {
+                        apply_shot_recoil(weapon, rng)
+                    };
 
-                        match (wall_hit, prop_hit_dist) {
-                            (Some(((wx, wy), wall_dist)), Some(prop_dist)) => {
-                                if wall_dist < prop_dist {
+                    let stats = weapon.stats();
+                    let eye = vec3(
+                        self.position.x,
+                        self.position.y + self.movement_state.height,
+                        self.position.z,
+                    );
+                    let base_fwd = vec3(
+                        self.yaw.cos() * self.pitch.cos(),
+                        self.pitch.sin(),
+                        self.yaw.sin() * self.pitch.cos(),
+                    );
+
+                    if !fsa_shot && !self.dev_mode.no_recoil {
+                        let pattern = stats.recoil_pattern;
+                        let idx = weapon.shot_index.saturating_sub(1) as usize;
+                        let (ptrn_pitch, ptrn_yaw) = if pattern.is_empty() {
+                            (stats.recoil_vertical, 0.0)
+                        } else {
+                            pattern[idx.min(pattern.len() - 1)]
+                        };
+
+                        let rand = (stats.pattern_randomness
+                            + (idx as f32) * stats.randomness_growth)
+                            .clamp(0.0, 1.0);
+
+                        self.pitch += ptrn_pitch;
+                        let ptrn_h = ptrn_yaw * stats.recoil_horizontal;
+                        let rand_h = (rng - 0.5) * 2.0 * stats.recoil_horizontal;
+                        self.yaw += ptrn_h * (1.0 - rand) + rand_h * rand;
+                        self.pitch = self.pitch.clamp(-1.55, 1.55);
+                    }
+
+                    let right_vec = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
+                    let up_vec = right_vec.cross(base_fwd).normalize();
+
+                    let damage = stats.damage;
+                    let range = stats.bullet_range;
+                    let spread = weapon.computed_spread;
+                    let cx = screen_width() / 2.0;
+                    let cy = screen_height() / 2.0;
+
+                    let mut total_dmg = 0.0f32;
+                    let mut any_headshot = false;
+                    let mut pellet_mask: u16 = 0;
+                    let mut player_damage_by_id: HashMap<u32, f32> = HashMap::new();
+                    let mut closest: Option<(EntityKind, usize, HitZone, f32)> = None;
+
+                    for i in 0..stats.pellet_count as usize {
+                        let mut fwd = base_fwd;
+                        if spread > 0.0001 {
+                            if let Some(ptrn) = stats.pellet_spread {
+                                let (angle, radius) = ptrn.get(i).copied().unwrap_or((0.0, 0.0));
+                                let deviation = spread * radius;
+                                fwd = (fwd
+                                    + right_vec * (angle.cos() * deviation)
+                                    + up_vec * (angle.sin() * deviation))
+                                    .normalize();
+                            } else {
+                                let angle = gen_range(0.0f32, std::f32::consts::TAU);
+                                let radius = gen_range(0.0f32, spread);
+                                fwd = (fwd
+                                    + right_vec * (angle.cos() * radius)
+                                    + up_vec * (angle.sin() * radius))
+                                    .normalize();
+                            }
+                        }
+
+                        let closest_blocking_dist = if self.current_world == WorldId::Maze {
+                            let wall_hit = maze
+                                .as_ref()
+                                .and_then(|m| m.ray_test_walls(eye, fwd, range));
+                            let prop_hit_dist = maze
+                                .as_ref()
+                                .and_then(|m| m.ray_test_props(eye, fwd, range));
+
+                            match (wall_hit, prop_hit_dist) {
+                                (Some(((wx, wy), wall_dist)), Some(prop_dist)) => {
+                                    if wall_dist < prop_dist {
+                                        if let Some(m) = maze.as_mut() {
+                                            if m.damage_wall(wx, wy, stats.damage) {
+                                                if !self.pending_broken_walls.contains(&(wx, wy)) {
+                                                    self.pending_broken_walls.push((wx, wy));
+                                                }
+                                            }
+                                        }
+                                        Some(wall_dist)
+                                    } else {
+                                        Some(prop_dist)
+                                    }
+                                }
+                                (Some(((wx, wy), wall_dist)), None) => {
                                     if let Some(m) = maze.as_mut() {
                                         if m.damage_wall(wx, wy, stats.damage) {
                                             if !self.pending_broken_walls.contains(&(wx, wy)) {
@@ -199,133 +217,100 @@ impl PlayingState {
                                         }
                                     }
                                     Some(wall_dist)
-                                } else {
-                                    Some(prop_dist)
                                 }
+                                (None, Some(prop_dist)) => Some(prop_dist),
+                                (None, None) => None,
                             }
-                            (Some(((wx, wy), wall_dist)), None) => {
-                                if let Some(m) = maze.as_mut() {
-                                    if m.damage_wall(wx, wy, stats.damage) {
-                                        if !self.pending_broken_walls.contains(&(wx, wy)) {
-                                            self.pending_broken_walls.push((wx, wy));
-                                        }
+                        } else {
+                            None
+                        };
+
+                        let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
+                        let tracer_end = if let Some(dist) = closest_blocking_dist {
+                            eye + fwd * dist
+                        } else {
+                            eye + fwd * range
+                        };
+
+                        self.tracers.push(crate::weapons::effects::BulletTracer {
+                            start: tracer_start,
+                            end: tracer_end,
+                            lifetime: stats.tracer_lifetime,
+                            speed: stats.bullet_speed,
+                            progress: 0.0,
+                            tracer_length: stats.tracer_length,
+                            tracer_color: stats.tracer_color,
+                            tracer_thickness: stats.tracer_thickness,
+                        });
+                        for (idx, bot) in self.practice_bots.iter().enumerate() {
+                            if let Some((zone, dist)) = bot.ray_test(eye, fwd, range) {
+                                let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
+                                if !blocked {
+                                    let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                                    if is_closer {
+                                        closest = Some((EntityKind::Bot, idx, zone, dist));
                                     }
                                 }
-                                Some(wall_dist)
                             }
-                            (None, Some(prop_dist)) => Some(prop_dist),
-                            (None, None) => None,
                         }
-                    } else {
-                        None
-                    };
 
-                    let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
-                    let tracer_end = if let Some(dist) = closest_blocking_dist {
-                        eye + fwd * dist
-                    } else {
-                        eye + fwd * range
-                    };
+                        if let Some((kind, idx, zone, dist)) = closest {
+                            let mult = if zone == HitZone::Head {
+                                stats.headshot_mult
+                            } else {
+                                zone.damage_mult()
+                            };
+                            let falloff = damage_falloff(dist, stats);
+                            let dmg = damage * mult * falloff;
 
-                    self.tracers.push(crate::weapons::effects::BulletTracer {
-                        start: tracer_start,
-                        end: tracer_end,
-                        lifetime: stats.tracer_lifetime,
-                        speed: stats.bullet_speed,
-                        progress: 0.0,
-                        tracer_length: stats.tracer_length,
-                        tracer_color: stats.tracer_color,
-                        tracer_thickness: stats.tracer_thickness,
-                    });
-
-                    let mut closest: Option<(EntityKind, usize, HitZone, f32)> = None;
-
-                    if self.current_world == WorldId::Lobby {
-                        if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
-                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                            if !blocked {
-                                closest = Some((EntityKind::Dummy, 0, zone, dist));
+                            match kind {
+                                EntityKind::Dummy => {
+                                    self.target_dummy.take_damage(dmg);
+                                }
+                                EntityKind::Player => {
+                                    if let Some(victim_id) = self.other_players[idx].entity_id() {
+                                        *player_damage_by_id.entry(victim_id).or_insert(0.0) += dmg;
+                                    }
+                                }
+                                EntityKind::Bot => {
+                                    self.practice_bots[idx].take_damage(dmg);
+                                }
+                                _ => {}
                             }
+
+                            total_dmg += dmg;
+                            if zone == HitZone::Head {
+                                any_headshot = true;
+                            }
+                            pellet_mask |= 1 << i;
                         }
                     }
 
-                    for (idx, p) in self.other_players.iter().enumerate() {
-                        if let Some((zone, dist)) = p.ray_test(eye, fwd, range) {
-                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                            if !blocked {
-                                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
-                                if is_closer {
-                                    closest = Some((EntityKind::Player, idx, zone, dist));
-                                }
-                            }
-                        }
+                    if total_dmg > 0.0 {
+                        self.hit_marker_timer = 0.35;
+                        self.hit_marker_headshot = any_headshot;
+                        self.hit_marker_pellet_mask = pellet_mask;
+                        self.damage_numbers.push(DamageNumber {
+                            amount: total_dmg,
+                            is_headshot: any_headshot,
+                            screen_x: cx + gen_range(-20.0f32, 20.0),
+                            screen_y: cy - 30.0,
+                            lifetime: 1.0,
+                        });
                     }
 
-                    for (idx, bot) in self.practice_bots.iter().enumerate() {
-                        if let Some((zone, dist)) = bot.ray_test(eye, fwd, range) {
-                            let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                            if !blocked {
-                                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
-                                if is_closer {
-                                    closest = Some((EntityKind::Bot, idx, zone, dist));
-                                }
-                            }
+                    for (victim_id, damage) in player_damage_by_id {
+                        if damage > 0.0 {
+                            self.pending_hits.push((victim_id, damage));
                         }
-                    }
-
-                    if let Some((kind, idx, zone, dist)) = closest {
-                        let mult = if zone == HitZone::Head {
-                            stats.headshot_mult
-                        } else {
-                            zone.damage_mult()
-                        };
-                        let falloff = damage_falloff(dist, stats);
-                        let dmg = damage * mult * falloff;
-
-                        match kind {
-                            EntityKind::Dummy => {
-                                self.target_dummy.take_damage(dmg);
-                            }
-                            EntityKind::Player => {
-                                if let Some(victim_id) = self.other_players[idx].entity_id() {
-                                    *player_damage_by_id.entry(victim_id).or_insert(0.0) += dmg;
-                                }
-                            }
-                            EntityKind::Bot => {
-                                self.practice_bots[idx].take_damage(dmg);
-                            }
-                            _ => {}
-                        }
-
-                        total_dmg += dmg;
-                        if zone == HitZone::Head {
-                            any_headshot = true;
-                        }
-                        pellet_mask |= 1 << i;
                     }
                 }
-
-                if total_dmg > 0.0 {
-                    self.hit_marker_timer = 0.35;
-                    self.hit_marker_headshot = any_headshot;
-                    self.hit_marker_pellet_mask = pellet_mask;
-                    self.damage_numbers.push(DamageNumber {
-                        amount: total_dmg,
-                        is_headshot: any_headshot,
-                        screen_x: cx + gen_range(-20.0f32, 20.0),
-                        screen_y: cy - 30.0,
-                        lifetime: 1.0,
-                    });
-                }
-
-                for (victim_id, damage) in player_damage_by_id {
-                    if damage > 0.0 {
-                        self.pending_hits.push((victim_id, damage));
-                    }
-                }
+                weapon.trigger_held = true;
+            } else {
+                weapon.trigger_held = false;
             }
-            weapon.trigger_held = true;
         } else {
+            // while frozen, ensure trigger_held is false so semi-auto isn't stuck
             weapon.trigger_held = false;
         }
 
@@ -335,7 +320,7 @@ impl PlayingState {
 
         // teleporter interaction removed; lobby console handled earlier
 
-        None
+        return None;
     }
 
     fn play_weapon_shot_sound(&self, sound_key: &str, config: &GameConfig) {

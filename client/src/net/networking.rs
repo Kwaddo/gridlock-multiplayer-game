@@ -5,8 +5,8 @@ use macroquad::prelude::*;
 use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_SPRINTING,
     MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN, MSG_MATCH_END,
-    MSG_MATCH_JOINED, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN, MSG_START_DENIED,
-    MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN,
+    MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
@@ -28,6 +28,7 @@ pub struct NetUpdate {
     pub lobby_console_message: Option<String>,
     pub match_join_announce: Option<String>,
     pub match_start_countdown: Option<u8>,
+    pub match_time_left: Option<u8>,
     pub match_end_winner: Option<String>,
     pub match_end_countdown: Option<u8>,
     pub player_list: Option<Vec<(u32, String, u32, WorldId, bool)>>,
@@ -58,6 +59,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         lobby_console_message: None,
         match_join_announce: None,
         match_start_countdown: None,
+        match_time_left: None,
         match_end_winner: None,
         match_end_countdown: None,
         player_list: None,
@@ -284,6 +286,13 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 if size >= 2 {
                     let secs = recv_buf[1];
                     update.match_start_countdown = Some(secs);
+                }
+            }
+            MSG_MATCH_TIMER => {
+                // format: [MSG_MATCH_TIMER][seconds:1] -- authoritative remaining match time
+                if size >= 2 {
+                    let secs = recv_buf[1];
+                    update.match_time_left = Some(secs);
                 }
             }
             MSG_MATCH_END => {

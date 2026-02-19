@@ -73,6 +73,14 @@ impl PlayingState {
             self.hit_marker_timer = (self.hit_marker_timer - delta).max(0.0);
         }
 
+        // Damage flash timer (short red vignette + optional attacker name)
+        if self.damage_flash_timer > 0.0 {
+            self.damage_flash_timer = (self.damage_flash_timer - delta).max(0.0);
+            if self.damage_flash_timer <= 0.0 {
+                self.last_damage_attacker = None;
+            }
+        }
+
         // Respawn feedback timer
         if self.spawn_feedback_timer > 0.0 {
             self.spawn_feedback_timer = (self.spawn_feedback_timer - delta).max(0.0);
@@ -95,6 +103,8 @@ impl PlayingState {
             if self.match_start_countdown_timer <= 0.0 {
                 // small 'Go' announcement
                 self.announcements.push(("GO!".to_string(), 1.5));
+                // start client-side movement & shooting freeze for the initial match window
+                self.post_teleport_freeze_timer = 10.0;
             }
         }
 
@@ -111,8 +121,17 @@ impl PlayingState {
         if self.post_teleport_freeze_timer > 0.0 {
             self.post_teleport_freeze_timer = (self.post_teleport_freeze_timer - delta).max(0.0);
             if self.post_teleport_freeze_timer <= 0.0 {
-                self.announcements.push(("Movement unlocked".to_string(), 2.0));
+                self.announcements
+                    .push(("Movement unlocked".to_string(), 2.0));
             }
+        }
+
+        // Match timer (client-side) — started when client enters Maze
+        if self.current_world == WorldId::Maze && self.match_time_left > 0.0 {
+            self.match_time_left = (self.match_time_left - delta).max(0.0);
+        } else if self.current_world != WorldId::Maze {
+            // ensure timer is cleared outside of match
+            self.match_time_left = 0.0;
         }
 
         // Announcements timers
