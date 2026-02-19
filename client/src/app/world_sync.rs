@@ -8,14 +8,30 @@ use client::screens::PlayingState;
 use client::types::animation_state::AnimState;
 use client::types::maze::Maze;
 
+pub struct SyncResult {
+    pub assets: Option<Vec<(String, String)>>,
+    pub server_seen: bool, // true if we received at least one packet during poll
+    pub removed_by_server: bool, // true if server no longer lists our player id (timed-out/removed)
+}
+
 pub fn sync_world(
     socket: &Option<UdpSocket>,
     player_id: u32,
     playing_state: &mut PlayingState,
     maze: &mut Option<Maze>,
-) -> Option<Vec<(String, String)>> {
+) -> SyncResult {
+    let mut result = SyncResult {
+        assets: None,
+        server_seen: false,
+        removed_by_server: false,
+    };
+
     if let Some(ref sock) = socket {
         let updates = poll_updates(sock, player_id);
+
+        // mark that we saw traffic from server during this poll
+        result.server_seen = updates.received_any;
+
         if let Some((new_maze, _spawn)) = updates.maze {
             *maze = Some(new_maze);
         }
@@ -93,11 +109,12 @@ pub fn sync_world(
             playing_state.movement_state.velocity = Vec3::ZERO;
             // If we just entered the Maze, start the short post-teleport movement freeze
             if world_id == WorldId::Maze {
-                playing_state.post_teleport_freeze_timer = 10.0;                // start client-side match timer to mirror server MATCH_DURATION
+                playing_state.post_teleport_freeze_timer = 10.0; // start client-side match timer to mirror server MATCH_DURATION
                 playing_state.match_time_left = 120.0; // seconds
             } else {
                 // ensure timer is cleared outside of match
-                playing_state.match_time_left = 0.0;            }
+                playing_state.match_time_left = 0.0;
+            }
         }
         if let Some(broken) = updates.broken_walls {
             if let Some(m) = maze.as_mut() {
@@ -191,13 +208,22 @@ pub fn sync_world(
 
         // Global connected player list (for Tab / scoreboard)
         if let Some(list) = updates.player_list {
+            // detect whether the server still knows about *us* — if not, server removed us (timed out)
+            let still_present = list
+                .iter()
+                .any(|(id, _name, _kills, _world, _alive)| *id == player_id);
+            if !still_present {
+                result.removed_by_server = true;
+            }
+
             playing_state.connected_players = list
                 .into_iter()
                 .map(|(id, name, kills, _world, _alive)| (id, name, kills))
                 .collect();
         }
 
-        return updates.assets;
+        result.assets = updates.assets;
     }
-    None
+
+    result
 }
