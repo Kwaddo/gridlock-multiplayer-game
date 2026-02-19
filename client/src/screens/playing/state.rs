@@ -37,6 +37,8 @@ pub struct PlayingState {
     pub just_landed: bool, // for precise landing animation timing
     pub current_world: WorldId,
     pub pending_world_change: Option<WorldId>,
+    pub pending_start_request: bool,
+    pub lobby_console_open: bool,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
     pub pending_hits: Vec<(u32, f32)>,
@@ -53,6 +55,10 @@ pub struct PlayingState {
 
     pub dev_mode: DevModeState,
 
+    // respawn feedback (e.g. teleporter fallback message)
+    pub spawn_feedback_message: Option<String>,
+    pub spawn_feedback_timer: f32,
+
     pub practice_bots: Vec<SimulatedPlayer>,
     pub next_bot_id: u32,
 
@@ -65,6 +71,11 @@ pub struct PlayingState {
     pub invulnerability_timer: f32,
 
     pub kill_feed: Vec<KillFeedEntry>,
+
+    // short bottom-left announcements (message, timer)
+    pub announcements: Vec<(String, f32)>,
+    pub lobby_console_message: Option<String>,
+    pub lobby_console_message_timer: f32,
 }
 
 pub struct KillFeedEntry {
@@ -106,6 +117,8 @@ impl PlayingState {
             just_landed: false,
             current_world: WorldId::Lobby,
             pending_world_change: None,
+            pending_start_request: false,
+            lobby_console_open: false,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
             pending_hits: Vec::new(),
@@ -127,6 +140,11 @@ impl PlayingState {
             death_timer: 0.0,
             invulnerability_timer: 0.0,
             kill_feed: Vec::new(),
+            spawn_feedback_message: None,
+            spawn_feedback_timer: 0.0,
+            lobby_console_message: None,
+            lobby_console_message_timer: 0.0,
+            announcements: Vec::new(),
         }
     }
 }

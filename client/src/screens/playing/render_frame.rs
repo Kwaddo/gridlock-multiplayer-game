@@ -38,7 +38,7 @@ impl PlayingState {
             }
         }
 
-        self.draw_teleporter(maze);
+        // in-world teleporter removed
 
         if self.current_world == WorldId::Lobby {
             self.draw_target_dummy();
@@ -55,7 +55,11 @@ impl PlayingState {
         }
 
         self.draw_entity_health_bars(&camera);
-        self.draw_teleporter_prompt(maze);
+        self.draw_lobby_console_prompt();
+
+        // Lobby console (Start Game) overlay
+        self.draw_lobby_console();
+
         self.draw_viewmodel();
 
         let forward = vec3(
@@ -65,31 +69,51 @@ impl PlayingState {
         );
         let right = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
 
-        draw_hud(
-            username,
-            player_id,
-            self.position,
-            self.yaw,
-            forward,
-            right,
-            self.pitch,
-            &self.movement_state,
-            &self.other_players,
-            &self.weapons,
-            &self.assets,
-            self.hit_marker_timer,
-            self.hit_marker_headshot,
-            &self.damage_numbers,
-            self.hit_marker_pellet_mask,
-            self.hp,
-            self.max_hp,
-            self.shield,
-            self.max_shield,
-            &self.kill_feed,
-            maze,
-            self.current_world,
-            config,
-        );
+        // When lobby console is open, suppress regular HUD (crosshair, minimap, status panels, etc.)
+        if !self.lobby_console_open {
+            draw_hud(
+                username,
+                player_id,
+                self.position,
+                self.yaw,
+                forward,
+                right,
+                self.pitch,
+                &self.movement_state,
+                &self.other_players,
+                &self.weapons,
+                &self.assets,
+                self.hit_marker_timer,
+                self.hit_marker_headshot,
+                &self.damage_numbers,
+                self.hit_marker_pellet_mask,
+                self.hp,
+                self.max_hp,
+                self.shield,
+                self.max_shield,
+                &self.kill_feed,
+                maze,
+                self.current_world,
+                config,
+            );
+        }
+
+        // Spawn feedback toast (e.g. teleporter fallback)
+        if let Some(msg) = &self.spawn_feedback_message {
+            let alpha = (self.spawn_feedback_timer / 3.0).clamp(0.0, 1.0);
+            let color = Color::from_rgba(255, 200, 100, (200.0 * alpha) as u8);
+            let w = crate::ui::fonts::measure_game_text(msg, 18);
+            draw_text_ex(msg, (screen_width() - w) / 2.0, 80.0, crate::ui::fonts::text_params(18, color));
+        }
+
+        // Bottom-left announcements (recent events like "PlayerX joined the match")
+        let mut y = screen_height() - 24.0;
+        for (txt, timer) in &self.announcements {
+            let alpha = (timer / 4.0).clamp(0.0, 1.0);
+            let col = Color::from_rgba(200, 200, 200, (220.0 * alpha) as u8);
+            draw_text_ex(txt, 12.0, y, crate::ui::fonts::text_params(14, col));
+            y -= 18.0;
+        }
 
         if self.is_dead {
             self.draw_death_screen();

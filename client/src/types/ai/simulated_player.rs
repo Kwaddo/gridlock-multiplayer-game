@@ -1,14 +1,14 @@
 /*
     This module is used to simulate an actual real network player for testing
     this "player" will follow instructions from user to mvoe around and shoot
-    will be used to test combat mechanics and hit detection without needing to connect to a 
+    will be used to test combat mechanics and hit detection without needing to connect to a
     real server or have another player, will also serve well for testing player models later on
 */
 
 use crate::types::animation_state::AnimState;
 use crate::types::player::{OtherPlayer, PlayerSkin};
 use crate::types::world::WorldId;
-use crate::weapons::combat::{ CombatEntity, EntityKind, Hitbox };
+use crate::weapons::combat::{CombatEntity, EntityKind, Hitbox};
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
 
@@ -37,9 +37,9 @@ pub struct ActionState {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum YawMode {
-    Fixed,       // stays at current yaw
-    FacePlayer,  // always rotates to face the local player
-    Spin,        // continuously rotates
+    Fixed,      // stays at current yaw
+    FacePlayer, // always rotates to face the local player
+    Spin,       // continuously rotates
 }
 
 pub struct SimulatedPlayer {
@@ -137,20 +137,29 @@ impl SimulatedPlayer {
             self.pattern
         };
 
+        // ensure we never match on MovementPattern::Random in the movement switch
+        let resolved_pattern = if active_pattern == MovementPattern::Random {
+            self.current_random_pattern
+        } else {
+            active_pattern
+        };
+
         let move_speed = 3.0;
         let oscillation_period = 2.0;
         let forward = vec2(self.player.yaw.cos(), self.player.yaw.sin());
         let right = vec2(-forward.y, forward.x);
 
-        match active_pattern {
-            MovementPattern::None => {},
+        match resolved_pattern {
+            MovementPattern::None => {}
             MovementPattern::ForwardBack => {
-                let t = (self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0).sin();
+                let t =
+                    (self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0).sin();
                 self.player.x += forward.x * t * move_speed * delta;
                 self.player.z += forward.y * t * move_speed * delta;
             }
             MovementPattern::SideToSide => {
-                let t = (self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0).sin();
+                let t =
+                    (self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0).sin();
                 self.player.x += right.x * t * move_speed * delta;
                 self.player.z += right.y * t * move_speed * delta;
             }
@@ -177,7 +186,7 @@ impl SimulatedPlayer {
                 self.player.x = self.circle_center.x + angle.cos() * radius;
                 self.player.z = self.circle_center.y + angle.sin() * radius;
             }
-            MovementPattern::Random => unreachable!(),
+            MovementPattern::Random => {} // handled by resolved_pattern — defensively do nothing here
         }
 
         self.player.x = self.player.x.clamp(-50.0, 50.0);
