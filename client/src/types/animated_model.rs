@@ -64,6 +64,7 @@ pub struct AnimatedModel {
     node_tracks: Vec<NodeAnimationTrack>,
     joint_nodes: Vec<usize>,
     joint_names: Vec<String>,
+    // here we have joint positions, we cache them every frame so we can detect hitboxes precisely everytime the animation moves
     joint_positions: Vec<Vec3>,
     inverse_bind: Vec<Mat4>,
     skin_mats: Vec<Mat4>,
@@ -113,6 +114,7 @@ impl AnimatedModel {
         for i in 0..self.joint_nodes.len() {
             let node_idx = self.joint_nodes[i];
             let global = self.global_for_node(node_idx);
+            // here we are caching each individual joint position for every joint in the skeleton so we can do hit detection against them for the player
             self.joint_positions[i] = global.transform_point3(Vec3::ZERO);
             self.skin_mats[i] = global * self.inverse_bind[i];
         }
@@ -168,7 +170,7 @@ impl AnimatedModel {
         self.node_global_valid[node_idx] = true;
         global
     }
-
+    // lets us find a joint position by matching tokens within the joint name (head, hips, etc) so we can create hitboxes for the player
     pub fn joint_position_with_tokens(&self, tokens: &[&str]) -> Option<Vec3> {
         self.joint_names
             .iter()
@@ -712,6 +714,8 @@ Add one in animation_override_index_for_stem().",
         .nodes()
         .map(|n| n.name().unwrap_or("").to_ascii_lowercase())
         .collect();
+
+    // here we are collecting joint names for each joint node so we can do token matching against them to find hitbox positions for the player
     let joint_names: Vec<String> = joint_nodes
         .iter()
         .map(|&i| node_names.get(i).cloned().unwrap_or_default())
