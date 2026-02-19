@@ -100,7 +100,12 @@ impl PlayingState {
 
         // Show player list / scoreboard while holding Tab
         if is_key_down(KeyCode::Tab) {
-            crate::ui::hud::draw_player_list(&self.connected_players, player_id, self.local_kills, self.current_world == WorldId::Maze);
+            crate::ui::hud::draw_player_list(
+                &self.connected_players,
+                player_id,
+                self.local_kills,
+                self.current_world == WorldId::Maze,
+            );
         }
 
         // Spawn feedback toast (e.g. teleporter fallback)
@@ -108,7 +113,12 @@ impl PlayingState {
             let alpha = (self.spawn_feedback_timer / 3.0).clamp(0.0, 1.0);
             let color = Color::from_rgba(255, 200, 100, (200.0 * alpha) as u8);
             let w = crate::ui::fonts::measure_game_text(msg, 18);
-            draw_text_ex(msg, (screen_width() - w) / 2.0, 80.0, crate::ui::fonts::text_params(18, color));
+            draw_text_ex(
+                msg,
+                (screen_width() - w) / 2.0,
+                80.0,
+                crate::ui::fonts::text_params(18, color),
+            );
         }
 
         // Match-start countdown (large center number)
@@ -116,10 +126,39 @@ impl PlayingState {
             let secs = self.match_start_countdown_timer.ceil() as i32;
             let txt = format!("{}", secs);
             let w = crate::ui::fonts::measure_game_text(&txt, 96);
-            draw_text_ex(&txt, (screen_width() - w) / 2.0, screen_height() / 2.0, crate::ui::fonts::text_params(96, Color::from_rgba(255, 220, 120, 255)));
+            // when shown in the Lobby (before teleport), nudge the countdown slightly upward
+            let y_center = if self.current_world == WorldId::Lobby {
+                screen_height() / 2.0 - 40.0
+            } else {
+                screen_height() / 2.0
+            };
+            draw_text_ex(
+                &txt,
+                (screen_width() - w) / 2.0,
+                y_center,
+                crate::ui::fonts::text_params(96, Color::from_rgba(255, 220, 120, 255)),
+            );
             let sub = "Match starts in".to_string();
             let sw = crate::ui::fonts::measure_game_text(&sub, 20);
-            draw_text_ex(&sub, (screen_width() - sw) / 2.0, screen_height() / 2.0 - 80.0, crate::ui::fonts::text_params(20, Color::from_rgba(200, 200, 200, 200)));
+            draw_text_ex(
+                &sub,
+                (screen_width() - sw) / 2.0,
+                y_center - 80.0,
+                crate::ui::fonts::text_params(20, Color::from_rgba(200, 200, 200, 200)),
+            );
+        }
+
+        // Post-teleport freeze indicator (players cannot move for a short time after being moved into the Maze)
+        if self.post_teleport_freeze_timer > 0.0 && self.current_world == WorldId::Maze {
+            let secs = self.post_teleport_freeze_timer.ceil() as i32;
+            let txt = format!("Movement locked for {}s", secs);
+            let sw = crate::ui::fonts::measure_game_text(&txt, 20);
+            draw_text_ex(
+                &txt,
+                (screen_width() - sw) / 2.0,
+                screen_height() / 2.0 + 60.0,
+                crate::ui::fonts::text_params(20, Color::from_rgba(200, 200, 200, 200)),
+            );
         }
 
         // Match-end countdown / winner banner
@@ -128,8 +167,19 @@ impl PlayingState {
                 let secs = self.match_end_countdown_timer.ceil() as i32;
                 let txt = format!("{} won — returning to lobby in {}s", winner, secs);
                 let w = crate::ui::fonts::measure_game_text(&txt, 22);
-                draw_rectangle((screen_width() - w) / 2.0 - 12.0, 40.0 - 24.0, w + 24.0, 44.0, Color::from_rgba(8, 10, 12, 200));
-                draw_text_ex(&txt, (screen_width() - w) / 2.0, 40.0, crate::ui::fonts::text_params(22, YELLOW));
+                draw_rectangle(
+                    (screen_width() - w) / 2.0 - 12.0,
+                    40.0 - 24.0,
+                    w + 24.0,
+                    44.0,
+                    Color::from_rgba(8, 10, 12, 200),
+                );
+                draw_text_ex(
+                    &txt,
+                    (screen_width() - w) / 2.0,
+                    40.0,
+                    crate::ui::fonts::text_params(22, YELLOW),
+                );
             }
         }
 

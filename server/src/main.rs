@@ -26,6 +26,7 @@ const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running 
 const MATCH_SCORE_TO_WIN: u32 = 20; // kills required to win the match
 const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts
 const MATCH_END_COUNTDOWN_SECS: u8 = 6; // seconds to wait after a win before returning players to lobby
+const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 10; // seconds players cannot move right after teleport into Maze
 
 fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
     let mut candidate = if requested.is_empty() || requested.len() > 20 {
@@ -67,6 +68,8 @@ fn main() -> std::io::Result<()> {
     let mut match_warmup_end: Option<Instant> = None;
     // scheduled match end (winner, delayed return-to-lobby)
     let mut match_end_pending: Option<(Instant, u32, String)> = None;
+    // short post-teleport freeze so players remain stationary for a few seconds after entering the Maze
+    let mut match_post_teleport_freeze_end: Option<Instant> = None;
 
     loop {
         match socket.recv_from(&mut buffer) {
@@ -84,7 +87,13 @@ fn main() -> std::io::Result<()> {
                         payload,
                     ),
                     MSG_DISCONNECT => handle_disconnect(&socket, &mut players, src_addr),
-                    MSG_POSITION => handle_position(&socket, &mut players, src_addr, payload),
+                    MSG_POSITION => handle_position(
+                        &socket,
+                        &mut players,
+                        src_addr,
+                        payload,
+                        match_post_teleport_freeze_end.map_or(false, |t| t > Instant::now()),
+                    ),
 
                     // client-requested world change (teleporter)
                     MSG_WORLD_CHANGE => {
@@ -277,6 +286,9 @@ fn main() -> std::io::Result<()> {
                     match_running = true;
                     match_start_time = Some(Instant::now());
                     match_warmup_end = None;
+                    // Start a short post-teleport freeze so players cannot move for a moment
+                    match_post_teleport_freeze_end =
+                        Some(Instant::now() + Duration::from_secs(MATCH_POST_TELEPORT_FREEZE_SECS));
 
                     for player in players.values_mut().filter(|p| p.world == WorldId::Lobby) {
                         let (sx, sy, sz, _used_fallback) =
@@ -533,16 +545,27 @@ fn handle_position(
     players: &mut HashMap<SocketAddr, Player>,
     src_addr: SocketAddr,
     payload: &[u8],
+    freeze_active: bool,
 ) {
     if payload.len() < 16 {
         return;
     }
 
+    // parse client-provided snapshot first
+    let x = f32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let y = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let z = f32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let yaw = f32::from_be_bytes([payload[12], payload[13], payload[14], payload[15]]);
+
     if let Some(player) = players.get_mut(&src_addr) {
-        let x = f32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
-        let y = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
-        let z = f32::from_be_bytes([payload[8], payload[9], payload[10], payload[11]]);
-        let yaw = f32::from_be_bytes([payload[12], payload[13], payload[14], payload[15]]);
+        // If a global post-teleport freeze is active, ignore movement updates from
+        // clients that are in the Maze so they remain stationary (server-authoritative).
+        if freeze_active && player.world == WorldId::Maze {
+            // refresh activity so they don't time out, but do not accept the position update
+            player.last_activity = Instant::now();
+            return;
+        }
+
         player.position = (x, y, z);
         player.yaw = yaw;
         player.last_activity = Instant::now();
@@ -796,6 +819,11 @@ fn handle_hit(
         return;
     };
 
+    // Ignore hits originating outside the Maze (no PvP in lobby)
+    if attacker.world != WorldId::Maze {
+        return;
+    }
+
     if !attacker.is_alive {
         return; // Dead players can't deal damage
     }
@@ -814,6 +842,11 @@ fn handle_hit(
     let Some(victim) = players.get_mut(&victim_addr) else {
         return;
     };
+
+    // Only allow damage inside the Maze world
+    if victim.world != WorldId::Maze {
+        return;
+    }
 
     if !victim.is_alive {
         return; // Already dead

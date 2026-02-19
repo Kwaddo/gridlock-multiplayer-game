@@ -91,6 +91,10 @@ pub fn sync_world(
             playing_state.current_world = world_id;
             playing_state.position = spawn;
             playing_state.movement_state.velocity = Vec3::ZERO;
+            // If we just entered the Maze, start the short post-teleport movement freeze
+            if world_id == WorldId::Maze {
+                playing_state.post_teleport_freeze_timer = 10.0;
+            }
         }
         if let Some(broken) = updates.broken_walls {
             if let Some(m) = maze.as_mut() {
