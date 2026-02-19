@@ -83,6 +83,8 @@ pub struct GameConfig {
     pub minimap_size: u8,
     // Minimap shape (0=Circle, 1=Square)
     pub minimap_shape: u8,
+    // Audio
+    pub mute_audio: bool,
 }
 
 impl GameConfig {
@@ -134,6 +136,8 @@ impl GameConfig {
             // Minimap
             minimap_size: 1,  // Medium
             minimap_shape: 0, // Circle
+            // Audio
+            mute_audio: true,
         }
     }
 

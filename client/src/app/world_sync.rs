@@ -4,8 +4,8 @@ use macroquad::prelude::*;
 
 use client::net::poll_updates;
 use client::screens::PlayingState;
+use client::types::animation_state::AnimState;
 use client::types::maze::Maze;
-use client::types::player::PlayerSkin;
 
 pub fn sync_world(
     socket: &Option<UdpSocket>,
@@ -19,22 +19,45 @@ pub fn sync_world(
             *maze = Some(new_maze);
         }
         if let Some(mut players) = updates.players {
-            for p in &mut players {
-                p.skin_type = PlayerSkin::RifleIdle;
-            }
-
             let mut existing = std::mem::take(&mut playing_state.other_players);
             let mut merged = Vec::with_capacity(players.len());
 
             for mut incoming in players {
                 if let Some(index) = existing.iter().position(|p| p.id == incoming.id) {
                     let mut current = existing.swap_remove(index);
+                    let anim_state = AnimState::from_movement(
+                        current.x,
+                        current.z,
+                        incoming.x,
+                        incoming.z,
+                        incoming.yaw,
+                        incoming.is_sprinting,
+                        incoming.is_ads,
+                        incoming.is_crouching,
+                        false,
+                        false,
+                        incoming.evt_jump_start,
+                    );
                     current.username = incoming.username;
                     current.world = incoming.world;
-                    current.skin_type = incoming.skin_type;
+                    current.skin_type = AnimState::skin_from_state(anim_state, None);
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     merged.push(current);
                 } else {
+                    let anim_state = AnimState::from_movement(
+                        incoming.x,
+                        incoming.z,
+                        incoming.x,
+                        incoming.z,
+                        incoming.yaw,
+                        incoming.is_sprinting,
+                        incoming.is_ads,
+                        incoming.is_crouching,
+                        false,
+                        false,
+                        incoming.evt_jump_start,
+                    );
+                    incoming.skin_type = AnimState::skin_from_state(anim_state, None);
                     incoming.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     merged.push(incoming);
                 }

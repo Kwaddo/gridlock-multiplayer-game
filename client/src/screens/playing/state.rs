@@ -33,10 +33,13 @@ pub struct PlayingState {
     pub asset_source_paths: HashMap<String, String>,
     pub move_dir: Vec3,
     pub jump_requested: bool,
+    pub just_jumped: bool, // for precise jump animation timing
+    pub just_landed: bool, // for precise landing animation timing
     pub current_world: WorldId,
     pub pending_world_change: Option<WorldId>,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
+    pub pending_hits: Vec<(u32, f32)>,
 
     pub weapons: WeaponInventory,
 
@@ -99,10 +102,13 @@ impl PlayingState {
             asset_source_paths: HashMap::new(),
             move_dir: Vec3::ZERO,
             jump_requested: false,
+            just_jumped: false,
+            just_landed: false,
             current_world: WorldId::Lobby,
             pending_world_change: None,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
+            pending_hits: Vec::new(),
             weapons: WeaponInventory::new(),
             target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
             hit_marker_timer: 0.0,
