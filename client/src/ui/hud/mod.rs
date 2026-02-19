@@ -38,6 +38,9 @@ pub fn draw_hud(
     shield: f32,
     max_shield: f32,
     kill_feed: &[crate::screens::playing::KillFeedEntry],
+    match_time_left: f32,
+    damage_flash_timer: f32,
+    last_damage_attacker: Option<&str>,
     maze: Option<&Maze>,
     current_world: WorldId,
     config: &GameConfig,
@@ -52,6 +55,33 @@ pub fn draw_hud(
         0.0
     };
     let cx = screen_width() / 2.0 + sprint_sway;
+
+    // Damage flash overlay (subtle red vignette) when we take damage
+    if damage_flash_timer > 0.0 {
+        let alpha = ((damage_flash_timer / 0.6).min(1.0) * 140.0) as u8;
+        draw_rectangle(
+            0.0,
+            0.0,
+            screen_width(),
+            screen_height(),
+            Color::from_rgba(255, 40, 40, alpha),
+        );
+        if let Some(att) = last_damage_attacker {
+            draw_text_ex(
+                &format!("Hit by {}", att),
+                12.0,
+                36.0,
+                crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
+            );
+        } else {
+            draw_text_ex(
+                "Hit!",
+                12.0,
+                36.0,
+                crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
+            );
+        }
+    }
 
     crosshair::draw_crosshair_and_combat_feedback(
         cx,
@@ -72,6 +102,7 @@ pub fn draw_hud(
         max_hp,
         shield,
         max_shield,
+        match_time_left,
     );
 
     players::draw_players_overlay(position, forward, right, pitch, other_players);

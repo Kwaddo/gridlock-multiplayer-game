@@ -93,8 +93,11 @@ pub fn sync_world(
             playing_state.movement_state.velocity = Vec3::ZERO;
             // If we just entered the Maze, start the short post-teleport movement freeze
             if world_id == WorldId::Maze {
-                playing_state.post_teleport_freeze_timer = 10.0;
-            }
+                playing_state.post_teleport_freeze_timer = 10.0;                // start client-side match timer to mirror server MATCH_DURATION
+                playing_state.match_time_left = 120.0; // seconds
+            } else {
+                // ensure timer is cleared outside of match
+                playing_state.match_time_left = 0.0;            }
         }
         if let Some(broken) = updates.broken_walls {
             if let Some(m) = maze.as_mut() {
@@ -105,6 +108,18 @@ pub fn sync_world(
         }
         if let Some((damage, attacker_id)) = updates.damage_taken {
             playing_state.take_damage(damage, attacker_id);
+            // also show a short announcement so hits appear in the feed
+            let ann = if let Some(aid) = attacker_id {
+                playing_state
+                    .connected_players
+                    .iter()
+                    .find(|(id, _n, _)| *id == aid)
+                    .map(|(_, name, _)| format!("Hit by {}", name))
+                    .unwrap_or_else(|| "Hit!".to_string())
+            } else {
+                "Hit!".to_string()
+            };
+            playing_state.announcements.push((ann, 2.0));
         }
         if let Some(kills) = updates.kill_feed {
             for (killer_id, victim_id, weapon) in kills {
@@ -143,6 +158,11 @@ pub fn sync_world(
             playing_state.match_start_countdown_timer = secs as f32;
         }
 
+        // Authoritative match timer (server-sent)
+        if let Some(secs) = updates.match_time_left {
+            playing_state.match_time_left = secs as f32;
+        }
+
         // Match-join announcement broadcast (show bottom-left)
         if let Some(msg) = updates.match_join_announce {
             playing_state.announcements.push((msg, 4.0));
@@ -151,6 +171,8 @@ pub fn sync_world(
         // Match-end winner + countdown (server-sent). Do NOT change world locally; server will send WorldChange when it executes the return.
         if let Some(winner) = updates.match_end_winner {
             playing_state.match_end_winner = Some(winner.clone());
+            // clear client-side match timer immediately when match end is announced
+            playing_state.match_time_left = 0.0;
             if let Some(cd) = updates.match_end_countdown {
                 playing_state.match_end_countdown_timer = cd as f32;
                 playing_state.announcements.push((

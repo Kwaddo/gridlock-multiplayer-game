@@ -92,6 +92,9 @@ impl PlayingState {
                 self.shield,
                 self.max_shield,
                 &self.kill_feed,
+                self.match_time_left,
+                self.damage_flash_timer,
+                self.last_damage_attacker.as_deref(),
                 maze,
                 self.current_world,
                 config,
@@ -151,7 +154,7 @@ impl PlayingState {
         // Post-teleport freeze indicator (players cannot move for a short time after being moved into the Maze)
         if self.post_teleport_freeze_timer > 0.0 && self.current_world == WorldId::Maze {
             let secs = self.post_teleport_freeze_timer.ceil() as i32;
-            let txt = format!("Movement locked for {}s", secs);
+            let txt = format!("Movement & firing locked for {}s", secs);
             let sw = crate::ui::fonts::measure_game_text(&txt, 20);
             draw_text_ex(
                 &txt,

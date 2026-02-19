@@ -12,8 +12,23 @@ pub(super) fn draw_status_panels(
     max_hp: f32,
     shield: f32,
     max_shield: f32,
+    match_time_left: f32,
 ) {
 
+    // Match timer (top-center)
+    if match_time_left > 0.0 {
+        let secs = match_time_left.ceil() as u32;
+        let mins = secs / 60;
+        let s = secs % 60;
+        let time_text = format!("{:02}:{:02}", mins, s);
+        let tw = crate::ui::fonts::measure_game_text(&time_text, 20);
+        draw_text_ex(
+            &time_text,
+            (screen_width() - tw) / 2.0,
+            32.0,
+            text_params(20, Color::from_rgba(220, 220, 220, 220)),
+        );
+    }
 
     let hp_bar_x = 20.0;
     let hp_bar_y = screen_height() - 120.0;

@@ -49,7 +49,12 @@ pub struct PlayingState {
     pub match_start_countdown_timer: f32,
     pub match_end_countdown_timer: f32,
     pub post_teleport_freeze_timer: f32, // seconds players cannot move immediately after teleport into Maze
+    pub match_time_left: f32,            // client-side remaining match time (seconds)
     pub match_end_winner: Option<String>,
+
+    // damage / hit feedback (client-side)
+    pub damage_flash_timer: f32, // short red flash when we take damage
+    pub last_damage_attacker: Option<String>,
 
     pub target_dummy: TargetDummy,
     pub hit_marker_timer: f32,
@@ -153,7 +158,13 @@ impl PlayingState {
             match_start_countdown_timer: 0.0,
             match_end_countdown_timer: 0.0,
             post_teleport_freeze_timer: 0.0,
+            match_time_left: 0.0,
             match_end_winner: None,
+
+            // damage / hit feedback (client-side)
+            damage_flash_timer: 0.0,
+            last_damage_attacker: None,
+
             spawn_feedback_message: None,
             spawn_feedback_timer: 0.0,
             lobby_console_message: None,

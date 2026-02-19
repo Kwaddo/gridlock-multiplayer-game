@@ -70,6 +70,8 @@ fn main() -> std::io::Result<()> {
     let mut match_end_pending: Option<(Instant, u32, String)> = None;
     // short post-teleport freeze so players remain stationary for a few seconds after entering the Maze
     let mut match_post_teleport_freeze_end: Option<Instant> = None;
+    // last sent authoritative match timer (to avoid spamming identical values)
+    let mut last_match_time_sent: Option<u8> = None;
 
     loop {
         match socket.recv_from(&mut buffer) {
@@ -233,6 +235,7 @@ fn main() -> std::io::Result<()> {
                         &mut match_running,
                         &mut match_start_time,
                         &mut match_end_pending,
+                        match_post_teleport_freeze_end.map_or(false, |t| t > Instant::now()),
                     ),
                     MSG_RESPAWN_REQUEST => {
                         if let Some(ref m) = maze {
@@ -286,6 +289,10 @@ fn main() -> std::io::Result<()> {
                     match_running = true;
                     match_start_time = Some(Instant::now());
                     match_warmup_end = None;
+                    // send initial authoritative match timer to all clients
+                    let initial_secs = MATCH_DURATION.as_secs().min(255) as u8;
+                    broadcast_match_timer(&socket, &players, initial_secs);
+                    last_match_time_sent = Some(initial_secs);
                     // Start a short post-teleport freeze so players cannot move for a moment
                     match_post_teleport_freeze_end =
                         Some(Instant::now() + Duration::from_secs(MATCH_POST_TELEPORT_FREEZE_SECS));
@@ -326,29 +333,30 @@ fn main() -> std::io::Result<()> {
             }
         }
 
-        // Basic match timer: end match after MATCH_DURATION
+        // Basic match timer: end match after MATCH_DURATION and send periodic authoritative timer updates
         if match_running {
             if let Some(start) = match_start_time {
-                if Instant::now().duration_since(start) >= MATCH_DURATION {
-                    println!("Match duration elapsed — returning players to Lobby");
-                    // move all players back to lobby
-                    for player in players.values_mut().filter(|p| p.world == WorldId::Maze) {
-                        player.world = WorldId::Lobby;
-                        player.position = (0.0, 0.0, 0.0);
-                        let mut response = vec![MSG_WORLD_CHANGE, WorldId::Lobby.as_u8()];
-                        response.extend_from_slice(&0.0f32.to_be_bytes());
-                        response.extend_from_slice(&0.0f32.to_be_bytes());
-                        response.extend_from_slice(&0.0f32.to_be_bytes());
-                        let _ = socket.send_to(&response, player.socket_addr);
-                    }
+                let elapsed = Instant::now().duration_since(start);
 
+                // send authoritative remaining-time to clients (only when value changes)
+                let remaining_secs = if elapsed >= MATCH_DURATION {
+                    0u8
+                } else {
+                    (MATCH_DURATION - elapsed).as_secs().min(255) as u8
+                };
+                if last_match_time_sent != Some(remaining_secs) {
+                    let _ = broadcast_match_timer(&socket, &players, remaining_secs);
+                    last_match_time_sent = Some(remaining_secs);
+                }
+
+                // timeout -> move players to lobby
+                if elapsed >= MATCH_DURATION {
+                    println!("Match duration elapsed — returning players to Lobby");
+                    move_all_players_to_lobby(&socket, &mut players, false);
                     match_running = false;
                     match_start_time = None;
                     maze = None;
-
-                    // broadcast final state and player-list so clients update immediately
-                    broadcast_state(&socket, &players);
-                    broadcast_player_list(&socket, &players);
+                    last_match_time_sent = None;
                 }
             }
         }
@@ -362,34 +370,16 @@ fn main() -> std::io::Result<()> {
                 );
 
                 // Move all players back to Lobby, reset match state and clear maze
-                for p in players.values_mut() {
-                    p.world = WorldId::Lobby;
-                    p.position = (0.0, 0.0, 0.0);
-                    p.is_alive = true;
-                    p.health = p.max_health;
-                    p.shield = 0;
-                    p.kills = 0; // reset match score
-                    p.death_time = None;
-
-                    // notify client of world change
-                    let mut wc = vec![MSG_WORLD_CHANGE, WorldId::Lobby.as_u8()];
-                    wc.extend_from_slice(&0.0f32.to_be_bytes());
-                    wc.extend_from_slice(&0.0f32.to_be_bytes());
-                    wc.extend_from_slice(&0.0f32.to_be_bytes());
-                    let _ = socket.send_to(&wc, p.socket_addr);
-                }
+                move_all_players_to_lobby(&socket, &mut players, true);
 
                 // clear server-side maze and match flags
                 maze = None;
                 match_running = false;
                 match_start_time = None;
 
-                // broadcast final state and player-list so clients update immediately
-                broadcast_state(&socket, &players);
-                broadcast_player_list(&socket, &players);
-
                 // clear pending flag
                 match_end_pending = None;
+                last_match_time_sent = None;
             }
         }
     }
@@ -538,6 +528,44 @@ fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<SocketAddr, Playe
     for p in players.values() {
         send_player_list(socket, players, p.socket_addr);
     }
+}
+
+/// Broadcast authoritative match-time remaining (seconds) to all connected clients
+fn broadcast_match_timer(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>, secs: u8) {
+    let msg = vec![MSG_MATCH_TIMER, secs];
+    for p in players.values() {
+        let _ = socket.send_to(&msg, p.socket_addr);
+    }
+}
+
+/// Move all players to Lobby and optionally reset per-match scores/state
+fn move_all_players_to_lobby(
+    socket: &UdpSocket,
+    players: &mut HashMap<SocketAddr, Player>,
+    reset_scores: bool,
+) {
+    for p in players.values_mut() {
+        p.world = WorldId::Lobby;
+        p.position = (0.0_f32, 0.0_f32, 0.0_f32);
+        if reset_scores {
+            p.is_alive = true;
+            p.health = p.max_health;
+            p.shield = 0;
+            p.kills = 0;
+            p.death_time = None;
+        }
+
+        // notify client of world change
+        let mut wc = vec![MSG_WORLD_CHANGE, WorldId::Lobby.as_u8()];
+        wc.extend_from_slice(&0.0f32.to_be_bytes());
+        wc.extend_from_slice(&0.0f32.to_be_bytes());
+        wc.extend_from_slice(&0.0f32.to_be_bytes());
+        let _ = socket.send_to(&wc, p.socket_addr);
+    }
+
+    // broadcast final state and player-list so clients update immediately
+    broadcast_state(socket, players);
+    broadcast_player_list(socket, players);
 }
 
 fn handle_position(
@@ -805,7 +833,12 @@ fn handle_hit(
     _match_running: &mut bool,
     _match_start_time: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
+    post_freeze_active: bool,
 ) {
+    // Ignore damage while the short post-teleport freeze is active (server-side enforcement)
+    if post_freeze_active {
+        return;
+    }
     // Payload: victim_id (4 bytes), damage (4 bytes)
     if payload.len() < 8 {
         return;
