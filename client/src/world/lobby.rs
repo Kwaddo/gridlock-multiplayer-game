@@ -38,6 +38,11 @@ pub const PARKOUR_CUBES: [(Vec3, Vec3); 12] = [
     (vec3(-1.5, 5.3, 0.0), vec3(2.0, 0.4, 2.0)),
 ];
 
+// Physical console placement in the lobby (player interacts to open HUD)
+// bottom y is 0.0 so the console sits flush on the floor
+pub const LOBBY_CONSOLE_POS: Vec3 = vec3(2.0, 0.0, -9.0);
+pub const LOBBY_CONSOLE_SIZE: Vec3 = vec3(0.8, 1.2, 0.4);
+
 pub fn draw_lobby(floor_texture: Option<&Texture2D>) {
     // Ground
     draw_cube(
@@ -76,4 +81,9 @@ pub fn draw_lobby(floor_texture: Option<&Texture2D>) {
         draw_cube(*center, *size, None, color);
         draw_cube_wires(*center, *size, BLACK);
     }
+
+    // Draw the physical lobby console
+    draw_cube(LOBBY_CONSOLE_POS + vec3(0.0, LOBBY_CONSOLE_SIZE.y / 2.0, 0.0), LOBBY_CONSOLE_SIZE, None, Color::from_rgba(200, 120, 60, 255));
+    draw_cube_wires(LOBBY_CONSOLE_POS + vec3(0.0, LOBBY_CONSOLE_SIZE.y / 2.0, 0.0), LOBBY_CONSOLE_SIZE, BLACK);
 }
+

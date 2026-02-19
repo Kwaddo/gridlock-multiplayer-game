@@ -17,6 +17,11 @@ const PLAYER_TIMEOUT: Duration = Duration::from_secs(30);
 const MAZE_CELL_SIZE: f32 = 1.8;
 const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 
+// Match / game loop settings (basic foundation)
+const MATCH_DURATION: Duration = Duration::from_secs(120); // match length (seconds)
+const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start (adjust later)
+const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
+
 fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
     let mut candidate = if requested.is_empty() || requested.len() > 20 {
         println!("Invalid username '{}'. Assigning default.", requested);
@@ -53,6 +58,10 @@ fn main() -> std::io::Result<()> {
         maze.width, maze.height, maze.seed
     );
 
+    // Basic match state for a future game loop
+    let mut match_running: bool = false;
+    let mut match_start_time: Option<Instant> = None;
+
     loop {
         match socket.recv_from(&mut buffer) {
             Ok((bytes_rcv, src_addr)) => {
@@ -63,9 +72,124 @@ fn main() -> std::io::Result<()> {
                     MSG_JOIN => handle_join(&socket, &mut players, &maze, src_addr, payload),
                     MSG_DISCONNECT => handle_disconnect(&mut players, src_addr),
                     MSG_POSITION => handle_position(&socket, &mut players, src_addr, payload),
+
+                    // client-requested world change (teleporter)
                     MSG_WORLD_CHANGE => {
                         handle_world_change(&socket, &maze, &mut players, src_addr, payload);
                     }
+
+                    // client requests to start a match from the lobby
+                    MSG_START_GAME => {
+                        // If a match is marked running but there are no players in the Maze,
+                        // treat it as stale and clear it so new starts are accepted.
+                        if match_running {
+                            let maze_count = players
+                                .values()
+                                .filter(|p| p.world == WorldId::Maze)
+                                .count();
+                            if maze_count == 0 {
+                                println!(
+                                    "Stale match detected (no players) — clearing match state"
+                                );
+                                match_running = false;
+                                match_start_time = None;
+                            }
+                        }
+
+                        // only accept start requests when not already running
+                        if !match_running {
+                            // require minimal number of players in lobby
+                            let lobby_count = players
+                                .values()
+                                .filter(|p| p.world == WorldId::Lobby)
+                                .count();
+                            if lobby_count >= MIN_PLAYERS_TO_START {
+                                // generate a fresh maze for this match
+                                maze = MazeData::new(maze.width, maze.height);
+                                println!(
+                                    "Match started by {} — new maze seed {}. Moving {} player(s) to Maze",
+                                    src_addr, maze.seed, lobby_count
+                                );
+
+                                match_running = true;
+                                match_start_time = Some(Instant::now());
+
+                                // Move every lobby player into the Maze and notify them — each gets a random spawn
+                                for player in
+                                    players.values_mut().filter(|p| p.world == WorldId::Lobby)
+                                {
+                                    let (sx, sy, sz, _used_fallback) =
+                                        maze.random_spawn_world(MAZE_CELL_SIZE);
+                                    player.world = WorldId::Maze;
+                                    player.position = (sx, sy, sz);
+
+                                    let mut response =
+                                        vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
+                                    response.extend_from_slice(&sx.to_be_bytes());
+                                    response.extend_from_slice(&sy.to_be_bytes());
+                                    response.extend_from_slice(&sz.to_be_bytes());
+                                    let _ = socket.send_to(&response, player.socket_addr);
+
+                                    // send maze data for clients that just entered
+                                    maze.send(&socket, player.socket_addr);
+                                }
+                            } else {
+                                println!(
+                                    "Start-game request ignored: not enough players ({}).",
+                                    lobby_count
+                                );
+                            }
+                        } else {
+                            // match is already running and contains players — allow the requester to
+                            // join if there's a vacant slot, otherwise notify them that the match is full.
+                            let maze_count = players
+                                .values()
+                                .filter(|p| p.world == WorldId::Maze)
+                                .count();
+                            if maze_count < MATCH_MAX_PLAYERS {
+                                if let Some(req_player) = players.get_mut(&src_addr) {
+                                    if req_player.world == WorldId::Lobby {
+                                        let (sx, sy, sz, _used_fallback) =
+                                            maze.random_spawn_world(MAZE_CELL_SIZE);
+                                        req_player.world = WorldId::Maze;
+                                        req_player.position = (sx, sy, sz);
+
+                                        let mut response =
+                                            vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
+                                        response.extend_from_slice(&sx.to_be_bytes());
+                                        response.extend_from_slice(&sy.to_be_bytes());
+                                        response.extend_from_slice(&sz.to_be_bytes());
+                                        let _ = socket.send_to(&response, req_player.socket_addr);
+
+                                        // send maze data to the joining client
+                                        maze.send(&socket, req_player.socket_addr);
+
+                                        println!(
+                                            "Player '{}' joined running match (vacant slot)",
+                                            req_player.username
+                                        );
+
+                                        // Broadcast announcement to all connected players
+                                        let name_bytes = req_player.username.as_bytes();
+                                        let mut ann = vec![MSG_MATCH_JOINED];
+                                        ann.extend_from_slice(&req_player.id.to_be_bytes());
+                                        ann.push(name_bytes.len() as u8);
+                                        ann.extend_from_slice(name_bytes);
+                                        for p in players.values() {
+                                            let _ = socket.send_to(&ann, p.socket_addr);
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Inform the requester the match is running and full
+                                let _ = socket.send_to(&[MSG_START_DENIED], src_addr);
+                                println!(
+                                    "Start-game request rejected: match already running and full."
+                                );
+                            }
+                        }
+                    }
+
                     MSG_WALL_BROKEN => {
                         handle_wall_broken(&socket, &mut maze, &players, src_addr, payload)
                     }
@@ -85,12 +209,52 @@ fn main() -> std::io::Result<()> {
 
         process_auto_respawns(&socket, &maze, &mut players);
         cleanup_inactive_players(&mut players);
+
+        // If a match is running but there are no players left in the Maze, end it immediately
+        if match_running {
+            let maze_count = players
+                .values()
+                .filter(|p| p.world == WorldId::Maze)
+                .count();
+            if maze_count == 0 {
+                println!("No players remain in match — ending match early");
+                match_running = false;
+                match_start_time = None;
+            }
+        }
+
+        // Basic match timer: end match after MATCH_DURATION
+        if match_running {
+            if let Some(start) = match_start_time {
+                if Instant::now().duration_since(start) >= MATCH_DURATION {
+                    println!("Match duration elapsed — returning players to Lobby");
+                    // move all players back to lobby
+                    for player in players.values_mut().filter(|p| p.world == WorldId::Maze) {
+                        player.world = WorldId::Lobby;
+                        player.position = (0.0, 0.0, 0.0);
+                        let mut response = vec![MSG_WORLD_CHANGE, WorldId::Lobby.as_u8()];
+                        response.extend_from_slice(&0.0f32.to_be_bytes());
+                        response.extend_from_slice(&0.0f32.to_be_bytes());
+                        response.extend_from_slice(&0.0f32.to_be_bytes());
+                        let _ = socket.send_to(&response, player.socket_addr);
+                    }
+
+                    match_running = false;
+                    match_start_time = None;
+                }
+            }
+        }
     }
 }
 
-fn process_auto_respawns(socket: &UdpSocket, maze: &MazeData, players: &mut HashMap<SocketAddr, Player>) {
+fn process_auto_respawns(
+    socket: &UdpSocket,
+    maze: &MazeData,
+    players: &mut HashMap<SocketAddr, Player>,
+) {
     let now = Instant::now();
-    let mut to_respawn: Vec<(SocketAddr, f32, f32, f32, String)> = Vec::new();
+    // include a bool indicating whether the teleporter fallback was used
+    let mut to_respawn: Vec<(SocketAddr, f32, f32, f32, bool, String)> = Vec::new();
 
     for player in players.values_mut() {
         if player.is_alive || player.world != WorldId::Maze {
@@ -107,18 +271,32 @@ fn process_auto_respawns(socket: &UdpSocket, maze: &MazeData, players: &mut Hash
             player.shield = 0;
             player.death_time = None;
 
-            let (sx, sy, sz) = maze.teleporter_world(MAZE_CELL_SIZE);
+            // choose a random spawn inside the maze (may fallback to teleporter)
+            let (sx, sy, sz, used_fallback) = maze.random_spawn_world(MAZE_CELL_SIZE);
             player.position = (sx, sy, sz);
-            to_respawn.push((player.socket_addr, sx, sy, sz, player.username.clone()));
+            to_respawn.push((
+                player.socket_addr,
+                sx,
+                sy,
+                sz,
+                used_fallback,
+                player.username.clone(),
+            ));
         }
     }
 
-    for (socket_addr, sx, sy, sz, username) in to_respawn {
-        println!("Player '{}' auto-respawned in {:?}", username, WorldId::Maze);
+    for (socket_addr, sx, sy, sz, used_fallback, username) in to_respawn {
+        println!(
+            "Player '{}' auto-respawned in {:?}",
+            username,
+            WorldId::Maze
+        );
         let mut respawn_msg = vec![MSG_RESPAWN];
         respawn_msg.extend_from_slice(&sx.to_be_bytes());
         respawn_msg.extend_from_slice(&sy.to_be_bytes());
         respawn_msg.extend_from_slice(&sz.to_be_bytes());
+        // extra byte: 0 = random spawn, 1 = teleporter fallback
+        respawn_msg.push(if used_fallback { 1u8 } else { 0u8 });
         let _ = socket.send_to(&respawn_msg, socket_addr);
     }
 }
@@ -325,7 +503,6 @@ fn handle_discover(
     src_addr: SocketAddr,
 ) {
     let player_count = players.len().min(255) as u8;
-    let max_players: u8 = 16;
     let hostname = fs::read_to_string("/etc/hostname")
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "Unknown".to_string());
@@ -334,7 +511,7 @@ fn handle_discover(
     let mut response = vec![
         MSG_DISCOVER,
         player_count,
-        max_players,
+        MATCH_MAX_PLAYERS as u8,
         name_bytes.len() as u8,
     ];
     response.extend_from_slice(name_bytes);
@@ -435,7 +612,11 @@ fn handle_hit(
     let attacker_id = attacker.id;
 
     // Find victim by ID
-    let Some(victim_addr) = players.iter().find(|(_, p)| p.id == victim_id).map(|(addr, _)| *addr) else {
+    let Some(victim_addr) = players
+        .iter()
+        .find(|(_, p)| p.id == victim_id)
+        .map(|(addr, _)| *addr)
+    else {
         return;
     };
 
@@ -519,19 +700,23 @@ fn handle_respawn_request(
     player.shield = 0;
     player.death_time = None;
 
-    // Choose spawn position based on world
-    let (sx, sy, sz) = match player.world {
-        WorldId::Lobby => (0.0_f32, 0.0_f32, 0.0_f32),
-        WorldId::Maze => maze.teleporter_world(MAZE_CELL_SIZE),
+    // Choose spawn position based on world. For Maze, prefer random spawn.
+    let (sx, sy, sz, used_fallback) = match player.world {
+        WorldId::Lobby => (0.0_f32, 0.0_f32, 0.0_f32, false),
+        WorldId::Maze => maze.random_spawn_world(MAZE_CELL_SIZE),
     };
     player.position = (sx, sy, sz);
 
-    println!("Player '{}' respawned in {:?}", player.username, player.world);
+    println!(
+        "Player '{}' respawned in {:?}",
+        player.username, player.world
+    );
 
-    // Send MSG_RESPAWN with spawn position
+    // Send MSG_RESPAWN with spawn position + spawn-kind flag
     let mut respawn_msg = vec![MSG_RESPAWN];
     respawn_msg.extend_from_slice(&sx.to_be_bytes());
     respawn_msg.extend_from_slice(&sy.to_be_bytes());
     respawn_msg.extend_from_slice(&sz.to_be_bytes());
+    respawn_msg.push(if used_fallback { 1u8 } else { 0u8 });
     let _ = socket.send_to(&respawn_msg, src_addr);
 }

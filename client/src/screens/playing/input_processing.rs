@@ -31,6 +31,15 @@ impl PlayingState {
             return None;
         }
 
+        // Lobby console UI takes input precedence. Check it first so ESC closes the console
+        // instead of opening the pause menu while the console is visible.
+        self.check_lobby_console();
+        if self.lobby_console_open {
+            // keep UI responsive (mouse) but prevent movement/weapon input
+            self.last_mouse_pos = mouse_position();
+            return None;
+        }
+
         if config.bind_settings.is_pressed() {
             return Some(GameState::Paused);
         }
@@ -318,7 +327,7 @@ impl PlayingState {
             self.play_weapon_shot_sound(sound_key, config);
         }
 
-        self.check_teleporter(maze.as_ref().map(|m| &**m));
+        // teleporter interaction removed; lobby console handled earlier
 
         None
     }

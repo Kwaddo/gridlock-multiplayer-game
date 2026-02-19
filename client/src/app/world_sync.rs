@@ -18,7 +18,7 @@ pub fn sync_world(
         if let Some((new_maze, _spawn)) = updates.maze {
             *maze = Some(new_maze);
         }
-        if let Some(mut players) = updates.players {
+        if let Some(players) = updates.players {
             let mut existing = std::mem::take(&mut playing_state.other_players);
             let mut merged = Vec::with_capacity(players.len());
 
@@ -98,6 +98,24 @@ pub fn sync_world(
         }
         if let Some(spawn_pos) = updates.respawn_pos {
             playing_state.respawn(spawn_pos);
+            if let Some(fallback) = updates.respawn_fallback {
+                if fallback {
+                    playing_state.spawn_feedback_message =
+                        Some("Respawned at teleporter (fallback)".to_string());
+                    playing_state.spawn_feedback_timer = 3.0;
+                }
+            }
+        }
+
+        // Lobby console feedback from server (e.g. start rejected because match full)
+        if let Some(msg) = updates.lobby_console_message {
+            playing_state.lobby_console_message = Some(msg);
+            playing_state.lobby_console_message_timer = 3.0;
+        }
+
+        // Match-join announcement broadcast (show bottom-left)
+        if let Some(msg) = updates.match_join_announce {
+            playing_state.announcements.push((msg, 4.0));
         }
         return updates.assets;
     }

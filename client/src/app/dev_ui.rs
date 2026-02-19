@@ -215,7 +215,7 @@ pub fn draw_bot_tab(
             y += draw_toggle_public("Sprint", &mut bot.action_state.sprint, x, y, mouse, clicked);
             y += draw_toggle_public("Slide", &mut bot.action_state.slide, x, y, mouse, clicked);
             y += draw_toggle_public("Shoot", &mut bot.action_state.shoot, x, y, mouse, clicked);
-            y += draw_toggle_public("ADS", &mut bot.action_state.ads, x, y, mouse, clicked);
+            draw_toggle_public("ADS", &mut bot.action_state.ads, x, y, mouse, clicked);
         }
     }
 }
