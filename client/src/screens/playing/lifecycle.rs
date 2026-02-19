@@ -28,6 +28,15 @@ impl PlayingState {
             self.hp = (self.hp - damage).max(0.0);
         }
 
+        // brief damage flash and attacker info for HUD
+        self.damage_flash_timer = 0.6;
+        self.last_damage_attacker = attacker_id.and_then(|aid| {
+            self.connected_players
+                .iter()
+                .find(|(id, _name, _)| *id == aid)
+                .map(|(_, name, _)| name.clone())
+        });
+
         if self.hp <= 0.0 {
             self.die(attacker_id)
         }

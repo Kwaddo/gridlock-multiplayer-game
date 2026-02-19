@@ -38,7 +38,9 @@ impl PlayingState {
         if self.is_dead {
             if self.death_timer > 0.0 {
                 self.death_timer -= delta;
-            } else if self.current_world == WorldId::Lobby && is_key_pressed(KeyCode::Space) {
+            } else if self.current_world == WorldId::Maze && is_key_pressed(KeyCode::Space) {
+                // allow explicit respawn requests only while in-match (Maze). In the Lobby
+                // the UI still shows the hint but SPACE does nothing.
                 self.pending_respawn = true;
             }
             return;
@@ -71,6 +73,73 @@ impl PlayingState {
             self.hit_marker_timer = (self.hit_marker_timer - delta).max(0.0);
         }
 
+        // Damage flash timer (short red vignette + optional attacker name)
+        if self.damage_flash_timer > 0.0 {
+            self.damage_flash_timer = (self.damage_flash_timer - delta).max(0.0);
+            if self.damage_flash_timer <= 0.0 {
+                self.last_damage_attacker = None;
+            }
+        }
+
+        // Respawn feedback timer
+        if self.spawn_feedback_timer > 0.0 {
+            self.spawn_feedback_timer = (self.spawn_feedback_timer - delta).max(0.0);
+            if self.spawn_feedback_timer <= 0.0 {
+                self.spawn_feedback_message = None;
+            }
+        }
+
+        // Lobby console feedback timer
+        if self.lobby_console_message_timer > 0.0 {
+            self.lobby_console_message_timer = (self.lobby_console_message_timer - delta).max(0.0);
+            if self.lobby_console_message_timer <= 0.0 {
+                self.lobby_console_message = None;
+            }
+        }
+
+        // Match-start countdown (server-initiated)
+        if self.match_start_countdown_timer > 0.0 {
+            self.match_start_countdown_timer = (self.match_start_countdown_timer - delta).max(0.0);
+            if self.match_start_countdown_timer <= 0.0 {
+                // small 'Go' announcement
+                self.announcements.push(("GO!".to_string(), 1.5));
+                // start client-side movement & shooting freeze for the initial match window
+                self.post_teleport_freeze_timer = 10.0;
+            }
+        }
+
+        // Match-end countdown (server-initiated)
+        if self.match_end_countdown_timer > 0.0 {
+            self.match_end_countdown_timer = (self.match_end_countdown_timer - delta).max(0.0);
+            if self.match_end_countdown_timer <= 0.0 {
+                // clear winner toast once countdown completes
+                self.match_end_winner = None;
+            }
+        }
+
+        // Post-teleport movement freeze timer (client-side display + input gating)
+        if self.post_teleport_freeze_timer > 0.0 {
+            self.post_teleport_freeze_timer = (self.post_teleport_freeze_timer - delta).max(0.0);
+            if self.post_teleport_freeze_timer <= 0.0 {
+                self.announcements
+                    .push(("Movement unlocked".to_string(), 2.0));
+            }
+        }
+
+        // Match timer (client-side) — started when client enters Maze
+        if self.current_world == WorldId::Maze && self.match_time_left > 0.0 {
+            self.match_time_left = (self.match_time_left - delta).max(0.0);
+        } else if self.current_world != WorldId::Maze {
+            // ensure timer is cleared outside of match
+            self.match_time_left = 0.0;
+        }
+
+        // Announcements timers
+        for ann in &mut self.announcements {
+            ann.1 = (ann.1 - delta).max(0.0);
+        }
+        self.announcements.retain(|ann| ann.1 > 0.0);
+
         for dn in &mut self.damage_numbers {
             dn.lifetime -= delta;
             dn.screen_y -= 60.0 * delta;
@@ -89,7 +158,14 @@ impl PlayingState {
         self.update_stamina(config, delta);
         self.update_crouch_height(config, delta);
         let was_grounded = self.movement_state.is_grounded;
-        self.apply_jump();
+        // Only allow jumping when not frozen after teleport
+        if self.post_teleport_freeze_timer <= 0.0 {
+            self.apply_jump();
+        } else {
+            // clear any pending jump while frozen
+            self.jump_requested = false;
+            self.just_jumped = false;
+        }
         self.apply_gravity(delta);
 
         match self.current_world {
@@ -114,7 +190,16 @@ impl PlayingState {
                     self.movement_state.velocity.y = 0.0;
                 }
                 let prev_position = self.position;
-                self.apply_movement(delta);
+
+                // while in the short post-teleport freeze, prevent movement on the client
+                if self.post_teleport_freeze_timer <= 0.0 {
+                    self.apply_movement(delta);
+                } else {
+                    // keep player stationary horizontally while still allowing gravity to apply
+                    self.movement_state.velocity.x = 0.0;
+                    self.movement_state.velocity.z = 0.0;
+                }
+
                 if let Some(m) = maze {
                     let clamped =
                         m.clamp_move(prev_position, self.position, collision::PLAYER_RADIUS);
@@ -154,16 +239,17 @@ impl PlayingState {
             return;
         };
 
-
         /*
-            this is the scale factor for the hitbox positions, it is based on the normalize scale of the animation (which is based on the original model size) 
+            this is the scale factor for the hitbox positions, it is based on the normalize scale of the animation (which is based on the original model size)
             and a tunable render scale factor to adjust how big the hitboxes are overall
-            makes it easy to fine tune without needing to adjust the original model or animation. 
+            makes it easy to fine tune without needing to adjust the original model or animation.
             We also apply the same scale factor to the y_offset which is used to adjust the hitbox positions up or down based on the players height (crouching, standing, etc)
         */
         let scale = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
         let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
-        if let Some(hitboxes) = Self::build_standing_hitboxes_from_joints(anim, player.render_yaw, scale, y_offset) {
+        if let Some(hitboxes) =
+            Self::build_standing_hitboxes_from_joints(anim, player.render_yaw, scale, y_offset)
+        {
             player.hitboxes = hitboxes;
         } else {
             player.hitboxes = default_player_hitboxes();
@@ -182,8 +268,8 @@ impl PlayingState {
                 .find_map(|tokens| anim.joint_position_with_tokens(tokens))
         }
         /*
-            Here we are using the same model scaling as the render so visual hitbox indicators line up with the actual hitboxes, and we also apply the same scaling to 
-            the y_offset which is used to adjust the hitbox positions up or down based on the players height (crouching, standing, etc)        
+            Here we are using the same model scaling as the render so visual hitbox indicators line up with the actual hitboxes, and we also apply the same scaling to
+            the y_offset which is used to adjust the hitbox positions up or down based on the players height (crouching, standing, etc)
         */
         let to_offset = |p: Vec3| -> Vec3 {
             let rotated = Mat3::from_rotation_y(-yaw + PLAYER_MODEL_YAW_OFFSET) * (p * scale);
@@ -196,16 +282,26 @@ impl PlayingState {
 
         let l_foot = any_joint(anim, &[&["left", "foot"], &["left", "toe"]]).unwrap_or(hips);
         let r_foot = any_joint(anim, &[&["right", "foot"], &["right", "toe"]]).unwrap_or(hips);
-        let l_shoulder = any_joint(anim, &[&["left", "shoulder"], &["left", "arm"]]).unwrap_or(chest);
-        let r_shoulder = any_joint(anim, &[&["right", "shoulder"], &["right", "arm"]]).unwrap_or(chest);
+        let l_shoulder =
+            any_joint(anim, &[&["left", "shoulder"], &["left", "arm"]]).unwrap_or(chest);
+        let r_shoulder =
+            any_joint(anim, &[&["right", "shoulder"], &["right", "arm"]]).unwrap_or(chest);
         let l_elbow = any_joint(
             anim,
-            &[&["left", "forearm"], &["left", "lowerarm"], &["left", "elbow"]],
+            &[
+                &["left", "forearm"],
+                &["left", "lowerarm"],
+                &["left", "elbow"],
+            ],
         )
         .unwrap_or(l_shoulder);
         let r_elbow = any_joint(
             anim,
-            &[&["right", "forearm"], &["right", "lowerarm"], &["right", "elbow"]],
+            &[
+                &["right", "forearm"],
+                &["right", "lowerarm"],
+                &["right", "elbow"],
+            ],
         )
         .unwrap_or(r_shoulder);
         let l_hand = any_joint(anim, &[&["left", "hand"], &["left", "wrist"]]).unwrap_or(l_elbow);
@@ -224,7 +320,7 @@ impl PlayingState {
         let r_hand_o = to_offset(r_hand);
 
         /*
-            Here we are bulding AABB hitboxes from a bone segment (hand, leg, etc) then we also add padding so it works for each state (stand, crouch, etc) 
+            Here we are bulding AABB hitboxes from a bone segment (hand, leg, etc) then we also add padding so it works for each state (stand, crouch, etc)
             and we also set a minimum size so hitboxes dont get too small if the model has very thin arms or legs.
         */
         let segment_box = |a: Vec3, b: Vec3, pad: Vec3, min_half: Vec3, zone: HitZone| -> Hitbox {
@@ -255,7 +351,13 @@ impl PlayingState {
                 half_extents: vec3(head_radius, head_radius, head_radius),
                 zone: HitZone::Head,
             },
-            segment_box(chest_o, hips_o, vec3(0.08, 0.08, 0.08), torso_min, HitZone::Torso),
+            segment_box(
+                chest_o,
+                hips_o,
+                vec3(0.08, 0.08, 0.08),
+                torso_min,
+                HitZone::Torso,
+            ),
             segment_box(
                 l_shoulder_o,
                 hips_o,
@@ -270,8 +372,20 @@ impl PlayingState {
                 torso_min * 0.8,
                 HitZone::Torso,
             ),
-            segment_box(hips_o, l_foot_o, vec3(0.05, 0.05, 0.05), limb_min, HitZone::Limbs),
-            segment_box(hips_o, r_foot_o, vec3(0.05, 0.05, 0.05), limb_min, HitZone::Limbs),
+            segment_box(
+                hips_o,
+                l_foot_o,
+                vec3(0.05, 0.05, 0.05),
+                limb_min,
+                HitZone::Limbs,
+            ),
+            segment_box(
+                hips_o,
+                r_foot_o,
+                vec3(0.05, 0.05, 0.05),
+                limb_min,
+                HitZone::Limbs,
+            ),
         ];
 
         let arm_min = vec3(0.08, 0.08, 0.08);

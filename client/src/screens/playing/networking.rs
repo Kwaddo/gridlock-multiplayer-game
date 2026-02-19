@@ -1,7 +1,7 @@
 use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS, FLAG_AIRBORNE,
     FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MSG_HIT, MSG_POSITION,
-    MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    MSG_START_GAME, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
 use std::net::UdpSocket;
 
@@ -17,6 +17,13 @@ impl PlayingState {
 
             if let Some(target) = self.pending_world_change.take() {
                 let msg = vec![MSG_WORLD_CHANGE, target.as_u8()];
+                let _ = s.send_to(&msg, server_addr);
+            }
+
+            // Lobby console: send start-game request to server
+            if self.pending_start_request {
+                self.pending_start_request = false;
+                let msg = vec![MSG_START_GAME];
                 let _ = s.send_to(&msg, server_addr);
             }
 

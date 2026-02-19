@@ -117,7 +117,7 @@ pub(super) fn draw_weapon_and_kill_feed(
         }
     }
 
-    let feed_x = screen_width() - 400.0;
+    let feed_x = 12.0; // move kill-feed to top-left
     let mut feed_y = 20.0;
     for entry in kill_feed.iter().rev().take(5) {
         let alpha = ((entry.timer / 5.0).min(1.0) * 255.0) as u8;
