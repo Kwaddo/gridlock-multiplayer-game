@@ -72,7 +72,13 @@ impl PlayingState {
             input::process_crouch(config, self.movement_state.is_crouching);
         self.jump_requested =
             input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons);
-
+        // If we are in the Maze and the post-teleport freeze is active, block movement input
+        if self.post_teleport_freeze_timer > 0.0 && self.current_world == WorldId::Maze {
+            self.move_dir = Vec3::ZERO;
+            self.movement_state.is_sprinting = false;
+            self.movement_state.is_crouching = false;
+            self.jump_requested = false;
+        }
         input::process_weapon_input(&mut self.weapons, config);
 
         let delta = raw_delta.min(0.05);

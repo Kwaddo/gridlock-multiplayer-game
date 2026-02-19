@@ -38,7 +38,9 @@ impl PlayingState {
         if self.is_dead {
             if self.death_timer > 0.0 {
                 self.death_timer -= delta;
-            } else if self.current_world == WorldId::Lobby && is_key_pressed(KeyCode::Space) {
+            } else if self.current_world == WorldId::Maze && is_key_pressed(KeyCode::Space) {
+                // allow explicit respawn requests only while in-match (Maze). In the Lobby
+                // the UI still shows the hint but SPACE does nothing.
                 self.pending_respawn = true;
             }
             return;
@@ -105,6 +107,14 @@ impl PlayingState {
             }
         }
 
+        // Post-teleport movement freeze timer (client-side display + input gating)
+        if self.post_teleport_freeze_timer > 0.0 {
+            self.post_teleport_freeze_timer = (self.post_teleport_freeze_timer - delta).max(0.0);
+            if self.post_teleport_freeze_timer <= 0.0 {
+                self.announcements.push(("Movement unlocked".to_string(), 2.0));
+            }
+        }
+
         // Announcements timers
         for ann in &mut self.announcements {
             ann.1 = (ann.1 - delta).max(0.0);
@@ -129,7 +139,14 @@ impl PlayingState {
         self.update_stamina(config, delta);
         self.update_crouch_height(config, delta);
         let was_grounded = self.movement_state.is_grounded;
-        self.apply_jump();
+        // Only allow jumping when not frozen after teleport
+        if self.post_teleport_freeze_timer <= 0.0 {
+            self.apply_jump();
+        } else {
+            // clear any pending jump while frozen
+            self.jump_requested = false;
+            self.just_jumped = false;
+        }
         self.apply_gravity(delta);
 
         match self.current_world {
@@ -154,7 +171,16 @@ impl PlayingState {
                     self.movement_state.velocity.y = 0.0;
                 }
                 let prev_position = self.position;
-                self.apply_movement(delta);
+
+                // while in the short post-teleport freeze, prevent movement on the client
+                if self.post_teleport_freeze_timer <= 0.0 {
+                    self.apply_movement(delta);
+                } else {
+                    // keep player stationary horizontally while still allowing gravity to apply
+                    self.movement_state.velocity.x = 0.0;
+                    self.movement_state.velocity.z = 0.0;
+                }
+
                 if let Some(m) = maze {
                     let clamped =
                         m.clamp_move(prev_position, self.position, collision::PLAYER_RADIUS);

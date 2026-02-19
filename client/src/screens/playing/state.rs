@@ -48,6 +48,7 @@ pub struct PlayingState {
     // countdown timers (server-synchronized)
     pub match_start_countdown_timer: f32,
     pub match_end_countdown_timer: f32,
+    pub post_teleport_freeze_timer: f32, // seconds players cannot move immediately after teleport into Maze
     pub match_end_winner: Option<String>,
 
     pub target_dummy: TargetDummy,
@@ -151,6 +152,7 @@ impl PlayingState {
             // countdown timers
             match_start_countdown_timer: 0.0,
             match_end_countdown_timer: 0.0,
+            post_teleport_freeze_timer: 0.0,
             match_end_winner: None,
             spawn_feedback_message: None,
             spawn_feedback_timer: 0.0,
