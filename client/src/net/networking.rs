@@ -4,8 +4,9 @@ use macroquad::prelude::*;
 
 use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_SPRINTING,
-    MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_JOINED, MSG_MAZE, MSG_POSITION,
-    MSG_RESPAWN, MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN, MSG_MATCH_END,
+    MSG_MATCH_JOINED, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN, MSG_START_DENIED,
+    MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
@@ -26,6 +27,11 @@ pub struct NetUpdate {
     pub respawn_fallback: Option<bool>,           // true if server fell back to teleporter
     pub lobby_console_message: Option<String>,
     pub match_join_announce: Option<String>,
+    pub match_start_countdown: Option<u8>,
+    pub match_end_winner: Option<String>,
+    pub match_end_countdown: Option<u8>,
+    pub player_list: Option<Vec<(u32, String, u32, WorldId, bool)>>,
+    pub self_kills: Option<u32>,
     pub death: bool, // You died
 }
 
@@ -49,9 +55,14 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         kill_feed: None,
         respawn_pos: None,
         respawn_fallback: None,
-        death: false,
         lobby_console_message: None,
         match_join_announce: None,
+        match_start_countdown: None,
+        match_end_winner: None,
+        match_end_countdown: None,
+        player_list: None,
+        self_kills: None,
+        death: false,
     };
 
     let mut recv_buf: [u8; 8192] = [0; 8192];
@@ -200,6 +211,16 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     offset += 1;
                     let event_flags = recv_buf[offset];
                     offset += 1;
+
+                    // new: kills (u32)
+                    let kills = u32::from_be_bytes([
+                        recv_buf[offset],
+                        recv_buf[offset + 1],
+                        recv_buf[offset + 2],
+                        recv_buf[offset + 3],
+                    ]);
+                    offset += 4;
+
                     let name_len = recv_buf[offset] as usize;
                     offset += 1;
                     let name =
@@ -218,7 +239,11 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
                         other_player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
                         other_player.evt_landed = (event_flags & EVT_LANDED) != 0;
+                        other_player.kills = kills;
                         new_players.push(other_player);
+                    } else {
+                        // update own-kills value for local UI/scoreboard
+                        update.self_kills = Some(kills);
                     }
                 }
                 update.players = Some(new_players);
@@ -252,6 +277,71 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         let name = String::from_utf8_lossy(&recv_buf[6..6 + name_len]).to_string();
                         update.match_join_announce = Some(format!("{} joined the match", name));
                     }
+                }
+            }
+            MSG_MATCH_COUNTDOWN => {
+                // format: [MSG_MATCH_COUNTDOWN][seconds:1]
+                if size >= 2 {
+                    let secs = recv_buf[1];
+                    update.match_start_countdown = Some(secs);
+                }
+            }
+            MSG_MATCH_END => {
+                // format: [MSG_MATCH_END][winner_id:4][name_len:1][name bytes][countdown?:1]
+                if size >= 6 {
+                    let name_len = recv_buf[5] as usize;
+                    if size >= 6 + name_len {
+                        let name = String::from_utf8_lossy(&recv_buf[6..6 + name_len]).to_string();
+                        update.match_end_winner = Some(name.clone());
+                        // optional trailing countdown byte
+                        if size >= 6 + name_len + 1 {
+                            let cd = recv_buf[6 + name_len];
+                            update.match_end_countdown = Some(cd);
+                        }
+                    }
+                }
+            }
+            MSG_PLAYER_LIST => {
+                // format: [MSG_PLAYER_LIST][count:1][entries...]
+                // entry: [id:4][name_len:1][name bytes][kills:4][world:1][alive:1]
+                if size >= 2 {
+                    let count = recv_buf[1] as usize;
+                    let mut offset = 2usize;
+                    let mut list = Vec::new();
+                    for _ in 0..count {
+                        if offset + 6 > size {
+                            break;
+                        }
+                        let id = u32::from_be_bytes([
+                            recv_buf[offset],
+                            recv_buf[offset + 1],
+                            recv_buf[offset + 2],
+                            recv_buf[offset + 3],
+                        ]);
+                        offset += 4;
+                        let name_len = recv_buf[offset] as usize;
+                        offset += 1;
+                        if offset + name_len + 6 > size {
+                            break;
+                        }
+                        let name = String::from_utf8_lossy(&recv_buf[offset..offset + name_len])
+                            .to_string();
+                        offset += name_len;
+                        let kills = u32::from_be_bytes([
+                            recv_buf[offset],
+                            recv_buf[offset + 1],
+                            recv_buf[offset + 2],
+                            recv_buf[offset + 3],
+                        ]);
+                        offset += 4;
+                        let world_id = recv_buf[offset];
+                        offset += 1;
+                        let alive = recv_buf[offset] != 0;
+                        offset += 1;
+                        let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
+                        list.push((id, name, kills, world, alive));
+                    }
+                    update.player_list = Some(list);
                 }
             }
             MSG_ASSETS => {

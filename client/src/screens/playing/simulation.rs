@@ -87,6 +87,24 @@ impl PlayingState {
             }
         }
 
+        // Match-start countdown (server-initiated)
+        if self.match_start_countdown_timer > 0.0 {
+            self.match_start_countdown_timer = (self.match_start_countdown_timer - delta).max(0.0);
+            if self.match_start_countdown_timer <= 0.0 {
+                // small 'Go' announcement
+                self.announcements.push(("GO!".to_string(), 1.5));
+            }
+        }
+
+        // Match-end countdown (server-initiated)
+        if self.match_end_countdown_timer > 0.0 {
+            self.match_end_countdown_timer = (self.match_end_countdown_timer - delta).max(0.0);
+            if self.match_end_countdown_timer <= 0.0 {
+                // clear winner toast once countdown completes
+                self.match_end_winner = None;
+            }
+        }
+
         // Announcements timers
         for ann in &mut self.announcements {
             ann.1 = (ann.1 - delta).max(0.0);

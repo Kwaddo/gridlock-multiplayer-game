@@ -22,6 +22,9 @@ pub const MSG_KILL_FEED: u8 = 18; // server -> all: broadcast kill (killer_id, v
 pub const MSG_START_GAME: u8 = 19; // client -> server: request to start a match
 pub const MSG_START_DENIED: u8 = 20; // server -> client: start request rejected (match running / full)
 pub const MSG_MATCH_JOINED: u8 = 21; // server -> all: announce player joined a running match (id, name)
+pub const MSG_MATCH_END: u8 = 22; // server -> all: announce match end (winner_id, name, countdown_secs)
+pub const MSG_PLAYER_LIST: u8 = 23; // server -> client: full connected player list (id,name,kills,world,is_alive)
+pub const MSG_MATCH_COUNTDOWN: u8 = 24; // server -> all: match start countdown (seconds)
 
 // State flags for player movement and actions, sent in the position message
 pub const FLAG_SPRINTING: u8 = 1 << 0;

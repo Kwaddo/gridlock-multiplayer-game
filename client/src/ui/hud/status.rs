@@ -13,22 +13,7 @@ pub(super) fn draw_status_panels(
     shield: f32,
     max_shield: f32,
 ) {
-    draw_text_ex("Multiplayer FPS", 20.0, 20.0, text_params(30, WHITE));
-    draw_text_ex(
-        &format!("Player: {} (ID: {})", username, player_id),
-        20.0,
-        50.0,
-        text_params(20, WHITE),
-    );
-    draw_text_ex(
-        &format!(
-            "Pos: {:.2}, {:.2}, {:.2}",
-            position.x, position.y, position.z
-        ),
-        20.0,
-        70.0,
-        text_params(20, WHITE),
-    );
+
 
     let hp_bar_x = 20.0;
     let hp_bar_y = screen_height() - 120.0;

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 mod crosshair;
 mod minimap;
 mod players;
+pub use players::draw_player_list;
 mod scope;
 mod status;
 mod weapon_feed;
