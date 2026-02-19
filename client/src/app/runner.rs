@@ -42,6 +42,9 @@ pub async fn run() {
     // connection heartbeat / last seen from server
     let mut last_server_contact: Option<Instant> = None;
     const CLIENT_CONNECTION_LOST_TIMEOUT: Duration = Duration::from_secs(8);
+    // keepalive: periodically send a lightweight position update while connected so the
+    // server does not mark us inactive when we are idle/paused.
+    let mut last_keepalive: Option<Instant> = None;
 
     let mut loading_assets: Vec<(String, String)> = Vec::new();
     let mut loading_index: usize = 0;
@@ -392,6 +395,18 @@ pub async fn run() {
                     let _ = s.send_to(&disconnect_msg, &server_addr);
                 }
                 std::process::exit(0);
+            }
+        }
+
+        // Keepalive: if connected, periodically send a lightweight position update so the
+        // server treats us as active even when idle/paused. Interval is less than server timeout.
+        if socket.is_some() {
+            if last_keepalive
+                .map(|t| Instant::now().duration_since(t) > Duration::from_secs(4))
+                .unwrap_or(true)
+            {
+                playing_state.send_network(&socket, &server_addr);
+                last_keepalive = Some(Instant::now());
             }
         }
 
