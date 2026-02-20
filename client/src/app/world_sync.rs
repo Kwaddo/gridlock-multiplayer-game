@@ -203,7 +203,7 @@ pub fn sync_world(
                     playing_state.weapons.set_locked_slot(Some(forced));
                 }
             } else {
-                // ensure timer is cleared outside of match
+                // returning to lobby: clear match-end state and maze
                 playing_state.match_time_left = 0.0;
                 // leaving the Maze / returning to Lobby — clear any mode-specific restrictions
                 playing_state.match_mode = None;
@@ -213,6 +213,10 @@ pub fn sync_world(
             // If the server attached a match_mode to the world-change packet, remember it
             if let Some(mode) = updates.match_mode {
                 playing_state.match_mode = Some(mode);
+                playing_state.match_end_winner = None;
+                playing_state.match_end_countdown_timer = 0.0;
+                playing_state.local_kills = 0;
+                *maze = None;
             }
         }
         if let Some(broken) = updates.broken_walls {

@@ -37,6 +37,10 @@ impl PlayingState {
                 let mut msg = vec![MSG_HIT];
                 msg.extend_from_slice(&victim_id.to_be_bytes());
                 msg.extend_from_slice(&damage.to_be_bytes());
+                // append active weapon name so server can include it in kill feed
+                let weapon_name = self.weapons.active().stats().name.as_bytes();
+                msg.push(weapon_name.len() as u8);
+                msg.extend_from_slice(weapon_name);
                 let _ = s.send_to(&msg, server_addr);
             }
 
