@@ -78,14 +78,24 @@ impl PlayingState {
                 event_flags |= EVT_SLIDE_END;
             }
 
-            let mut msg = vec![MSG_POSITION];
-            msg.extend_from_slice(&self.position.x.to_be_bytes());
-            msg.extend_from_slice(&self.position.y.to_be_bytes());
-            msg.extend_from_slice(&self.position.z.to_be_bytes());
-            msg.extend_from_slice(&self.yaw.to_be_bytes());
-            msg.push(state_flags);
-            msg.push(event_flags);
-            let _ = s.send_to(&msg, server_addr);
+            // pack position message into a small stack buffer to avoid per-frame heap allocations
+            let mut buf = [0u8; 32];
+            let mut p = 0usize;
+            buf[p] = MSG_POSITION;
+            p += 1;
+            buf[p..p + 4].copy_from_slice(&self.position.x.to_be_bytes());
+            p += 4;
+            buf[p..p + 4].copy_from_slice(&self.position.y.to_be_bytes());
+            p += 4;
+            buf[p..p + 4].copy_from_slice(&self.position.z.to_be_bytes());
+            p += 4;
+            buf[p..p + 4].copy_from_slice(&self.yaw.to_be_bytes());
+            p += 4;
+            buf[p] = state_flags;
+            p += 1;
+            buf[p] = event_flags;
+            p += 1;
+            let _ = s.send_to(&buf[..p], server_addr);
         }
     }
 }

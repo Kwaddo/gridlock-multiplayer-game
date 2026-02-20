@@ -181,6 +181,7 @@ impl PlayingState {
                     &mut self.position,
                     &mut self.movement_state.velocity,
                     self.movement_state.height,
+                    self.movement_state.is_grounded,
                 );
             }
             WorldId::Maze => {
