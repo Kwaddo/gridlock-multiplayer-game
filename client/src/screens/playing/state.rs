@@ -15,6 +15,21 @@ use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandsPlaybackMode {
+    IdleLoop,
+    ReloadOnce,
+    Stopped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectPhase {
+    None,
+    Start,
+    Hold,
+    Return,
+}
+
 pub struct PlayingState {
     pub position: Vec3,
     pub yaw: f32,
@@ -89,6 +104,10 @@ pub struct PlayingState {
     pub announcements: Vec<(String, f32)>,
     pub lobby_console_message: Option<String>,
     pub lobby_console_message_timer: f32,
+    pub hands_playback_mode: HandsPlaybackMode,
+    pub hands_anim_initialized: bool,
+    pub inspect_phase: InspectPhase,
+    pub inspect_timer: f32,
 }
 
 pub struct KillFeedEntry {
@@ -171,6 +190,10 @@ impl PlayingState {
             lobby_console_message_timer: 0.0,
             announcements: Vec::new(),
             connected_players: Vec::new(),
+            hands_playback_mode: HandsPlaybackMode::IdleLoop,
+            hands_anim_initialized: false,
+            inspect_phase: InspectPhase::None,
+            inspect_timer: 0.0,
         }
     }
 }

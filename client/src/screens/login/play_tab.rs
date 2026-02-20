@@ -80,7 +80,7 @@ impl LoginScreen {
         }
 
         if !self.error_msg.is_empty() {
-            let ey = by + bh + 16.0;
+            let ey = by + bh + 10.0;
             let ew = measure_game_text(&self.error_msg, 15);
             draw_text_ex(
                 &self.error_msg,

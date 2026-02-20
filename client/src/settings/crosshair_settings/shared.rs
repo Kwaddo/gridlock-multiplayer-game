@@ -1,5 +1,5 @@
 use crate::weapons::crosshair::{CrosshairConfig, CrosshairType};
-use crate::weapons::stats::WeaponKind;
+use crate::weapons::stats::WeaponCategory;
 use crate::weapons::WeaponInventory;
 use macroquad::prelude::*;
 
@@ -63,7 +63,7 @@ pub(super) fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
 }
 
 pub struct CrosshairSettingsPreview {
-    pub preview_weapon: WeaponKind,
+    pub preview_weapon: WeaponCategory,
     pub preview_ads: bool,
     pub preview_light_bg: bool,
     pub shotgun_type_warning: bool,
@@ -88,7 +88,7 @@ pub struct CrosshairSettingsPreview {
 impl CrosshairSettingsPreview {
     pub fn new() -> Self {
         Self {
-            preview_weapon: WeaponKind::Pistol,
+            preview_weapon: WeaponCategory::Pistol,
             preview_ads: false,
             preview_light_bg: false,
             shotgun_type_warning: false,

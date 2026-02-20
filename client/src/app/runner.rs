@@ -6,11 +6,13 @@ use std::time::{Duration, Instant};
 
 use client::core::{GameConfig, GameState};
 use client::screens::dev_mode::{draw_dev_overlay, DevModeState};
-use client::screens::{draw_pause_menu, LoginScreen, PlayingState};
+use client::screens::{draw_pause_menu, LobbyInventoryScreen, LoginScreen, PlayingState};
 use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
 use client::weapons::crosshair_presets::CrosshairPresetManager;
+use client::weapons::loadout::Loadout;
+use client::weapons::WeaponInventory;
 
 use super::asset_cache::{load_cached_manifest, save_cached_manifest};
 use super::asset_loader::load_asset_entry;
@@ -37,6 +39,8 @@ pub async fn run() {
     let mut preset_manager = CrosshairPresetManager::new("");
     let mut maze: Option<Maze> = None;
     let mut is_fullscreen = true;
+    let mut loadout = Loadout::default_loadout();
+    let mut lobby_inventory = LobbyInventoryScreen::new();
 
     // connection heartbeat / last seen from server
     let mut last_server_contact: Option<Instant> = None;
@@ -78,6 +82,37 @@ pub async fn run() {
                     state = GameState::Loading;
                 }
                 login_screen.draw();
+            }
+
+            GameState::LobbyInventory => {
+                let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                if sync.removed_by_server {
+                    socket = None;
+                    login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                    state = GameState::Login;
+                    set_cursor_grab(false);
+                    show_mouse(true);
+                    playing_state.clear_input();
+                    last_server_contact = None;
+                    continue;
+                }
+                if sync.server_seen {
+                    last_server_contact = Some(Instant::now());
+                }
+                if let Some(entries) = sync.assets {
+                    for (key, path) in resolve_asset_entries_for_quality(entries) {
+                        load_asset_entry(key, path, &mut playing_state).await;
+                    }
+                }
+                playing_state.simulate(&config, maze.as_ref());
+                playing_state.render(&config, &username, player_id, maze.as_ref());
+
+                draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::from_rgba(0, 0, 0, 150));
+                lobby_inventory.draw(&loadout);
+                if lobby_inventory.update(&mut loadout) {
+                    playing_state.weapons = WeaponInventory::from_loadout(&loadout);
+                    state = GameState::Paused;
+                }
             }
 
             GameState::Loading => {
@@ -129,6 +164,7 @@ pub async fn run() {
 
                 if loading_started && loading_index >= loading_assets.len() {
                     ensure_essential_viewmodel_assets(&mut playing_state).await;
+                    playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                     state = GameState::Playing;
                     set_cursor_grab(true);
                     show_mouse(false);
@@ -267,9 +303,12 @@ pub async fn run() {
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
                 if let Some(new_state) =
-                    draw_pause_menu(&config, &mut settings_screen, &mut playing_state.dev_mode)
+                    draw_pause_menu(&config, &mut settings_screen, &mut playing_state.dev_mode, maze.is_some())
                 {
                     state = new_state;
+                    if matches!(state, GameState::LobbyInventory) {
+                        lobby_inventory = LobbyInventoryScreen::new();
+                    }
                     if matches!(state, GameState::Playing) {
                         set_cursor_grab(true);
                         show_mouse(false);
@@ -491,8 +530,13 @@ fn resolve_asset_path_for_quality(path: &str) -> String {
 async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
     let required = [
         ("fp_hands", "assets/models/hand/fps_animated_carbine.glb"),
+        ("m1911_model", "assets/models/weapons/Pistols/m1911.glb"),
         ("deagle_model", "assets/models/weapons/Pistols/deagle.glb"),
-        ("pistol_model", "assets/models/weapons/Pistols/m1911.glb")
+        ("mp5_model", "assets/models/weapons/SMGs/mp5.glb"),
+        ("spas_model", "assets/models/weapons/Shotguns/spas.glb"),
+        ("m16_model", "assets/models/weapons/Assault Rifles/m16.glb"),
+        ("bolt_action_model", "assets/models/weapons/Snipers/bolt_action.glb"),
+        ("minigun_model", "assets/models/weapons/Other/minigun.glb"),
     ];
 
     for (key, path) in required {

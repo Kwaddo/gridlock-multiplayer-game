@@ -2,10 +2,11 @@
  One instance per weapon the player is carrying.
 */
 use super::crosshair::CrosshairConfig;
-use super::stats::{FireMode, WeaponKind, WeaponStats};
+use super::loadout::Loadout;
+use super::stats::{FireMode, WeaponId, WeaponStats};
 
 pub struct WeaponState {
-    pub kind: WeaponKind,
+    pub id: WeaponId,
     pub stats_data: WeaponStats, // owned mutable copy (const defaults used for reset)
 
     // -- Ammo
@@ -49,10 +50,11 @@ pub struct WeaponState {
 }
 
 impl WeaponState {
-    pub fn new(kind: WeaponKind) -> Self {
-        let stats = kind.stats();
+    pub fn new(id: WeaponId) -> Self {
+        let stats = id.stats();
+        let category = id.category();
         Self {
-            kind,
+            id,
             stats_data: stats.clone(),
             ammo: stats.magazine_size,
             reserve: stats.max_reserve,
@@ -68,7 +70,7 @@ impl WeaponState {
             computed_spread: 0.0,
             trigger_held: false,
             muzzle_flash_timer: 0.0,
-            crosshair: CrosshairConfig::for_weapon(kind),
+            crosshair: CrosshairConfig::for_category(category),
             fsa_timer: 0.0,
             crosshair_kick: 0.0,
             shot_index: 0,
@@ -82,7 +84,7 @@ impl WeaponState {
 
     // reset stats to factory defaults (from const definitions)
     pub fn reset_stats(&mut self) {
-        self.stats_data = self.kind.stats().clone();
+        self.stats_data = self.id.stats().clone();
     }
 
     // can we fire right now?
@@ -181,17 +183,27 @@ pub struct WeaponInventory {
 }
 
 impl WeaponInventory {
-    // start with all 5 weapons for now
-    pub fn new() -> Self {
-        let weapons = WeaponKind::ALL
-            .iter()
-            .map(|&kind| WeaponState::new(kind))
-            .collect();
+    // build inventory from a loadout (5 slots)
+    pub fn from_loadout(loadout: &Loadout) -> Self {
+        let weapons = loadout.slots.iter().map(|&id| WeaponState::new(id)).collect();
         Self {
             weapons,
             active_slot: 0,
             switch_cooldown: 0.0,
         }
+    }
+
+    // default inventory for backwards compat
+    pub fn new() -> Self {
+        Self::from_loadout(&Loadout::default_loadout())
+    }
+
+    // find the first weapon slot matching a category, or fall back to slot 0.
+    pub fn index_for_category(&self, cat: super::stats::WeaponCategory) -> usize {
+        self.weapons
+            .iter()
+            .position(|w| w.id.category() == cat)
+            .unwrap_or(0)
     }
 
     pub fn active(&self) -> &WeaponState {

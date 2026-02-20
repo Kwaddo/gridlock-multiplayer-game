@@ -20,12 +20,34 @@
     "xhair_scope_141": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair141.png",
     "xhair_scope_162": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair162.png",
 
-    "pistol_model": "assets/models/weapons/Pistols/m1911.glb",
-    "smg_model": "assets/models/weapons/SMG/SubmachineGun_1.obj",
-    "shotgun_model": "assets/models/weapons/Shotgun/Shotgun_1.obj",
-    "ar_model": "assets/models/weapons/AR/AssaultRifle2_1.obj",
-    "sniper_model": "assets/models/weapons/Sniper/SniperRifle_1.obj",
+    "m1911_model": "assets/models/weapons/Pistols/m1911.glb",
     "deagle_model": "assets/models/weapons/Pistols/deagle.glb",
+    "revolver_model": "assets/models/weapons/Pistols/revolver.glb",
+    "suppressed_pistol_model": "assets/models/weapons/Pistols/supressed_pistol.glb",
+    "taurus_raging_model": "assets/models/weapons/Pistols/taurus_raging.glb",
+
+    "mp5_model": "assets/models/weapons/SMGs/mp5.glb",
+    "p90_model": "assets/models/weapons/SMGs/p90.glb",
+    "honey_badger_model": "assets/models/weapons/SMGs/honey_badger.glb",
+    "tommy_gun_model": "assets/models/weapons/SMGs/tommy_gun.glb",
+
+    "benelli_model": "assets/models/weapons/Shotguns/benelli.glb",
+    "spas_model": "assets/models/weapons/Shotguns/spas.glb",
+
+    "m4a1_model": "assets/models/weapons/Assault Rifles/m4a1.glb",
+    "ak_model": "assets/models/weapons/Assault Rifles/ak.glb",
+    "famas_model": "assets/models/weapons/Assault Rifles/famas.glb",
+    "m16_model": "assets/models/weapons/Assault Rifles/m16.glb",
+    "scar_model": "assets/models/weapons/Assault Rifles/scar.glb",
+    "as_val_model": "assets/models/weapons/Assault Rifles/as_val.glb",
+
+    "bolt_action_model": "assets/models/weapons/Snipers/bolt_action.glb",
+    "hunting_rifle_model": "assets/models/weapons/Snipers/hunting_rifle.glb",
+    "semi_auto_sniper_model": "assets/models/weapons/Snipers/semi_auto.glb",
+
+    "grenade_launcher_model": "assets/models/weapons/Other/grenade_launcher.glb",
+    "minigun_model": "assets/models/weapons/Other/minigun.glb",
+    "rpg_model": "assets/models/weapons/Other/rpg.glb",
 
     "deagle_shot": "assets/sounds/deagle.ogg",
 

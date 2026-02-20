@@ -1,5 +1,6 @@
 use crate::core::GameConfig;
 use crate::physics::collision;
+use crate::screens::dev_mode::HandsAnimRequest;
 use crate::types::animated_model::AnimatedModel;
 use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
@@ -9,10 +10,16 @@ use crate::weapons::combat::{default_player_hitboxes, CombatEntity, HitZone, Hit
 use macroquad::prelude::*;
 use std::collections::HashMap;
 
+use super::state::HandsPlaybackMode;
 use super::PlayingState;
 
 const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
+const HANDS_RELOAD_START_SEC: f32 = 0.0;
+const HANDS_RELOAD_END_SEC: f32 = 1.85;
+const INSPECT_START_SEC: f32 = 0.18;
+const INSPECT_HOLD_SEC: f32 = 0.45;
+const INSPECT_RETURN_SEC: f32 = 0.22;
 
 impl PlayingState {
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
@@ -29,6 +36,36 @@ impl PlayingState {
         let delta = raw_delta.min(0.05);
         self.just_jumped = false;
         self.just_landed = false;
+
+        if is_key_pressed(KeyCode::V) {
+            self.inspect_phase = super::state::InspectPhase::Start;
+            self.inspect_timer = 0.0;
+        }
+
+        match self.inspect_phase {
+            super::state::InspectPhase::None => {}
+            super::state::InspectPhase::Start => {
+                self.inspect_timer += delta;
+                if self.inspect_timer >= INSPECT_START_SEC {
+                    self.inspect_phase = super::state::InspectPhase::Hold;
+                    self.inspect_timer = 0.0;
+                }
+            }
+            super::state::InspectPhase::Hold => {
+                self.inspect_timer += delta;
+                if self.inspect_timer >= INSPECT_HOLD_SEC {
+                    self.inspect_phase = super::state::InspectPhase::Return;
+                    self.inspect_timer = 0.0;
+                }
+            }
+            super::state::InspectPhase::Return => {
+                self.inspect_timer += delta;
+                if self.inspect_timer >= INSPECT_RETURN_SEC {
+                    self.inspect_phase = super::state::InspectPhase::None;
+                    self.inspect_timer = 0.0;
+                }
+            }
+        }
 
         for entry in &mut self.kill_feed {
             entry.timer -= delta;
@@ -47,10 +84,64 @@ impl PlayingState {
         }
 
         self.weapons.update(delta);
-        // Only world/player animation clips should be advanced each frame.
-        // Viewmodel assets like fp_hands/deagle_model are rendered in bind pose for now.
+
+        let hands_is_all_in_one = self
+            .asset_source_paths
+            .get("fp_hands")
+            .map(|p| p.contains("fps_animated_carbine.glb"))
+            .unwrap_or(false);
+
+        if let Some(hands) = self.animated_models.get_mut("fp_hands") {
+            if !self.hands_anim_initialized {
+                if hands_is_all_in_one {
+                    // This file has a single combined clip ("allanims"), so idle is a held pose.
+                    hands.stop_at_start();
+                    self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                } else {
+                    hands.play_from_start(true);
+                    self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
+                }
+                self.hands_anim_initialized = true;
+            }
+
+            if let Some(request) = self.dev_mode.hands_anim_request.take() {
+                match request {
+                    HandsAnimRequest::IdleLoop => {
+                        if hands_is_all_in_one {
+                            hands.stop_at_start();
+                            self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                        } else {
+                            hands.play_from_start(true);
+                            self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
+                        }
+                    }
+                    HandsAnimRequest::ReloadOnce => {
+                        hands.play_segment(HANDS_RELOAD_START_SEC, HANDS_RELOAD_END_SEC, false);
+                        self.hands_playback_mode = HandsPlaybackMode::ReloadOnce;
+                    }
+                    HandsAnimRequest::Stop => {
+                        hands.stop_at_start();
+                        self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                    }
+                }
+            }
+
+            if self.hands_playback_mode == HandsPlaybackMode::ReloadOnce
+                && hands.is_playback_finished()
+            {
+                if hands_is_all_in_one {
+                    hands.stop_at_start();
+                    self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                } else {
+                    hands.play_from_start(true);
+                    self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
+                }
+            }
+        }
+
+        // Advance world/player clips plus first-person hands.
         for (key, model) in self.animated_models.iter_mut() {
-            if key.starts_with("anim_") {
+            if key.starts_with("anim_") || key == "fp_hands" {
                 model.update(delta);
             }
         }

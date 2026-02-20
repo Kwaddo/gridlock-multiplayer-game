@@ -45,7 +45,7 @@ impl LoginScreen {
         }
     }
 
-    pub(crate) fn draw_title(&self) {
+    pub fn draw_title(&self) {
         let sw = screen_width();
         let sh = screen_height();
         let title = "MULTIPLAYER FPS";
