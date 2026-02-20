@@ -105,37 +105,44 @@ impl PlayingState {
         let inspect_pos = INSPECT_POS_OFFSET * inspect_alpha;
         let inspect_rot = INSPECT_ROT_OFFSET * inspect_alpha;
 
-        // Hands are the anchor. Weapon offsets are applied relative to this anchor.
         let dev = &self.dev_mode;
-        let mut hands_anchor = vec3(
+        let hands_weapon_offset = vec3(
+            stats.viewmodel_hands_offset.0,
+            stats.viewmodel_hands_offset.1,
+            stats.viewmodel_hands_offset.2,
+        );
+        let hands_base_anchor = vec3(
             -0.35 + dev.hands_offset_x,
             -0.25 + dev.hands_offset_y,
-            0.58 + dev.hands_offset_z
-        );
+            0.58 + dev.hands_offset_z,
+        ) + hands_weapon_offset;
+        let weapon_base_anchor = vec3(-0.35, -0.25, 0.58);
         let ads_offset_x = 0.08 * weapon.ads_progress;
         let ads_offset_y = 0.03 * weapon.ads_progress;
-        let weapon_offset_from_hands = vec3(base_x + ads_offset_x, base_y + ads_offset_y, base_z);
+        let weapon_local_offset = vec3(base_x + ads_offset_x, base_y + ads_offset_y, base_z);
 
+        let mut motion_offset = Vec3::ZERO;
         let horizontal_speed = vec2(
             self.movement_state.velocity.x,
             self.movement_state.velocity.z
         ).length();
         if horizontal_speed > 0.1 && self.movement_state.is_grounded {
             let t = self.bob_timer;
-            hands_anchor.x += t.sin() * 0.008;
-            hands_anchor.y += t.cos() * 0.006;
+            motion_offset.x += t.sin() * 0.008;
+            motion_offset.y += t.cos() * 0.006;
         }
 
         if weapon.is_reloading {
             let reload_fraction = (weapon.reload_timer / stats.reload_time).clamp(0.0, 1.0);
-            hands_anchor.y -= (reload_fraction * std::f32::consts::PI).sin() * 0.08;
+            motion_offset.y -= (reload_fraction * std::f32::consts::PI).sin() * 0.08;
         }
 
         let kick = weapon.muzzle_flash_timer / 0.08;
-        hands_anchor.z += kick * 0.02;
-        hands_anchor.y -= kick * 0.01;
-        hands_anchor += inspect_pos;
-        let pos = hands_anchor + weapon_offset_from_hands;
+        motion_offset.z += kick * 0.02;
+        motion_offset.y -= kick * 0.01;
+        let hands_anchor = hands_base_anchor + motion_offset + inspect_pos;
+        let weapon_anchor = weapon_base_anchor + motion_offset + inspect_pos;
+        let pos = weapon_anchor + weapon_local_offset;
 
         let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
             * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
@@ -180,9 +187,7 @@ impl PlayingState {
             // does not make hands disappear.
             let hands_scale = HANDS_BASE_SCALE * dev.hands_scale.max(0.01);
             let hands_scale_mat = Mat4::from_scale(Vec3::splat(hands_scale));
-            let (ho_x, ho_y, ho_z) = stats.viewmodel_hands_offset;
-            let hands_pos = hands_anchor + vec3(ho_x, ho_y, ho_z);
-            let hands_trans = Mat4::from_translation(hands_pos);
+            let hands_trans = Mat4::from_translation(hands_anchor);
             let hands_rot_mat = Mat4::from_euler(
                 EulerRot::XYZ,
                 dev.hands_rot_pitch + inspect_rot.x,
