@@ -100,16 +100,10 @@ impl PlayingState {
         let gl = unsafe { get_internal_gl() };
         gl.quad_gl.depth_test(false);
 
-        let mut transformed_verts = mesh.vertices.clone();
-        for v in &mut transformed_verts {
-            v.position = transform.transform_point3(v.position);
-        }
-        let temp_mesh = Mesh {
-            vertices: transformed_verts,
-            indices: mesh.indices.clone(),
-            texture: mesh.texture.clone(),
-        };
-        draw_mesh(&temp_mesh);
+        // avoid allocating a transformed mesh every frame by using the GL model matrix
+        gl.quad_gl.push_model_matrix(transform);
+        draw_mesh(mesh);
+        gl.quad_gl.pop_model_matrix();
 
         let muzzle_local = vec3(
             stats.viewmodel_muzzle_offset.0,

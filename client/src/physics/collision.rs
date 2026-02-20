@@ -57,9 +57,41 @@ pub fn resolve_vertical(
 }
 
 /// Resolve horizontal collision: push player out of cube side walls.
-pub fn resolve_horizontal(position: &mut Vec3, velocity: &mut Vec3, player_height: f32) {
+///
+/// Special-case: when the player is grounded and very close to a cube's top surface
+/// we prefer keeping them "on top" (clamp to the top area) instead of pushing them
+/// sideways and accidentally dropping them off small platforms.
+pub fn resolve_horizontal(
+    position: &mut Vec3,
+    velocity: &mut Vec3,
+    player_height: f32,
+    is_grounded: bool,
+) {
     let py = position.y;
     let head_y = py + player_height;
+    const TOP_EPS: f32 = 0.06; // tolerance for "on-top" detection
+    const STICKY_OVERLAP: f32 = 0.06; // small pushes below this will not knock you off a platform
+
+    // If we're standing on a cube top, remember that cube so we can avoid
+    // tiny side-nudges from *other* cubes pushing us off the top.
+    let mut supporting_cube: Option<(Vec3, Vec3)> = None;
+    if is_grounded {
+        for (c_center, c_size) in all_cubes() {
+            let half = *c_size * 0.5;
+            let c_min = *c_center - half;
+            let c_max = *c_center + half;
+            if py >= c_max.y - TOP_EPS && py <= c_max.y + TOP_EPS {
+                if position.x >= c_min.x - PLAYER_RADIUS
+                    && position.x <= c_max.x + PLAYER_RADIUS
+                    && position.z >= c_min.z - PLAYER_RADIUS
+                    && position.z <= c_max.z + PLAYER_RADIUS
+                {
+                    supporting_cube = Some((c_min, c_max));
+                    break;
+                }
+            }
+        }
+    }
 
     for (center, size) in all_cubes() {
         let half = *size * 0.5;
@@ -78,12 +110,66 @@ pub fn resolve_horizontal(position: &mut Vec3, velocity: &mut Vec3, player_heigh
         let dz = position.z - closest_z;
         let dist_sq = dx * dx + dz * dz;
 
+        // If player is grounded and very close to the cube top, prefer keeping them on top
+        if is_grounded && py >= cube_max.y - TOP_EPS && py <= cube_max.y + TOP_EPS {
+            if position.x >= cube_min.x - PLAYER_RADIUS
+                && position.x <= cube_max.x + PLAYER_RADIUS
+                && position.z >= cube_min.z - PLAYER_RADIUS
+                && position.z <= cube_max.z + PLAYER_RADIUS
+            {
+                // Clamp into the top-face area so small nudges don't push player off
+                position.x = position
+                    .x
+                    .clamp(cube_min.x + PLAYER_RADIUS, cube_max.x - PLAYER_RADIUS);
+                position.z = position
+                    .z
+                    .clamp(cube_min.z + PLAYER_RADIUS, cube_max.z - PLAYER_RADIUS);
+
+                // Kill velocity into the walls so the player doesn't immediately slide off
+                if position.x <= cube_min.x + PLAYER_RADIUS + 0.001 && velocity.x < 0.0 {
+                    velocity.x = 0.0;
+                }
+                if position.x >= cube_max.x - PLAYER_RADIUS - 0.001 && velocity.x > 0.0 {
+                    velocity.x = 0.0;
+                }
+                if position.z <= cube_min.z + PLAYER_RADIUS + 0.001 && velocity.z < 0.0 {
+                    velocity.z = 0.0;
+                }
+                if position.z >= cube_max.z - PLAYER_RADIUS - 0.001 && velocity.z > 0.0 {
+                    velocity.z = 0.0;
+                }
+
+                continue;
+            }
+        }
+
         if dist_sq < PLAYER_RADIUS * PLAYER_RADIUS && dist_sq > 0.0001 {
             // Push player out
             let dist = dist_sq.sqrt();
             let overlap = PLAYER_RADIUS - dist;
             let nx = dx / dist;
             let nz = dz / dist;
+
+            // If we're standing on a supporting cube, ignore very small pushes
+            // from *other* cubes that would move us off the support area.
+            if let Some((sup_min, sup_max)) = supporting_cube {
+                // If this cube is the support cube itself, allow normal handling
+                if !(sup_min == cube_min && sup_max == cube_max) {
+                    let new_x = position.x + nx * overlap;
+                    let new_z = position.z + nz * overlap;
+
+                    let outside_x = new_x < (sup_min.x + PLAYER_RADIUS - 0.001)
+                        || new_x > (sup_max.x - PLAYER_RADIUS + 0.001);
+                    let outside_z = new_z < (sup_min.z + PLAYER_RADIUS - 0.001)
+                        || new_z > (sup_max.z - PLAYER_RADIUS + 0.001);
+
+                    if (outside_x || outside_z) && overlap < STICKY_OVERLAP {
+                        // treat it as non-colliding (sticky top)
+                        continue;
+                    }
+                }
+            }
+
             position.x += nx * overlap;
             position.z += nz * overlap;
 
