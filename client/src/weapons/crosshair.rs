@@ -43,7 +43,7 @@ impl CrosshairConfig {
                 dot_size: 0.15,
                 line_length: 1.0,
                 line_thickness: 0.2,
-                center_gap: 2.5,
+                center_gap: 3.5,
                 outline_enabled: true,
                 outline_thickness: 0.1,
                 crosshair_type: CrosshairType::FourCurves,
