@@ -21,6 +21,7 @@ pub enum HandsAnimRequest {
 pub struct DevModeState {
     pub active_tab: usize,
     pub scroll_offset: f32,
+    pub content_height: f32, // height of last-drawn tab content, used to clamp scroll
     pub infinite_ammo: bool,
     pub no_recoil: bool,
     pub show_hitboxes: bool,
@@ -30,6 +31,8 @@ pub struct DevModeState {
     pub code_verified: bool,
     pub show_code_prompt: bool,
     pub hands_anim_request: Option<HandsAnimRequest>,
+    pub precision_mode: bool, // viewmodel: shrinks all step sizes by 10x for micro-adjustments
+    pub force_ads: bool, // simulate ADS being held for viewmodel preview
 }
 
 impl DevModeState {
@@ -37,6 +40,7 @@ impl DevModeState {
         Self {
             active_tab: 0,
             scroll_offset: 0.0,
+            content_height: 9999.0,
             infinite_ammo: false,
             no_recoil: false,
             show_hitboxes: false,
@@ -46,6 +50,8 @@ impl DevModeState {
             code_verified: false,
             show_code_prompt: false,
             hands_anim_request: None,
+            precision_mode: false,
+            force_ads: false,
         }
     }
 
