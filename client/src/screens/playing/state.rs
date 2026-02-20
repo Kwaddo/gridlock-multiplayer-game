@@ -10,7 +10,7 @@ use crate::weapons::WeaponInventory;
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
 use rodio::{OutputStream, OutputStreamHandle};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
@@ -90,6 +90,9 @@ pub struct PlayingState {
     pub announcements: Vec<(String, f32)>,
     pub lobby_console_message: Option<String>,
     pub lobby_console_message_timer: f32,
+
+    // ceiling lights that have been shot out (cell coords)
+    pub destroyed_lights: HashSet<(u8, u8)>,
 }
 
 pub struct KillFeedEntry {
@@ -173,6 +176,7 @@ impl PlayingState {
             lobby_console_message_timer: 0.0,
             announcements: Vec::new(),
             connected_players: Vec::new(),
+            destroyed_lights: HashSet::new(),
         }
     }
 }

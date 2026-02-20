@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use macroquad::prelude::*;
 
 use crate::types::maze::Maze;
@@ -5,7 +7,13 @@ use crate::types::maze::Maze;
 use super::props::draw_props;
 use super::utils::{apply_lighting, tint_color, CeilingLight};
 
-pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32, show_hitboxes: bool) {
+pub fn draw_maze(
+    maze: Option<&Maze>,
+    viewer_pos: Vec3,
+    render_distance: f32,
+    show_hitboxes: bool,
+    destroyed_lights: &HashSet<(u8, u8)>,
+) {
     if let Some(m) = maze {
         // Reset GL state to a known-good configuration before doing any
         // maze rendering. Debug draws (wireframes/tracers/viewmodel) can
@@ -59,6 +67,7 @@ pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32, sh
         let ceiling_lights: Vec<CeilingLight> = m
             .ceiling_lights
             .iter()
+            .filter(|info| !destroyed_lights.contains(&(info.x, info.y)))
             .map(|info| {
                 let color = match info.variant % 3 {
                     0 => vec3(0.95, 0.94, 0.88),
@@ -205,15 +214,19 @@ pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32, sh
             );
         }
 
-        for light in &ceiling_lights {
-            let mount_pos = vec3(light.pos.x, roof_bottom_y - 0.015, light.pos.z);
-            let stem_len = (mount_pos.y - light.pos.y).max(0.03);
-            let stem_pos = vec3(light.pos.x, mount_pos.y - stem_len * 0.5, light.pos.z);
-            let housing_pos = light.pos + vec3(0.0, 0.02, 0.0);
+        // Render all ceiling light fixtures (both active and destroyed)
+        for info in &m.ceiling_lights {
+            let is_destroyed = destroyed_lights.contains(&(info.x, info.y));
+            let light_pos = m.cell_to_world(info.x as i32, info.y as i32)
+                + vec3(0.0, roof_bottom_y - 0.16, 0.0);
+            let mount_pos = vec3(light_pos.x, roof_bottom_y - 0.015, light_pos.z);
+            let stem_len = (mount_pos.y - light_pos.y).max(0.03);
+            let stem_pos = vec3(light_pos.x, mount_pos.y - stem_len * 0.5, light_pos.z);
+            let housing_pos = light_pos + vec3(0.0, 0.02, 0.0);
             let mount_to_pipe = (mount_pos.y - pipe_y).abs();
 
             if mount_to_pipe > 0.01 {
-                let feeder_pos = vec3(light.pos.x, (mount_pos.y + pipe_y) * 0.5, light.pos.z);
+                let feeder_pos = vec3(light_pos.x, (mount_pos.y + pipe_y) * 0.5, light_pos.z);
                 draw_cube(
                     feeder_pos,
                     vec3(0.03, mount_to_pipe, 0.03),
@@ -223,14 +236,14 @@ pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32, sh
             }
 
             if let Some(nearest_pipe_z) = pipe_rows.iter().min_by(|a, b| {
-                (*a - light.pos.z)
+                (*a - light_pos.z)
                     .abs()
-                    .total_cmp(&(*b - light.pos.z).abs())
+                    .total_cmp(&(*b - light_pos.z).abs())
             }) {
-                let conduit_len = (nearest_pipe_z - light.pos.z).abs();
+                let conduit_len = (nearest_pipe_z - light_pos.z).abs();
                 if conduit_len > 0.06 {
                     let conduit_pos =
-                        vec3(light.pos.x, pipe_y, (nearest_pipe_z + light.pos.z) * 0.5);
+                        vec3(light_pos.x, pipe_y, (nearest_pipe_z + light_pos.z) * 0.5);
                     draw_cube(
                         conduit_pos,
                         vec3(0.035, 0.035, conduit_len),
@@ -252,23 +265,46 @@ pub fn draw_maze(maze: Option<&Maze>, viewer_pos: Vec3, render_distance: f32, sh
                 None,
                 apply_light(Color::new(0.60, 0.62, 0.66, 1.0), stem_pos),
             );
-            draw_cube(
-                housing_pos,
-                vec3(0.44, 0.06, 0.44),
-                None,
-                apply_light(Color::new(0.86, 0.86, 0.88, 1.0), housing_pos),
-            );
-            draw_cube(
-                housing_pos + vec3(0.0, -0.04, 0.0),
-                vec3(0.38, 0.02, 0.38),
-                None,
-                Color {
-                    r: 0.98 * light.color.x,
-                    g: 0.96 * light.color.y,
-                    b: 0.90 * light.color.z,
-                    a: 1.0,
-                },
-            );
+
+            if is_destroyed {
+                // destroyed light: dark housing, no bulb glow
+                draw_cube(
+                    housing_pos,
+                    vec3(0.44, 0.06, 0.44),
+                    None,
+                    apply_light(Color::new(0.30, 0.30, 0.32, 1.0), housing_pos),
+                );
+                // dead bulb — dark glass
+                draw_cube(
+                    housing_pos + vec3(0.0, -0.04, 0.0),
+                    vec3(0.38, 0.02, 0.38),
+                    None,
+                    Color::new(0.15, 0.14, 0.12, 1.0),
+                );
+            } else {
+                let light_color = match info.variant % 3 {
+                    0 => vec3(0.95, 0.94, 0.88),
+                    1 => vec3(1.0, 0.95, 0.85),
+                    _ => vec3(0.88, 0.92, 0.98),
+                };
+                draw_cube(
+                    housing_pos,
+                    vec3(0.44, 0.06, 0.44),
+                    None,
+                    apply_light(Color::new(0.86, 0.86, 0.88, 1.0), housing_pos),
+                );
+                draw_cube(
+                    housing_pos + vec3(0.0, -0.04, 0.0),
+                    vec3(0.38, 0.02, 0.38),
+                    None,
+                    Color {
+                        r: 0.98 * light_color.x,
+                        g: 0.96 * light_color.y,
+                        b: 0.90 * light_color.z,
+                        a: 1.0,
+                    },
+                );
+            }
         }
 
         draw_props(m, &ceiling_lights, show_hitboxes);

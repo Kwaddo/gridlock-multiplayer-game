@@ -187,38 +187,47 @@ impl PlayingState {
                             }
                         }
 
-                        // track whether bullet hit a surface (wall/prop) for bullet holes
-                        // surface_hit_info: Option<(distance, normal)>
+                        // track whether bullet hit a surface (wall/prop/floor/ceiling/light)
                         let mut surface_hit = false;
                         let mut surface_normal: Option<Vec3> = None;
+                        let mut hit_wall_cell: Option<(u8, u8)> = None;
                         let closest_blocking_dist = if self.current_world == WorldId::Maze {
+                            // gather all candidate hits
                             let wall_hit = maze
                                 .as_ref()
                                 .and_then(|m| m.ray_test_walls_with_normal(eye, fwd, range));
                             let prop_hit = maze
                                 .as_ref()
                                 .and_then(|m| m.ray_test_props_with_normal(eye, fwd, range));
+                            let fc_hit = maze
+                                .as_ref()
+                                .and_then(|m| m.ray_test_floor_ceiling_with_normal(eye, fwd, range));
+                            let light_hit = maze
+                                .as_ref()
+                                .and_then(|m| m.ray_test_ceiling_lights_with_normal(eye, fwd, range, &self.destroyed_lights));
 
-                            match (wall_hit, prop_hit) {
-                                (Some(((wx, wy), wall_dist, wall_n)), Some((prop_dist, prop_n))) => {
-                                    if wall_dist < prop_dist {
-                                        if let Some(m) = maze.as_mut() {
-                                            if m.damage_wall(wx, wy, stats.damage) {
-                                                if !self.pending_broken_walls.contains(&(wx, wy)) {
-                                                    self.pending_broken_walls.push((wx, wy));
-                                                }
-                                            }
-                                        }
-                                        surface_hit = true;
-                                        surface_normal = Some(wall_n);
-                                        Some(wall_dist)
-                                    } else {
-                                        surface_hit = true;
-                                        surface_normal = Some(prop_n);
-                                        Some(prop_dist)
-                                    }
-                                }
-                                (Some(((wx, wy), wall_dist, wall_n)), None) => {
+                            // collect all hits as (distance, normal, Option<wall_cell>, is_light_cell)
+                            let mut candidates: Vec<(f32, Vec3, Option<(u8, u8)>, Option<(u8, u8)>)> = Vec::new();
+
+                            if let Some(((wx, wy), d, n)) = wall_hit {
+                                candidates.push((d, n, Some((wx, wy)), None));
+                            }
+                            if let Some((d, n)) = prop_hit {
+                                candidates.push((d, n, None, None));
+                            }
+                            if let Some((d, n)) = fc_hit {
+                                candidates.push((d, n, None, None));
+                            }
+                            if let Some(((lx, ly), d, n)) = light_hit {
+                                candidates.push((d, n, None, Some((lx, ly))));
+                            }
+
+                            // pick the closest
+                            candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+                            if let Some((dist, norm, wall_cell, light_cell)) = candidates.first().copied() {
+                                // if closest hit is a wall, damage it
+                                if let Some((wx, wy)) = wall_cell {
                                     if let Some(m) = maze.as_mut() {
                                         if m.damage_wall(wx, wy, stats.damage) {
                                             if !self.pending_broken_walls.contains(&(wx, wy)) {
@@ -226,16 +235,17 @@ impl PlayingState {
                                             }
                                         }
                                     }
-                                    surface_hit = true;
-                                    surface_normal = Some(wall_n);
-                                    Some(wall_dist)
+                                    hit_wall_cell = Some((wx, wy));
                                 }
-                                (None, Some((prop_dist, prop_n))) => {
-                                    surface_hit = true;
-                                    surface_normal = Some(prop_n);
-                                    Some(prop_dist)
+                                // if closest hit is a light, destroy it
+                                if let Some((lx, ly)) = light_cell {
+                                    self.destroyed_lights.insert((lx, ly));
                                 }
-                                (None, None) => None,
+                                surface_hit = true;
+                                surface_normal = Some(norm);
+                                Some(dist)
+                            } else {
+                                None
                             }
                         } else if self.current_world == WorldId::Lobby {
                             // lobby: test against lobby cubes, console, ground
@@ -287,6 +297,7 @@ impl PlayingState {
                                     max_lifetime: stats.bullet_hole_lifetime,
                                     size: stats.bullet_hole_size,
                                     color: stats.bullet_hole_color,
+                                    wall_cell: hit_wall_cell,
                                 });
                                 // cap total bullet holes to avoid memory bloat
                                 if self.bullet_holes.len() > 200 {
