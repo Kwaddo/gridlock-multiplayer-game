@@ -143,6 +143,7 @@ pub fn sync_world(
                 playing_state.match_end_winner = None;
                 playing_state.match_end_countdown_timer = 0.0;
                 playing_state.local_kills = 0;
+                playing_state.destroyed_lights.clear();
                 *maze = None;
             }
         }

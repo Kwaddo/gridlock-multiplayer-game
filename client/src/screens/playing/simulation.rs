@@ -155,11 +155,24 @@ impl PlayingState {
         }
         self.tracers.retain(|t| t.lifetime > 0.0);
 
-        // bullet hole lifetime decay
+        // bullet hole lifetime decay + remove holes on broken walls
         for hole in &mut self.bullet_holes {
             hole.lifetime -= delta;
         }
-        self.bullet_holes.retain(|h| h.lifetime > 0.0);
+        self.bullet_holes.retain(|h| {
+            if h.lifetime <= 0.0 {
+                return false;
+            }
+            // if this hole is on a breakable wall, check if the wall still exists
+            if let Some((cx, cy)) = h.wall_cell {
+                if let Some(m) = maze {
+                    if !m.is_wall(cx, cy) {
+                        return false;
+                    }
+                }
+            }
+            true
+        });
 
         self.update_stamina(config, delta);
         self.update_crouch_height(config, delta);
