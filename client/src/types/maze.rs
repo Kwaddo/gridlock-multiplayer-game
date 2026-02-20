@@ -296,6 +296,65 @@ impl Maze {
         closest_hit
     }
 
+    /// Like `ray_test_props` but also returns the surface normal of the hit face.
+    pub fn ray_test_props_with_normal(&self, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<(f32, Vec3)> {
+        use crate::weapons::combat::ray_hit_aabb_with_normal;
+
+        let mut closest: Option<(f32, Vec3)> = None;
+
+        for prop in &self.props {
+            if let Some((center_offset, half_extents)) = prop.kind.bullet_hitbox() {
+                let prop_world_pos = self.cell_to_world(prop.x as i32, prop.y as i32);
+                let box_center = prop_world_pos + center_offset;
+
+                if let Some((dist, normal)) = ray_hit_aabb_with_normal(origin, dir, box_center, half_extents, max_dist) {
+                    if closest.map_or(true, |(d, _)| dist < d) {
+                        closest = Some((dist, normal));
+                    }
+                }
+            }
+        }
+
+        closest
+    }
+
+    /// Like `ray_test_walls` but also returns the surface normal of the hit face.
+    pub fn ray_test_walls_with_normal(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_dist: f32,
+    ) -> Option<((u8, u8), f32, Vec3)> {
+        use crate::weapons::combat::ray_hit_aabb_with_normal;
+
+        let mut closest_hit: Option<((u8, u8), f32, Vec3)> = None;
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.cells[self.idx(x as usize, y as usize)] == 0 {
+                    let wall_center = self.cell_to_world(x as i32, y as i32);
+                    let box_center = wall_center + vec3(0.0, self.wall_height * 0.5, 0.0);
+                    let half_extents = vec3(
+                        self.cell_size * 0.5,
+                        self.wall_height * 0.5,
+                        self.cell_size * 0.5,
+                    );
+
+                    if let Some((dist, normal)) =
+                        ray_hit_aabb_with_normal(origin, dir, box_center, half_extents, max_dist)
+                    {
+                        let is_closer = closest_hit.map_or(true, |(_, d, _)| dist < d);
+                        if is_closer {
+                            closest_hit = Some(((x, y), dist, normal));
+                        }
+                    }
+                }
+            }
+        }
+
+        closest_hit
+    }
+
     /// Damage a wall at the given cell position
     /// Returns true if the wall was destroyed
     pub fn damage_wall(&mut self, cell_x: u8, cell_y: u8, damage: f32) -> bool {

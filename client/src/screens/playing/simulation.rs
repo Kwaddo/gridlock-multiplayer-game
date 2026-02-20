@@ -155,6 +155,12 @@ impl PlayingState {
         }
         self.tracers.retain(|t| t.lifetime > 0.0);
 
+        // bullet hole lifetime decay
+        for hole in &mut self.bullet_holes {
+            hole.lifetime -= delta;
+        }
+        self.bullet_holes.retain(|h| h.lifetime > 0.0);
+
         self.update_stamina(config, delta);
         self.update_crouch_height(config, delta);
         let was_grounded = self.movement_state.is_grounded;
