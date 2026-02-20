@@ -21,7 +21,7 @@ const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 
 // Match / game loop settings (basic foundation)
 const MATCH_DURATION: Duration = Duration::from_secs(120); // match length (seconds)
-const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start (adjust later)
+const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
 const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
 const MATCH_SCORE_TO_WIN: u32 = 20; // kills required to win the match
 const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts
@@ -70,6 +70,8 @@ fn main() -> std::io::Result<()> {
     let mut match_end_pending: Option<(Instant, u32, String)> = None;
     // last sent authoritative match timer (to avoid spamming identical values)
     let mut last_match_time_sent: Option<u8> = None;
+    // how many players entered the maze during this match (for last-man-standing detection)
+    let mut match_total_maze_entries: usize = 0;
 
     loop {
         match socket.recv_from(&mut buffer) {
@@ -193,6 +195,7 @@ fn main() -> std::io::Result<()> {
                                         // send maze data to the joining client
                                         current_maze.send(&socket, req_player.socket_addr);
 
+                                        match_total_maze_entries += 1;
                                         println!(
                                             "Player '{}' joined running match (vacant slot)",
                                             req_player.username
@@ -265,6 +268,7 @@ fn main() -> std::io::Result<()> {
                 match_running = false;
                 match_start_time = None;
                 maze = None;
+                match_total_maze_entries = 0;
             }
         }
 
@@ -287,6 +291,7 @@ fn main() -> std::io::Result<()> {
                     match_running = true;
                     match_start_time = Some(Instant::now());
                     match_warmup_end = None;
+                    match_total_maze_entries = lobby_count;
                     // send initial authoritative match timer to all clients
                     let initial_secs = MATCH_DURATION.as_secs().min(255) as u8;
                     broadcast_match_timer(&socket, &players, initial_secs);
@@ -318,17 +323,50 @@ fn main() -> std::io::Result<()> {
             }
         }
 
-        // If a match is running but there are no players left in the Maze, end it immediately
-        if match_running {
-            let maze_count = players
+        // If a match is running, check player counts for early end conditions
+        if match_running && match_end_pending.is_none() {
+            let maze_players: Vec<&Player> = players
                 .values()
                 .filter(|p| p.world == WorldId::Maze)
-                .count();
+                .collect();
+            let maze_count = maze_players.len();
+            let alive_in_maze: Vec<&Player> = maze_players
+                .iter()
+                .filter(|p| p.is_alive)
+                .copied()
+                .collect();
+
             if maze_count == 0 {
                 println!("No players remain in match — ending match early");
                 match_running = false;
                 match_start_time = None;
                 maze = None;
+            } else if alive_in_maze.len() == 1 && match_total_maze_entries >= 2 {
+                // Last player standing wins — only trigger when at least 2 players
+                // entered the maze during this match (not just a solo player)
+                let winner = alive_in_maze[0];
+                let winner_id = winner.id;
+                let winner_name = winner.username.clone();
+                println!(
+                    "Last player standing: '{}' wins the match",
+                    winner_name
+                );
+
+                // Broadcast MSG_MATCH_END
+                let mut end_msg = vec![MSG_MATCH_END];
+                end_msg.extend_from_slice(&winner_id.to_be_bytes());
+                let name_bytes = winner_name.as_bytes();
+                end_msg.push(name_bytes.len() as u8);
+                end_msg.extend_from_slice(name_bytes);
+                for p in players.values() {
+                    let _ = socket.send_to(&end_msg, p.socket_addr);
+                }
+
+                match_end_pending = Some((
+                    Instant::now() + Duration::from_secs(MATCH_END_COUNTDOWN_SECS as u64),
+                    winner_id,
+                    winner_name,
+                ));
             }
         }
 
@@ -356,11 +394,12 @@ fn main() -> std::io::Result<()> {
                     match_start_time = None;
                     maze = None;
                     last_match_time_sent = None;
+                    match_total_maze_entries = 0;
                 }
             }
         }
 
-        // If a match-end was scheduled (winner reached score), execute it when the countdown expires
+        // If a match-end was scheduled (winner reached score or last-man-standing), execute it when the countdown expires
         if let Some((when, _, winner_name)) = match_end_pending.clone() {
             if Instant::now() >= when {
                 println!(
@@ -379,6 +418,7 @@ fn main() -> std::io::Result<()> {
                 // clear pending flag
                 match_end_pending = None;
                 last_match_time_sent = None;
+                match_total_maze_entries = 0;
             }
         }
     }
@@ -835,13 +875,25 @@ fn handle_hit(
     _match_start_time: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
 ) {
-    // Payload: victim_id (4 bytes), damage (4 bytes)
+    // Payload: victim_id (4 bytes), damage (4 bytes), optional: weapon_len (1), weapon_name (variable)
     if payload.len() < 8 {
         return;
     }
 
     let victim_id = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let damage = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+
+    // Parse optional weapon name from payload
+    let weapon_name = if payload.len() >= 9 {
+        let wlen = payload[8] as usize;
+        if payload.len() >= 9 + wlen {
+            String::from_utf8_lossy(&payload[9..9 + wlen]).to_string()
+        } else {
+            "Unknown".to_string()
+        }
+    } else {
+        "Unknown".to_string()
+    };
 
     // Get attacker
     let Some(attacker) = players.get(&src_addr) else {
@@ -937,7 +989,6 @@ fn handle_hit(
         }
 
         // Broadcast kill feed to all players
-        let weapon_name = "Rifle"; // TODO: Get actual weapon from payload
         let weapon_bytes = weapon_name.as_bytes();
         let mut kill_feed_msg = vec![MSG_KILL_FEED];
         kill_feed_msg.extend_from_slice(&attacker_id.to_be_bytes());
