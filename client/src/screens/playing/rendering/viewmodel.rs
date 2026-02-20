@@ -180,7 +180,9 @@ impl PlayingState {
             // does not make hands disappear.
             let hands_scale = HANDS_BASE_SCALE * dev.hands_scale.max(0.01);
             let hands_scale_mat = Mat4::from_scale(Vec3::splat(hands_scale));
-            let hands_trans = Mat4::from_translation(hands_anchor);
+            let (ho_x, ho_y, ho_z) = stats.viewmodel_hands_offset;
+            let hands_pos = hands_anchor + vec3(ho_x, ho_y, ho_z);
+            let hands_trans = Mat4::from_translation(hands_pos);
             let hands_rot_mat = Mat4::from_euler(
                 EulerRot::XYZ,
                 dev.hands_rot_pitch + inspect_rot.x,
