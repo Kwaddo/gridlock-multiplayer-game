@@ -22,26 +22,35 @@ pub fn resolve_vertical(
     let head_y = py + player_height;
     let mut best_ground = 0.0_f32;
 
+    // allow landing even if the player is far outside the normal radius
+    // (e.g. stepping onto a block corner).  bump the extra high so the
+    // lobby feels like stepping onto a massive pad rather than a tiny cube.
+    const LANDING_EXTRA: f32 = 0.1;
+    let landing_radius = PLAYER_RADIUS + LANDING_EXTRA;
+    let landing_radius_sq = landing_radius * landing_radius;
+
     for (center, size) in all_cubes() {
         let half = *size * 0.5;
         let cube_min = *center - half;
         let cube_max = *center + half;
 
-        // Check XZ overlap (player circle vs cube AABB)
+        // Check XZ overlap (player circle vs cube AABB).
+        // use the expanded radius for detection so you can land on corners.
         let closest_x = px.clamp(cube_min.x, cube_max.x);
         let closest_z = pz.clamp(cube_min.z, cube_max.z);
         let dx = px - closest_x;
         let dz = pz - closest_z;
-        if dx * dx + dz * dz > PLAYER_RADIUS * PLAYER_RADIUS {
+        if dx * dx + dz * dz > landing_radius_sq {
             continue;
         }
 
-        // Landing on top
-        if py >= cube_max.y - 0.1 && velocity.y <= 0.0 && cube_max.y > best_ground {
+        // Landing on top (give a big vertical buffer so falling near edge still
+        // counts as landing).  value chosen to match the horizontal padding.
+        if py >= cube_max.y - 0.25 && velocity.y <= 0.0 && cube_max.y > best_ground {
             best_ground = cube_max.y;
         }
 
-        // Head bump
+        // Head bump (keep behaviour unchanged).
         if velocity.y > 0.0 && head_y >= cube_min.y && py < cube_min.y {
             position.y = cube_min.y - player_height;
             velocity.y = 0.0;
@@ -69,8 +78,10 @@ pub fn resolve_horizontal(
 ) {
     let py = position.y;
     let head_y = py + player_height;
-    const TOP_EPS: f32 = 0.06; // tolerance for "on-top" detection
-    const STICKY_OVERLAP: f32 = 0.06; // small pushes below this will not knock you off a platform
+    const TOP_EPS: f32 = 0.12; // tolerance for "on-top" detection (bigger margin)
+    const STICKY_OVERLAP: f32 = 0.25; // small pushes below this will not knock you off a platform
+    const SUPPORT_EXTRA: f32 = 0.5; // match landing extra so corners count as support
+    let support_radius = PLAYER_RADIUS + SUPPORT_EXTRA;
 
     // If we're standing on a cube top, remember that cube so we can avoid
     // tiny side-nudges from *other* cubes pushing us off the top.
@@ -81,10 +92,10 @@ pub fn resolve_horizontal(
             let c_min = *c_center - half;
             let c_max = *c_center + half;
             if py >= c_max.y - TOP_EPS && py <= c_max.y + TOP_EPS {
-                if position.x >= c_min.x - PLAYER_RADIUS
-                    && position.x <= c_max.x + PLAYER_RADIUS
-                    && position.z >= c_min.z - PLAYER_RADIUS
-                    && position.z <= c_max.z + PLAYER_RADIUS
+                if position.x >= c_min.x - support_radius
+                    && position.x <= c_max.x + support_radius
+                    && position.z >= c_min.z - support_radius
+                    && position.z <= c_max.z + support_radius
                 {
                     supporting_cube = Some((c_min, c_max));
                     break;
@@ -118,12 +129,14 @@ pub fn resolve_horizontal(
                 && position.z <= cube_max.z + PLAYER_RADIUS
             {
                 // Clamp into the top-face area so small nudges don't push player off
+                // use support_radius so corners count as "on top" and remain there.
+                let support_radius = PLAYER_RADIUS + SUPPORT_EXTRA;
                 position.x = position
                     .x
-                    .clamp(cube_min.x + PLAYER_RADIUS, cube_max.x - PLAYER_RADIUS);
+                    .clamp(cube_min.x + support_radius, cube_max.x - support_radius);
                 position.z = position
                     .z
-                    .clamp(cube_min.z + PLAYER_RADIUS, cube_max.z - PLAYER_RADIUS);
+                    .clamp(cube_min.z + support_radius, cube_max.z - support_radius);
 
                 // Kill velocity into the walls so the player doesn't immediately slide off
                 if position.x <= cube_min.x + PLAYER_RADIUS + 0.001 && velocity.x < 0.0 {

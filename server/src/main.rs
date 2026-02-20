@@ -757,6 +757,17 @@ fn handle_world_change(
     response.extend_from_slice(&sy.to_be_bytes());
     response.extend_from_slice(&sz.to_be_bytes());
     let _ = socket.send_to(&response, src_addr);
+
+    // ensure the client has the maze data when transitioning into the Maze.
+    // this avoids a situation where the world_change packet is received but the
+    // corresponding MSG_MAZE was lost, leaving the player standing in a "void"
+    // because the client hasn't drawn any geometry yet.  sending the maze here
+    // is cheap and idempotent, and the client already deduplicates gracefully.
+    if target == WorldId::Maze {
+        if let Some(m) = maze {
+            m.send(socket, src_addr);
+        }
+    }
 }
 
 fn handle_discover(

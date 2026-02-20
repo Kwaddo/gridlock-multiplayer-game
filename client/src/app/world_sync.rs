@@ -34,8 +34,15 @@ pub fn sync_world(
         // mark that we saw traffic from server during this poll
         result.server_seen = updates.received_any;
 
-        if let Some((new_maze, _spawn)) = updates.maze {
+        // If the server sent a new maze, remember its spawn point as well.
+        // The spawn coordinates are the teleporter location and are only used
+        // when we don't already have an explicit world_change to Maze. This
+        // covers the case where a world_change packet arrived but the accompanying
+        // maze data was lost, leaving the client in "Maze" with no geometry.
+        let mut maze_spawn: Option<Vec3> = None;
+        if let Some((new_maze, spawn)) = updates.maze {
             *maze = Some(new_maze);
+            maze_spawn = Some(spawn);
         }
         if let Some(players) = updates.players {
             let mut existing = std::mem::take(&mut playing_state.other_players);
@@ -187,10 +194,13 @@ pub fn sync_world(
             playing_state.weapons.set_locked_slot(None);
         }
 
+        let mut world_change_applied = false;
         if let Some((world_id, spawn)) = updates.world_change {
             playing_state.current_world = world_id;
             playing_state.position = spawn;
             playing_state.movement_state.velocity = Vec3::ZERO;
+            world_change_applied = true;
+
             // If we just entered the Maze, start the short post-teleport movement freeze
             if world_id == WorldId::Maze {
                 playing_state.post_teleport_freeze_timer = 10.0; // start client-side match timer to mirror server MATCH_DURATION
@@ -210,13 +220,27 @@ pub fn sync_world(
                 playing_state.weapons.set_locked_slot(None);
                 playing_state.pending_forced_weapon_slot = None;
             }
-            // If the server attached a match_mode to the world-change packet, remember it
+            // If the server attached a match_mode to the world-change packet, remember it.
+            // We used to clear `*maze` here, but that meant the very maze we just received
+            // would be discarded when a match started (word_change+match_mode arrive
+            // together). the maze is already cleared when we explicitly return to the
+            // lobby above, so keep it intact on entry.
             if let Some(mode) = updates.match_mode {
                 playing_state.match_mode = Some(mode);
                 playing_state.match_end_winner = None;
                 playing_state.match_end_countdown_timer = 0.0;
                 playing_state.local_kills = 0;
-                *maze = None;
+            }
+        }
+
+        // if we just received maze data but didn't have a world change this poll,
+        // and we're already considered to be in the Maze, use the teleporter spawn so
+        // we don't end up stranded in empty space. this covers lost-world-change
+        // scenarios and ensures teleporting works even if the maze packet arrives
+        // slightly after the world-change message.
+        if let Some(spawn) = maze_spawn {
+            if !world_change_applied && playing_state.current_world == WorldId::Maze {
+                playing_state.position = spawn;
             }
         }
         if let Some(broken) = updates.broken_walls {
