@@ -292,7 +292,7 @@ pub struct WeaponStats {
     pub viewmodel_position: (f32, f32, f32),   // position offset (right, up, forward)
     pub viewmodel_rotation: (f32, f32, f32),   // rotation (pitch, yaw, roll) in radians
     pub viewmodel_muzzle_offset: (f32, f32, f32), // muzzle in normalized model space
-    pub viewmodel_hands_offset: (f32, f32, f32), // per-weapon offset applied to hand model so the grip aligns with the gun
+    pub viewmodel_hands_offset: (f32, f32, f32), // per-weapon hand position offset
 
     // --- damage falloff
     pub falloff_start: f32, // distance at which damage falloff begins (units)
@@ -306,9 +306,9 @@ pub struct WeaponStats {
     pub pattern_reset_time: f32, // time in seconds to fully reset after releasing trigger
 }
 
-const VM_BASE_SCALE: f32 = 0.004;
-const VM_BASE_POS: (f32, f32, f32) = (0.01, 0.14, 0.28);
-const VM_BASE_ROT: (f32, f32, f32) = (0.05, -1.55, 0.0);
+const VM_BASE_SCALE: f32 = 0.003;
+const VM_BASE_POS: (f32, f32, f32) = (0.30, 0.08, -0.37);
+const VM_BASE_ROT: (f32, f32, f32) = (0.05, -1.45, 0.0);
 
 // ============================================================================
 //  PISTOLS
@@ -368,10 +368,10 @@ pub const M1911: WeaponStats = WeaponStats {
     viewmodel_model: Some("m1911_model"),
     viewmodel_asset_key: Some("weapon_fp_pistol"),
     viewmodel_scale: VM_BASE_SCALE,
-    viewmodel_position: (-0.01, 0.14, 0.28),
+    viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
-    viewmodel_hands_offset: (0.08, -0.06, -0.15),  // pistol: hands pulled back and down to sit behind the small grip
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 15.0,
     falloff_end: 35.0,
@@ -446,7 +446,7 @@ pub const DEAGLE: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
-    viewmodel_hands_offset: (0.06, -0.04, -0.12),  // deagle: slightly smaller offset than m1911
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 20.0,
     falloff_end: 60.0,
@@ -550,7 +550,7 @@ pub const MP5: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-0.90, 0.02, -0.22),
-    viewmodel_hands_offset: (0.04, -0.03, -0.08),  // smg: slight pull back
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 10.0,
     falloff_end: 30.0,
@@ -674,11 +674,11 @@ pub const SPAS: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("spas_model"),
     viewmodel_asset_key: Some("weapon_fp_shotgun"),
-    viewmodel_scale: VM_BASE_SCALE,
-    viewmodel_position: VM_BASE_POS,
-    viewmodel_rotation: VM_BASE_ROT,
+    viewmodel_scale: 0.002,
+    viewmodel_position: (0.22, 0.13, -0.44),
+    viewmodel_rotation: (-0.10, -1.45, 0.0),
     viewmodel_muzzle_offset: (-1.10, 0.02, -0.25),
-    viewmodel_hands_offset: (0.02, -0.01, -0.04),  // shotgun: close to rifle size, small offset
+    viewmodel_hands_offset: (-0.09, -0.01, 0.13),
 
     falloff_start: 5.0,
     falloff_end: 15.0,
@@ -771,11 +771,11 @@ pub const M16_STATS: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("m16_model"),
     viewmodel_asset_key: None,
-    viewmodel_scale: VM_BASE_SCALE,
-    viewmodel_position: VM_BASE_POS,
-    viewmodel_rotation: VM_BASE_ROT,
+    viewmodel_scale: 0.003,
+    viewmodel_position: (0.22, 0.08, -0.31),
+    viewmodel_rotation: (0.05, -1.75, 0.0),
     viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
-    viewmodel_hands_offset: (0.01, -0.01, -0.02),  // AR: very close to bolt action size
+    viewmodel_hands_offset: (0.0, 0.0, -0.10),
 
     falloff_start: 25.0,
     falloff_end: 70.0,
@@ -875,7 +875,7 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.20, 0.02, -0.28),
-    viewmodel_hands_offset: (0.0, 0.0, 0.0),       // bolt action: reference — hands fit perfectly
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 1000.0,
     falloff_end: 10000.0,
@@ -964,7 +964,7 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
-    viewmodel_hands_offset: (0.0, 0.0, 0.0),       // minigun: large weapon, no offset needed
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 15.0,
     falloff_end: 45.0,

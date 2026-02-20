@@ -563,9 +563,9 @@ pub(super) fn draw_viewmodel_tab(
     y += draw_slider("muzzle_z", &mut weapon.stats_data.viewmodel_muzzle_offset.2, -2.0, 2.0, 0.02, x, y, w, mouse, clicked, held);
 
     y += draw_section_header("Per-Weapon Hands Offset", x, y);
-    y += draw_slider("hands_off_x", &mut weapon.stats_data.viewmodel_hands_offset.0, -0.5, 0.5, 0.01, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_off_y", &mut weapon.stats_data.viewmodel_hands_offset.1, -0.5, 0.5, 0.01, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_off_z", &mut weapon.stats_data.viewmodel_hands_offset.2, -0.5, 0.5, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_off_x", &mut weapon.stats_data.viewmodel_hands_offset.0, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_off_y", &mut weapon.stats_data.viewmodel_hands_offset.1, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_off_z", &mut weapon.stats_data.viewmodel_hands_offset.2, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
 
     y += draw_section_header("FP Hands", x, y);
     y += draw_slider("hands_scale", &mut dev.hands_scale, 0.01, 2.0, 0.01, x, y, w, mouse, clicked, held);

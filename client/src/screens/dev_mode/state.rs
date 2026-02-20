@@ -3,12 +3,12 @@ use macroquad::prelude::*;
 
 const DEV_CODE: &str = "verso";
 pub const HANDS_DEFAULT_SCALE: f32 = 1.93;
-pub const HANDS_DEFAULT_OFFSET_X: f32 = 0.34;
-pub const HANDS_DEFAULT_OFFSET_Y: f32 = -0.12;
-pub const HANDS_DEFAULT_OFFSET_Z: f32 = -0.50;
-pub const HANDS_DEFAULT_ROT_PITCH: f32 = 0.0;
-pub const HANDS_DEFAULT_ROT_YAW: f32 = -0.07;
-pub const HANDS_DEFAULT_ROT_ROLL: f32 = 0.0;
+pub const HANDS_DEFAULT_OFFSET_X: f32 = 0.16;
+pub const HANDS_DEFAULT_OFFSET_Y: f32 = -0.03;
+pub const HANDS_DEFAULT_OFFSET_Z: f32 = -0.18;
+pub const HANDS_DEFAULT_ROT_PITCH: f32 = -0.15;
+pub const HANDS_DEFAULT_ROT_YAW: f32 = 0.65;
+pub const HANDS_DEFAULT_ROT_ROLL: f32 = -0.05;
 pub(super) const TAB_NAMES: &[&str] = &[
     "Weapon",
     "Crosshair",
