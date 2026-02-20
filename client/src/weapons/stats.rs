@@ -56,7 +56,7 @@ pub enum WeaponId {
     // Pistols
     M1911,
     Deagle,
-    // Revolver,
+    Revolver,
     // SuppressedPistol,
     // TaurusRaging,
 
@@ -94,7 +94,7 @@ impl WeaponId {
         // Pistols
         WeaponId::M1911,
         WeaponId::Deagle,
-        // WeaponId::Revolver,
+        WeaponId::Revolver,
         // WeaponId::SuppressedPistol,
         // WeaponId::TaurusRaging,
 
@@ -129,8 +129,8 @@ impl WeaponId {
 
     pub fn category(self) -> WeaponCategory {
         match self {
-            WeaponId::M1911 | WeaponId::Deagle  
-            // | WeaponId::Revolver| WeaponId::SuppressedPistol | WeaponId::TaurusRaging 
+            WeaponId::M1911 | WeaponId::Deagle | WeaponId::Revolver
+            // | WeaponId::SuppressedPistol | WeaponId::TaurusRaging 
             => WeaponCategory::Pistol,
 
             WeaponId::Mp5 
@@ -162,7 +162,7 @@ impl WeaponId {
             // Pistols
             WeaponId::M1911 => &M1911,
             WeaponId::Deagle => &DEAGLE,
-            // WeaponId::Revolver => &REVOLVER,
+            WeaponId::Revolver => &REVOLVER,
             // WeaponId::SuppressedPistol => &SUPPRESSED_PISTOL,
             // WeaponId::TaurusRaging => &TAURUS_RAGING,
 
@@ -393,7 +393,7 @@ pub const M1911: WeaponStats = WeaponStats {
     pattern_reset_time: 0.4,
 };
 
-/// Desert Eagle — hand cannon, sniper pistol with massive recoil
+// Desert Eagle — hand cannon, sniper pistol with massive recoil
 pub const DEAGLE: WeaponStats = WeaponStats {
     name: "Desert Eagle",
     fire_mode: FireMode::SemiAuto,
@@ -403,7 +403,7 @@ pub const DEAGLE: WeaponStats = WeaponStats {
     pellet_count: 1,
     pellet_spread: None,
 
-    fire_rate: 2.5,
+    fire_rate: 1.2,
     magazine_size: 6,
     max_reserve: 35,
     reload_time: 2.0,
@@ -469,15 +469,85 @@ pub const DEAGLE: WeaponStats = WeaponStats {
     ],
     pattern_randomness: 0.2,
     randomness_growth: 0.1,
-    pattern_reset_time: 0.5,
+    pattern_reset_time: 1.2,
 };
 
-// TODO: Revolver — slow high damage precision sidearm
+//  Revolver — slow high damage precision sidearm
 pub const REVOLVER: WeaponStats = WeaponStats {
     name: "Revolver",
+    fire_mode: FireMode::SemiAuto,
+
+    damage: 45.0,
+    headshot_mult: 2.5, // = 112.5
+    pellet_count: 1,
+    pellet_spread: None,
+
+    fire_rate: 1.6,
+    magazine_size: 6,
+    max_reserve: 36,
+    reload_time: 2.2,
+
+    recoil_horizontal: 0.035,
+    recoil_vertical: 0.02,
+    recoil_recovery: 3.5,
+    hip_spread: 0.03,
+    ads_spread: 0.006,
+    spread_per_shot: 0.025,
+    spread_recovery: 1.8,
+    move_spread_mult: 1.3,
+    sprint_spread_mult: 1.6,
+    crouch_spread_mult: 0.75,
+    ads_zoom_fov: 60.0,
+    ads_time: 0.25,
+    ads_sensitivity: None,
+
+    bullet_speed: 210.0,
+    bullet_range: 45.0,
+    tracer_length: 2.5,
+    tracer_color: [255, 205, 85, 255],
+    tracer_thickness: 0.015,
+    tracer_lifetime: 1.7,
+
+    crosshair_kick_per_shot: 1.8,
+    crosshair_kick_decay: 5.0,
+    crosshair_kick_max: 2.5,
+
+    crosshair_style: CrosshairStyle::Standard,
+    fsa_time: Some(0.35),
+
+    fire_sound_asset_key: "revolver_shot",
+    icon_asset_key: "pistol_icon",
+    icon_width: 85.0,
+    icon_height: 50.0,
+    icon_flip_x: false,
+
     viewmodel_model: Some("revolver_model"),
     viewmodel_asset_key: None,
-    ..M1911
+
+    viewmodel_scale: VM_BASE_SCALE,
+    viewmodel_position: VM_BASE_POS,
+    viewmodel_rotation: VM_BASE_ROT,
+    viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
+    viewmodel_hands_scale: 1.93,
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
+
+    falloff_start: 80.0,
+    falloff_end: 200.0,
+    falloff_min_mult: 0.9,
+
+    recoil_pattern: &[
+        (0.035, 0.0),
+        (0.030, 0.1),
+        (0.028, -0.1),
+        (0.025, 0.15),
+        (0.022, -0.15),
+        (0.020, 0.1),
+        (0.018, -0.1),
+    ],
+    pattern_randomness: 0.25,
+    randomness_growth: 0.12,
+    pattern_reset_time: 0.85,
 };
 
 // TODO: Suppressed Pistol — stealth pistol, silent assassin
