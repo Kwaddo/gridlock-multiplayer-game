@@ -47,6 +47,17 @@ pub(super) fn draw_weapon_and_kill_feed(
         text_params(16, Color::from_rgba(180, 180, 180, 255)),
     );
 
+    // indicate when a server-mode lock is active (e.g. Gun Game)
+    if weapons.locked_slot.is_some() {
+        let lock_text = "(locked)";
+        draw_text_ex(
+            lock_text,
+            name_x + name_w + 8.0,
+            name_y,
+            text_params(12, Color::from_rgba(255, 140, 140, 200)),
+        );
+    }
+
     let icon_w = stats.icon_width;
     let icon_h = stats.icon_height;
     let icon_x = name_x - icon_w - 8.0;

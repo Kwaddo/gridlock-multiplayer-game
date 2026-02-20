@@ -20,10 +20,11 @@ impl PlayingState {
                 let _ = s.send_to(&msg, server_addr);
             }
 
-            // Lobby console: send start-game request to server
+            // Lobby console: send start-game request to server (include selected gamemode)
             if self.pending_start_request {
                 self.pending_start_request = false;
-                let msg = vec![MSG_START_GAME];
+                let mode = self.pending_start_gamemode;
+                let msg = vec![MSG_START_GAME, mode];
                 let _ = s.send_to(&msg, server_addr);
             }
 

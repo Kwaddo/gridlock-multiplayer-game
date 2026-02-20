@@ -23,10 +23,15 @@ const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 const MATCH_DURATION: Duration = Duration::from_secs(120); // match length (seconds)
 const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start (adjust later)
 const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
-const MATCH_SCORE_TO_WIN: u32 = 20; // kills required to win the match
+const MATCH_SCORE_TO_WIN: u32 = 20; // kills required to win the match (unused for Gun Game)
 const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts
 const MATCH_END_COUNTDOWN_SECS: u8 = 6; // seconds to wait after a win before returning players to lobby
 const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 10; // seconds players cannot move right after teleport into Maze
+
+// --- Gun Game configuration (single-mode for now)
+// Customize this progression to change the sequence of weapons for Gun Game.
+// Names must match client-side `WeaponStats.name` values (e.g. "Pistol", "SMG", "Shotgun", ...)
+const GUN_GAME_PROGRESSION: [&str; 5] = ["Pistol", "SMG", "Shotgun", "AssaultRifle", "Sniper"];
 
 fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
     let mut candidate = if requested.is_empty() || requested.len() > 20 {
@@ -70,6 +75,8 @@ fn main() -> std::io::Result<()> {
     let mut match_end_pending: Option<(Instant, u32, String)> = None;
     // last sent authoritative match timer (to avoid spamming identical values)
     let mut last_match_time_sent: Option<u8> = None;
+    // current match mode (defaults to Gun Game)
+    let mut match_mode: u8 = MODE_GUN_GAME;
 
     loop {
         match socket.recv_from(&mut buffer) {
@@ -136,15 +143,19 @@ fn main() -> std::io::Result<()> {
                                         + Duration::from_secs(MATCH_START_COUNTDOWN_SECS as u64),
                                 );
 
-                                // broadcast countdown to all connected clients
-                                let cd = vec![MSG_MATCH_COUNTDOWN, MATCH_START_COUNTDOWN_SECS];
+                                // broadcast countdown to all connected clients (include selected gamemode)
+                                let cd = vec![
+                                    MSG_MATCH_COUNTDOWN,
+                                    MATCH_START_COUNTDOWN_SECS,
+                                    match_mode,
+                                ];
                                 for p in players.values() {
                                     let _ = socket.send_to(&cd, p.socket_addr);
                                 }
 
                                 println!(
-                                    "Match start requested by {} — countdown {}s",
-                                    src_addr, MATCH_START_COUNTDOWN_SECS
+                                    "Match start requested by {} — mode {} — countdown {}s",
+                                    src_addr, match_mode, MATCH_START_COUNTDOWN_SECS
                                 );
                             } else {
                                 println!(
@@ -188,6 +199,8 @@ fn main() -> std::io::Result<()> {
                                         response.extend_from_slice(&sx.to_be_bytes());
                                         response.extend_from_slice(&sy.to_be_bytes());
                                         response.extend_from_slice(&sz.to_be_bytes());
+                                        // include current match mode for clients joining a running match
+                                        response.push(match_mode);
                                         let _ = socket.send_to(&response, req_player.socket_addr);
 
                                         // send maze data to the joining client
@@ -234,6 +247,7 @@ fn main() -> std::io::Result<()> {
                         &mut match_running,
                         &mut match_start_time,
                         &mut match_end_pending,
+                        match_mode,
                     ),
                     MSG_RESPAWN_REQUEST => {
                         if let Some(ref m) = maze {
@@ -302,10 +316,15 @@ fn main() -> std::io::Result<()> {
                             Instant::now() + Duration::from_secs(MATCH_POST_TELEPORT_FREEZE_SECS),
                         );
 
+                        // reset per-player Gun Game progression at match start
+                        player.gun_level = 1;
+
                         let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
                         response.extend_from_slice(&sx.to_be_bytes());
                         response.extend_from_slice(&sy.to_be_bytes());
                         response.extend_from_slice(&sz.to_be_bytes());
+                        // attach match mode so clients know which mode is starting
+                        response.push(match_mode);
                         let _ = socket.send_to(&response, player.socket_addr);
 
                         current_maze.send(&socket, player.socket_addr);
@@ -551,6 +570,7 @@ fn move_all_players_to_lobby(
             p.health = p.max_health;
             p.shield = 0;
             p.kills = 0;
+            p.gun_level = 1; // reset Gun Game progression
             p.death_time = None;
         }
 
@@ -666,6 +686,9 @@ fn broadcast_state(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) {
 
             // include kills (score) so clients can render scoreboard
             state_msg.extend_from_slice(&player.kills.to_be_bytes());
+
+            // include gun progression level for Gun Game (1 = first weapon)
+            state_msg.push(player.gun_level as u8);
 
             let name_bytes = player.username.as_bytes();
             state_msg.push(name_bytes.len() as u8);
@@ -834,6 +857,7 @@ fn handle_hit(
     _match_running: &mut bool,
     _match_start_time: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
+    match_mode: u8,
 ) {
     // Payload: victim_id (4 bytes), damage (4 bytes)
     if payload.len() < 8 {
@@ -923,31 +947,51 @@ fn handle_hit(
         death_msg.extend_from_slice(&attacker_id.to_be_bytes());
         let _ = socket.send_to(&death_msg, victim_addr);
 
-        // Send MSG_KILL to attacker and increment their kill count
+        // Send MSG_KILL to attacker and update kills. Gun Game progression only applies
+        // when the current match mode is Gun Game; other modes are not implemented yet.
         let mut attacker_won_match = false;
         if let Some(attacker) = players.get_mut(&src_addr) {
             attacker.kills += 1;
-            // Check for match victory
-            if attacker.kills >= MATCH_SCORE_TO_WIN && *_match_running {
-                attacker_won_match = true;
-            }
+
+            // choose weapon name and (optionally) advance progression only for Gun Game
+            let weapon_name = if match_mode == MODE_GUN_GAME {
+                let weapon_index = (attacker.gun_level as usize).saturating_sub(1);
+                let wn = GUN_GAME_PROGRESSION
+                    .get(weapon_index)
+                    .copied()
+                    .unwrap_or("Unknown");
+
+                // If the attacker used the LAST weapon in progression when this kill happened,
+                // they win instantly. Otherwise advance their gun_level to the next weapon.
+                if attacker.gun_level as usize >= GUN_GAME_PROGRESSION.len() && *_match_running {
+                    attacker_won_match = true;
+                } else {
+                    attacker.gun_level =
+                        (attacker.gun_level + 1).min(GUN_GAME_PROGRESSION.len() as u32);
+                }
+
+                wn.to_string()
+            } else {
+                // fallback weapon name for unimplemented modes
+                "Gun".to_string()
+            };
+
+            // notify attacker about the kill (victim id)
             let mut kill_msg = vec![MSG_KILL];
             kill_msg.extend_from_slice(&victim_id.to_be_bytes());
             let _ = socket.send_to(&kill_msg, src_addr);
-        }
 
-        // Broadcast kill feed to all players
-        let weapon_name = "Rifle"; // TODO: Get actual weapon from payload
-        let weapon_bytes = weapon_name.as_bytes();
-        let mut kill_feed_msg = vec![MSG_KILL_FEED];
-        kill_feed_msg.extend_from_slice(&attacker_id.to_be_bytes());
-        kill_feed_msg.extend_from_slice(&victim_id.to_be_bytes());
-        kill_feed_msg.push(weapon_bytes.len() as u8);
-        kill_feed_msg.extend_from_slice(weapon_bytes);
-        for player in players.values() {
-            let _ = socket.send_to(&kill_feed_msg, player.socket_addr);
+            // Broadcast kill feed to all players using the weapon the attacker just used
+            let weapon_bytes = weapon_name.as_bytes();
+            let mut kill_feed_msg = vec![MSG_KILL_FEED];
+            kill_feed_msg.extend_from_slice(&attacker_id.to_be_bytes());
+            kill_feed_msg.extend_from_slice(&victim_id.to_be_bytes());
+            kill_feed_msg.push(weapon_bytes.len() as u8);
+            kill_feed_msg.extend_from_slice(weapon_bytes);
+            for player in players.values() {
+                let _ = socket.send_to(&kill_feed_msg, player.socket_addr);
+            }
         }
-
         // Immediately broadcast an updated state so the killed player's model is removed
         // from other clients without waiting for the next position update.
         broadcast_state(socket, players);
@@ -955,17 +999,14 @@ fn handle_hit(
         // also broadcast player-list so scoreboard UI updates immediately
         broadcast_player_list(socket, players);
 
-        // If the attacker reached the score to win, end the match now.
+        // If the attacker won via Gun Game progression, end the match now.
         if attacker_won_match {
             // find winner (attacker) to announce
             let winner_name = players
                 .get(&src_addr)
                 .map(|p| p.username.clone())
                 .unwrap_or_else(|| "Unknown".to_string());
-            println!(
-                "Match won by '{}' ({} kills) — ending match",
-                winner_name, MATCH_SCORE_TO_WIN
-            );
+            println!("Match won by '{}' (Gun Game) — ending match", winner_name);
 
             // Broadcast MSG_MATCH_END (winner_id, name)
             let mut end_msg = vec![MSG_MATCH_END];
@@ -983,9 +1024,6 @@ fn handle_hit(
                 attacker_id,
                 winner_name.clone(),
             ));
-
-            // NOTE: actual move-to-lobby will be executed by the main loop when the countdown expires
-            // (below). We still broadcast current state so clients immediately see final scores.
         }
     }
 }

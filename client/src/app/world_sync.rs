@@ -5,6 +5,7 @@ use client::ui::OtherPlayer;
 use macroquad::prelude::*;
 
 use client::net::poll_updates;
+use client::net::protocols::MODE_GUN_GAME;
 use client::screens::PlayingState;
 use client::types::animation_state::AnimState;
 use client::types::maze::Maze;
@@ -129,6 +130,46 @@ pub fn sync_world(
             playing_state.local_kills = k;
         }
 
+        // If server indicates match mode (sent with countdown or world change), store it locally
+        if let Some(mode) = updates.match_mode {
+            playing_state.match_mode = Some(mode);
+        }
+
+        // Sync authoritative Gun Game weapon slot for local player — only enforce when the
+        // authoritative/current mode is Gun Game (prefer mode included in the same update).
+        // IMPORTANT: apply the forced slot *after* the player actually teleports into Maze.
+        if let Some(gl) = updates.self_gun_level {
+            // determine the authoritative mode for this update: prefer updates.match_mode if present
+            let current_mode = updates.match_mode.or(playing_state.match_mode);
+            if current_mode == Some(MODE_GUN_GAME) {
+                // server sends 1 = first slot; convert to zero-based slot index
+                let slot = (gl as usize).saturating_sub(1);
+
+                // If we're already in the Maze, apply immediately. If the update also contains a
+                // pending world_change to Maze (same poll), apply immediately as well. Otherwise
+                // defer application until the client receives the world change / teleport.
+                let will_be_in_maze = updates
+                    .world_change
+                    .as_ref()
+                    .map(|(w, _)| *w == WorldId::Maze)
+                    .unwrap_or(false);
+
+                if playing_state.current_world == WorldId::Maze || will_be_in_maze {
+                    let _ = playing_state.weapons.switch_to(slot);
+                    playing_state.weapons.set_locked_slot(Some(slot));
+                    playing_state.pending_forced_weapon_slot = None;
+                } else {
+                    // store and wait until teleport completes
+                    playing_state.pending_forced_weapon_slot = Some(slot);
+                }
+            } else {
+                // do NOT force weapon changes from the server when not in Gun Game
+                // just clear any previous lock so the player can freely switch in the lobby
+                playing_state.weapons.set_locked_slot(None);
+                playing_state.pending_forced_weapon_slot = None;
+            }
+        }
+
         // Handle match end broadcast
         let match_end_winner_cloned = updates.match_end_winner.clone();
         if let Some(winner_name) = match_end_winner_cloned {
@@ -140,6 +181,10 @@ pub fn sync_world(
             playing_state.current_world = WorldId::Lobby;
             *maze = None;
             playing_state.local_kills = 0;
+
+            // clear any mode-specific restrictions
+            playing_state.match_mode = None;
+            playing_state.weapons.set_locked_slot(None);
         }
 
         if let Some((world_id, spawn)) = updates.world_change {
@@ -150,9 +195,24 @@ pub fn sync_world(
             if world_id == WorldId::Maze {
                 playing_state.post_teleport_freeze_timer = 10.0; // start client-side match timer to mirror server MATCH_DURATION
                 playing_state.match_time_left = 120.0; // seconds
+
+                // if a forced slot was received earlier while we were still in the lobby,
+                // apply it now that the teleport is complete
+                if let Some(forced) = playing_state.pending_forced_weapon_slot.take() {
+                    let _ = playing_state.weapons.switch_to(forced);
+                    playing_state.weapons.set_locked_slot(Some(forced));
+                }
             } else {
                 // ensure timer is cleared outside of match
                 playing_state.match_time_left = 0.0;
+                // leaving the Maze / returning to Lobby — clear any mode-specific restrictions
+                playing_state.match_mode = None;
+                playing_state.weapons.set_locked_slot(None);
+                playing_state.pending_forced_weapon_slot = None;
+            }
+            // If the server attached a match_mode to the world-change packet, remember it
+            if let Some(mode) = updates.match_mode {
+                playing_state.match_mode = Some(mode);
             }
         }
         if let Some(broken) = updates.broken_walls {
