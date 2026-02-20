@@ -129,19 +129,6 @@ pub fn sync_world(
             playing_state.local_kills = k;
         }
 
-        // Handle match end broadcast
-        let match_end_winner_cloned = updates.match_end_winner.clone();
-        if let Some(winner_name) = match_end_winner_cloned {
-            // move client back to lobby view and clear local maze
-            playing_state.announcements.push((
-                format!("{} won the match! Returning to lobby.", winner_name),
-                6.0,
-            ));
-            playing_state.current_world = WorldId::Lobby;
-            *maze = None;
-            playing_state.local_kills = 0;
-        }
-
         if let Some((world_id, spawn)) = updates.world_change {
             playing_state.current_world = world_id;
             playing_state.position = spawn;
@@ -151,8 +138,12 @@ pub fn sync_world(
                 playing_state.post_teleport_freeze_timer = 10.0; // start client-side match timer to mirror server MATCH_DURATION
                 playing_state.match_time_left = 120.0; // seconds
             } else {
-                // ensure timer is cleared outside of match
+                // returning to lobby: clear match-end state and maze
                 playing_state.match_time_left = 0.0;
+                playing_state.match_end_winner = None;
+                playing_state.match_end_countdown_timer = 0.0;
+                playing_state.local_kills = 0;
+                *maze = None;
             }
         }
         if let Some(broken) = updates.broken_walls {

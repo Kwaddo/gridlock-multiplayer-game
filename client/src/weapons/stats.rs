@@ -147,6 +147,11 @@ pub struct WeaponStats {
     pub pattern_randomness: f32, // how much random variance to add to the recoil pattern (radians),
     pub randomness_growth: f32, // additional randomness per shot to make the pattern less predictable the longer you fire (radians)
     pub pattern_reset_time: f32, // time in seconds to fully reset after releasing trigger
+
+    // --- bullet hole / impact mark config (per-weapon so sniper != pistol)
+    pub bullet_hole_size: f32,      // radius of the impact decal (world units)
+    pub bullet_hole_lifetime: f32,  // how long the mark stays on the wall (seconds)
+    pub bullet_hole_color: [u8; 4], // RGBA tint of the impact mark
 }
 
 // --- Weapon definitions
@@ -222,6 +227,10 @@ pub const PISTOL: WeaponStats = WeaponStats {
     pattern_randomness: 0.15,
     randomness_growth: 0.08,
     pattern_reset_time: 0.4,
+
+    bullet_hole_size: 0.025,
+    bullet_hole_lifetime: 300.0,
+    bullet_hole_color: [40, 35, 30, 255],
 };
 
 pub const SMG: WeaponStats = WeaponStats {
@@ -301,6 +310,10 @@ pub const SMG: WeaponStats = WeaponStats {
     pattern_randomness: 0.3,
     randomness_growth: 0.04,
     pattern_reset_time: 0.35,
+
+    bullet_hole_size: 0.02,
+    bullet_hole_lifetime: 300.0,
+    bullet_hole_color: [35, 30, 25, 255],
 };
 
 pub const SHOTGUN: WeaponStats = WeaponStats {
@@ -378,6 +391,10 @@ pub const SHOTGUN: WeaponStats = WeaponStats {
     pattern_randomness: 0.0,
     randomness_growth: 0.0,  // no pattern, so randomness doesnt increase
     pattern_reset_time: 0.0, // no pattern to reset
+
+    bullet_hole_size: 0.035,
+    bullet_hole_lifetime: 300.0,
+    bullet_hole_color: [50, 40, 30, 255],
 };
 
 pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
@@ -457,6 +474,10 @@ pub const ASSAULT_RIFLE: WeaponStats = WeaponStats {
     pattern_randomness: 0.1, // early on its very predictable,
     randomness_growth: 0.06, // but the longer you hold it, the more random it gets to prevent pure pattern memorization
     pattern_reset_time: 0.5,
+
+    bullet_hole_size: 0.03,
+    bullet_hole_lifetime: 300.0,
+    bullet_hole_color: [45, 38, 28, 255],
 };
 
 pub const SNIPER: WeaponStats = WeaponStats {
@@ -523,4 +544,8 @@ pub const SNIPER: WeaponStats = WeaponStats {
     pattern_randomness: 0.0, // sniper has no recoil pattern, just a single strong kick with some randomness
     randomness_growth: 0.0,  // no pattern, so randomness doesnt increase
     pattern_reset_time: 0.0, // no pattern to reset
+
+    bullet_hole_size: 0.06,
+    bullet_hole_lifetime: 300.0,
+    bullet_hole_color: [30, 25, 20, 255],
 };

@@ -21,3 +21,13 @@ pub struct BulletTracer {
     pub tracer_color: [u8; 4], // RGBA color of the tracer
     pub tracer_thickness: f32, // thickness of the tracer line
 }
+
+// bullet hole / impact mark left on walls/surfaces
+pub struct BulletHole {
+    pub position: Vec3,    // world position of the impact
+    pub normal: Vec3,      // surface normal at impact (for orienting the decal)
+    pub lifetime: f32,     // remaining time before fading out (seconds)
+    pub max_lifetime: f32, // initial lifetime (for fade calculation)
+    pub size: f32,         // radius of the bullet hole decal
+    pub color: [u8; 4],    // RGBA tint of the hole (weapon-dependent)
+}

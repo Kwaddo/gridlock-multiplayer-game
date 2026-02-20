@@ -5,7 +5,7 @@ use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 use crate::weapons::combat::CombatEntity;
-use crate::world::lobby::{LANDMARK_CUBES, PARKOUR_CUBES};
+use crate::world::lobby::{LANDMARK_CUBES, LOBBY_CONSOLE_POS, LOBBY_CONSOLE_SIZE, PARKOUR_CUBES};
 
 const MINIMAP_MARGIN: f32 = 16.0;
 /// Fraction of the radius where edge fade begins.
@@ -244,6 +244,23 @@ fn draw_lobby_layer(
         let w = size.x * ppwu;
         let h = size.z * ppwu;
         draw_rectangle(sx - w / 2.0, sy - h / 2.0, w, h, c);
+    }
+
+    // Lobby console (orange accent icon on minimap)
+    {
+        let sx = center_x + (LOBBY_CONSOLE_POS.x - local_pos.x) * ppwu;
+        let sy = center_y + (LOBBY_CONSOLE_POS.z - local_pos.z) * ppwu;
+        let alpha = fade_alpha(sx, sy, center_x, center_y, half, circular);
+        if alpha > 0.0 {
+            let w = LOBBY_CONSOLE_SIZE.x * ppwu;
+            let h = LOBBY_CONSOLE_SIZE.z * ppwu;
+            // orange fill matching the UI accent
+            let fill = Color::new(1.0, 0.42, 0.21, alpha * 0.9);
+            draw_rectangle(sx - w / 2.0, sy - h / 2.0, w, h, fill);
+            // bright border for visibility
+            let border = Color::new(1.0, 0.55, 0.38, alpha);
+            draw_rectangle_lines(sx - w / 2.0 - 1.0, sy - h / 2.0 - 1.0, w + 2.0, h + 2.0, 1.0, border);
+        }
     }
 }
 
