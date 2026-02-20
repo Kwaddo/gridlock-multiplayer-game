@@ -9,7 +9,7 @@ use super::super::PlayingState;
 const HANDS_BASE_SCALE: f32 = 0.35;
 const INSPECT_START_SEC: f32 = 0.35;
 const INSPECT_SWEEP_SEC: f32 = 0.60;
-const INSPECT_HOLD_SEC: f32 = 0.35;
+const INSPECT_HOLD_SEC: f32 = 0.85;
 const INSPECT_RETURN_SEC: f32 = 0.45;
 const INSPECT_LOOK_DOWN_Y: f32 = -0.26;
 const INSPECT_POS_A: Vec3 = Vec3::from_array([0.02, -0.03, -0.04]);
