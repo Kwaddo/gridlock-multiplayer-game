@@ -47,6 +47,7 @@ impl PlayingState {
         self.draw_other_players();
         self.draw_player_hitboxes();
         self.draw_tracers(camera.position);
+        self.draw_bullet_holes();
 
         set_default_camera();
 
@@ -164,38 +165,25 @@ impl PlayingState {
             );
         }
 
-        // Match-end countdown / winner banner
+        // Victory screen overlay (match end)
         if self.match_end_countdown_timer > 0.0 {
-            if let Some(winner) = &self.match_end_winner {
-                let secs = self.match_end_countdown_timer.ceil() as i32;
-                let txt = format!("{} won — returning to lobby in {}s", winner, secs);
-                let w = crate::ui::fonts::measure_game_text(&txt, 22);
-                draw_rectangle(
-                    (screen_width() - w) / 2.0 - 12.0,
-                    40.0 - 24.0,
-                    w + 24.0,
-                    44.0,
-                    Color::from_rgba(8, 10, 12, 200),
-                );
-                draw_text_ex(
-                    &txt,
-                    (screen_width() - w) / 2.0,
-                    40.0,
-                    crate::ui::fonts::text_params(22, YELLOW),
-                );
+            if let Some(winner) = &self.match_end_winner.clone() {
+                self.draw_victory_screen(winner, player_id);
             }
         }
 
         // Bottom-left announcements (recent events like "PlayerX joined the match")
-        let mut y = screen_height() - 24.0;
-        for (txt, timer) in &self.announcements {
-            let alpha = (timer / 4.0).clamp(0.0, 1.0);
-            let col = Color::from_rgba(200, 200, 200, (220.0 * alpha) as u8);
-            draw_text_ex(txt, 12.0, y, crate::ui::fonts::text_params(14, col));
-            y -= 18.0;
+        if self.match_end_countdown_timer <= 0.0 {
+            let mut y = screen_height() - 24.0;
+            for (txt, timer) in &self.announcements {
+                let alpha = (timer / 4.0).clamp(0.0, 1.0);
+                let col = Color::from_rgba(200, 200, 200, (220.0 * alpha) as u8);
+                draw_text_ex(txt, 12.0, y, crate::ui::fonts::text_params(14, col));
+                y -= 18.0;
+            }
         }
 
-        if self.is_dead {
+        if self.is_dead && self.match_end_countdown_timer <= 0.0 {
             self.draw_death_screen();
         }
     }
