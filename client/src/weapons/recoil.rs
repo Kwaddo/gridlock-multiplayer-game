@@ -5,6 +5,7 @@
     as additional multipliers without changing this core logic.
 */
 use super::state::WeaponState; //use super means "use from the parent module" (weapons::state)
+use super::stats::FireMode;
 
 /*
     Context flags that affect spread calculation.
@@ -30,8 +31,9 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
     // reset FSA timer on shot (must happen after the check above)
     weapon.fsa_timer = 0.0;
 
-    // FSA first shot: no recoil, no bloom, no crosshair kick — perfectly accurate
-    if fsa_was_active {
+    // Keep legacy FSA behavior for full-auto only.
+    // Semi-auto should still apply normal recoil/crosshair kick even when FSA is active.
+    if fsa_was_active && matches!(weapon.stats_data.fire_mode, FireMode::FullAuto) {
         return true;
     }
 
