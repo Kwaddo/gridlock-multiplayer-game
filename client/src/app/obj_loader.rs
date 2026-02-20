@@ -268,7 +268,42 @@ fn gltf_image_to_rgba8(image: &gltf::image::Data) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+fn linear_to_srgb(v: f32) -> u8 {
+    let srgb = if v <= 0.0031308 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    };
+    (srgb.clamp(0.0, 1.0) * 255.0) as u8
+}
+
+fn lift_dark_untextured_color(mut color: [u8; 4]) -> [u8; 4] {
+    let r = color[0] as f32 / 255.0;
+    let g = color[1] as f32 / 255.0;
+    let b = color[2] as f32 / 255.0;
+    let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+    // Some converted GLBs carry near-black base factors with no base texture.
+    // Lift them into a readable range for non-PBR shading.
+    if lum < 0.16 {
+        let gain = (0.24 / lum.max(0.02)).min(3.5);
+        color[0] = ((r * gain).clamp(0.0, 1.0) * 255.0) as u8;
+        color[1] = ((g * gain).clamp(0.0, 1.0) * 255.0) as u8;
+        color[2] = ((b * gain).clamp(0.0, 1.0) * 255.0) as u8;
+    }
+
+    color
+}
+
 pub async fn load_gltf_static_mesh(path: &str) -> Result<Mesh, String> {
+    load_gltf_static_mesh_impl(path, false).await
+}
+
+pub async fn load_gltf_static_mesh_lit(path: &str) -> Result<Mesh, String> {
+    load_gltf_static_mesh_impl(path, true).await
+}
+
+async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<Mesh, String> {
     let (doc, buffers, images) = gltf::import(path)
         .map_err(|e| format!("failed to import gltf '{}': {e}", path))?;
 
@@ -280,21 +315,58 @@ pub async fn load_gltf_static_mesh(path: &str) -> Result<Mesh, String> {
         for prim in mesh.primitives() {
             let reader = prim.reader(|buffer| Some(&buffers[buffer.index()]));
 
-            let f = prim.material().pbr_metallic_roughness().base_color_factor();
-            let mat_color = [
-                (f[0] * 255.0) as u8,
-                (f[1] * 255.0) as u8,
-                (f[2] * 255.0) as u8,
-                (f[3] * 255.0) as u8,
-            ];
+            let mat = prim.material();
+
+            // Prefer KHR_materials_pbrSpecularGlossiness diffuse when present,
+            // fall back to metallic-roughness base color.
+            let (mat_color, base_tex_info) =
+                if let Some(sg) = mat.pbr_specular_glossiness() {
+                    let f = sg.diffuse_factor();
+                    let s = sg.specular_factor(); // [f32; 3], default [1,1,1]
+                    let g = sg.glossiness_factor(); // f32, default 1.0
+                    let tex_idx = sg.diffuse_texture().map(|t| t.texture().source().index());
+                    // No texture: approximate metal appearance by lerping diffuse toward
+                    // specular based on glossiness. High-gloss metals read mostly as specular.
+                    let blend = if tex_idx.is_none() { g * 0.75 } else { 0.0 };
+                    let r = f[0] + (s[0] - f[0]) * blend;
+                    let g_ch = f[1] + (s[1] - f[1]) * blend;
+                    let b = f[2] + (s[2] - f[2]) * blend;
+                    // Force fully opaque for viewmodel models — the deagle's SG materials
+                    // can have alpha < 1 on the diffuse_factor which would make the outer
+                    // shell transparent, revealing the interior geometry.
+                    if bake_lighting && f[3] < 0.99 {
+                        println!("[gltf-lit] prim '{}' has alpha={:.3} — forcing opaque", mat.name().unwrap_or("?"), f[3]);
+                    }
+                    let alpha = if bake_lighting { 255u8 } else { (f[3] * 255.0) as u8 };
+                    let mut color = [
+                        linear_to_srgb(r),
+                        linear_to_srgb(g_ch),
+                        linear_to_srgb(b),
+                        alpha,
+                    ];
+                    if tex_idx.is_none() {
+                        color = lift_dark_untextured_color(color);
+                    }
+                    (color, tex_idx)
+                } else {
+                    let f = mat.pbr_metallic_roughness().base_color_factor();
+                    let tex_idx = mat.pbr_metallic_roughness().base_color_texture()
+                        .map(|t| t.texture().source().index());
+                    let alpha = if bake_lighting { 255u8 } else { (f[3] * 255.0) as u8 };
+                    let mut color = [
+                        linear_to_srgb(f[0]),
+                        linear_to_srgb(f[1]),
+                        linear_to_srgb(f[2]),
+                        alpha,
+                    ];
+                    if tex_idx.is_none() {
+                        color = lift_dark_untextured_color(color);
+                    }
+                    (color, tex_idx)
+                };
 
             if mesh_texture.is_none() {
-                if let Some(base_color) = prim
-                    .material()
-                    .pbr_metallic_roughness()
-                    .base_color_texture()
-                {
-                    let image_index = base_color.texture().source().index();
+                if let Some(image_index) = base_tex_info {
                     if let Some(image) = images.get(image_index) {
                         let rgba = gltf_image_to_rgba8(image)?;
                         if image.width > u16::MAX as u32 || image.height > u16::MAX as u32 {
@@ -327,14 +399,36 @@ pub async fn load_gltf_static_mesh(path: &str) -> Result<Mesh, String> {
                 .map(|uv| uv.into_f32().collect())
                 .unwrap_or_default();
 
+            // Light directions in model space.
+            // Viewmodel guns are rendered at yaw=-PI/2, so we pre-rotate the world-space
+            // key light (+90° around Y) to get the correct model-space direction:
+            // world (-0.4, 0.8, 0.5) → model (0.5, 0.8, 0.4)
+            let light_dir = vec3(0.5_f32, 0.8, 0.4).normalize();
+            let fill_dir  = vec3(-0.4_f32, -0.3, -0.6).normalize();
+
             let base = vertices.len() as u32;
             for (i, p) in pos_iter.enumerate() {
                 let n = normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]);
                 let uv = uvs.get(i).copied().unwrap_or([0.0, 0.0]);
+                let color = if bake_lighting {
+                    let nv = vec3(n[0], n[1], n[2]).normalize();
+                    let diff_key  = nv.dot(light_dir).max(0.0);
+                    let diff_fill = nv.dot(fill_dir).max(0.0) * 0.25;
+                    let ambient   = 0.30_f32;
+                    let light     = (ambient + diff_key * 0.62 + diff_fill).min(1.0);
+                    [
+                        ((mat_color[0] as f32 / 255.0 * light) * 255.0) as u8,
+                        ((mat_color[1] as f32 / 255.0 * light) * 255.0) as u8,
+                        ((mat_color[2] as f32 / 255.0 * light) * 255.0) as u8,
+                        mat_color[3],
+                    ]
+                } else {
+                    mat_color
+                };
                 vertices.push(Vertex {
                     position: vec3(p[0], p[1], p[2]),
                     uv: vec2(uv[0], uv[1]),
-                    color: mat_color,
+                    color,
                     normal: vec4(n[0], n[1], n[2], 0.0),
                 });
             }

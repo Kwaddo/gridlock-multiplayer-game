@@ -207,7 +207,7 @@ pub const PISTOL: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("pistol_model"),
     viewmodel_asset_key: Some("weapon_fp_pistol"),
-    viewmodel_scale: 0.012,
+    viewmodel_scale: 0.004,
     viewmodel_position: (0.15, 0.08, -0.05),
     viewmodel_rotation: (0.0, -1.57, 0.0),
     viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
@@ -581,7 +581,7 @@ pub const DEAGLE: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("deagle_model"),
     viewmodel_asset_key: None,
-    viewmodel_scale: 0.0015,
+    viewmodel_scale: 0.004,
     viewmodel_position: (0.15, 0.08, -0.05),
     viewmodel_rotation: (0.0, -1.57, 0.0),
     viewmodel_muzzle_offset: (0.26, 0.32, -0.20),

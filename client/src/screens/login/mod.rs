@@ -46,35 +46,12 @@ impl MenuParticle {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum ModelQuality {
-    Compressed,
-    Full,
-}
-
-impl ModelQuality {
-    pub fn label(self) -> &'static str {
-        match self {
-            ModelQuality::Compressed => "Compressed",
-            ModelQuality::Full => "Full",
-        }
-    }
-
-    fn toggle(self) -> Self {
-        match self {
-            ModelQuality::Compressed => ModelQuality::Full,
-            ModelQuality::Full => ModelQuality::Compressed,
-        }
-    }
-}
-
 pub struct LoginScreen {
     pub ip_input: String,
     pub username_input: String,
     pub active_field: LoginField,
     pub error_msg: String,
     pub active_tab: MainMenuTab,
-    pub model_quality: ModelQuality,
     discovered_servers: Vec<DiscoveredServer>,
     scan_socket: Option<UdpSocket>,
     scan_timer: f32,
@@ -102,7 +79,6 @@ impl LoginScreen {
             particles,
             anim_time: 0.0,
             connecting: false,
-            model_quality: ModelQuality::Compressed,
         }
     }
 

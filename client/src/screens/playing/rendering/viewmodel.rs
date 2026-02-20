@@ -131,7 +131,7 @@ impl PlayingState {
 
         gl_use_default_material();
         let gl = unsafe { get_internal_gl() }; // unsafe is required to access internal GL for custom shader uniforms
-        gl.quad_gl.depth_test(false);
+        gl.quad_gl.depth_test(true);
 
         // draw gun mesh
         let mut transformed_verts = mesh.vertices.clone();
@@ -164,6 +164,8 @@ impl PlayingState {
             let mut hands_verts = hands_mesh.vertices.clone();
             for v in &mut hands_verts {
                 v.position = hands_transform.transform_point3(v.position);
+                // Viewmodel hands should be fully opaque regardless of source material alpha.
+                v.color[3] = 255;
             }
             let hands_temp = Mesh {
                 vertices: hands_verts,
