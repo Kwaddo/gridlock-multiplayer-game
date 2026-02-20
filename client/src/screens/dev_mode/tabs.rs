@@ -522,6 +522,7 @@ pub(super) fn draw_movement_tab(
 
 pub(super) fn draw_viewmodel_tab(
     inv: &mut WeaponInventory,
+    dev: &mut DevModeState,
     x: f32,
     mut y: f32,
     w: f32,
@@ -557,6 +558,12 @@ pub(super) fn draw_viewmodel_tab(
     y += draw_slider("muzzle_y", &mut weapon.stats_data.viewmodel_muzzle_offset.1, -2.0, 2.0, 0.02, x, y, w, mouse, clicked, held);
     y += draw_slider("muzzle_z", &mut weapon.stats_data.viewmodel_muzzle_offset.2, -2.0, 2.0, 0.02, x, y, w, mouse, clicked, held);
 
+    y += draw_section_header("FP Hands", x, y);
+    y += draw_slider("hands_scale", &mut dev.hands_scale, 0.01, 2.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_offset_x", &mut dev.hands_offset_x, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_offset_y", &mut dev.hands_offset_y, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_offset_z", &mut dev.hands_offset_z, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+
     y += 8.0;
     let (_, pressed) = draw_action_button("Reset Viewmodel to Defaults", x, y, 260.0, mouse, clicked);
     if pressed {
@@ -565,6 +572,10 @@ pub(super) fn draw_viewmodel_tab(
         weapon.stats_data.viewmodel_position = defaults.viewmodel_position;
         weapon.stats_data.viewmodel_rotation = defaults.viewmodel_rotation;
         weapon.stats_data.viewmodel_muzzle_offset = defaults.viewmodel_muzzle_offset;
+        dev.hands_scale = 0.5;
+        dev.hands_offset_x = 0.0;
+        dev.hands_offset_y = 0.0;
+        dev.hands_offset_z = 0.0;
     }
 }
 

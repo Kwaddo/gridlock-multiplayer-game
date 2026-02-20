@@ -47,8 +47,12 @@ impl PlayingState {
         }
 
         self.weapons.update(delta);
-        for model in self.animated_models.values_mut() {
-            model.update(delta);
+        // Only world/player animation clips should be advanced each frame.
+        // Viewmodel assets like fp_hands/deagle_model are rendered in bind pose for now.
+        for (key, model) in self.animated_models.iter_mut() {
+            if key.starts_with("anim_") {
+                model.update(delta);
+            }
         }
 
         self.target_dummy.update(delta);

@@ -137,6 +137,7 @@ pub async fn run() {
                 }
 
                 if loading_started && loading_index >= loading_assets.len() {
+                    ensure_essential_viewmodel_assets(&mut playing_state).await;
                     state = GameState::Playing;
                     set_cursor_grab(true);
                     show_mouse(false);
@@ -500,4 +501,19 @@ fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> St
     }
 
     path.to_string()
+}
+
+async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
+    let required = [
+        ("fp_hands", "assets/models/hand/animated_hand.glb"),
+        ("deagle_model", "assets/models/weapons/Pistols/deagle.glb"),
+    ];
+
+    for (key, path) in required {
+        if playing_state.models.contains_key(key) || playing_state.animated_models.contains_key(key)
+        {
+            continue;
+        }
+        load_asset_entry(key.to_string(), path.to_string(), playing_state).await;
+    }
 }

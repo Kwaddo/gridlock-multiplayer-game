@@ -22,6 +22,11 @@ pub struct DevModeState {
     pub code_input: String,
     pub code_verified: bool,
     pub show_code_prompt: bool,
+    // hands tuning (viewmodel tab)
+    pub hands_scale: f32,
+    pub hands_offset_x: f32,
+    pub hands_offset_y: f32,
+    pub hands_offset_z: f32,
 }
 
 impl DevModeState {
@@ -37,6 +42,10 @@ impl DevModeState {
             code_input: String::new(),
             code_verified: false,
             show_code_prompt: false,
+            hands_scale: 0.5,
+            hands_offset_x: 0.0,
+            hands_offset_y: 0.0,
+            hands_offset_z: 0.0,
         }
     }
 

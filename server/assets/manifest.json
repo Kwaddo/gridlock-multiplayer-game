@@ -1,5 +1,8 @@
 {
   "global": {
+
+    "fp_hands": "assets/models/hand/animated_hand.glb",
+
     "pistol_shot": "assets/sounds/pew.ogg",
     "smg_shot": "assets/sounds/pew.ogg",
     "shotgun_shot": "assets/sounds/pew.ogg",
@@ -22,6 +25,9 @@
     "shotgun_model": "assets/models/weapons/Shotgun/Shotgun_1.obj",
     "ar_model": "assets/models/weapons/AR/AssaultRifle2_1.obj",
     "sniper_model": "assets/models/weapons/Sniper/SniperRifle_1.obj",
+    "deagle_model": "assets/models/weapons/Pistols/deagle.glb",
+
+    "deagle_shot": "assets/sounds/deagle.ogg",
 
     "anim_crouch": "assets/models/player/Crouch.glb",
     "anim_crouch_aim": "assets/models/player/Crouch_Aim.glb",

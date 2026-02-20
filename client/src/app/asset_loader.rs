@@ -1,12 +1,14 @@
 use client::screens::PlayingState;
 use client::types::animated_model::load_gltf_animated_model;
 use macroquad::prelude::*;
+use std::path::Path;
 use std::sync::Arc;
 
 use super::obj_loader::{load_gltf_static_mesh, load_obj_mesh_with_materials};
 
 pub async fn load_asset_entry(key: String, path: String, playing_state: &mut PlayingState) {
-    let lower = path.to_lowercase();
+    let resolved_path = resolve_runtime_asset_path(&path);
+    let lower = resolved_path.to_lowercase();
     let is_obj = lower.ends_with(".obj");
     let is_gltf = lower.ends_with(".glb") || lower.ends_with(".gltf");
     let is_sound = lower.ends_with(".ogg") || lower.ends_with(".wav") || lower.ends_with(".mp3");
@@ -16,7 +18,7 @@ pub async fn load_asset_entry(key: String, path: String, playing_state: &mut Pla
     }
 
     if is_obj {
-        match load_obj_mesh_with_materials(&path).await {
+        match load_obj_mesh_with_materials(&resolved_path).await {
             Ok(mesh) => {
                 let vertex_count = mesh.vertices.len();
                 playing_state.models.insert(key.clone(), mesh);
@@ -25,15 +27,42 @@ pub async fn load_asset_entry(key: String, path: String, playing_state: &mut Pla
                     .insert(key.clone(), path.clone());
                 println!(
                     "Loaded model: {} ({} verts) from {}",
-                    key, vertex_count, path
+                    key, vertex_count, resolved_path
                 );
             }
             Err(e) => {
-                println!("Failed to load model {} from {}: {:?}", key, path, e);
+                println!(
+                    "Failed to load model {} from {} (requested {}): {:?}",
+                    key, resolved_path, path, e
+                );
             }
         }
     } else if is_gltf {
-        match load_gltf_animated_model(&path) {
+        // Hands rig from external packs can contain skinning data that deforms badly
+        // in our lightweight runtime animator. For now load fp_hands as static mesh.
+        if key == "fp_hands" {
+            match load_gltf_static_mesh(&resolved_path).await {
+                Ok(mesh) => {
+                    let vertex_count = mesh.vertices.len();
+                    playing_state.models.insert(key.clone(), mesh);
+                    playing_state
+                        .asset_source_paths
+                        .insert(key.clone(), path.clone());
+                    println!(
+                        "Loaded static GLTF hands model: {} ({} verts) from {}",
+                        key, vertex_count, resolved_path
+                    );
+                    return;
+                }
+                Err(e) => {
+                    println!(
+                        "Failed static GLTF hands load {} from {} (requested {}): {:?}",
+                        key, resolved_path, path, e
+                    );
+                }
+            }
+        }
+        match load_gltf_animated_model(&resolved_path) {
             Ok(animated) => {
                 let vertex_count = animated.mesh().vertices.len();
                 playing_state.animated_models.insert(key.clone(), animated);
@@ -42,10 +71,10 @@ pub async fn load_asset_entry(key: String, path: String, playing_state: &mut Pla
                     .insert(key.clone(), path.clone());
                 println!(
                     "Loaded animated GLTF model: {} ({} verts) from {}",
-                    key, vertex_count, path
+                    key, vertex_count, resolved_path
                 );
             }
-            Err(anim_err) => match load_gltf_static_mesh(&path).await {
+            Err(anim_err) => match load_gltf_static_mesh(&resolved_path).await {
                 Ok(mesh) => {
                     let vertex_count = mesh.vertices.len();
                     playing_state.models.insert(key.clone(), mesh);
@@ -54,19 +83,19 @@ pub async fn load_asset_entry(key: String, path: String, playing_state: &mut Pla
                         .insert(key.clone(), path.clone());
                     println!(
                         "Loaded static GLTF model: {} ({} verts) from {}",
-                        key, vertex_count, path
+                        key, vertex_count, resolved_path
                     );
                 }
                 Err(static_err) => {
                     println!(
-                        "Failed GLTF load {} from {}. animated_err={:?} static_err={:?}",
-                        key, path, anim_err, static_err
+                        "Failed GLTF load {} from {} (requested {}). animated_err={:?} static_err={:?}",
+                        key, resolved_path, path, anim_err, static_err
                     );
                 }
             },
         }
     } else if is_sound {
-        match std::fs::read(&path) {
+        match std::fs::read(&resolved_path) {
             Ok(bytes) => {
                 playing_state
                     .sound_samples
@@ -74,27 +103,50 @@ pub async fn load_asset_entry(key: String, path: String, playing_state: &mut Pla
                 playing_state
                     .asset_source_paths
                     .insert(key.clone(), path.clone());
-                println!("Loaded sound bytes: {} from {}", key, path);
+                println!("Loaded sound bytes: {} from {}", key, resolved_path);
             }
             Err(e) => {
-                println!("Failed to load sound bytes {} from {}: {:?}", key, path, e);
+                println!(
+                    "Failed to load sound bytes {} from {} (requested {}): {:?}",
+                    key, resolved_path, path, e
+                );
             }
         }
     } else {
-        match load_texture(&path).await {
+        match load_texture(&resolved_path).await {
             Ok(tex) => {
                 tex.set_filter(FilterMode::Nearest);
                 playing_state.assets.insert(key.clone(), tex);
                 playing_state
                     .asset_source_paths
                     .insert(key.clone(), path.clone());
-                println!("Loaded texture: {} from {}", key, path);
+                println!("Loaded texture: {} from {}", key, resolved_path);
             }
             Err(e) => {
-                println!("Failed to load texture {} from {}: {:?}", key, path, e);
+                println!(
+                    "Failed to load texture {} from {} (requested {}): {:?}",
+                    key, resolved_path, path, e
+                );
             }
         }
     }
+}
+
+fn resolve_runtime_asset_path(path: &str) -> String {
+    if Path::new(path).exists() {
+        return path.to_string();
+    }
+    if path.starts_with("assets/") {
+        let client_path = format!("client/{}", path);
+        if Path::new(&client_path).exists() {
+            return client_path;
+        }
+        let server_path = format!("server/{}", path);
+        if Path::new(&server_path).exists() {
+            return server_path;
+        }
+    }
+    path.to_string()
 }
 
 fn is_asset_cached(

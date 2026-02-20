@@ -119,7 +119,7 @@ pub fn draw_dev_overlay<F>(
             clicked,
             held,
         ),
-        3 => draw_viewmodel_tab(inventory, content_x, content_y, content_w, mouse, clicked, held),
+        3 => draw_viewmodel_tab(inventory, dev, content_x, content_y, content_w, mouse, clicked, held),
         4 => draw_debug_tab(dev, inventory, content_x, content_y, mouse, clicked),
         5 => {
             draw_bot_tab(content_x, content_y, content_w, mouse, clicked, held);

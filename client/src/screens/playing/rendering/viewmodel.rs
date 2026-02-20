@@ -6,6 +6,8 @@ use macroquad::window::get_internal_gl;
 
 use super::super::PlayingState;
 
+const HANDS_BASE_SCALE: f32 = 0.35;
+
 impl PlayingState {
     pub(crate) fn draw_viewmodel(&self) {
         let weapon = self.weapons.active();
@@ -15,15 +17,37 @@ impl PlayingState {
             return;
         }
 
+        /*
+            ATTEMPT TO GET HAND ANIM MODEL
+        */
+        let hands_anim = self.animated_models.get("fp_hands");
+        let hands_static = self.models.get("fp_hands");
+
         if let Some(model_key) = stats.viewmodel_model {
             if let Some(mesh) = self.models.get(model_key) {
-                self.draw_3d_viewmodel(mesh, weapon, stats);
+                self.draw_3d_viewmodel(
+                    mesh,
+                    1.0,
+                    0.0,
+                    hands_anim,
+                    hands_static,
+                    weapon,
+                    stats
+                );
+                return;
+            } else if let Some(animated_model) = self.animated_models.get(model_key) {
+                self.draw_3d_viewmodel(
+                    animated_model.mesh(),
+                    animated_model.normalize_scale,
+                    animated_model.y_offset,
+                    hands_anim,
+                    hands_static,
+                    weapon,
+                    stats
+                );
                 return;
             } else {
-                println!(
-                    "Model '{}' not found in cache, using 2D fallback",
-                    model_key
-                );
+                println!("Model '{}' not found in cache, using 2D fallback", model_key);
             }
         }
 
@@ -33,12 +57,18 @@ impl PlayingState {
     fn draw_3d_viewmodel(
         &self,
         mesh: &Mesh,
+        mesh_normalize_scale: f32,
+        mesh_y_offset: f32,
+        hands_anim: Option<&crate::types::animated_model::AnimatedModel>,
+        hands_static: Option<&Mesh>,
         weapon: &crate::weapons::WeaponState,
-        stats: &crate::weapons::stats::WeaponStats,
+        stats: &crate::weapons::stats::WeaponStats
     ) {
         if stats.crosshair_style == CrosshairStyle::Scope && weapon.ads_progress > 0.9 {
             return;
         }
+
+        // camera and projection setup
 
         let vm_fov = (60.0f32).to_radians();
         let vm_camera = Camera3D {
@@ -64,14 +94,13 @@ impl PlayingState {
         let mut pos = vec3(
             -0.35 + base_x + ads_offset_x,
             -0.25 + base_y + ads_offset_y,
-            0.58 + base_z,
+            0.58 + base_z
         );
 
         let horizontal_speed = vec2(
             self.movement_state.velocity.x,
-            self.movement_state.velocity.z,
-        )
-        .length();
+            self.movement_state.velocity.z
+        ).length();
         if horizontal_speed > 0.1 && self.movement_state.is_grounded {
             let t = self.bob_timer;
             pos.x += t.sin() * 0.008;
@@ -87,19 +116,24 @@ impl PlayingState {
         pos.z += kick * 0.02;
         pos.y -= kick * 0.01;
 
-        let scale_mat = Mat4::from_scale(vec3(
-            stats.viewmodel_scale * 28.0,
-            stats.viewmodel_scale * 28.0,
-            stats.viewmodel_scale * 28.0,
-        ));
+        let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
+            * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
+        let scale_mat = Mat4::from_scale(
+            vec3(
+                stats.viewmodel_scale * 28.0,
+                stats.viewmodel_scale * 28.0,
+                stats.viewmodel_scale * 28.0
+            )
+        );
         let rot_mat = Mat4::from_euler(EulerRot::XYZ, rot_pitch, rot_yaw, rot_roll);
         let trans_mat = Mat4::from_translation(pos);
-        let transform = trans_mat * rot_mat * scale_mat;
+        let transform = trans_mat * rot_mat * scale_mat * normalize_mat;
 
         gl_use_default_material();
-        let gl = unsafe { get_internal_gl() };
+        let gl = unsafe { get_internal_gl() }; // unsafe is required to access internal GL for custom shader uniforms
         gl.quad_gl.depth_test(false);
 
+        // draw gun mesh
         let mut transformed_verts = mesh.vertices.clone();
         for v in &mut transformed_verts {
             v.position = transform.transform_point3(v.position);
@@ -111,10 +145,48 @@ impl PlayingState {
         };
         draw_mesh(&temp_mesh);
 
+        /*
+            DRAWING ANIMATED HANDS HERE
+        */
+
+        let draw_hands = |hands_mesh: &Mesh, normalize_scale: f32, y_offset: f32| {
+            let dev = &self.dev_mode;
+            // Keep hands scale independent from weapon scale so tiny weapon tuning
+            // does not make hands disappear.
+            let hands_scale = HANDS_BASE_SCALE * dev.hands_scale.max(0.01);
+            let hands_scale_mat = Mat4::from_scale(Vec3::splat(hands_scale));
+            let hands_offset = vec3(dev.hands_offset_x, dev.hands_offset_y, dev.hands_offset_z);
+            let hands_trans = Mat4::from_translation(pos + hands_offset);
+            let hands_normalize_mat = Mat4::from_translation(vec3(0.0, y_offset, 0.0))
+                * Mat4::from_scale(Vec3::splat(normalize_scale.max(0.0001)));
+            let hands_transform = hands_trans * rot_mat * hands_scale_mat * hands_normalize_mat;
+
+            let mut hands_verts = hands_mesh.vertices.clone();
+            for v in &mut hands_verts {
+                v.position = hands_transform.transform_point3(v.position);
+            }
+            let hands_temp = Mesh {
+                vertices: hands_verts,
+                indices: hands_mesh.indices.clone(),
+                texture: hands_mesh.texture.clone(),
+            };
+            draw_mesh(&hands_temp);
+        };
+
+        if let Some(hands_model) = hands_anim {
+            draw_hands(
+                hands_model.mesh(),
+                hands_model.normalize_scale,
+                hands_model.y_offset
+            );
+        } else if let Some(hands_mesh) = hands_static {
+            draw_hands(hands_mesh, 1.0, 0.0);
+        }
+
         let muzzle_local = vec3(
             stats.viewmodel_muzzle_offset.0,
             stats.viewmodel_muzzle_offset.1,
-            stats.viewmodel_muzzle_offset.2,
+            stats.viewmodel_muzzle_offset.2
         );
         let muzzle_world = transform.transform_point3(muzzle_local);
 
@@ -128,12 +200,7 @@ impl PlayingState {
                 let alpha = (220.0 * t) as u8;
                 let radius = 18.0 * stats.viewmodel_scale * 28.0 * (0.4 + 0.6 * t);
 
-                draw_circle(
-                    fx,
-                    fy,
-                    radius * 1.4,
-                    Color::from_rgba(255, 190, 80, alpha / 2),
-                );
+                draw_circle(fx, fy, radius * 1.4, Color::from_rgba(255, 190, 80, alpha / 2));
                 draw_circle(fx, fy, radius, Color::from_rgba(255, 240, 180, alpha));
             }
         }
@@ -159,7 +226,7 @@ impl PlayingState {
     fn draw_2d_viewmodel(
         &self,
         weapon: &crate::weapons::WeaponState,
-        stats: &crate::weapons::stats::WeaponStats,
+        stats: &crate::weapons::stats::WeaponStats
     ) {
         let key = stats.viewmodel_asset_key.unwrap_or(stats.icon_asset_key);
         let tex = match self.assets.get(key) {
@@ -172,8 +239,10 @@ impl PlayingState {
         let screen_w = screen_width();
         let screen_h = screen_height();
 
-        let target_h =
-            (screen_h * (0.46 - weapon.ads_progress * 0.08)).clamp(160.0, screen_h * 0.8);
+        let target_h = (screen_h * (0.46 - weapon.ads_progress * 0.08)).clamp(
+            160.0,
+            screen_h * 0.8
+        );
         let scale = (target_h / tex.height()).max(0.2) * stats.viewmodel_scale;
         let size = vec2(tex.width() * scale, tex.height() * scale);
 
@@ -183,9 +252,8 @@ impl PlayingState {
 
         let horizontal_speed = vec2(
             self.movement_state.velocity.x,
-            self.movement_state.velocity.z,
-        )
-        .length();
+            self.movement_state.velocity.z
+        ).length();
         if horizontal_speed > 0.1 && self.movement_state.is_grounded {
             let t = self.bob_timer;
             pos.x += t.sin() * 5.0;
@@ -193,23 +261,19 @@ impl PlayingState {
         }
 
         if weapon.is_reloading {
-            let reload_fraction =
-                (weapon.reload_timer / weapon.stats().reload_time).clamp(0.0, 1.0);
+            let reload_fraction = (weapon.reload_timer / weapon.stats().reload_time).clamp(
+                0.0,
+                1.0
+            );
             pos.y += (reload_fraction * std::f32::consts::PI).sin() * 12.0;
         }
 
         let draw_pos = vec2(pos.x - size.x, pos.y - size.y);
 
-        draw_texture_ex(
-            tex,
-            draw_pos.x,
-            draw_pos.y,
-            WHITE,
-            DrawTextureParams {
-                dest_size: Some(size),
-                ..Default::default()
-            },
-        );
+        draw_texture_ex(tex, draw_pos.x, draw_pos.y, WHITE, DrawTextureParams {
+            dest_size: Some(size),
+            ..Default::default()
+        });
 
         if weapon.muzzle_flash_timer > 0.0 {
             let t = (weapon.muzzle_flash_timer / 0.08).min(1.0);
@@ -222,14 +286,9 @@ impl PlayingState {
                 flash_pos.x,
                 flash_pos.y,
                 radius * 1.5,
-                Color::from_rgba(255, 190, 80, alpha / 2),
+                Color::from_rgba(255, 190, 80, alpha / 2)
             );
-            draw_circle(
-                flash_pos.x,
-                flash_pos.y,
-                radius,
-                Color::from_rgba(255, 240, 180, alpha),
-            );
+            draw_circle(flash_pos.x, flash_pos.y, radius, Color::from_rgba(255, 240, 180, alpha));
         }
     }
 }
