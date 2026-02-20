@@ -4,7 +4,11 @@ use crate::weapons::crosshair::{CrosshairConfig, CrosshairType};
 use crate::weapons::state::WeaponInventory;
 use macroquad::prelude::*;
 
-use super::state::DevModeState;
+use super::state::{
+    DevModeState, HandsAnimRequest, HANDS_DEFAULT_OFFSET_X, HANDS_DEFAULT_OFFSET_Y,
+    HANDS_DEFAULT_OFFSET_Z, HANDS_DEFAULT_ROT_PITCH, HANDS_DEFAULT_ROT_ROLL,
+    HANDS_DEFAULT_ROT_YAW, HANDS_DEFAULT_SCALE,
+};
 use super::widgets::{
     draw_action_button, draw_section_header, draw_slider, draw_slider_u32, draw_toggle,
 };
@@ -488,10 +492,10 @@ pub(super) fn draw_crosshair_tab(
     y += btn_h;
 
     y += 8.0;
-    let kind = weapon.kind;
+    let cat = weapon.id.category();
     let (_, pressed) = draw_action_button("Reset Crosshair to Defaults", x, y, 260.0, mouse, clicked);
     if pressed {
-        inv.active_mut().crosshair = CrosshairConfig::for_weapon(kind);
+        inv.active_mut().crosshair = CrosshairConfig::for_category(cat);
     }
 }
 
@@ -563,19 +567,43 @@ pub(super) fn draw_viewmodel_tab(
     y += draw_slider("hands_offset_x", &mut dev.hands_offset_x, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
     y += draw_slider("hands_offset_y", &mut dev.hands_offset_y, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
     y += draw_slider("hands_offset_z", &mut dev.hands_offset_z, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_rot_pitch", &mut dev.hands_rot_pitch, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_rot_yaw", &mut dev.hands_rot_yaw, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_rot_roll", &mut dev.hands_rot_roll, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
+
+    y += draw_section_header("Hands Animation", x, y);
+    let (h, idle_pressed) = draw_action_button("Play Idle (Loop)", x, y, 170.0, mouse, clicked);
+    y += h;
+    if idle_pressed {
+        dev.hands_anim_request = Some(HandsAnimRequest::IdleLoop);
+    }
+    let (h, reload_pressed) = draw_action_button("Play Reload (Once)", x, y, 180.0, mouse, clicked);
+    y += h;
+    if reload_pressed {
+        dev.hands_anim_request = Some(HandsAnimRequest::ReloadOnce);
+    }
+    let (h, stop_pressed) = draw_action_button("Stop Hands", x, y, 120.0, mouse, clicked);
+    y += h;
+    if stop_pressed {
+        dev.hands_anim_request = Some(HandsAnimRequest::Stop);
+    }
 
     y += 8.0;
     let (_, pressed) = draw_action_button("Reset Viewmodel to Defaults", x, y, 260.0, mouse, clicked);
     if pressed {
-        let defaults = weapon.kind.stats();
+        let defaults = weapon.id.stats();
         weapon.stats_data.viewmodel_scale = defaults.viewmodel_scale;
         weapon.stats_data.viewmodel_position = defaults.viewmodel_position;
         weapon.stats_data.viewmodel_rotation = defaults.viewmodel_rotation;
         weapon.stats_data.viewmodel_muzzle_offset = defaults.viewmodel_muzzle_offset;
-        dev.hands_scale = 0.5;
-        dev.hands_offset_x = 0.0;
-        dev.hands_offset_y = 0.0;
-        dev.hands_offset_z = 0.0;
+        dev.hands_scale = HANDS_DEFAULT_SCALE;
+        dev.hands_offset_x = HANDS_DEFAULT_OFFSET_X;
+        dev.hands_offset_y = HANDS_DEFAULT_OFFSET_Y;
+        dev.hands_offset_z = HANDS_DEFAULT_OFFSET_Z;
+        dev.hands_rot_pitch = HANDS_DEFAULT_ROT_PITCH;
+        dev.hands_rot_yaw = HANDS_DEFAULT_ROT_YAW;
+        dev.hands_rot_roll = HANDS_DEFAULT_ROT_ROLL;
+        dev.hands_anim_request = Some(HandsAnimRequest::IdleLoop);
     }
 }
 
@@ -608,7 +636,7 @@ pub(super) fn draw_debug_tab(
     if pressed {
         for w in &mut inv.weapons {
             w.reset_stats();
-            w.crosshair = CrosshairConfig::for_weapon(w.kind);
+            w.crosshair = CrosshairConfig::for_category(w.id.category());
         }
     }
 }

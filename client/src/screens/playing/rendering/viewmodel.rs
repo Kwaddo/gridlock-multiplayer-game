@@ -7,6 +7,10 @@ use macroquad::window::get_internal_gl;
 use super::super::PlayingState;
 
 const HANDS_BASE_SCALE: f32 = 0.35;
+const INSPECT_START_SEC: f32 = 0.18;
+const INSPECT_RETURN_SEC: f32 = 0.22;
+const INSPECT_POS_OFFSET: Vec3 = Vec3::from_array([0.02, -0.03, -0.04]);
+const INSPECT_ROT_OFFSET: Vec3 = Vec3::from_array([-0.22, 0.45, 0.16]);
 
 impl PlayingState {
     pub(crate) fn draw_viewmodel(&self) {
@@ -88,14 +92,29 @@ impl PlayingState {
 
         let (base_x, base_y, base_z) = stats.viewmodel_position;
         let (rot_pitch, rot_yaw, rot_roll) = stats.viewmodel_rotation;
+        let inspect_alpha = match self.inspect_phase {
+            super::super::state::InspectPhase::None => 0.0,
+            super::super::state::InspectPhase::Start => {
+                (self.inspect_timer / INSPECT_START_SEC).clamp(0.0, 1.0)
+            }
+            super::super::state::InspectPhase::Hold => 1.0,
+            super::super::state::InspectPhase::Return => {
+                1.0 - (self.inspect_timer / INSPECT_RETURN_SEC).clamp(0.0, 1.0)
+            }
+        };
+        let inspect_pos = INSPECT_POS_OFFSET * inspect_alpha;
+        let inspect_rot = INSPECT_ROT_OFFSET * inspect_alpha;
 
+        // Hands are the anchor. Weapon offsets are applied relative to this anchor.
+        let dev = &self.dev_mode;
+        let mut hands_anchor = vec3(
+            -0.35 + dev.hands_offset_x,
+            -0.25 + dev.hands_offset_y,
+            0.58 + dev.hands_offset_z
+        );
         let ads_offset_x = 0.08 * weapon.ads_progress;
         let ads_offset_y = 0.03 * weapon.ads_progress;
-        let mut pos = vec3(
-            -0.35 + base_x + ads_offset_x,
-            -0.25 + base_y + ads_offset_y,
-            0.58 + base_z
-        );
+        let weapon_offset_from_hands = vec3(base_x + ads_offset_x, base_y + ads_offset_y, base_z);
 
         let horizontal_speed = vec2(
             self.movement_state.velocity.x,
@@ -103,18 +122,20 @@ impl PlayingState {
         ).length();
         if horizontal_speed > 0.1 && self.movement_state.is_grounded {
             let t = self.bob_timer;
-            pos.x += t.sin() * 0.008;
-            pos.y += t.cos() * 0.006;
+            hands_anchor.x += t.sin() * 0.008;
+            hands_anchor.y += t.cos() * 0.006;
         }
 
         if weapon.is_reloading {
             let reload_fraction = (weapon.reload_timer / stats.reload_time).clamp(0.0, 1.0);
-            pos.y -= (reload_fraction * std::f32::consts::PI).sin() * 0.08;
+            hands_anchor.y -= (reload_fraction * std::f32::consts::PI).sin() * 0.08;
         }
 
         let kick = weapon.muzzle_flash_timer / 0.08;
-        pos.z += kick * 0.02;
-        pos.y -= kick * 0.01;
+        hands_anchor.z += kick * 0.02;
+        hands_anchor.y -= kick * 0.01;
+        hands_anchor += inspect_pos;
+        let pos = hands_anchor + weapon_offset_from_hands;
 
         let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
             * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
@@ -125,9 +146,14 @@ impl PlayingState {
                 stats.viewmodel_scale * 28.0
             )
         );
-        let rot_mat = Mat4::from_euler(EulerRot::XYZ, rot_pitch, rot_yaw, rot_roll);
+        let weapon_rot_mat = Mat4::from_euler(
+            EulerRot::XYZ,
+            rot_pitch + inspect_rot.x,
+            rot_yaw + inspect_rot.y,
+            rot_roll + inspect_rot.z,
+        );
         let trans_mat = Mat4::from_translation(pos);
-        let transform = trans_mat * rot_mat * scale_mat * normalize_mat;
+        let transform = trans_mat * weapon_rot_mat * scale_mat * normalize_mat;
 
         gl_use_default_material();
         let gl = unsafe { get_internal_gl() }; // unsafe is required to access internal GL for custom shader uniforms
@@ -150,16 +176,23 @@ impl PlayingState {
         */
 
         let draw_hands = |hands_mesh: &Mesh, normalize_scale: f32, y_offset: f32| {
-            let dev = &self.dev_mode;
             // Keep hands scale independent from weapon scale so tiny weapon tuning
             // does not make hands disappear.
             let hands_scale = HANDS_BASE_SCALE * dev.hands_scale.max(0.01);
             let hands_scale_mat = Mat4::from_scale(Vec3::splat(hands_scale));
-            let hands_offset = vec3(dev.hands_offset_x, dev.hands_offset_y, dev.hands_offset_z);
-            let hands_trans = Mat4::from_translation(pos + hands_offset);
+            let hands_trans = Mat4::from_translation(hands_anchor);
+            let hands_rot_mat = Mat4::from_euler(
+                EulerRot::XYZ,
+                dev.hands_rot_pitch + inspect_rot.x,
+                dev.hands_rot_yaw + inspect_rot.y,
+                dev.hands_rot_roll + inspect_rot.z,
+            );
+            // Some FPS hand exports include hidden/far helper geometry that can poison
+            // auto-normalization (very tiny normalize_scale), so clamp to a sane band.
+            let clamped_normalize = normalize_scale.clamp(0.2, 5.0);
             let hands_normalize_mat = Mat4::from_translation(vec3(0.0, y_offset, 0.0))
-                * Mat4::from_scale(Vec3::splat(normalize_scale.max(0.0001)));
-            let hands_transform = hands_trans * rot_mat * hands_scale_mat * hands_normalize_mat;
+                * Mat4::from_scale(Vec3::splat(clamped_normalize));
+            let hands_transform = hands_trans * hands_rot_mat * hands_scale_mat * hands_normalize_mat;
 
             let mut hands_verts = hands_mesh.vertices.clone();
             for v in &mut hands_verts {

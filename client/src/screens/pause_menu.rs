@@ -10,6 +10,7 @@ pub fn draw_pause_menu(
     config: &GameConfig,
     settings_screen: &mut SettingsScreen,
     dev_mode: &mut DevModeState,
+    is_maze: bool,
 ) -> Option<GameState> {
     // if code prompt open, ONLY handle input for that (ignore all other pause menu input including mouse clicks)
     if dev_mode.show_code_prompt {
@@ -23,7 +24,7 @@ pub fn draw_pause_menu(
         );
 
         let panel_w = 300.0;
-        let panel_h = 310.0;
+        let panel_h = if is_maze { 310.0 } else { 360.0 };
         let panel_x = (screen_width() - panel_w) / 2.0;
         let panel_y = (screen_height() - panel_h) / 2.0;
         draw_rectangle(
@@ -67,7 +68,7 @@ pub fn draw_pause_menu(
     );
 
     let panel_w = 300.0;
-    let panel_h = 310.0;
+    let panel_h = if is_maze { 310.0 } else { 360.0 };
     let panel_x = (screen_width() - panel_w) / 2.0;
     let panel_y = (screen_height() - panel_h) / 2.0;
     draw_rectangle(
@@ -119,9 +120,24 @@ pub fn draw_pause_menu(
         return Some(GameState::Settings);
     }
 
+    if !is_maze {
+        if is_button_clicked(
+            btn_x,
+            panel_y + 180.0,
+            btn_w,
+            btn_h,
+            "Loadout",
+            btn_color,
+            btn_hover,
+        ) {
+            return Some(GameState::LobbyInventory);
+        }
+    }
+
+    let dev_btn_y = if is_maze { panel_y + 180.0 } else { panel_y + 230.0 };
     if is_button_clicked(
         btn_x,
-        panel_y + 180.0,
+        dev_btn_y,
         btn_w,
         btn_h,
         "Dev Mode",
@@ -134,9 +150,10 @@ pub fn draw_pause_menu(
         }
     }
 
+    let exit_y = if is_maze { panel_y + 250.0 } else { panel_y + 300.0 };
     if is_button_clicked(
         btn_x,
-        panel_y + 250.0,
+        exit_y,
         btn_w,
         btn_h,
         "Exit",
