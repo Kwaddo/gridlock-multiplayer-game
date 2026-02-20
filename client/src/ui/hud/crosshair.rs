@@ -51,7 +51,7 @@ pub(super) fn draw_crosshair_and_combat_feedback(
                 let ads_rest_gap = if fsa_active {
                     (sh * 0.3) / 100.0
                 } else {
-                    ((xhair.center_gap * sh) / 100.0) * 0.4 * weapon.ads_progress
+                    ((xhair.center_gap * sh) / 100.0) * 0.7 * weapon.ads_progress
                 };
 
                 let radius = hip_gap + kick_gap + ads_rest_gap + movement_gap;

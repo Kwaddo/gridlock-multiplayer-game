@@ -662,7 +662,7 @@ fn draw_crosshair_preview(
     let color = xhair.color;
 
     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
-    let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
+    let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.7 * ads_progress;
 
     match xhair.crosshair_type {
         CrosshairType::FourCurves => {
