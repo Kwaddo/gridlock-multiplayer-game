@@ -1,7 +1,7 @@
 {
   "global": {
 
-    "fp_hands": "assets/models/hand/animated_hand.glb",
+    "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
 
     "pistol_shot": "assets/sounds/pew.ogg",
     "smg_shot": "assets/sounds/pew.ogg",
@@ -20,7 +20,7 @@
     "xhair_scope_141": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair141.png",
     "xhair_scope_162": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair162.png",
 
-    "pistol_model": "assets/models/weapons/Pistol/Pistol_1.obj",
+    "pistol_model": "assets/models/weapons/Pistols/m1911.glb",
     "smg_model": "assets/models/weapons/SMG/SubmachineGun_1.obj",
     "shotgun_model": "assets/models/weapons/Shotgun/Shotgun_1.obj",
     "ar_model": "assets/models/weapons/AR/AssaultRifle2_1.obj",

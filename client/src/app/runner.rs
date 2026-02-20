@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use client::core::{GameConfig, GameState};
 use client::screens::dev_mode::{draw_dev_overlay, DevModeState};
-use client::screens::{draw_pause_menu, LoginScreen, ModelQuality, PlayingState};
+use client::screens::{draw_pause_menu, LoginScreen, PlayingState};
 use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
@@ -33,7 +33,6 @@ pub async fn run() {
     let mut username = String::new();
     let mut server_addr = String::new();
     let mut asset_cache_key = String::new();
-    let mut model_quality = ModelQuality::Compressed;
     let mut config = GameConfig::new();
     let mut preset_manager = CrosshairPresetManager::new("");
     let mut maze: Option<Maze> = None;
@@ -65,21 +64,13 @@ pub async fn run() {
                     username = name;
                     player_id = id;
                     server_addr = login_screen.ip_input.clone();
-                    model_quality = login_screen.model_quality;
-                    asset_cache_key = format!(
-                        "{}|model_quality={}",
-                        server_addr,
-                        model_quality.label().to_lowercase()
-                    );
+                    asset_cache_key = server_addr.clone();
                     // mark server contact as fresh on connect
                     last_server_contact = Some(Instant::now());
 
                     preset_manager = CrosshairPresetManager::new(&username);
 
-                    loading_assets = resolve_asset_entries_for_quality(
-                        load_cached_manifest(&asset_cache_key),
-                        model_quality,
-                    );
+                    loading_assets = resolve_asset_entries_for_quality(load_cached_manifest(&asset_cache_key));
                     loading_index = 0;
                     loading_current.clear();
                     loading_stable_frames = 0;
@@ -112,7 +103,7 @@ pub async fn run() {
                     if !entries.is_empty() {
                         merge_manifest_entries(
                             &mut loading_assets,
-                            resolve_asset_entries_for_quality(entries, model_quality),
+                            resolve_asset_entries_for_quality(entries),
                         );
                         save_cached_manifest(&asset_cache_key, &loading_assets);
                         loading_stable_frames = 0;
@@ -183,7 +174,7 @@ pub async fn run() {
                         last_server_contact = Some(Instant::now());
                     }
                     if let Some(entries) = sync.assets {
-                        for (key, path) in resolve_asset_entries_for_quality(entries, model_quality)
+                        for (key, path) in resolve_asset_entries_for_quality(entries)
                         {
                             load_asset_entry(key, path, &mut playing_state).await;
                         }
@@ -227,7 +218,7 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries, model_quality) {
+                    for (key, path) in resolve_asset_entries_for_quality(entries) {
                         load_asset_entry(key, path, &mut playing_state).await;
                     }
                 }
@@ -267,7 +258,7 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries, model_quality) {
+                    for (key, path) in resolve_asset_entries_for_quality(entries) {
                         load_asset_entry(key, path, &mut playing_state).await;
                     }
                 }
@@ -303,7 +294,7 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries, model_quality) {
+                    for (key, path) in resolve_asset_entries_for_quality(entries) {
                         load_asset_entry(key, path, &mut playing_state).await;
                     }
                 }
@@ -363,7 +354,7 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries, model_quality) {
+                    for (key, path) in resolve_asset_entries_for_quality(entries) {
                         load_asset_entry(key, path, &mut playing_state).await;
                     }
                 }
@@ -440,64 +431,58 @@ fn merge_manifest_entries(existing: &mut Vec<(String, String)>, incoming: Vec<(S
     }
 }
 
-fn resolve_asset_entries_for_quality(
-    entries: Vec<(String, String)>,
-    model_quality: ModelQuality,
-) -> Vec<(String, String)> {
+fn resolve_asset_entries_for_quality(entries: Vec<(String, String)>) -> Vec<(String, String)> {
     entries
         .into_iter()
-        .map(|(key, path)| (key, resolve_asset_path_for_quality(&path, model_quality)))
+        .map(|(key, path)| (key, resolve_asset_path_for_quality(&path)))
         .collect()
 }
 
-fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> String {
+fn resolve_asset_path_for_quality(path: &str) -> String {
     let normalized = path.replace('\\', "/");
     if !normalized.ends_with(".glb") || !normalized.starts_with("assets/models/player/") {
         return path.to_string();
     }
 
+    if Path::new(&normalized).exists() {
+        return normalized;
+    }
+
     let Some(file_name) = Path::new(&normalized)
         .file_name()
         .and_then(|s| s.to_str())
-        .map(|s| s.to_string())
     else {
         return path.to_string();
     };
 
-    let preferred_dir = match model_quality {
-        ModelQuality::Compressed => "assets/models/player/Compressed",
-        ModelQuality::Full => "assets/models/player/Full",
-    };
-    let preferred_path = format!("{}/{}", preferred_dir, file_name);
-    if Path::new(&preferred_path).exists() {
-        return preferred_path;
+    let compressed_path = format!("assets/models/player/Compressed/{}", file_name);
+    if Path::new(&compressed_path).exists() {
+        return compressed_path;
     }
 
-    // Requested behavior: if compressed is missing but full exists, use Rifle_Idle fallback.
-    if matches!(model_quality, ModelQuality::Compressed) {
-        let full_path = format!("assets/models/player/Full/{}", file_name);
-        if Path::new(&full_path).exists() {
-            let compressed_idle = "assets/models/player/Compressed/Rifle_Idle.glb";
-            if Path::new(compressed_idle).exists() {
-                return compressed_idle.to_string();
-            }
-            let full_idle = "assets/models/player/Full/Rifle_Idle.glb";
-            if Path::new(full_idle).exists() {
-                return full_idle.to_string();
-            }
-        }
+    let full_path = format!("assets/models/player/Full/{}", file_name);
+    if Path::new(&full_path).exists() {
+        return full_path;
     }
 
-    let preferred_idle = match model_quality {
-        ModelQuality::Compressed => "assets/models/player/Compressed/Rifle_Idle.glb",
-        ModelQuality::Full => "assets/models/player/Full/Rifle_Idle.glb",
-    };
-    if Path::new(preferred_idle).exists() {
-        return preferred_idle.to_string();
+    let flat_path = format!("assets/models/player/{}", file_name);
+    if Path::new(&flat_path).exists() {
+        return flat_path;
     }
-    let any_idle = "assets/models/player/Full/Rifle_Idle.glb";
-    if Path::new(any_idle).exists() {
-        return any_idle.to_string();
+
+    let compressed_idle = "assets/models/player/Compressed/Rifle_Idle.glb";
+    if Path::new(compressed_idle).exists() {
+        return compressed_idle.to_string();
+    }
+
+    let full_idle = "assets/models/player/Full/Rifle_Idle.glb";
+    if Path::new(full_idle).exists() {
+        return full_idle.to_string();
+    }
+
+    let idle = "assets/models/player/Rifle_Idle.glb";
+    if Path::new(idle).exists() {
+        return idle.to_string();
     }
 
     path.to_string()
@@ -505,8 +490,9 @@ fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> St
 
 async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
     let required = [
-        ("fp_hands", "assets/models/hand/animated_hand.glb"),
+        ("fp_hands", "assets/models/hand/fps_animated_carbine.glb"),
         ("deagle_model", "assets/models/weapons/Pistols/deagle.glb"),
+        ("pistol_model", "assets/models/weapons/Pistols/m1911.glb")
     ];
 
     for (key, path) in required {

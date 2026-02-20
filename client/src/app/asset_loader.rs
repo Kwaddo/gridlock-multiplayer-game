@@ -4,7 +4,7 @@ use macroquad::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
 
-use super::obj_loader::{load_gltf_static_mesh, load_obj_mesh_with_materials};
+use super::obj_loader::{load_gltf_static_mesh, load_gltf_static_mesh_lit, load_obj_mesh_with_materials};
 
 pub async fn load_asset_entry(key: String, path: String, playing_state: &mut PlayingState) {
     let resolved_path = resolve_runtime_asset_path(&path);
@@ -38,30 +38,6 @@ pub async fn load_asset_entry(key: String, path: String, playing_state: &mut Pla
             }
         }
     } else if is_gltf {
-        // Hands rig from external packs can contain skinning data that deforms badly
-        // in our lightweight runtime animator. For now load fp_hands as static mesh.
-        if key == "fp_hands" {
-            match load_gltf_static_mesh(&resolved_path).await {
-                Ok(mesh) => {
-                    let vertex_count = mesh.vertices.len();
-                    playing_state.models.insert(key.clone(), mesh);
-                    playing_state
-                        .asset_source_paths
-                        .insert(key.clone(), path.clone());
-                    println!(
-                        "Loaded static GLTF hands model: {} ({} verts) from {}",
-                        key, vertex_count, resolved_path
-                    );
-                    return;
-                }
-                Err(e) => {
-                    println!(
-                        "Failed static GLTF hands load {} from {} (requested {}): {:?}",
-                        key, resolved_path, path, e
-                    );
-                }
-            }
-        }
         match load_gltf_animated_model(&resolved_path) {
             Ok(animated) => {
                 let vertex_count = animated.mesh().vertices.len();
@@ -74,25 +50,35 @@ pub async fn load_asset_entry(key: String, path: String, playing_state: &mut Pla
                     key, vertex_count, resolved_path
                 );
             }
-            Err(anim_err) => match load_gltf_static_mesh(&resolved_path).await {
-                Ok(mesh) => {
-                    let vertex_count = mesh.vertices.len();
-                    playing_state.models.insert(key.clone(), mesh);
-                    playing_state
-                        .asset_source_paths
-                        .insert(key.clone(), path.clone());
-                    println!(
-                        "Loaded static GLTF model: {} ({} verts) from {}",
-                        key, vertex_count, resolved_path
-                    );
+            Err(anim_err) => {
+                // Weapon/viewmodel models (keys ending in "_model") get lighting baked
+                // into vertex colors at load time so they have depth without a custom shader.
+                let is_viewmodel = key.ends_with("_model");
+                let static_result = if is_viewmodel {
+                    load_gltf_static_mesh_lit(&resolved_path).await
+                } else {
+                    load_gltf_static_mesh(&resolved_path).await
+                };
+                match static_result {
+                    Ok(mesh) => {
+                        let vertex_count = mesh.vertices.len();
+                        playing_state.models.insert(key.clone(), mesh);
+                        playing_state
+                            .asset_source_paths
+                            .insert(key.clone(), path.clone());
+                        println!(
+                            "Loaded static GLTF model: {} ({} verts) from {}",
+                            key, vertex_count, resolved_path
+                        );
+                    }
+                    Err(static_err) => {
+                        println!(
+                            "Failed GLTF load {} from {} (requested {}). animated_err={:?} static_err={:?}",
+                            key, resolved_path, path, anim_err, static_err
+                        );
+                    }
                 }
-                Err(static_err) => {
-                    println!(
-                        "Failed GLTF load {} from {} (requested {}). animated_err={:?} static_err={:?}",
-                        key, resolved_path, path, anim_err, static_err
-                    );
-                }
-            },
+            }
         }
     } else if is_sound {
         match std::fs::read(&resolved_path) {
