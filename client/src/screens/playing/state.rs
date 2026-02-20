@@ -26,6 +26,7 @@ pub enum HandsPlaybackMode {
 pub enum InspectPhase {
     None,
     Start,
+    Sweep,
     Hold,
     Return,
 }

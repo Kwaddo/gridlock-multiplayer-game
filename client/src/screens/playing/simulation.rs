@@ -18,7 +18,8 @@ const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
 const HANDS_RELOAD_START_SEC: f32 = 0.0;
 const HANDS_RELOAD_END_SEC: f32 = 1.85;
 const INSPECT_START_SEC: f32 = 0.18;
-const INSPECT_HOLD_SEC: f32 = 0.45;
+const INSPECT_SWEEP_SEC: f32 = 0.26;
+const INSPECT_HOLD_SEC: f32 = 0.28;
 const INSPECT_RETURN_SEC: f32 = 0.22;
 
 impl PlayingState {
@@ -47,6 +48,13 @@ impl PlayingState {
             super::state::InspectPhase::Start => {
                 self.inspect_timer += delta;
                 if self.inspect_timer >= INSPECT_START_SEC {
+                    self.inspect_phase = super::state::InspectPhase::Sweep;
+                    self.inspect_timer = 0.0;
+                }
+            }
+            super::state::InspectPhase::Sweep => {
+                self.inspect_timer += delta;
+                if self.inspect_timer >= INSPECT_SWEEP_SEC {
                     self.inspect_phase = super::state::InspectPhase::Hold;
                     self.inspect_timer = 0.0;
                 }

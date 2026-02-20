@@ -292,7 +292,9 @@ pub struct WeaponStats {
     pub viewmodel_position: (f32, f32, f32),   // position offset (right, up, forward)
     pub viewmodel_rotation: (f32, f32, f32),   // rotation (pitch, yaw, roll) in radians
     pub viewmodel_muzzle_offset: (f32, f32, f32), // muzzle in normalized model space
+    pub viewmodel_hands_scale: f32,            // per-weapon hands scale multiplier
     pub viewmodel_hands_offset: (f32, f32, f32), // per-weapon hand position offset
+    pub viewmodel_hands_rotation: (f32, f32, f32), // per-weapon hand rotation (pitch, yaw, roll)
 
     // --- damage falloff
     pub falloff_start: f32, // distance at which damage falloff begins (units)
@@ -371,7 +373,9 @@ pub const M1911: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
+    viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
 
     falloff_start: 15.0,
     falloff_end: 35.0,
@@ -446,7 +450,9 @@ pub const DEAGLE: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
+    viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
 
     falloff_start: 20.0,
     falloff_end: 60.0,
@@ -550,7 +556,9 @@ pub const MP5: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-0.90, 0.02, -0.22),
+    viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
 
     falloff_start: 10.0,
     falloff_end: 30.0,
@@ -678,7 +686,9 @@ pub const SPAS: WeaponStats = WeaponStats {
     viewmodel_position: (0.22, 0.13, -0.44),
     viewmodel_rotation: (-0.10, -1.45, 0.0),
     viewmodel_muzzle_offset: (-1.10, 0.02, -0.25),
-    viewmodel_hands_offset: (-0.09, -0.01, 0.13),
+    viewmodel_hands_scale: 1.93,
+    viewmodel_hands_offset: (0.18, -0.12, -0.45),
+    viewmodel_hands_rotation: (-0.05, 0.90, 0.10),
 
     falloff_start: 5.0,
     falloff_end: 15.0,
@@ -694,7 +704,7 @@ pub const SPAS: WeaponStats = WeaponStats {
 //  ASSAULT RIFLES
 // ============================================================================
 
-// M4A1 is a stub — M16 is the default AR
+// M4A1 - versatile assault rifle, balanced stats all around, good for learning the game but its mainly here cause the model was cool
 pub const M4A1: WeaponStats = WeaponStats {
     name: "M4A1",
     viewmodel_model: Some("m4a1_model"),
@@ -775,7 +785,9 @@ pub const M16_STATS: WeaponStats = WeaponStats {
     viewmodel_position: (0.22, 0.08, -0.31),
     viewmodel_rotation: (0.05, -1.75, 0.0),
     viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
-    viewmodel_hands_offset: (0.0, 0.0, -0.10),
+    viewmodel_hands_scale: 1.93,
+    viewmodel_hands_offset: (0.16, -0.16, -0.28),
+    viewmodel_hands_rotation: (-0.15, 0.45, -0.05),
 
     falloff_start: 25.0,
     falloff_end: 70.0,
@@ -875,7 +887,9 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.20, 0.02, -0.28),
+    viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
 
     falloff_start: 1000.0,
     falloff_end: 10000.0,
@@ -964,7 +978,9 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
+    viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
 
     falloff_start: 15.0,
     falloff_end: 45.0,
