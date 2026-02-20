@@ -1,6 +1,7 @@
 use std::net::UdpSocket;
 
 use client::types::world::WorldId;
+use client::ui::OtherPlayer;
 use macroquad::prelude::*;
 
 use client::net::poll_updates;
@@ -42,27 +43,61 @@ pub fn sync_world(
             for mut incoming in players {
                 if let Some(index) = existing.iter().position(|p| p.id == incoming.id) {
                     let mut current = existing.swap_remove(index);
-                    let anim_state = AnimState::from_movement(
+                    // treat sprinting with a short grace window to avoid walk/sprint flicker
+                    let effective_sprinting =
+                        incoming.is_sprinting || current.is_sprinting || current.sprint_grace > 0.0;
+                    let mut anim_state = AnimState::from_movement(
                         current.x,
                         current.z,
                         incoming.x,
                         incoming.z,
                         incoming.yaw,
-                        incoming.is_sprinting,
+                        effective_sprinting,
                         incoming.is_ads,
                         incoming.is_crouching,
                         false,
                         false,
                         incoming.evt_jump_start,
                     );
+
+                    // Hysteresis: avoid rapid forward/side animation flips by requiring a short
+                    // confirmation window before accepting a new MoveDir.
+                    let candidate_dir = anim_state.move_dir;
+                    if candidate_dir != current.last_move_dir {
+                        // start or refresh a pending candidate — don't switch visuals yet
+                        if current.pending_move_dir == Some(candidate_dir) {
+                            // pending already in progress; leave it
+                        } else {
+                            current.pending_move_dir = Some(candidate_dir);
+                            current.pending_move_timer = OtherPlayer::MOVE_DIR_GRACE;
+                        }
+                        anim_state.move_dir = current.last_move_dir;
+                    } else {
+                        // candidate matches current direction — accept immediately and clear pending
+                        current.pending_move_dir = None;
+                        current.pending_move_timer = 0.0;
+                        current.last_move_dir = candidate_dir;
+                        anim_state.move_dir = candidate_dir;
+                    }
+
                     current.username = incoming.username;
                     current.world = incoming.world;
                     current.skin_type = AnimState::skin_from_state(anim_state, None);
+                    // refresh sprint grace when server reports sprinting
+                    if incoming.is_sprinting {
+                        current.sprint_grace = OtherPlayer::SPRINT_GRACE;
+                    }
+                    // update authoritative flags from server
+                    current.is_sprinting = incoming.is_sprinting;
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     // preserve updated kills
                     current.kills = incoming.kills;
                     merged.push(current);
                 } else {
+                    // for newly-seen players treat sprint flag as fresh and prime the grace timer
+                    if incoming.is_sprinting {
+                        incoming.sprint_grace = OtherPlayer::SPRINT_GRACE;
+                    }
                     let anim_state = AnimState::from_movement(
                         incoming.x,
                         incoming.z,
@@ -77,6 +112,10 @@ pub fn sync_world(
                         incoming.evt_jump_start,
                     );
                     incoming.skin_type = AnimState::skin_from_state(anim_state, None);
+                    // initialize move-direction hysteresis state for new players
+                    incoming.last_move_dir = anim_state.move_dir;
+                    incoming.pending_move_dir = None;
+                    incoming.pending_move_timer = 0.0;
                     incoming.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     merged.push(incoming);
                 }

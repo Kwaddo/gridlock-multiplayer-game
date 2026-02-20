@@ -1,3 +1,4 @@
+use crate::types::animation_state::MoveDir;
 use crate::types::world::WorldId;
 use crate::weapons::combat::{default_player_hitboxes, CombatEntity, EntityKind, Hitbox};
 use macroquad::prelude::*;
@@ -184,7 +185,7 @@ pub struct OtherPlayer {
     pub render_y: f32,
     pub render_z: f32,
     pub render_yaw: f32,
-    has_snapshot: bool, 
+    has_snapshot: bool,
     pub username: String,
     pub skin: Option<Texture2D>,
     pub skin_type: PlayerSkin,
@@ -201,12 +202,22 @@ pub struct OtherPlayer {
     pub hit_timer: f32,
     pub hitboxes: Vec<Hitbox>,
     pub kills: u32,
+    pub sprint_grace: f32,
+    // smoothing / hysteresis for rapid move-direction changes (prevents animation flicker)
+    pub last_move_dir: MoveDir,
+    pub pending_move_dir: Option<MoveDir>,
+    pub pending_move_timer: f32,
 }
 
 impl OtherPlayer {
     const POSITION_SMOOTH_RATE: f32 = 14.0;
     const YAW_SMOOTH_RATE: f32 = 18.0;
     const SNAP_DISTANCE: f32 = 5.0;
+    /// how long we continue treating a player as "sprinting" after the last sprint flag
+    /// (helps hide missing/late network packets and stops walk/sprint flicker)
+    pub const SPRINT_GRACE: f32 = 0.18; // seconds
+    /// how long we wait before accepting a new movement direction (reduces walk/side animation flicker)
+    pub const MOVE_DIR_GRACE: f32 = 0.12; // seconds
 
     pub fn color_for_id(id: u32) -> Color {
         let r = ((id * 73 + 29) % 256) as u8;
@@ -243,6 +254,10 @@ impl OtherPlayer {
             hit_timer: 0.0,
             hitboxes: default_player_hitboxes(),
             kills: 0,
+            sprint_grace: 0.0,
+            last_move_dir: MoveDir::None,
+            pending_move_dir: None,
+            pending_move_timer: 0.0,
         }
     }
 
@@ -322,6 +337,18 @@ impl CombatEntity for OtherPlayer {
         self.smooth_render_state(delta);
         if self.hit_timer > 0.0 {
             self.hit_timer = (self.hit_timer - delta).max(0.0);
+        }
+        if self.sprint_grace > 0.0 {
+            self.sprint_grace = (self.sprint_grace - delta).max(0.0);
+        }
+
+        if self.pending_move_timer > 0.0 {
+            self.pending_move_timer = (self.pending_move_timer - delta).max(0.0);
+            if self.pending_move_timer == 0.0 {
+                if let Some(pd) = self.pending_move_dir.take() {
+                    self.last_move_dir = pd;
+                }
+            }
         }
     }
 
