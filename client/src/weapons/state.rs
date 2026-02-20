@@ -47,6 +47,18 @@ pub struct WeaponState {
     // -- more recoil stats
     pub shot_index: u32, // which bullet in current spray (for recoil patterns)
     pub pattern_reset_timer: f32, // time since triggerer released so it can go back to normal after a while
+
+    // -- Dev: pair lock (hand + gun move together)
+    pub pair_locked: bool,
+    pub pair_offset_pos: (f32, f32, f32), // additive offset applied to both weapon and hands
+    pub pair_offset_rot: (f32, f32, f32), // additive rotation (pitch, yaw, roll) applied to both
+
+    // -- Dev: ADS viewmodel offsets (additive, lerped by ads_progress, independent per weapon)
+    pub ads_pair_locked: bool,                  // when true, ADS pos/rot sliders move gun+hands together
+    pub ads_pos_offset: (f32, f32, f32),        // default (0.08, 0.03, 0.0) — matches old hardcoded shift
+    pub ads_rot_offset: (f32, f32, f32),        // rotation delta at full ADS
+    pub ads_hands_pos_offset: (f32, f32, f32),  // hands position delta at full ADS
+    pub ads_hands_rot_offset: (f32, f32, f32),  // hands rotation delta at full ADS
 }
 
 impl WeaponState {
@@ -75,6 +87,14 @@ impl WeaponState {
             crosshair_kick: 0.0,
             shot_index: 0,
             pattern_reset_timer: 0.0,
+            pair_locked: false,
+            pair_offset_pos: stats.viewmodel_pair_offset_pos,
+            pair_offset_rot: stats.viewmodel_pair_offset_rot,
+            ads_pair_locked: false,
+            ads_pos_offset: stats.viewmodel_ads_pos_offset,
+            ads_rot_offset: stats.viewmodel_ads_rot_offset,
+            ads_hands_pos_offset: stats.viewmodel_ads_hands_pos_offset,
+            ads_hands_rot_offset: stats.viewmodel_ads_hands_rot_offset,
         }
     }
 

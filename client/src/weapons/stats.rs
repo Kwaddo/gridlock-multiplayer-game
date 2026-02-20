@@ -295,6 +295,12 @@ pub struct WeaponStats {
     pub viewmodel_hands_scale: f32,            // per-weapon hands scale multiplier
     pub viewmodel_hands_offset: (f32, f32, f32), // per-weapon hand position offset
     pub viewmodel_hands_rotation: (f32, f32, f32), // per-weapon hand rotation (pitch, yaw, roll)
+    pub viewmodel_pair_offset_pos: (f32, f32, f32), // hand+gun locked-pair position offset
+    pub viewmodel_pair_offset_rot: (f32, f32, f32), // hand+gun locked-pair rotation offset (pitch, yaw, roll)
+    pub viewmodel_ads_pos_offset: (f32, f32, f32),        // gun position delta at full ADS
+    pub viewmodel_ads_rot_offset: (f32, f32, f32),        // gun rotation delta at full ADS
+    pub viewmodel_ads_hands_pos_offset: (f32, f32, f32),  // hands position delta at full ADS
+    pub viewmodel_ads_hands_rot_offset: (f32, f32, f32),  // hands rotation delta at full ADS
 
     // --- damage falloff
     pub falloff_start: f32, // distance at which damage falloff begins (units)
@@ -376,6 +382,12 @@ pub const M1911: WeaponStats = WeaponStats {
     viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
+    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 15.0,
     falloff_end: 35.0,
@@ -453,6 +465,12 @@ pub const DEAGLE: WeaponStats = WeaponStats {
     viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
+    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 20.0,
     falloff_end: 60.0,
@@ -531,6 +549,12 @@ pub const REVOLVER: WeaponStats = WeaponStats {
     viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
+    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 80.0,
     falloff_end: 200.0,
@@ -629,6 +653,12 @@ pub const MP5: WeaponStats = WeaponStats {
     viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
+    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 10.0,
     falloff_end: 30.0,
@@ -752,13 +782,19 @@ pub const SPAS: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("spas_model"),
     viewmodel_asset_key: Some("weapon_fp_shotgun"),
-    viewmodel_scale: 0.002,
-    viewmodel_position: (0.22, 0.13, -0.44),
-    viewmodel_rotation: (-0.10, -1.45, 0.0),
-    viewmodel_muzzle_offset: (-1.10, 0.02, -0.25),
+    viewmodel_scale: 0.0020,
+    viewmodel_position: (0.220, 0.130, -0.440),
+    viewmodel_rotation: (-0.100, -1.450, 0.000),
+    viewmodel_muzzle_offset: (-1.100, 0.020, -0.250),
     viewmodel_hands_scale: 1.93,
-    viewmodel_hands_offset: (0.18, -0.12, -0.45),
-    viewmodel_hands_rotation: (-0.05, 0.90, 0.10),
+    viewmodel_hands_offset: (0.180, -0.120, -0.466),
+    viewmodel_hands_rotation: (-0.050, 0.900, 0.100),
+    viewmodel_pair_offset_pos: (0.044, 0.000, 0.000),
+    viewmodel_pair_offset_rot: (0.100, 0.000, 0.000),
+    viewmodel_ads_pos_offset: (0.125, 0.025, -0.060),
+    viewmodel_ads_rot_offset: (0.275, -0.130, 0.125),
+    viewmodel_ads_hands_pos_offset: (0.134, 0.026, -0.537),
+    viewmodel_ads_hands_rot_offset: (0.100, 0.000, 0.085),
 
     falloff_start: 5.0,
     falloff_end: 15.0,
@@ -858,6 +894,12 @@ pub const M16_STATS: WeaponStats = WeaponStats {
     viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.16, -0.16, -0.28),
     viewmodel_hands_rotation: (-0.15, 0.45, -0.05),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
+    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 25.0,
     falloff_end: 70.0,
@@ -960,6 +1002,12 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
     viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
+    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 1000.0,
     falloff_end: 10000.0,
@@ -1051,6 +1099,12 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
+    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 15.0,
     falloff_end: 45.0,

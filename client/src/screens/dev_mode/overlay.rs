@@ -101,6 +101,11 @@ pub fn draw_dev_overlay<F>(
     {
         dev.scroll_offset += scroll_y * 30.0;
         dev.scroll_offset = dev.scroll_offset.min(0.0);
+        // clamp scroll so you can't scroll past the bottom of content
+        let content_start_y = tab_y + 36.0; // where content begins (below tabs)
+        let available_h = panel_y + panel_h - content_start_y;
+        let max_scroll_down = -(dev.content_height - available_h).max(0.0);
+        dev.scroll_offset = dev.scroll_offset.max(max_scroll_down);
     }
 
     let content_x = panel_x + 16.0;
@@ -119,7 +124,10 @@ pub fn draw_dev_overlay<F>(
             clicked,
             held,
         ),
-        3 => draw_viewmodel_tab(inventory, dev, content_x, content_y, content_w, mouse, clicked, held),
+        3 => {
+            let bottom_y = draw_viewmodel_tab(inventory, dev, content_x, content_y, content_w, mouse, clicked, held);
+            dev.content_height = bottom_y - content_y;
+        }
         4 => draw_debug_tab(dev, inventory, content_x, content_y, mouse, clicked),
         5 => {
             draw_bot_tab(content_x, content_y, content_w, mouse, clicked, held);
