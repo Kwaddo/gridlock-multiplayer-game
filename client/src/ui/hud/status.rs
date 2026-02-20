@@ -4,9 +4,6 @@ use crate::physics::movement::MovementState;
 use crate::ui::fonts::text_params;
 
 pub(super) fn draw_status_panels(
-    username: &str,
-    player_id: u32,
-    position: Vec3,
     movement_state: &MovementState,
     hp: f32,
     max_hp: f32,
@@ -14,7 +11,6 @@ pub(super) fn draw_status_panels(
     max_shield: f32,
     match_time_left: f32,
 ) {
-
     // Match timer (top-center)
     if match_time_left > 0.0 {
         let secs = match_time_left.ceil() as u32;

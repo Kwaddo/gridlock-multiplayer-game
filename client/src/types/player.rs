@@ -207,6 +207,9 @@ pub struct OtherPlayer {
     pub last_move_dir: MoveDir,
     pub pending_move_dir: Option<MoveDir>,
     pub pending_move_timer: f32,
+
+    // Gun Game progression: 1 = first weapon slot
+    pub gun_level: u8,
 }
 
 impl OtherPlayer {
@@ -258,6 +261,7 @@ impl OtherPlayer {
             last_move_dir: MoveDir::None,
             pending_move_dir: None,
             pending_move_timer: 0.0,
+            gun_level: 1,
         }
     }
 

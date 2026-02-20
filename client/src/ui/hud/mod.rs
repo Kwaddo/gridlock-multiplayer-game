@@ -94,9 +94,6 @@ pub fn draw_hud(
     );
 
     status::draw_status_panels(
-        username,
-        player_id,
-        position,
         movement_state,
         hp,
         max_hp,

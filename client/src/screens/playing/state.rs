@@ -1,3 +1,4 @@
+use crate::net::protocols::MODE_GUN_GAME;
 use crate::physics::movement::{MovementConfig, MovementState};
 use crate::screens::target_dummy::TargetDummy;
 use crate::types::ai::simulated_player::SimulatedPlayer;
@@ -38,6 +39,7 @@ pub struct PlayingState {
     pub current_world: WorldId,
     pub pending_world_change: Option<WorldId>,
     pub pending_start_request: bool,
+    pub pending_start_gamemode: u8,
     pub lobby_console_open: bool,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
@@ -51,6 +53,12 @@ pub struct PlayingState {
     pub post_teleport_freeze_timer: f32, // seconds players cannot move immediately after teleport into Maze
     pub match_time_left: f32,            // client-side remaining match time (seconds)
     pub match_end_winner: Option<String>,
+
+    // authoritative/current match mode (None when not in a match)
+    pub match_mode: Option<u8>,
+
+    // temporarily hold a server-forced weapon slot until the player actually teleports into the Maze
+    pub pending_forced_weapon_slot: Option<usize>,
 
     // damage / hit feedback (client-side)
     pub damage_flash_timer: f32, // short red flash when we take damage
@@ -131,6 +139,7 @@ impl PlayingState {
             current_world: WorldId::Lobby,
             pending_world_change: None,
             pending_start_request: false,
+            pending_start_gamemode: MODE_GUN_GAME,
             lobby_console_open: false,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
@@ -171,6 +180,12 @@ impl PlayingState {
             lobby_console_message_timer: 0.0,
             announcements: Vec::new(),
             connected_players: Vec::new(),
+
+            // match mode unknown until server indicates otherwise
+            match_mode: None,
+
+            // pending forced weapon slot (applied after teleport into Maze)
+            pending_forced_weapon_slot: None,
         }
     }
 }
