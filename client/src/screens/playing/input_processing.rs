@@ -187,16 +187,20 @@ impl PlayingState {
                             }
                         }
 
+                        // track whether bullet hit a surface (wall/prop) for bullet holes
+                        // surface_hit_info: Option<(distance, normal)>
+                        let mut surface_hit = false;
+                        let mut surface_normal: Option<Vec3> = None;
                         let closest_blocking_dist = if self.current_world == WorldId::Maze {
                             let wall_hit = maze
                                 .as_ref()
-                                .and_then(|m| m.ray_test_walls(eye, fwd, range));
-                            let prop_hit_dist = maze
+                                .and_then(|m| m.ray_test_walls_with_normal(eye, fwd, range));
+                            let prop_hit = maze
                                 .as_ref()
-                                .and_then(|m| m.ray_test_props(eye, fwd, range));
+                                .and_then(|m| m.ray_test_props_with_normal(eye, fwd, range));
 
-                            match (wall_hit, prop_hit_dist) {
-                                (Some(((wx, wy), wall_dist)), Some(prop_dist)) => {
+                            match (wall_hit, prop_hit) {
+                                (Some(((wx, wy), wall_dist, wall_n)), Some((prop_dist, prop_n))) => {
                                     if wall_dist < prop_dist {
                                         if let Some(m) = maze.as_mut() {
                                             if m.damage_wall(wx, wy, stats.damage) {
@@ -205,12 +209,16 @@ impl PlayingState {
                                                 }
                                             }
                                         }
+                                        surface_hit = true;
+                                        surface_normal = Some(wall_n);
                                         Some(wall_dist)
                                     } else {
+                                        surface_hit = true;
+                                        surface_normal = Some(prop_n);
                                         Some(prop_dist)
                                     }
                                 }
-                                (Some(((wx, wy), wall_dist)), None) => {
+                                (Some(((wx, wy), wall_dist, wall_n)), None) => {
                                     if let Some(m) = maze.as_mut() {
                                         if m.damage_wall(wx, wy, stats.damage) {
                                             if !self.pending_broken_walls.contains(&(wx, wy)) {
@@ -218,10 +226,25 @@ impl PlayingState {
                                             }
                                         }
                                     }
+                                    surface_hit = true;
+                                    surface_normal = Some(wall_n);
                                     Some(wall_dist)
                                 }
-                                (None, Some(prop_dist)) => Some(prop_dist),
+                                (None, Some((prop_dist, prop_n))) => {
+                                    surface_hit = true;
+                                    surface_normal = Some(prop_n);
+                                    Some(prop_dist)
+                                }
                                 (None, None) => None,
+                            }
+                        } else if self.current_world == WorldId::Lobby {
+                            // lobby: test against lobby cubes, console, ground
+                            if let Some((dist, n)) = crate::world::lobby::ray_test_lobby_with_normal(eye, fwd, range) {
+                                surface_hit = true;
+                                surface_normal = Some(n);
+                                Some(dist)
+                            } else {
+                                None
                             }
                         } else {
                             None
@@ -234,16 +257,43 @@ impl PlayingState {
                             eye + fwd * range
                         };
 
+                        // when bullet hits a wall, set tracer lifetime to 0 so it disappears
+                        // on impact rather than lingering
+                        let tracer_lifetime = if surface_hit {
+                            0.0
+                        } else {
+                            stats.tracer_lifetime
+                        };
+
                         self.tracers.push(crate::weapons::effects::BulletTracer {
                             start: tracer_start,
                             end: tracer_end,
-                            lifetime: stats.tracer_lifetime,
+                            lifetime: tracer_lifetime,
                             speed: stats.bullet_speed,
                             progress: 0.0,
                             tracer_length: stats.tracer_length,
                             tracer_color: stats.tracer_color,
                             tracer_thickness: stats.tracer_thickness,
                         });
+
+                        // spawn bullet hole on surface hit
+                        if surface_hit {
+                            if let (Some(dist), Some(normal)) = (closest_blocking_dist, surface_normal) {
+                                let hit_point = eye + fwd * dist;
+                                self.bullet_holes.push(crate::weapons::effects::BulletHole {
+                                    position: hit_point + normal * 0.002,
+                                    normal,
+                                    lifetime: stats.bullet_hole_lifetime,
+                                    max_lifetime: stats.bullet_hole_lifetime,
+                                    size: stats.bullet_hole_size,
+                                    color: stats.bullet_hole_color,
+                                });
+                                // cap total bullet holes to avoid memory bloat
+                                if self.bullet_holes.len() > 200 {
+                                    self.bullet_holes.remove(0);
+                                }
+                            }
+                        }
 
                         // check target dummy first
                         if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
@@ -377,3 +427,4 @@ impl PlayingState {
         sink.detach();
     }
 }
+
