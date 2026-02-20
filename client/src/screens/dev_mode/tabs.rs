@@ -4,11 +4,7 @@ use crate::weapons::crosshair::{CrosshairConfig, CrosshairType};
 use crate::weapons::state::WeaponInventory;
 use macroquad::prelude::*;
 
-use super::state::{
-    DevModeState, HandsAnimRequest, HANDS_DEFAULT_OFFSET_X, HANDS_DEFAULT_OFFSET_Y,
-    HANDS_DEFAULT_OFFSET_Z, HANDS_DEFAULT_ROT_PITCH, HANDS_DEFAULT_ROT_ROLL,
-    HANDS_DEFAULT_ROT_YAW, HANDS_DEFAULT_SCALE,
-};
+use super::state::{DevModeState, HandsAnimRequest};
 use super::widgets::{
     draw_action_button, draw_section_header, draw_slider, draw_slider_u32, draw_toggle,
 };
@@ -562,19 +558,14 @@ pub(super) fn draw_viewmodel_tab(
     y += draw_slider("muzzle_y", &mut weapon.stats_data.viewmodel_muzzle_offset.1, -2.0, 2.0, 0.02, x, y, w, mouse, clicked, held);
     y += draw_slider("muzzle_z", &mut weapon.stats_data.viewmodel_muzzle_offset.2, -2.0, 2.0, 0.02, x, y, w, mouse, clicked, held);
 
-    y += draw_section_header("Per-Weapon Hands Offset", x, y);
-    y += draw_slider("hands_off_x", &mut weapon.stats_data.viewmodel_hands_offset.0, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_off_y", &mut weapon.stats_data.viewmodel_hands_offset.1, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_off_z", &mut weapon.stats_data.viewmodel_hands_offset.2, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
-
     y += draw_section_header("FP Hands", x, y);
-    y += draw_slider("hands_scale", &mut dev.hands_scale, 0.01, 2.0, 0.01, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_offset_x", &mut dev.hands_offset_x, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_offset_y", &mut dev.hands_offset_y, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_offset_z", &mut dev.hands_offset_z, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_rot_pitch", &mut dev.hands_rot_pitch, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_rot_yaw", &mut dev.hands_rot_yaw, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
-    y += draw_slider("hands_rot_roll", &mut dev.hands_rot_roll, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_scale", &mut weapon.stats_data.viewmodel_hands_scale, 0.01, 2.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_offset_x", &mut weapon.stats_data.viewmodel_hands_offset.0, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_offset_y", &mut weapon.stats_data.viewmodel_hands_offset.1, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_offset_z", &mut weapon.stats_data.viewmodel_hands_offset.2, -1.0, 1.0, 0.01, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_rot_pitch", &mut weapon.stats_data.viewmodel_hands_rotation.0, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_rot_yaw", &mut weapon.stats_data.viewmodel_hands_rotation.1, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
+    y += draw_slider("hands_rot_roll", &mut weapon.stats_data.viewmodel_hands_rotation.2, -3.15, 3.15, 0.05, x, y, w, mouse, clicked, held);
 
     y += draw_section_header("Hands Animation", x, y);
     let (h, idle_pressed) = draw_action_button("Play Idle (Loop)", x, y, 170.0, mouse, clicked);
@@ -601,14 +592,9 @@ pub(super) fn draw_viewmodel_tab(
         weapon.stats_data.viewmodel_position = defaults.viewmodel_position;
         weapon.stats_data.viewmodel_rotation = defaults.viewmodel_rotation;
         weapon.stats_data.viewmodel_muzzle_offset = defaults.viewmodel_muzzle_offset;
+        weapon.stats_data.viewmodel_hands_scale = defaults.viewmodel_hands_scale;
         weapon.stats_data.viewmodel_hands_offset = defaults.viewmodel_hands_offset;
-        dev.hands_scale = HANDS_DEFAULT_SCALE;
-        dev.hands_offset_x = HANDS_DEFAULT_OFFSET_X;
-        dev.hands_offset_y = HANDS_DEFAULT_OFFSET_Y;
-        dev.hands_offset_z = HANDS_DEFAULT_OFFSET_Z;
-        dev.hands_rot_pitch = HANDS_DEFAULT_ROT_PITCH;
-        dev.hands_rot_yaw = HANDS_DEFAULT_ROT_YAW;
-        dev.hands_rot_roll = HANDS_DEFAULT_ROT_ROLL;
+        weapon.stats_data.viewmodel_hands_rotation = defaults.viewmodel_hands_rotation;
         dev.hands_anim_request = Some(HandsAnimRequest::IdleLoop);
     }
 }

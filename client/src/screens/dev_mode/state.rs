@@ -2,13 +2,6 @@ use crate::ui::fonts::text_params;
 use macroquad::prelude::*;
 
 const DEV_CODE: &str = "verso";
-pub const HANDS_DEFAULT_SCALE: f32 = 1.93;
-pub const HANDS_DEFAULT_OFFSET_X: f32 = 0.16;
-pub const HANDS_DEFAULT_OFFSET_Y: f32 = -0.03;
-pub const HANDS_DEFAULT_OFFSET_Z: f32 = -0.18;
-pub const HANDS_DEFAULT_ROT_PITCH: f32 = -0.15;
-pub const HANDS_DEFAULT_ROT_YAW: f32 = 0.65;
-pub const HANDS_DEFAULT_ROT_ROLL: f32 = -0.05;
 pub(super) const TAB_NAMES: &[&str] = &[
     "Weapon",
     "Crosshair",
@@ -36,14 +29,6 @@ pub struct DevModeState {
     pub code_input: String,
     pub code_verified: bool,
     pub show_code_prompt: bool,
-    // hands tuning (viewmodel tab)
-    pub hands_scale: f32,
-    pub hands_offset_x: f32,
-    pub hands_offset_y: f32,
-    pub hands_offset_z: f32,
-    pub hands_rot_pitch: f32,
-    pub hands_rot_yaw: f32,
-    pub hands_rot_roll: f32,
     pub hands_anim_request: Option<HandsAnimRequest>,
 }
 
@@ -60,13 +45,6 @@ impl DevModeState {
             code_input: String::new(),
             code_verified: false,
             show_code_prompt: false,
-            hands_scale: HANDS_DEFAULT_SCALE,
-            hands_offset_x: HANDS_DEFAULT_OFFSET_X,
-            hands_offset_y: HANDS_DEFAULT_OFFSET_Y,
-            hands_offset_z: HANDS_DEFAULT_OFFSET_Z,
-            hands_rot_pitch: HANDS_DEFAULT_ROT_PITCH,
-            hands_rot_yaw: HANDS_DEFAULT_ROT_YAW,
-            hands_rot_roll: HANDS_DEFAULT_ROT_ROLL,
             hands_anim_request: None,
         }
     }

@@ -8,9 +8,13 @@ use super::super::PlayingState;
 
 const HANDS_BASE_SCALE: f32 = 0.35;
 const INSPECT_START_SEC: f32 = 0.18;
+const INSPECT_SWEEP_SEC: f32 = 0.26;
+const INSPECT_HOLD_SEC: f32 = 0.28;
 const INSPECT_RETURN_SEC: f32 = 0.22;
-const INSPECT_POS_OFFSET: Vec3 = Vec3::from_array([0.02, -0.03, -0.04]);
-const INSPECT_ROT_OFFSET: Vec3 = Vec3::from_array([-0.22, 0.45, 0.16]);
+const INSPECT_POS_A: Vec3 = Vec3::from_array([0.02, -0.03, -0.04]);
+const INSPECT_ROT_A: Vec3 = Vec3::from_array([-0.22, 0.45, 0.16]);
+const INSPECT_POS_B: Vec3 = Vec3::from_array([-0.03, -0.02, -0.06]);
+const INSPECT_ROT_B: Vec3 = Vec3::from_array([-0.18, -0.60, -0.18]);
 
 impl PlayingState {
     pub(crate) fn draw_viewmodel(&self) {
@@ -92,29 +96,35 @@ impl PlayingState {
 
         let (base_x, base_y, base_z) = stats.viewmodel_position;
         let (rot_pitch, rot_yaw, rot_roll) = stats.viewmodel_rotation;
-        let inspect_alpha = match self.inspect_phase {
-            super::super::state::InspectPhase::None => 0.0,
+        let (inspect_pos, inspect_rot) = match self.inspect_phase {
+            super::super::state::InspectPhase::None => (Vec3::ZERO, Vec3::ZERO),
             super::super::state::InspectPhase::Start => {
-                (self.inspect_timer / INSPECT_START_SEC).clamp(0.0, 1.0)
+                let t = (self.inspect_timer / INSPECT_START_SEC).clamp(0.0, 1.0);
+                (Vec3::ZERO.lerp(INSPECT_POS_A, t), Vec3::ZERO.lerp(INSPECT_ROT_A, t))
             }
-            super::super::state::InspectPhase::Hold => 1.0,
+            super::super::state::InspectPhase::Sweep => {
+                let t = (self.inspect_timer / INSPECT_SWEEP_SEC).clamp(0.0, 1.0);
+                (INSPECT_POS_A.lerp(INSPECT_POS_B, t), INSPECT_ROT_A.lerp(INSPECT_ROT_B, t))
+            }
+            super::super::state::InspectPhase::Hold => {
+                let _ = INSPECT_HOLD_SEC;
+                (INSPECT_POS_B, INSPECT_ROT_B)
+            }
             super::super::state::InspectPhase::Return => {
-                1.0 - (self.inspect_timer / INSPECT_RETURN_SEC).clamp(0.0, 1.0)
+                let t = (self.inspect_timer / INSPECT_RETURN_SEC).clamp(0.0, 1.0);
+                (INSPECT_POS_B.lerp(Vec3::ZERO, t), INSPECT_ROT_B.lerp(Vec3::ZERO, t))
             }
         };
-        let inspect_pos = INSPECT_POS_OFFSET * inspect_alpha;
-        let inspect_rot = INSPECT_ROT_OFFSET * inspect_alpha;
 
-        let dev = &self.dev_mode;
         let hands_weapon_offset = vec3(
             stats.viewmodel_hands_offset.0,
             stats.viewmodel_hands_offset.1,
             stats.viewmodel_hands_offset.2,
         );
         let hands_base_anchor = vec3(
-            -0.35 + dev.hands_offset_x,
-            -0.25 + dev.hands_offset_y,
-            0.58 + dev.hands_offset_z,
+            -0.35,
+            -0.25,
+            0.58,
         ) + hands_weapon_offset;
         let weapon_base_anchor = vec3(-0.35, -0.25, 0.58);
         let ads_offset_x = 0.08 * weapon.ads_progress;
@@ -185,14 +195,14 @@ impl PlayingState {
         let draw_hands = |hands_mesh: &Mesh, normalize_scale: f32, y_offset: f32| {
             // Keep hands scale independent from weapon scale so tiny weapon tuning
             // does not make hands disappear.
-            let hands_scale = HANDS_BASE_SCALE * dev.hands_scale.max(0.01);
+            let hands_scale = HANDS_BASE_SCALE * stats.viewmodel_hands_scale.max(0.01);
             let hands_scale_mat = Mat4::from_scale(Vec3::splat(hands_scale));
             let hands_trans = Mat4::from_translation(hands_anchor);
             let hands_rot_mat = Mat4::from_euler(
                 EulerRot::XYZ,
-                dev.hands_rot_pitch + inspect_rot.x,
-                dev.hands_rot_yaw + inspect_rot.y,
-                dev.hands_rot_roll + inspect_rot.z,
+                stats.viewmodel_hands_rotation.0 + inspect_rot.x,
+                stats.viewmodel_hands_rotation.1 + inspect_rot.y,
+                stats.viewmodel_hands_rotation.2 + inspect_rot.z,
             );
             // Some FPS hand exports include hidden/far helper geometry that can poison
             // auto-normalization (very tiny normalize_scale), so clamp to a sane band.
