@@ -4,7 +4,7 @@ use crate::types::ai::simulated_player::SimulatedPlayer;
 use crate::types::animated_model::AnimatedModel;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
-use crate::weapons::effects::{BulletTracer, DamageNumber};
+use crate::weapons::effects::{BulletHole, BulletTracer, DamageNumber};
 use crate::weapons::WeaponInventory;
 
 use macroquad::models::Mesh;
@@ -61,6 +61,7 @@ pub struct PlayingState {
     pub hit_marker_headshot: bool,
     pub damage_numbers: Vec<DamageNumber>,
     pub tracers: Vec<BulletTracer>,
+    pub bullet_holes: Vec<BulletHole>,
 
     pub hit_marker_pellet_mask: u16,
 
@@ -141,6 +142,7 @@ impl PlayingState {
             hit_marker_headshot: false,
             damage_numbers: Vec::new(),
             tracers: Vec::new(),
+            bullet_holes: Vec::new(),
             hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
             practice_bots: Vec::new(),
