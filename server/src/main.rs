@@ -758,10 +758,16 @@ fn handle_discover(
 }
 
 fn send_assets(socket: &UdpSocket, addr: SocketAddr) {
-    let Ok(data) = fs::read_to_string("assets/manifest.json") else {
-        println!("Warning: could not read assets/manifest.json");
-        return;
+    let data = match fs::read_to_string("assets/manifest.json")
+        .or_else(|_| fs::read_to_string("server/assets/manifest.json"))
+    {
+        Ok(d) => d,
+        Err(_) => {
+            println!("Warning: could not read assets/manifest.json (or server/assets/manifest.json)");
+            return;
+        }
     };
+
     let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&data) else {
         println!("Warning: invalid assets/manifest.json");
         return;

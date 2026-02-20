@@ -12,16 +12,18 @@ pub enum WeaponKind {
     Shotgun,
     AssaultRifle,
     Sniper,
+    Deagle,
 }
 
 impl WeaponKind {
     // all weapon kinds in order (used for scroll-switching, or gun level based on kill etc.)
-    pub const ALL: [WeaponKind; 5] = [
+    pub const ALL: [WeaponKind; 6] = [
         WeaponKind::Pistol,
         WeaponKind::Smg,
         WeaponKind::Shotgun,
         WeaponKind::AssaultRifle,
         WeaponKind::Sniper,
+        WeaponKind::Deagle,
     ];
 
     // for now i am making it slot based to simplify testing
@@ -32,6 +34,7 @@ impl WeaponKind {
             WeaponKind::Shotgun => 3,
             WeaponKind::AssaultRifle => 4,
             WeaponKind::Sniper => 5,
+            WeaponKind::Deagle => 6,
         }
     }
 
@@ -46,6 +49,7 @@ impl WeaponKind {
             WeaponKind::Shotgun => &SHOTGUN,
             WeaponKind::AssaultRifle => &ASSAULT_RIFLE,
             WeaponKind::Sniper => &SNIPER,
+            WeaponKind::Deagle => &DEAGLE,
         }
     }
 }
@@ -523,4 +527,79 @@ pub const SNIPER: WeaponStats = WeaponStats {
     pattern_randomness: 0.0, // sniper has no recoil pattern, just a single strong kick with some randomness
     randomness_growth: 0.0,  // no pattern, so randomness doesnt increase
     pattern_reset_time: 0.0, // no pattern to reset
+};
+
+pub const DEAGLE: WeaponStats = WeaponStats {
+    name: "Desert Eagle",
+    fire_mode: FireMode::SemiAuto,
+
+    damage: 75.0, // 2-shot body kill
+    headshot_mult: 2.0, // 150
+    pellet_count: 1,
+    pellet_spread: None,
+
+    fire_rate: 2.5,
+    magazine_size: 6,
+    max_reserve: 35,
+    reload_time: 2.0,
+
+    recoil_horizontal: 0.045,
+    recoil_vertical: 0.015,
+    recoil_recovery: 3.0,
+
+    hip_spread: 0.025,
+    ads_spread: 0.005,
+    spread_per_shot: 0.03,
+    spread_recovery: 1.5,
+    move_spread_mult: 1.4,
+    sprint_spread_mult: 1.8,
+    crouch_spread_mult: 0.7,
+
+    ads_zoom_fov: 60.0,
+    ads_time: 0.2,
+    ads_sensitivity: None,
+
+    bullet_speed: 220.0,
+    bullet_range: 50.0,
+    tracer_length: 3.0,
+    tracer_color: [255, 210, 90, 255],
+    tracer_thickness: 0.02,
+    tracer_lifetime: 1.8,
+
+    crosshair_kick_per_shot: 2.0,
+    crosshair_kick_decay: 6.0,
+    crosshair_kick_max: 3.0,
+
+    crosshair_style: CrosshairStyle::Standard,
+    fsa_time: Some(0.3),
+
+    fire_sound_asset_key: "deagle_shot",
+    icon_asset_key: "pistol_icon", // for now
+    icon_width: 90.0,
+    icon_height: 50.0,
+    icon_flip_x: false,
+
+    viewmodel_model: Some("deagle_model"),
+    viewmodel_asset_key: None,
+    viewmodel_scale: 0.0015,
+    viewmodel_position: (0.15, 0.08, -0.05),
+    viewmodel_rotation: (0.0, -1.57, 0.0),
+    viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
+
+    falloff_start: 20.0,
+    falloff_end: 60.0,
+    falloff_min_mult: 0.75,
+
+    recoil_pattern: &[
+        (0.045, 0.0),
+        (0.040, 0.08),
+        (0.038, -0.10),
+        (0.035, 0.12),
+        (0.032, -0.08),
+        (0.030, 0.05),
+        (0.028, -0.05),
+    ],
+    pattern_randomness: 0.2,
+    randomness_growth: 0.1,
+    pattern_reset_time: 0.5,
 };

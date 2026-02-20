@@ -99,6 +99,9 @@ pub fn process_weapon_input(inventory: &mut WeaponInventory, config: &GameConfig
     if config.bind_weapon5.is_pressed() {
         inventory.switch_to(4);
     }
+    if config.bind_weapon6.is_pressed() {
+        inventory.switch_to(5);
+    }
 
     // mouse wheel switching
     let (_, wheel_y) = mouse_wheel();
