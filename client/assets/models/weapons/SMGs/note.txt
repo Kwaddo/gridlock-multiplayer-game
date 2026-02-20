@@ -1,0 +1,15 @@
+honey_badger.glb
+→ Stealth assault SMG hybrid
+Unique trait: suppressed + rifle damage feel
+
+mp5.glb
+→ Control SMG
+Unique trait: laser accuracy spray
+
+p90.glb
+→ Bullet hose SMG
+Unique trait: huge mag + high fire rate
+
+tommy_gun.glb
+→ Vintage SMG
+Unique trait: heavy recoil but strong close range

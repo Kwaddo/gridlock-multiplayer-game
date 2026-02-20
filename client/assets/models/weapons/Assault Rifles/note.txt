@@ -1,0 +1,23 @@
+ak.glb
+→ High damage / high recoil rifle
+Unique trait: strongest per shot AR, hardest to control
+
+as_val.glb
+→ Suppressed close-range rifle
+Unique trait: built-in stealth + fast TTK but short range
+
+famas.glb
+→ Burst rifle
+Unique trait: burst accuracy reward weapon
+
+m4a1.glb
+→ Balanced automatic rifle
+Unique trait: lowest recoil baseline gun
+
+m16.glb
+→ Precision burst rifle
+Unique trait: tap/burst accuracy king
+
+scar.glb
+→ Heavy rifle
+Unique trait: slower fire rate but hits harder than M4

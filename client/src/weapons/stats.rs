@@ -446,6 +446,7 @@ pub const DEAGLE: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (0.26, 0.32, -0.20),
+    viewmodel_hands_offset: (0.06, -0.04, -0.12),  // deagle: slightly smaller offset than m1911
 
     falloff_start: 20.0,
     falloff_end: 60.0,
@@ -549,6 +550,7 @@ pub const MP5: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-0.90, 0.02, -0.22),
+    viewmodel_hands_offset: (0.04, -0.03, -0.08),  // smg: slight pull back
 
     falloff_start: 10.0,
     falloff_end: 30.0,
@@ -676,6 +678,7 @@ pub const SPAS: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.10, 0.02, -0.25),
+    viewmodel_hands_offset: (0.02, -0.01, -0.04),  // shotgun: close to rifle size, small offset
 
     falloff_start: 5.0,
     falloff_end: 15.0,
@@ -772,6 +775,7 @@ pub const M16_STATS: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
+    viewmodel_hands_offset: (0.01, -0.01, -0.02),  // AR: very close to bolt action size
 
     falloff_start: 25.0,
     falloff_end: 70.0,
@@ -871,6 +875,7 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.20, 0.02, -0.28),
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),       // bolt action: reference — hands fit perfectly
 
     falloff_start: 1000.0,
     falloff_end: 10000.0,
@@ -959,6 +964,7 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),       // minigun: large weapon, no offset needed
 
     falloff_start: 15.0,
     falloff_end: 45.0,

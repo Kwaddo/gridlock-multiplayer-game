@@ -1,0 +1,7 @@
+benelli.glb
+→ Semi-auto shotgun
+Unique trait: fast follow-up shots
+
+spas.glb
+→ Tactical shotgun
+Unique trait: mid-range shotgun consistency
