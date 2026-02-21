@@ -33,6 +33,8 @@ pub struct DevModeState {
     pub hands_anim_request: Option<HandsAnimRequest>,
     pub precision_mode: bool, // viewmodel: shrinks all step sizes by 10x for micro-adjustments
     pub force_ads: bool, // simulate ADS being held for viewmodel preview
+    pub viewport_drag_active: bool, // viewmodel: drag on viewport to adjust pos/rot
+    pub viewport_drag_prev_mouse: (f32, f32), // last frame mouse pos for delta calc
 }
 
 impl DevModeState {
@@ -52,6 +54,8 @@ impl DevModeState {
             hands_anim_request: None,
             precision_mode: false,
             force_ads: false,
+            viewport_drag_active: false,
+            viewport_drag_prev_mouse: (0.0, 0.0),
         }
     }
 
