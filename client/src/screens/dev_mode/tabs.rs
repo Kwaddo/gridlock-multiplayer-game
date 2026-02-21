@@ -551,6 +551,10 @@ pub(super) fn draw_viewmodel_tab(
     // ADS preview toggle — simulates ADS held without physically holding right-click
     let ads_label = if dev.force_ads { "ADS Preview  [ON]" } else { "ADS Preview [OFF]" };
     y += draw_toggle(ads_label, &mut dev.force_ads, x, y, mouse, clicked);
+
+    // Viewport drag mode — drag directly on viewport to adjust position / rotation
+    let drag_label = if dev.viewport_drag_active { "Drag Mode  [ON]" } else { "Drag Mode [OFF]" };
+    y += draw_toggle(drag_label, &mut dev.viewport_drag_active, x, y, mouse, clicked);
     y += 4.0;
 
     y += draw_section_header("Scale", x, y);

@@ -134,4 +134,147 @@ pub fn draw_dev_overlay<F>(
         }
         _ => {}
     }
+
+    // ── Viewport Drag Mode (Viewmodel tab only) ───────────────────────────
+    if dev.active_tab == 3 && dev.viewport_drag_active {
+        let right_held = is_mouse_button_down(MouseButton::Right);
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+        let ctrl = is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl);
+        let mouse_over_panel = mouse.0 >= panel_x && mouse.0 <= panel_x + panel_w;
+
+        let pos_sens = if dev.precision_mode { 0.0002 } else { 0.002 };
+        let rot_sens = if dev.precision_mode { 0.0008 } else { 0.008 };
+
+        // ── Mouse drag (axis-locked: dominant axis wins) ──
+        if (held || right_held) && !mouse_over_panel {
+            let raw_dx = mouse.0 - dev.viewport_drag_prev_mouse.0;
+            let raw_dy = mouse.1 - dev.viewport_drag_prev_mouse.1;
+
+            // Lock to dominant axis so you don't accidentally drift sideways
+            let (dx, dy) = if raw_dx.abs() > raw_dy.abs() {
+                (raw_dx, 0.0)
+            } else {
+                (0.0, raw_dy)
+            };
+
+            let weapon = inventory.active_mut();
+
+            if right_held {
+                weapon.stats_data.viewmodel_rotation.1 =
+                    (weapon.stats_data.viewmodel_rotation.1 + dx * rot_sens).clamp(-3.15, 3.15);
+                weapon.stats_data.viewmodel_rotation.0 =
+                    (weapon.stats_data.viewmodel_rotation.0 - dy * rot_sens).clamp(-3.15, 3.15);
+            } else if ctrl {
+                weapon.stats_data.viewmodel_rotation.2 =
+                    (weapon.stats_data.viewmodel_rotation.2 + dx * rot_sens).clamp(-3.15, 3.15);
+            } else if shift {
+                weapon.stats_data.viewmodel_position.2 =
+                    (weapon.stats_data.viewmodel_position.2 - dy * pos_sens).clamp(-0.5, 0.5);
+            } else {
+                weapon.stats_data.viewmodel_position.0 =
+                    (weapon.stats_data.viewmodel_position.0 + dx * pos_sens).clamp(-0.5, 0.5);
+                weapon.stats_data.viewmodel_position.1 =
+                    (weapon.stats_data.viewmodel_position.1 - dy * pos_sens).clamp(-0.5, 0.5);
+            }
+        }
+
+        dev.viewport_drag_prev_mouse = mouse;
+
+        // ── Arrow keys: precise single-axis nudging ──
+        let arrow_step_pos = if dev.precision_mode { 0.001 } else { 0.005 };
+        let arrow_step_rot = if dev.precision_mode { 0.005 } else { 0.02 };
+        {
+            let weapon = inventory.active_mut();
+
+            if shift {
+                // Shift + arrows → yaw / pitch
+                if is_key_down(KeyCode::Left) {
+                    weapon.stats_data.viewmodel_rotation.1 =
+                        (weapon.stats_data.viewmodel_rotation.1 - arrow_step_rot).clamp(-3.15, 3.15);
+                }
+                if is_key_down(KeyCode::Right) {
+                    weapon.stats_data.viewmodel_rotation.1 =
+                        (weapon.stats_data.viewmodel_rotation.1 + arrow_step_rot).clamp(-3.15, 3.15);
+                }
+                if is_key_down(KeyCode::Up) {
+                    weapon.stats_data.viewmodel_rotation.0 =
+                        (weapon.stats_data.viewmodel_rotation.0 + arrow_step_rot).clamp(-3.15, 3.15);
+                }
+                if is_key_down(KeyCode::Down) {
+                    weapon.stats_data.viewmodel_rotation.0 =
+                        (weapon.stats_data.viewmodel_rotation.0 - arrow_step_rot).clamp(-3.15, 3.15);
+                }
+            } else if ctrl {
+                // Ctrl + left/right → roll
+                if is_key_down(KeyCode::Left) {
+                    weapon.stats_data.viewmodel_rotation.2 =
+                        (weapon.stats_data.viewmodel_rotation.2 - arrow_step_rot).clamp(-3.15, 3.15);
+                }
+                if is_key_down(KeyCode::Right) {
+                    weapon.stats_data.viewmodel_rotation.2 =
+                        (weapon.stats_data.viewmodel_rotation.2 + arrow_step_rot).clamp(-3.15, 3.15);
+                }
+                // Ctrl + up/down → pos Z (depth)
+                if is_key_down(KeyCode::Up) {
+                    weapon.stats_data.viewmodel_position.2 =
+                        (weapon.stats_data.viewmodel_position.2 + arrow_step_pos).clamp(-0.5, 0.5);
+                }
+                if is_key_down(KeyCode::Down) {
+                    weapon.stats_data.viewmodel_position.2 =
+                        (weapon.stats_data.viewmodel_position.2 - arrow_step_pos).clamp(-0.5, 0.5);
+                }
+            } else {
+                // Arrows → pos X / Y
+                if is_key_down(KeyCode::Left) {
+                    weapon.stats_data.viewmodel_position.0 =
+                        (weapon.stats_data.viewmodel_position.0 - arrow_step_pos).clamp(-0.5, 0.5);
+                }
+                if is_key_down(KeyCode::Right) {
+                    weapon.stats_data.viewmodel_position.0 =
+                        (weapon.stats_data.viewmodel_position.0 + arrow_step_pos).clamp(-0.5, 0.5);
+                }
+                if is_key_down(KeyCode::Up) {
+                    weapon.stats_data.viewmodel_position.1 =
+                        (weapon.stats_data.viewmodel_position.1 + arrow_step_pos).clamp(-0.5, 0.5);
+                }
+                if is_key_down(KeyCode::Down) {
+                    weapon.stats_data.viewmodel_position.1 =
+                        (weapon.stats_data.viewmodel_position.1 - arrow_step_pos).clamp(-0.5, 0.5);
+                }
+            }
+        }
+
+        // ── Hint overlay (lower-right corner) ──
+        let sw = screen_width();
+        let sh = screen_height();
+        let hints = [
+            ("LMB drag", "Move X / Y (axis-locked)"),
+            ("Shift+LMB", "Move Z (depth)"),
+            ("RMB drag", "Rotate Yaw / Pitch"),
+            ("Ctrl+LMB", "Roll"),
+            ("", ""),
+            ("Arrows", "Move X / Y"),
+            ("Shift+Arrows", "Rotate Yaw / Pitch"),
+            ("Ctrl+Arrows", "Roll / Depth"),
+        ];
+        let hint_w = 290.0_f32;
+        let hint_h = 16.0 * hints.len() as f32 + 28.0;
+        let hx = sw - hint_w - 10.0;
+        let hy = sh - hint_h - 10.0;
+
+        draw_rectangle(hx, hy, hint_w, hint_h, Color::from_rgba(10, 10, 10, 200));
+        draw_rectangle_lines(hx, hy, hint_w, hint_h, 1.0, Color::from_rgba(80, 200, 80, 255));
+        draw_text_ex(
+            "DRAG MODE",
+            hx + 8.0,
+            hy + 16.0,
+            text_params(13, Color::from_rgba(80, 200, 80, 255)),
+        );
+        for (i, (key, desc)) in hints.iter().enumerate() {
+            if key.is_empty() { continue; }
+            let row_y = hy + 28.0 + i as f32 * 16.0;
+            draw_text_ex(key, hx + 8.0, row_y + 12.0, text_params(11, Color::from_rgba(200, 200, 200, 255)));
+            draw_text_ex(desc, hx + 110.0, row_y + 12.0, text_params(11, Color::from_rgba(160, 160, 160, 255)));
+        }
+    }
 }
