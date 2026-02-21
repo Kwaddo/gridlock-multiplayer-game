@@ -178,6 +178,8 @@ pub struct WeaponInventory {
     pub weapons: Vec<WeaponState>,
     pub active_slot: usize,
     pub switch_cooldown: f32, // prevents rapid switching but its not that noticeable and it simplifies input handling
+    /// When set, only this slot may be selected by the local client (used for Gun Game).
+    pub locked_slot: Option<usize>,
 }
 
 impl WeaponInventory {
@@ -191,6 +193,7 @@ impl WeaponInventory {
             weapons,
             active_slot: 0,
             switch_cooldown: 0.0,
+            locked_slot: None,
         }
     }
 
@@ -202,8 +205,28 @@ impl WeaponInventory {
         &mut self.weapons[self.active_slot]
     }
 
+    /// Enforce allowed weapon slot for game modes like Gun Game. Pass `None` to clear the lock.
+    pub fn set_locked_slot(&mut self, slot: Option<usize>) {
+        self.locked_slot = slot;
+        // if locking to a different slot, force-active to match the lock immediately
+        if let Some(s) = slot {
+            if s < self.weapons.len() && s != self.active_slot {
+                // bypass cooldown on forced server-driven switch
+                self.active_slot = s;
+                self.switch_cooldown = 0.0;
+            }
+        }
+    }
+
     // switch to a specific slot (0-4). returns true if switched.
     pub fn switch_to(&mut self, slot: usize) -> bool {
+        // honor server-enforced lock (e.g. Gun Game)
+        if let Some(locked) = self.locked_slot {
+            if slot != locked {
+                return false;
+            }
+        }
+
         if slot < self.weapons.len() && slot != self.active_slot && self.switch_cooldown <= 0.0 {
             // cancel reload on old weapon
             let old = &mut self.weapons[self.active_slot];
@@ -220,6 +243,10 @@ impl WeaponInventory {
 
     // scroll to next/prev weapon.
     pub fn scroll(&mut self, direction: i32) {
+        // scrolling is not allowed when a locked slot is active
+        if self.locked_slot.is_some() {
+            return;
+        }
         let len = self.weapons.len() as i32;
         let new_slot = ((self.active_slot as i32) + direction).rem_euclid(len) as usize;
         self.switch_to(new_slot);

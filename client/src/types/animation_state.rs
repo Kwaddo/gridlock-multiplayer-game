@@ -22,6 +22,7 @@ pub struct AnimState {
 }
 
 impl AnimState {
+    #[inline(always)]
     pub fn from_movement(
         prev_x: f32,
         prev_z: f32,
@@ -72,6 +73,7 @@ impl AnimState {
         }
     }
 
+    #[inline(always)]
     pub fn skin_from_state(state: AnimState, override_skin: Option<PlayerSkin>) -> PlayerSkin {
         if let Some(skin) = override_skin {
             return skin;

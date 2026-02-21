@@ -16,6 +16,7 @@ use std::io::Cursor;
 use super::PlayingState;
 
 impl PlayingState {
+    #[inline(always)]
     pub fn process_local_input(
         &mut self,
         config: &GameConfig,
@@ -199,6 +200,7 @@ impl PlayingState {
                             let prop_hit = maze
                                 .as_ref()
                                 .and_then(|m| m.ray_test_props_with_normal(eye, fwd, range));
+<<<<<<< HEAD
                             let fc_hit = maze
                                 .as_ref()
                                 .and_then(|m| m.ray_test_floor_ceiling_with_normal(eye, fwd, range));
@@ -208,6 +210,27 @@ impl PlayingState {
 
                             // collect all hits as (distance, normal, Option<wall_cell>, is_light_cell)
                             let mut candidates: Vec<(f32, Vec3, Option<(u8, u8)>, Option<(u8, u8)>)> = Vec::new();
+=======
+                            let fc_hit = maze.as_ref().and_then(|m| {
+                                m.ray_test_floor_ceiling_with_normal(eye, fwd, range)
+                            });
+                            let light_hit = maze.as_ref().and_then(|m| {
+                                m.ray_test_ceiling_lights_with_normal(
+                                    eye,
+                                    fwd,
+                                    range,
+                                    &self.destroyed_lights,
+                                )
+                            });
+
+                            // collect all hits as (distance, normal, Option<wall_cell>, is_light_cell)
+                            let mut candidates: Vec<(
+                                f32,
+                                Vec3,
+                                Option<(u8, u8)>,
+                                Option<(u8, u8)>,
+                            )> = Vec::new();
+>>>>>>> alimohsen999/mul-25-implement-gun-game
 
                             if let Some(((wx, wy), d, n)) = wall_hit {
                                 candidates.push((d, n, Some((wx, wy)), None));
@@ -223,9 +246,19 @@ impl PlayingState {
                             }
 
                             // pick the closest
+<<<<<<< HEAD
                             candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
                             if let Some((dist, norm, wall_cell, light_cell)) = candidates.first().copied() {
+=======
+                            candidates.sort_by(|a, b| {
+                                a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+
+                            if let Some((dist, norm, wall_cell, light_cell)) =
+                                candidates.first().copied()
+                            {
+>>>>>>> alimohsen999/mul-25-implement-gun-game
                                 // if closest hit is a wall, damage it
                                 if let Some((wx, wy)) = wall_cell {
                                     if let Some(m) = maze.as_mut() {
@@ -249,7 +282,9 @@ impl PlayingState {
                             }
                         } else if self.current_world == WorldId::Lobby {
                             // lobby: test against lobby cubes, console, ground
-                            if let Some((dist, n)) = crate::world::lobby::ray_test_lobby_with_normal(eye, fwd, range) {
+                            if let Some((dist, n)) =
+                                crate::world::lobby::ray_test_lobby_with_normal(eye, fwd, range)
+                            {
                                 surface_hit = true;
                                 surface_normal = Some(n);
                                 Some(dist)
@@ -288,7 +323,9 @@ impl PlayingState {
 
                         // spawn bullet hole on surface hit
                         if surface_hit {
-                            if let (Some(dist), Some(normal)) = (closest_blocking_dist, surface_normal) {
+                            if let (Some(dist), Some(normal)) =
+                                (closest_blocking_dist, surface_normal)
+                            {
                                 let hit_point = eye + fwd * dist;
                                 self.bullet_holes.push(crate::weapons::effects::BulletHole {
                                     position: hit_point + normal * 0.002,
@@ -425,7 +462,7 @@ impl PlayingState {
 
         let pitch = gen_range(0.94f32, 1.06f32);
         let volume = gen_range(0.70f32, 0.82f32);
-        let cursor = Cursor::new(sample_bytes.clone());
+        let cursor: Cursor<Vec<u8>> = Cursor::new(sample_bytes.to_vec());
         let Ok(source) = Decoder::new(cursor) else {
             return;
         };
@@ -438,4 +475,3 @@ impl PlayingState {
         sink.detach();
     }
 }
-

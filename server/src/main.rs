@@ -1,12 +1,8 @@
-use std::collections::HashMap;
-use std::fs;
-use std::net::{SocketAddr, UdpSocket};
-use std::time::{Duration, Instant};
-
 mod maze;
 mod player;
 mod protocols;
 
+<<<<<<< HEAD
 use maze::MazeData;
 use player::Player;
 use protocols::*;
@@ -1079,4 +1075,10 @@ fn handle_respawn_request(
 
     // Immediately notify other clients so the player reappears for others right away.
     broadcast_state(socket, players);
+=======
+mod server;
+
+fn main() -> std::io::Result<()> {
+    server::run()
+>>>>>>> alimohsen999/mul-25-implement-gun-game
 }
