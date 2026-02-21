@@ -76,10 +76,10 @@ pub async fn run() {
 
                     preset_manager = CrosshairPresetManager::new(&username);
 
-                    loading_assets = resolve_asset_entries_for_quality(
-                        load_cached_manifest(&asset_cache_key),
-                        model_quality,
-                    );
+                    {
+                        let cached = load_cached_manifest(&asset_cache_key);
+                        loading_assets = resolve_asset_entries_for_quality(&cached, model_quality);
+                    }
                     loading_index = 0;
                     loading_current.clear();
                     loading_stable_frames = 0;
@@ -109,13 +109,8 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
-                    if !entries.is_empty() {
-                        merge_manifest_entries(
-                            &mut loading_assets,
-                            resolve_asset_entries_for_quality(entries, model_quality),
-                        );
-                        save_cached_manifest(&asset_cache_key, &loading_assets);
-                        loading_stable_frames = 0;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
 
@@ -130,7 +125,7 @@ pub async fn run() {
                 }
 
                 if loading_started && loading_index < loading_assets.len() {
-                    let (key, path) = loading_assets[loading_index].clone();
+                    let (ref key, ref path) = loading_assets[loading_index];
                     loading_current = key.clone();
                     load_asset_entry(key, path, &mut playing_state).await;
                     loading_index += 1;
@@ -182,11 +177,13 @@ pub async fn run() {
                         last_server_contact = Some(Instant::now());
                     }
                     if let Some(entries) = sync.assets {
-                        for (key, path) in resolve_asset_entries_for_quality(entries, model_quality)
+                        for (key, path) in
+                            resolve_asset_entries_for_quality(&entries, model_quality)
                         {
-                            load_asset_entry(key, path, &mut playing_state).await;
+                            load_asset_entry(&key, &path, &mut playing_state).await;
                         }
                     }
+
                     playing_state.simulate(&config, maze.as_ref());
                     playing_state.render(&config, &username, player_id, maze.as_ref());
                     if DevModeState::update_code_prompt(&mut playing_state.dev_mode) {
@@ -226,8 +223,8 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries, model_quality) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
 
@@ -266,8 +263,8 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries, model_quality) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
 
@@ -302,10 +299,11 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries, model_quality) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
+
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
@@ -362,10 +360,11 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries, model_quality) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
+
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
@@ -430,30 +429,49 @@ pub async fn run() {
 }
 
 fn merge_manifest_entries(existing: &mut Vec<(String, String)>, incoming: Vec<(String, String)>) {
+    use std::collections::HashMap;
+
+    // build a quick lookup for the existing entries so we avoid an O(n²) scan
+    let mut index_map: HashMap<String, usize> = HashMap::with_capacity(existing.len());
+    for (i, (k, _)) in existing.iter().enumerate() {
+        index_map.insert(k.clone(), i);
+    }
+
     for (key, path) in incoming {
-        if let Some((_, existing_path)) = existing.iter_mut().find(|(k, _)| *k == key) {
-            *existing_path = path;
+        if let Some(&idx) = index_map.get(&key) {
+            existing[idx].1 = path;
         } else {
+            index_map.insert(key.clone(), existing.len());
             existing.push((key, path));
         }
     }
 }
 
 fn resolve_asset_entries_for_quality(
-    entries: Vec<(String, String)>,
+    entries: &[(String, String)],
     model_quality: ModelQuality,
 ) -> Vec<(String, String)> {
     entries
-        .into_iter()
-        .map(|(key, path)| (key, resolve_asset_path_for_quality(&path, model_quality)))
+        .iter()
+        .map(|(key, path)| {
+            (
+                key.clone(),
+                resolve_asset_path_for_quality(path, model_quality),
+            )
+        })
         .collect()
 }
 
 fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> String {
-    let normalized = path.replace('\\', "/");
-    if !normalized.ends_with(".glb") || !normalized.starts_with("assets/models/player/") {
+    // avoid allocating a normalized copy unless we know it's a player GLB file
+    if !path.ends_with(".glb") || !path.starts_with("assets/models/player/") {
         return path.to_string();
     }
+    let normalized = if path.contains('\\') {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
 
     let Some(file_name) = Path::new(&normalized)
         .file_name()

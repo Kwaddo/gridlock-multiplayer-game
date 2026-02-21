@@ -15,6 +15,7 @@ const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
 
 impl PlayingState {
+    #[inline(always)]
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
         let raw_delta = get_frame_time();
         if raw_delta > 0.20 {
@@ -26,14 +27,15 @@ impl PlayingState {
             return;
         }
 
-        let delta = raw_delta.min(0.05);
+        let delta: f32 = raw_delta.min(0.05);
         self.just_jumped = false;
         self.just_landed = false;
 
-        for entry in &mut self.kill_feed {
+        // decrement timers and drop expired entries in a single pass
+        self.kill_feed.retain_mut(|entry| {
             entry.timer -= delta;
-        }
-        self.kill_feed.retain(|entry| entry.timer > 0.0);
+            entry.timer > 0.0
+        });
 
         if self.is_dead {
             if self.death_timer > 0.0 {
@@ -68,7 +70,8 @@ impl PlayingState {
         for bot in &mut self.practice_bots {
             Self::refresh_player_hitboxes(animated_models, &mut bot.player);
         }
-        self.practice_bots.retain(|bot| !bot.is_dead());
+        self.practice_bots
+            .retain(|bot: &crate::types::ai::simulated_player::SimulatedPlayer| !bot.is_dead());
         if self.hit_marker_timer > 0.0 {
             self.hit_marker_timer = (self.hit_marker_timer - delta).max(0.0);
         }
@@ -140,26 +143,31 @@ impl PlayingState {
         }
         self.announcements.retain(|ann| ann.1 > 0.0);
 
-        for dn in &mut self.damage_numbers {
+        self.damage_numbers.retain_mut(|dn| {
             dn.lifetime -= delta;
             dn.screen_y -= 60.0 * delta;
-        }
-        self.damage_numbers.retain(|dn| dn.lifetime > 0.0);
+            dn.lifetime > 0.0
+        });
 
-        for t in &mut self.tracers {
+        self.tracers.retain_mut(|t| {
             if t.progress < 1.0 {
                 let dist = (t.end - t.start).length();
                 t.progress = (t.progress + (t.speed * delta) / dist).min(1.0);
             }
             t.lifetime -= delta;
-        }
-        self.tracers.retain(|t| t.lifetime > 0.0);
+            t.lifetime > 0.0
+        });
 
         // bullet hole lifetime decay + remove holes on broken walls
+<<<<<<< HEAD
         for hole in &mut self.bullet_holes {
             hole.lifetime -= delta;
         }
         self.bullet_holes.retain(|h| {
+=======
+        self.bullet_holes.retain_mut(|h| {
+            h.lifetime -= delta;
+>>>>>>> alimohsen999/mul-25-implement-gun-game
             if h.lifetime <= 0.0 {
                 return false;
             }
@@ -200,6 +208,7 @@ impl PlayingState {
                     &mut self.position,
                     &mut self.movement_state.velocity,
                     self.movement_state.height,
+                    self.movement_state.is_grounded,
                 );
             }
             WorldId::Maze => {

@@ -55,15 +55,9 @@ pub fn draw_maze(
         let pipe_col_spacing = 6usize;
         let pipe_y = roof_bottom_y - 0.035;
 
-        let pipe_rows: Vec<f32> = (2..m.height as i32)
-            .step_by(pipe_row_spacing)
-            .map(|row| (row as f32 + 0.5) * m.cell_size)
-            .collect();
-        let pipe_cols: Vec<f32> = (1..m.width as i32)
-            .step_by(pipe_col_spacing)
-            .map(|col| (col as f32 + 0.5) * m.cell_size)
-            .collect();
+        // Compute pipe grid positions on-the-fly in the rendering loops below (avoid allocating Vecs every frame)
 
+        // Build ceiling lights vector once (small allocation; lights list is typically short)
         let ceiling_lights: Vec<CeilingLight> = m
             .ceiling_lights
             .iter()
@@ -184,8 +178,10 @@ pub fn draw_maze(
 
         let pipe_drop = (roof_bottom_y - pipe_y).max(0.03);
 
-        for z in &pipe_rows {
-            let main_pipe_pos = vec3(map_w * 0.5, pipe_y, *z);
+        // Draw main pipe rows and hangers without allocating temporary Vecs
+        for row in (2..m.height as i32).step_by(pipe_row_spacing) {
+            let z = (row as f32 + 0.5) * m.cell_size;
+            let main_pipe_pos = vec3(map_w * 0.5, pipe_y, z);
             draw_cube(
                 main_pipe_pos,
                 vec3(map_w * 0.94, 0.07, 0.07),
@@ -193,8 +189,9 @@ pub fn draw_maze(
                 apply_light(pipe_color, main_pipe_pos),
             );
 
-            for x in &pipe_cols {
-                let hanger_pos = vec3(*x, roof_bottom_y - pipe_drop * 0.5, *z);
+            for col in (1..m.width as i32).step_by(pipe_col_spacing) {
+                let x = (col as f32 + 0.5) * m.cell_size;
+                let hanger_pos = vec3(x, roof_bottom_y - pipe_drop * 0.5, z);
                 draw_cube(
                     hanger_pos,
                     vec3(0.03, pipe_drop, 0.03),
@@ -204,8 +201,10 @@ pub fn draw_maze(
             }
         }
 
-        for x in &pipe_cols {
-            let cross_pipe_pos = vec3(*x, pipe_y - 0.03, map_h * 0.5);
+        // Cross pipes (iterate cols again without allocating)
+        for col in (1..m.width as i32).step_by(pipe_col_spacing) {
+            let x = (col as f32 + 0.5) * m.cell_size;
+            let cross_pipe_pos = vec3(x, pipe_y - 0.03, map_h * 0.5);
             draw_cube(
                 cross_pipe_pos,
                 vec3(0.06, 0.06, map_h * 0.90),
@@ -235,11 +234,27 @@ pub fn draw_maze(
                 );
             }
 
+<<<<<<< HEAD
             if let Some(nearest_pipe_z) = pipe_rows.iter().min_by(|a, b| {
                 (*a - light_pos.z)
                     .abs()
                     .total_cmp(&(*b - light_pos.z).abs())
             }) {
+=======
+            // find nearest pipe row on-the-fly (avoid allocating/iterating a Vec)
+            let mut best_z: Option<f32> = None;
+            let mut best_dist = f32::INFINITY;
+            for row in (2..m.height as i32).step_by(pipe_row_spacing) {
+                let z = (row as f32 + 0.5) * m.cell_size;
+                let d = (z - light_pos.z).abs();
+                if d < best_dist {
+                    best_dist = d;
+                    best_z = Some(z);
+                }
+            }
+
+            if let Some(nearest_pipe_z) = best_z {
+>>>>>>> alimohsen999/mul-25-implement-gun-game
                 let conduit_len = (nearest_pipe_z - light_pos.z).abs();
                 if conduit_len > 0.06 {
                     let conduit_pos =

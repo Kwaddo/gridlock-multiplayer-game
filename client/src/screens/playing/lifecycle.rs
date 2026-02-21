@@ -34,7 +34,7 @@ impl PlayingState {
             self.connected_players
                 .iter()
                 .find(|(id, _name, _)| *id == aid)
-                .map(|(_, name, _)| name.clone())
+                .map(|(_, name, _): &(u32, String, u32)| name.clone())
         });
 
         if self.hp <= 0.0 {
@@ -175,34 +175,19 @@ impl PlayingState {
         // "MATCH OVER" header
         let header = "MATCH OVER";
         let hw = measure_game_text(header, 16);
-        draw_text_ex(
-            header,
-            (sw - hw) / 2.0,
-            cy,
-            text_params(16, text_dim),
-        );
+        draw_text_ex(header, (sw - hw) / 2.0, cy, text_params(16, text_dim));
         cy += 36.0;
 
         // Winner name (large, gold/orange)
         let winner_text = format!("{}", winner_name);
         let ww = measure_game_text(&winner_text, 42);
-        draw_text_ex(
-            &winner_text,
-            (sw - ww) / 2.0,
-            cy,
-            text_params(42, gold),
-        );
+        draw_text_ex(&winner_text, (sw - ww) / 2.0, cy, text_params(42, gold));
         cy += 14.0;
 
         // "WINS THE MATCH" subtitle
         let subtitle = "WINS THE MATCH";
         let stw = measure_game_text(subtitle, 16);
-        draw_text_ex(
-            subtitle,
-            (sw - stw) / 2.0,
-            cy,
-            text_params(16, text_label),
-        );
+        draw_text_ex(subtitle, (sw - stw) / 2.0, cy, text_params(16, text_label));
         cy += 32.0;
 
         // Separator line
@@ -228,11 +213,7 @@ impl PlayingState {
             let row_y = cy - 13.0;
 
             // Row background
-            let bg = if is_local {
-                row_highlight
-            } else {
-                row_bg
-            };
+            let bg = if is_local { row_highlight } else { row_bg };
             draw_rectangle(panel_x + 12.0, row_y, panel_w - 24.0, 26.0, bg);
 
             // Rank
@@ -253,7 +234,12 @@ impl PlayingState {
             // Kills
             let kills_text = format!("{}", kills);
             let kw = measure_game_text(&kills_text, 14);
-            draw_text_ex(&kills_text, col_kills_x + (40.0 - kw) / 2.0, cy, text_params(14, text_bright));
+            draw_text_ex(
+                &kills_text,
+                col_kills_x + (40.0 - kw) / 2.0,
+                cy,
+                text_params(14, text_bright),
+            );
 
             cy += 28.0;
         }
