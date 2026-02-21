@@ -1,4 +1,4 @@
-use super::{CrosshairStyle, FireMode, WeaponStats};
+use super::{ CrosshairStyle, FireMode, WeaponStats };
 
 /// SPAS-12 — tactical shotgun, mid-range consistency
 pub const SPAS: WeaponStats = WeaponStats {
@@ -8,17 +8,19 @@ pub const SPAS: WeaponStats = WeaponStats {
     damage: 12.0,
     headshot_mult: 1.5,
     pellet_count: 9,
-    pellet_spread: Some(&[
-        (0.0, 0.0),
-        (0.4363, 0.9),
-        (1.1345, 0.9),
-        (2.0071, 0.9),
-        (2.7053, 0.9),
-        (3.5779, 0.9),
-        (4.2761, 0.9),
-        (5.1487, 0.9),
-        (5.8469, 0.9),
-    ]),
+    pellet_spread: Some(
+        &[
+            (0.0, 0.0),
+            (0.4363, 0.9),
+            (1.1345, 0.9),
+            (2.0071, 0.9),
+            (2.7053, 0.9),
+            (3.5779, 0.9),
+            (4.2761, 0.9),
+            (5.1487, 0.9),
+            (5.8469, 0.9),
+        ]
+    ),
 
     fire_rate: 1.0,
     magazine_size: 7,
@@ -63,19 +65,20 @@ pub const SPAS: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("spas_model"),
     viewmodel_asset_key: Some("weapon_fp_shotgun"),
-    viewmodel_scale: 0.0020,
-    viewmodel_position: (0.220, 0.130, -0.440),
-    viewmodel_rotation: (-0.100, -1.450, 0.000),
-    viewmodel_muzzle_offset: (-1.100, 0.020, -0.250),
+
+    viewmodel_scale: 0.002,
+    viewmodel_position: (0.22, 0.13, -0.44),
+    viewmodel_rotation: (-0.1, -1.45, 0.0),
+    viewmodel_muzzle_offset: (-1.1, 0.02, -0.25),
     viewmodel_hands_scale: 1.93,
-    viewmodel_hands_offset: (0.180, -0.120, -0.466),
-    viewmodel_hands_rotation: (-0.050, 0.900, 0.100),
-    viewmodel_pair_offset_pos: (0.044, 0.000, 0.000),
-    viewmodel_pair_offset_rot: (0.100, 0.000, 0.000),
-    viewmodel_ads_pos_offset: (0.125, 0.025, -0.060),
-    viewmodel_ads_rot_offset: (0.275, -0.130, 0.125),
+    viewmodel_hands_offset: (0.18, -0.12, -0.466),
+    viewmodel_hands_rotation: (-0.05, 0.9, 0.1),
+    viewmodel_pair_offset_pos: (0.044, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.1, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.126, 0.025, -0.06),
+    viewmodel_ads_rot_offset: (0.275, -0.12, 0.125),
     viewmodel_ads_hands_pos_offset: (0.134, 0.026, -0.537),
-    viewmodel_ads_hands_rot_offset: (0.100, 0.000, 0.085),
+    viewmodel_ads_hands_rot_offset: (0.1, 0.0, 0.085),
 
     falloff_start: 5.0,
     falloff_end: 15.0,

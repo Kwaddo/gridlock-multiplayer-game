@@ -1,4 +1,4 @@
-use super::{CrosshairStyle, FireMode, WeaponStats};
+use super::{ CrosshairStyle, FireMode, WeaponStats };
 
 /// M16 — precision burst rifle, tap/burst accuracy king
 pub const M16_STATS: WeaponStats = WeaponStats {
@@ -53,18 +53,19 @@ pub const M16_STATS: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("m16_model"),
     viewmodel_asset_key: None,
+
     viewmodel_scale: 0.003,
     viewmodel_position: (0.22, 0.08, -0.31),
     viewmodel_rotation: (0.05, -1.75, 0.0),
-    viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
+    viewmodel_muzzle_offset: (-1.0, 0.02, -0.25),
     viewmodel_hands_scale: 1.93,
     viewmodel_hands_offset: (0.16, -0.16, -0.28),
     viewmodel_hands_rotation: (-0.15, 0.45, -0.05),
     viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
     viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
-    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
-    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
-    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.132, 0.025, -0.151),
+    viewmodel_ads_rot_offset: (0.015, 0.195, -0.02),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, -0.704),
     viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 25.0,
@@ -72,13 +73,13 @@ pub const M16_STATS: WeaponStats = WeaponStats {
     falloff_min_mult: 0.6,
 
     recoil_pattern: &[
-        (0.010, 0.0),
+        (0.01, 0.0),
         (0.011, 0.0),
         (0.012, 0.1),
         (0.012, 0.2),
         (0.011, 0.3),
-        (0.010, 0.1),
-        (0.010, -0.2),
+        (0.01, 0.1),
+        (0.01, -0.2),
         (0.009, -0.4),
         (0.008, -0.3),
         (0.007, -0.1),
