@@ -36,6 +36,9 @@ pub const MP5: WeaponStats = WeaponStats {
     tracer_color: [255, 200, 80, 255],
     tracer_thickness: 0.01,
     tracer_lifetime: 1.2,
+    bullet_hole_size: 0.18,
+    bullet_hole_lifetime: 5.0,
+    bullet_hole_color: [200, 200, 200, 255],
 
     crosshair_kick_per_shot: 0.8,
     crosshair_kick_decay: 6.0,

@@ -303,7 +303,7 @@ pub fn draw_crosshair_settings(
         };
         draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
         draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, GRAY);
-        let name = kind.display_name();
+        let name: &str = kind.display_name();
         let text_w = measure_game_text(name, btn_fs);
         draw_text_ex(
             name,

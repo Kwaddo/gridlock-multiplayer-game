@@ -138,6 +138,83 @@ pub fn ray_hit_aabb(
     Some(tmin)
 }
 
+/// Same as `ray_hit_aabb` but also returns the surface normal of the AABB face that was hit.
+pub fn ray_hit_aabb_with_normal(
+    origin: Vec3,
+    dir: Vec3,
+    center: Vec3,
+    half: Vec3,
+    max_dist: f32,
+) -> Option<(f32, Vec3)> {
+    let min = center - half;
+    let max = center + half;
+
+    let mut tmin = 0.0_f32;
+    let mut tmax = max_dist;
+    // Track which axis and direction produced the tightest entry constraint.
+    // axis: 0=X, 1=Y, 2=Z; sign: -1 or +1 (outward normal direction)
+    let mut hit_axis: usize = 0;
+    let mut hit_sign: f32 = -1.0;
+
+    for i in 0..3 {
+        let o = match i {
+            0 => origin.x,
+            1 => origin.y,
+            _ => origin.z,
+        };
+        let d = match i {
+            0 => dir.x,
+            1 => dir.y,
+            _ => dir.z,
+        };
+        let bmin = match i {
+            0 => min.x,
+            1 => min.y,
+            _ => min.z,
+        };
+        let bmax = match i {
+            0 => max.x,
+            1 => max.y,
+            _ => max.z,
+        };
+
+        if d.abs() < 1e-8 {
+            if o < bmin || o > bmax {
+                return None;
+            }
+        } else {
+            let inv_d = 1.0 / d;
+            let mut t1 = (bmin - o) * inv_d;
+            let mut t2 = (bmax - o) * inv_d;
+            // t1 = entry into the min face, t2 = entry into the max face
+            // After swap, t1 < t2 but we need to track which face t1 corresponds to
+            let enters_from_min_side = d > 0.0; // ray goes +, so it enters through bmin face
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
+            }
+            if t1 > tmin {
+                tmin = t1;
+                hit_axis = i;
+                // The outward normal points away from the box center.
+                // If ray enters from the min side (d>0), normal points -axis.
+                // If ray enters from the max side (d<0), normal points +axis.
+                hit_sign = if enters_from_min_side { -1.0 } else { 1.0 };
+            }
+            tmax = tmax.min(t2);
+            if tmin > tmax {
+                return None;
+            }
+        }
+    }
+
+    let normal = match hit_axis {
+        0 => vec3(hit_sign, 0.0, 0.0),
+        1 => vec3(0.0, hit_sign, 0.0),
+        _ => vec3(0.0, 0.0, hit_sign),
+    };
+    Some((tmin, normal))
+}
+
 pub fn damage_falloff(distance: f32, stats: &WeaponStats) -> f32 {
     if distance <= stats.falloff_start {
         1.0

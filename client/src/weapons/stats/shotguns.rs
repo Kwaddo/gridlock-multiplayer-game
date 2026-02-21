@@ -49,6 +49,9 @@ pub const SPAS: WeaponStats = WeaponStats {
     tracer_color: [255, 140, 60, 255],
     tracer_thickness: 0.008,
     tracer_lifetime: 0.8,
+    bullet_hole_size: 0.3,
+    bullet_hole_lifetime: 5.0,
+    bullet_hole_color: [200, 200, 200, 255],
 
     crosshair_kick_per_shot: 2.5,
     crosshair_kick_decay: 8.0,

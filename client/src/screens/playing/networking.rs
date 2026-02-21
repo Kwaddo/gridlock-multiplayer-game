@@ -16,14 +16,15 @@ impl PlayingState {
             }
 
             if let Some(target) = self.pending_world_change.take() {
-                let msg = vec![MSG_WORLD_CHANGE, target.as_u8()];
+                let msg: Vec<u8> = vec![MSG_WORLD_CHANGE, target.as_u8()];
                 let _ = s.send_to(&msg, server_addr);
             }
 
-            // Lobby console: send start-game request to server
+            // Lobby console: send start-game request to server (include selected gamemode)
             if self.pending_start_request {
                 self.pending_start_request = false;
-                let msg = vec![MSG_START_GAME];
+                let mode = self.pending_start_gamemode;
+                let msg = vec![MSG_START_GAME, mode];
                 let _ = s.send_to(&msg, server_addr);
             }
 
@@ -36,6 +37,10 @@ impl PlayingState {
                 let mut msg = vec![MSG_HIT];
                 msg.extend_from_slice(&victim_id.to_be_bytes());
                 msg.extend_from_slice(&damage.to_be_bytes());
+                // append active weapon name so server can include it in kill feed
+                let weapon_name = self.weapons.active().stats().name.as_bytes();
+                msg.push(weapon_name.len() as u8);
+                msg.extend_from_slice(weapon_name);
                 let _ = s.send_to(&msg, server_addr);
             }
 
@@ -77,14 +82,24 @@ impl PlayingState {
                 event_flags |= EVT_SLIDE_END;
             }
 
-            let mut msg = vec![MSG_POSITION];
-            msg.extend_from_slice(&self.position.x.to_be_bytes());
-            msg.extend_from_slice(&self.position.y.to_be_bytes());
-            msg.extend_from_slice(&self.position.z.to_be_bytes());
-            msg.extend_from_slice(&self.yaw.to_be_bytes());
-            msg.push(state_flags);
-            msg.push(event_flags);
-            let _ = s.send_to(&msg, server_addr);
+            // pack position message into a small stack buffer to avoid per-frame heap allocations
+            let mut buf = [0u8; 32];
+            let mut p = 0usize;
+            buf[p] = MSG_POSITION;
+            p += 1;
+            buf[p..p + 4].copy_from_slice(&self.position.x.to_be_bytes());
+            p += 4;
+            buf[p..p + 4].copy_from_slice(&self.position.y.to_be_bytes());
+            p += 4;
+            buf[p..p + 4].copy_from_slice(&self.position.z.to_be_bytes());
+            p += 4;
+            buf[p..p + 4].copy_from_slice(&self.yaw.to_be_bytes());
+            p += 4;
+            buf[p] = state_flags;
+            p += 1;
+            buf[p] = event_flags;
+            p += 1;
+            let _ = s.send_to(&buf[..p], server_addr);
         }
     }
 }

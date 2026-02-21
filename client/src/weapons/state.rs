@@ -57,11 +57,11 @@ pub struct WeaponState {
     pub pair_offset_rot: (f32, f32, f32), // additive rotation (pitch, yaw, roll) applied to both
 
     // -- Dev: ADS viewmodel offsets (additive, lerped by ads_progress, independent per weapon)
-    pub ads_pair_locked: bool,                  // when true, ADS pos/rot sliders move gun+hands together
-    pub ads_pos_offset: (f32, f32, f32),        // default (0.08, 0.03, 0.0) — matches old hardcoded shift
-    pub ads_rot_offset: (f32, f32, f32),        // rotation delta at full ADS
-    pub ads_hands_pos_offset: (f32, f32, f32),  // hands position delta at full ADS
-    pub ads_hands_rot_offset: (f32, f32, f32),  // hands rotation delta at full ADS
+    pub ads_pair_locked: bool, // when true, ADS pos/rot sliders move gun+hands together
+    pub ads_pos_offset: (f32, f32, f32), // default (0.08, 0.03, 0.0) — matches old hardcoded shift
+    pub ads_rot_offset: (f32, f32, f32), // rotation delta at full ADS
+    pub ads_hands_pos_offset: (f32, f32, f32), // hands position delta at full ADS
+    pub ads_hands_rot_offset: (f32, f32, f32), // hands rotation delta at full ADS
 }
 
 impl WeaponState {
@@ -85,9 +85,14 @@ impl WeaponState {
             computed_spread: 0.0,
             trigger_held: false,
             muzzle_flash_timer: 0.0,
-            crosshair: if stats.crosshair_style == CrosshairStyle::Standard {
-                // Standard-style weapons always get the default cross config,
-                // even if their category (e.g. Sniper) would give a stripped-down one
+            crosshair: if stats.crosshair_style == CrosshairStyle::Standard
+                && category == super::stats::WeaponCategory::Sniper
+            {
+                // only snipers need the generic crosshair fallback; other weapon types
+                // (including shotguns) should still receive their category-specific
+                // crosshair config. previously all Standard-style weapons were forced
+                // to use `WeaponCategory::Other` which caused shotguns to show a
+                // plain crosshair instead of the intended "four curves" preset.
                 CrosshairConfig::for_category(super::stats::WeaponCategory::Other)
             } else {
                 CrosshairConfig::for_category(category)
@@ -228,16 +233,23 @@ pub struct WeaponInventory {
     pub weapons: Vec<WeaponState>,
     pub active_slot: usize,
     pub switch_cooldown: f32, // prevents rapid switching but its not that noticeable and it simplifies input handling
+    /// When set, only this slot may be selected by the local client (used for Gun Game).
+    pub locked_slot: Option<usize>,
 }
 
 impl WeaponInventory {
     // build inventory from a loadout (5 slots)
     pub fn from_loadout(loadout: &Loadout) -> Self {
-        let weapons = loadout.slots.iter().map(|&id| WeaponState::new(id)).collect();
+        let weapons = loadout
+            .slots
+            .iter()
+            .map(|&id| WeaponState::new(id))
+            .collect();
         Self {
             weapons,
             active_slot: 0,
             switch_cooldown: 0.0,
+            locked_slot: None,
         }
     }
 
@@ -262,8 +274,28 @@ impl WeaponInventory {
         &mut self.weapons[self.active_slot]
     }
 
+    /// Enforce allowed weapon slot for game modes like Gun Game. Pass `None` to clear the lock.
+    pub fn set_locked_slot(&mut self, slot: Option<usize>) {
+        self.locked_slot = slot;
+        // if locking to a different slot, force-active to match the lock immediately
+        if let Some(s) = slot {
+            if s < self.weapons.len() && s != self.active_slot {
+                // bypass cooldown on forced server-driven switch
+                self.active_slot = s;
+                self.switch_cooldown = 0.0;
+            }
+        }
+    }
+
     // switch to a specific slot (0-4). returns true if switched.
     pub fn switch_to(&mut self, slot: usize) -> bool {
+        // honor server-enforced lock (e.g. Gun Game)
+        if let Some(locked) = self.locked_slot {
+            if slot != locked {
+                return false;
+            }
+        }
+
         if slot < self.weapons.len() && slot != self.active_slot && self.switch_cooldown <= 0.0 {
             // cancel reload on old weapon
             let old = &mut self.weapons[self.active_slot];
@@ -280,6 +312,10 @@ impl WeaponInventory {
 
     // scroll to next/prev weapon.
     pub fn scroll(&mut self, direction: i32) {
+        // scrolling is not allowed when a locked slot is active
+        if self.locked_slot.is_some() {
+            return;
+        }
         let len = self.weapons.len() as i32;
         let new_slot = ((self.active_slot as i32) + direction).rem_euclid(len) as usize;
         self.switch_to(new_slot);

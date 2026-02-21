@@ -14,10 +14,27 @@ use client::weapons::crosshair_presets::CrosshairPresetManager;
 use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
-use super::asset_cache::{load_cached_manifest, save_cached_manifest};
+use super::asset_cache::load_cached_manifest;
 use super::asset_loader::load_asset_entry;
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
+
+// asset quality selector used when resolving which version of a model to
+// request from the server.  the value is passed down to
+// `resolve_asset_path_for_quality`, which currently just uses it when
+// choosing between `Compressed`/`Full` folders; defaults to `High`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModelQuality {
+    Low,
+    Medium,
+    High,
+}
+
+impl Default for ModelQuality {
+    fn default() -> Self {
+        ModelQuality::High
+    }
+}
 
 pub async fn run() {
     set_default_filter_mode(FilterMode::Nearest);
@@ -41,6 +58,10 @@ pub async fn run() {
     let mut is_fullscreen = true;
     let mut loadout = Loadout::default_loadout();
     let mut lobby_inventory = LobbyInventoryScreen::new();
+
+    // currently we always use high quality; eventually this could be
+    // user-configurable via the settings screen.
+    let mut model_quality = ModelQuality::default();
 
     // connection heartbeat / last seen from server
     let mut last_server_contact: Option<Instant> = None;
@@ -74,7 +95,10 @@ pub async fn run() {
 
                     preset_manager = CrosshairPresetManager::new(&username);
 
-                    loading_assets = resolve_asset_entries_for_quality(load_cached_manifest(&asset_cache_key));
+                    {
+                        let cached = load_cached_manifest(&asset_cache_key);
+                        loading_assets = resolve_asset_entries_for_quality(&cached, model_quality);
+                    }
                     loading_index = 0;
                     loading_current.clear();
                     loading_stable_frames = 0;
@@ -100,14 +124,20 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
-                draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::from_rgba(0, 0, 0, 150));
+                draw_rectangle(
+                    0.0,
+                    0.0,
+                    screen_width(),
+                    screen_height(),
+                    Color::from_rgba(0, 0, 0, 150),
+                );
                 lobby_inventory.draw(&loadout);
                 if lobby_inventory.update(&mut loadout) {
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
@@ -135,13 +165,8 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
-                    if !entries.is_empty() {
-                        merge_manifest_entries(
-                            &mut loading_assets,
-                            resolve_asset_entries_for_quality(entries),
-                        );
-                        save_cached_manifest(&asset_cache_key, &loading_assets);
-                        loading_stable_frames = 0;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
 
@@ -156,7 +181,7 @@ pub async fn run() {
                 }
 
                 if loading_started && loading_index < loading_assets.len() {
-                    let (key, path) = loading_assets[loading_index].clone();
+                    let (ref key, ref path) = loading_assets[loading_index];
                     loading_current = key.clone();
                     load_asset_entry(key, path, &mut playing_state).await;
                     loading_index += 1;
@@ -210,11 +235,13 @@ pub async fn run() {
                         last_server_contact = Some(Instant::now());
                     }
                     if let Some(entries) = sync.assets {
-                        for (key, path) in resolve_asset_entries_for_quality(entries)
+                        for (key, path) in
+                            resolve_asset_entries_for_quality(&entries, model_quality)
                         {
-                            load_asset_entry(key, path, &mut playing_state).await;
+                            load_asset_entry(&key, &path, &mut playing_state).await;
                         }
                     }
+
                     playing_state.simulate(&config, maze.as_ref());
                     playing_state.render(&config, &username, player_id, maze.as_ref());
                     if DevModeState::update_code_prompt(&mut playing_state.dev_mode) {
@@ -254,8 +281,8 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
 
@@ -294,17 +321,20 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
-                if let Some(new_state) =
-                    draw_pause_menu(&config, &mut settings_screen, &mut playing_state.dev_mode, maze.is_some())
-                {
+                if let Some(new_state) = draw_pause_menu(
+                    &config,
+                    &mut settings_screen,
+                    &mut playing_state.dev_mode,
+                    maze.is_some(),
+                ) {
                     state = new_state;
                     if matches!(state, GameState::LobbyInventory) {
                         lobby_inventory = LobbyInventoryScreen::new();
@@ -333,10 +363,11 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
+
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
@@ -393,10 +424,11 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
                 if let Some(entries) = sync.assets {
-                    for (key, path) in resolve_asset_entries_for_quality(entries) {
-                        load_asset_entry(key, path, &mut playing_state).await;
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
                     }
                 }
+
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
@@ -461,36 +493,58 @@ pub async fn run() {
 }
 
 fn merge_manifest_entries(existing: &mut Vec<(String, String)>, incoming: Vec<(String, String)>) {
+    use std::collections::HashMap;
+
+    // build a quick lookup for the existing entries so we avoid an O(n²) scan
+    let mut index_map: HashMap<String, usize> = HashMap::with_capacity(existing.len());
+    for (i, (k, _)) in existing.iter().enumerate() {
+        index_map.insert(k.clone(), i);
+    }
+
     for (key, path) in incoming {
-        if let Some((_, existing_path)) = existing.iter_mut().find(|(k, _)| *k == key) {
-            *existing_path = path;
+        if let Some(&idx) = index_map.get(&key) {
+            existing[idx].1 = path;
         } else {
+            index_map.insert(key.clone(), existing.len());
             existing.push((key, path));
         }
     }
 }
 
-fn resolve_asset_entries_for_quality(entries: Vec<(String, String)>) -> Vec<(String, String)> {
+fn resolve_asset_entries_for_quality(
+    entries: &[(String, String)],
+    model_quality: ModelQuality,
+) -> Vec<(String, String)> {
+    // the `model_quality` parameter is currently unused; kept so we can
+    // support different heuristics later (low/medium/high).
+    let _ = model_quality;
     entries
-        .into_iter()
-        .map(|(key, path)| (key, resolve_asset_path_for_quality(&path)))
+        .iter()
+        .map(|(key, path)| {
+            (
+                key.clone(),
+                resolve_asset_path_for_quality(path, model_quality),
+            )
+        })
         .collect()
 }
 
-fn resolve_asset_path_for_quality(path: &str) -> String {
-    let normalized = path.replace('\\', "/");
-    if !normalized.ends_with(".glb") || !normalized.starts_with("assets/models/player/") {
+fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> String {
+    // avoid allocating a normalized copy unless we know it's a player GLB file
+    if !path.ends_with(".glb") || !path.starts_with("assets/models/player/") {
         return path.to_string();
     }
+    let normalized = if path.contains('\\') {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
 
     if Path::new(&normalized).exists() {
         return normalized;
     }
 
-    let Some(file_name) = Path::new(&normalized)
-        .file_name()
-        .and_then(|s| s.to_str())
-    else {
+    let Some(file_name) = Path::new(&normalized).file_name().and_then(|s| s.to_str()) else {
         return path.to_string();
     };
 
@@ -535,7 +589,10 @@ async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
         ("mp5_model", "assets/models/weapons/SMGs/mp5.glb"),
         ("spas_model", "assets/models/weapons/Shotguns/spas.glb"),
         ("m16_model", "assets/models/weapons/Assault Rifles/m16.glb"),
-        ("bolt_action_model", "assets/models/weapons/Snipers/bolt_action.glb"),
+        (
+            "bolt_action_model",
+            "assets/models/weapons/Snipers/bolt_action.glb",
+        ),
         ("minigun_model", "assets/models/weapons/Other/minigun.glb"),
     ];
 
@@ -544,6 +601,6 @@ async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
         {
             continue;
         }
-        load_asset_entry(key.to_string(), path.to_string(), playing_state).await;
+        load_asset_entry(key, path, playing_state).await;
     }
 }

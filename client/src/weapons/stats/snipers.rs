@@ -36,6 +36,9 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
     tracer_color: [180, 200, 255, 255],
     tracer_thickness: 0.03,
     tracer_lifetime: 3.5,
+    bullet_hole_size: 0.5,
+    bullet_hole_lifetime: 5.0,
+    bullet_hole_color: [200, 200, 200, 255],
 
     crosshair_kick_per_shot: 0.0,
     crosshair_kick_decay: 0.0,

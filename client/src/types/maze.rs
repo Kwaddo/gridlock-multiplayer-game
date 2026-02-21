@@ -20,6 +20,7 @@ pub enum PropKind {
     Desk = 5,
     Monitor = 6,
     OfficeChair = 7,
+    Foosball = 8,
 }
 
 impl PropKind {
@@ -32,6 +33,7 @@ impl PropKind {
             5 => Some(PropKind::Desk),
             6 => Some(PropKind::Monitor),
             7 => Some(PropKind::OfficeChair),
+            8 => Some(PropKind::Foosball),
             _ => None,
         }
     }
@@ -46,6 +48,7 @@ impl PropKind {
             PropKind::Desk => 0.40,
             PropKind::Monitor => 0.0,     // monitors are on desks
             PropKind::OfficeChair => 0.0, // chairs can be pushed through
+            PropKind::Foosball => 0.45,
         }
     }
 
@@ -59,6 +62,7 @@ impl PropKind {
             PropKind::Desk => true,
             PropKind::Monitor => false,
             PropKind::OfficeChair => false,
+            PropKind::Foosball => true,
         }
     }
 
@@ -74,7 +78,9 @@ impl PropKind {
             PropKind::Crate => Some((vec3(0.0, 0.35, 0.0), vec3(0.33, 0.36, 0.33))),
             PropKind::Barrel => Some((vec3(0.0, 0.45, 0.0), vec3(0.29, 0.46, 0.29))),
             PropKind::SupplyCrate => Some((vec3(0.0, 0.35, 0.0), vec3(0.34, 0.36, 0.34))),
-            PropKind::Desk => Some((vec3(0.0, 0.35, 0.0), vec3(0.55, 0.35, 0.50))),
+            // Desk: just the desktop surface (thin slab) — avoids bullet holes floating under the desk
+            PropKind::Desk => Some((vec3(0.0, 0.65, 0.0), vec3(0.55, 0.04, 0.50))),
+            PropKind::Foosball => Some((vec3(0.0, 0.68, 0.0), vec3(0.57, 0.12, 0.36))),
             _ => None,
         }
     }
@@ -137,6 +143,11 @@ impl Maze {
             return false;
         }
         self.cells[self.idx(x as usize, y as usize)] == 1
+    }
+
+    pub fn is_wall(&self, x: u8, y: u8) -> bool {
+        let idx = self.idx(x as usize, y as usize);
+        idx < self.cells.len() && self.cells[idx] == 0
     }
 
     pub fn get_prop_at(&self, x: u8, y: u8) -> Option<&Prop> {
@@ -294,6 +305,170 @@ impl Maze {
         }
 
         closest_hit
+    }
+
+    /// Like `ray_test_props` but also returns the surface normal of the hit face.
+    pub fn ray_test_props_with_normal(&self, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<(f32, Vec3)> {
+        use crate::weapons::combat::ray_hit_aabb_with_normal;
+
+        let mut closest: Option<(f32, Vec3)> = None;
+
+        for prop in &self.props {
+            if let Some((center_offset, half_extents)) = prop.kind.bullet_hitbox() {
+                let prop_world_pos = self.cell_to_world(prop.x as i32, prop.y as i32);
+                let box_center = prop_world_pos + center_offset;
+
+                if let Some((dist, normal)) = ray_hit_aabb_with_normal(origin, dir, box_center, half_extents, max_dist) {
+                    if closest.map_or(true, |(d, _)| dist < d) {
+                        closest = Some((dist, normal));
+                    }
+                }
+            }
+        }
+
+        closest
+    }
+
+    /// Like `ray_test_walls` but also returns the surface normal of the hit face.
+    pub fn ray_test_walls_with_normal(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_dist: f32,
+    ) -> Option<((u8, u8), f32, Vec3)> {
+        use crate::weapons::combat::ray_hit_aabb_with_normal;
+
+        let mut closest_hit: Option<((u8, u8), f32, Vec3)> = None;
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.cells[self.idx(x as usize, y as usize)] == 0 {
+                    let wall_center = self.cell_to_world(x as i32, y as i32);
+                    let box_center = wall_center + vec3(0.0, self.wall_height * 0.5, 0.0);
+                    let half_extents = vec3(
+                        self.cell_size * 0.5,
+                        self.wall_height * 0.5,
+                        self.cell_size * 0.5,
+                    );
+
+                    if let Some((dist, normal)) =
+                        ray_hit_aabb_with_normal(origin, dir, box_center, half_extents, max_dist)
+                    {
+                        let is_closer = closest_hit.map_or(true, |(_, d, _)| dist < d);
+                        if is_closer {
+                            closest_hit = Some(((x, y), dist, normal));
+                        }
+                    }
+                }
+            }
+        }
+
+        closest_hit
+    }
+
+    /// Ray-test the maze floor and ceiling panels. Returns closest hit distance and surface normal.
+    pub fn ray_test_floor_ceiling_with_normal(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_dist: f32,
+    ) -> Option<(f32, Vec3)> {
+        use crate::weapons::combat::ray_hit_aabb_with_normal;
+
+        let map_w = self.width as f32 * self.cell_size;
+        let map_h = self.height as f32 * self.cell_size;
+
+        let mut best: Option<(f32, Vec3)> = None;
+
+        // Floor: thin slab at y = -0.025, size 0.05 thick
+        let floor_center = vec3(map_w * 0.5, -0.025, map_h * 0.5);
+        let floor_half = vec3(map_w * 0.5, 0.025, map_h * 0.5);
+        if let Some((d, n)) = ray_hit_aabb_with_normal(origin, dir, floor_center, floor_half, max_dist) {
+            best = Some((d, n));
+        }
+
+        // Ceiling: individual per-cell panels (matches rendering in maze.rs)
+        let roof_clearance = 0.05;
+        let roof_bottom_y = self.wall_height + roof_clearance;
+        let panel_inset = 0.03;
+        let panel_thickness = 0.03;
+        let panel_drop = 0.018;
+        let panel_y = roof_bottom_y - panel_drop;
+        let panel_half_xz = self.cell_size * (1.0 - panel_inset) * 0.5;
+        let panel_half_y = panel_thickness * 0.5;
+
+        // Only check cells near the ray to avoid iterating the entire maze
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let idx = self.idx(x as usize, y as usize);
+                if self.cells[idx] == 0 {
+                    continue; // wall cells don't have ceiling panels
+                }
+                let center = vec3(
+                    (x as f32 + 0.5) * self.cell_size,
+                    panel_y,
+                    (y as f32 + 0.5) * self.cell_size,
+                );
+                if let Some((d, n)) = ray_hit_aabb_with_normal(
+                    origin, dir, center,
+                    vec3(panel_half_xz, panel_half_y, panel_half_xz),
+                    max_dist,
+                ) {
+                    if best.map_or(true, |(b, _)| d < b) {
+                        best = Some((d, n));
+                    }
+                }
+            }
+        }
+
+        // Fallback: the solid roof slab above all panels catches anything that misses gaps
+        let roof_thickness = 0.06;
+        let roof_top_y = roof_bottom_y + roof_thickness;
+        let roof_center = vec3(map_w * 0.5, (roof_bottom_y + roof_top_y) * 0.5, map_h * 0.5);
+        let roof_half = vec3(map_w * 0.505, roof_thickness * 0.5, map_h * 0.505);
+        if let Some((d, n)) = ray_hit_aabb_with_normal(origin, dir, roof_center, roof_half, max_dist) {
+            if best.map_or(true, |(b, _)| d < b) {
+                best = Some((d, n));
+            }
+        }
+
+        best
+    }
+
+    /// Ray-test ceiling lights. Returns the cell (x,y) of the closest hit light and distance + normal.
+    pub fn ray_test_ceiling_lights_with_normal(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_dist: f32,
+        destroyed_lights: &HashSet<(u8, u8)>,
+    ) -> Option<((u8, u8), f32, Vec3)> {
+        use crate::weapons::combat::ray_hit_aabb_with_normal;
+
+        let roof_clearance = 0.05;
+        let roof_bottom_y = self.wall_height + roof_clearance;
+
+        let mut best: Option<((u8, u8), f32, Vec3)> = None;
+
+        for info in &self.ceiling_lights {
+            // skip already destroyed lights
+            if destroyed_lights.contains(&(info.x, info.y)) {
+                continue;
+            }
+            let light_pos = self.cell_to_world(info.x as i32, info.y as i32)
+                + vec3(0.0, roof_bottom_y - 0.16, 0.0);
+            // housing hitbox: 0.44 x 0.06 x 0.44 centered at light_pos + (0, 0.02, 0)
+            let housing_center = light_pos + vec3(0.0, 0.02, 0.0);
+            let housing_half = vec3(0.22, 0.05, 0.22);
+
+            if let Some((d, n)) = ray_hit_aabb_with_normal(origin, dir, housing_center, housing_half, max_dist) {
+                if best.map_or(true, |(_, bd, _)| d < bd) {
+                    best = Some(((info.x, info.y), d, n));
+                }
+            }
+        }
+
+        best
     }
 
     /// Damage a wall at the given cell position

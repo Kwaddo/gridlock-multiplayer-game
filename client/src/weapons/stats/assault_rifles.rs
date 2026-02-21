@@ -37,6 +37,9 @@ pub const M16_STATS: WeaponStats = WeaponStats {
     tracer_color: [255, 230, 150, 255],
     tracer_thickness: 0.015,
     tracer_lifetime: 1.5,
+    bullet_hole_size: 0.25,
+    bullet_hole_lifetime: 5.0,
+    bullet_hole_color: [200, 200, 200, 255],
 
     crosshair_kick_per_shot: 0.8,
     crosshair_kick_decay: 5.0,

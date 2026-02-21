@@ -19,7 +19,7 @@ pub mod state;
 pub mod stats;
 
 // exports for convenience
-pub use effects::{BulletTracer, DamageNumber};
+pub use effects::{BulletHole, BulletTracer, DamageNumber};
 pub use loadout::Loadout;
 pub use recoil::SpreadContext;
 pub use state::{WeaponInventory, WeaponState};
