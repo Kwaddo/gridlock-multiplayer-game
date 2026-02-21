@@ -87,8 +87,8 @@ pub enum WeaponId {
 
     // Snipers
     BoltAction,
-    // HuntingRifle,
-    // SemiAutoSniper,
+    HuntingRifle,
+    SemiAutoSniper,
 
     // Other
     // GrenadeLauncher,
@@ -125,8 +125,8 @@ impl WeaponId {
 
         // Snipers
         WeaponId::BoltAction,
-        // WeaponId::HuntingRifle,
-        // WeaponId::SemiAutoSniper,
+        WeaponId::HuntingRifle,
+        WeaponId::SemiAutoSniper,
 
         // Other
         // WeaponId::GrenadeLauncher,
@@ -155,8 +155,7 @@ impl WeaponId {
             | WeaponId::AsVal
             => WeaponCategory::AssaultRifle,
 
-            WeaponId::BoltAction
-            // | WeaponId::HuntingRifle | WeaponId::SemiAutoSniper
+            WeaponId::BoltAction | WeaponId::HuntingRifle | WeaponId::SemiAutoSniper
             => WeaponCategory::Sniper,
 
             // WeaponId::GrenadeLauncher | WeaponId::Rpg |
@@ -194,8 +193,8 @@ impl WeaponId {
 
             // Snipers
             WeaponId::BoltAction => &snipers::BOLT_ACTION,
-            // WeaponId::HuntingRifle => &snipers::HUNTING_RIFLE,
-            // WeaponId::SemiAutoSniper => &snipers::SEMI_AUTO_SNIPER,
+            WeaponId::HuntingRifle => &snipers::HUNTING_RIFLE,
+            WeaponId::SemiAutoSniper => &snipers::SEMI_AUTO_SNIPER,
 
             // Other
             // WeaponId::GrenadeLauncher => &other::GRENADE_LAUNCHER,

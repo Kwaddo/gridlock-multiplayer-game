@@ -3,7 +3,7 @@
 */
 use super::crosshair::CrosshairConfig;
 use super::loadout::Loadout;
-use super::stats::{FireMode, WeaponId, WeaponStats};
+use super::stats::{CrosshairStyle, FireMode, WeaponId, WeaponStats};
 
 pub struct WeaponState {
     pub id: WeaponId,
@@ -85,7 +85,13 @@ impl WeaponState {
             computed_spread: 0.0,
             trigger_held: false,
             muzzle_flash_timer: 0.0,
-            crosshair: CrosshairConfig::for_category(category),
+            crosshair: if stats.crosshair_style == CrosshairStyle::Standard {
+                // Standard-style weapons always get the default cross config,
+                // even if their category (e.g. Sniper) would give a stripped-down one
+                CrosshairConfig::for_category(super::stats::WeaponCategory::Other)
+            } else {
+                CrosshairConfig::for_category(category)
+            },
             fsa_timer: 0.0,
             crosshair_kick: 0.0,
             shot_index: 0,
