@@ -1,5 +1,5 @@
 use super::crosshair::{CrosshairConfig, CrosshairType};
-use super::stats::WeaponKind;
+use super::stats::WeaponCategory;
 use macroquad::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -83,41 +83,41 @@ impl CrosshairPresetManager {
         self.presets.clear();
 
         // Cross default
-        let cross = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        let cross = CrosshairConfig::for_category(WeaponCategory::Pistol);
         self.presets
             .push(CrosshairPreset::from_config("Cross", &cross, true));
 
         // 4 Curves
-        let curves = CrosshairConfig::for_weapon(WeaponKind::Shotgun);
+        let curves = CrosshairConfig::for_category(WeaponCategory::Shotgun);
         self.presets
             .push(CrosshairPreset::from_config("4 Curves", &curves, true));
 
         // Chevron default
-        let mut chevron = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        let mut chevron = CrosshairConfig::for_category(WeaponCategory::Pistol);
         chevron.crosshair_type = CrosshairType::Chevron;
         self.presets
             .push(CrosshairPreset::from_config("Chevron", &chevron, true));
 
         // Circle default
-        let mut circle = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        let mut circle = CrosshairConfig::for_category(WeaponCategory::Pistol);
         circle.crosshair_type = CrosshairType::Circle;
         self.presets
             .push(CrosshairPreset::from_config("Circle", &circle, true));
 
         // Square default
-        let mut square = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        let mut square = CrosshairConfig::for_category(WeaponCategory::Pistol);
         square.crosshair_type = CrosshairType::Square;
         self.presets
             .push(CrosshairPreset::from_config("Square", &square, true));
 
         // Triangle default
-        let mut triangle = CrosshairConfig::for_weapon(WeaponKind::Pistol);
+        let mut triangle = CrosshairConfig::for_category(WeaponCategory::Pistol);
         triangle.crosshair_type = CrosshairType::Triangle;
         self.presets
             .push(CrosshairPreset::from_config("Triangle", &triangle, true));
 
         // Angle Brackets (shotgun-style wider gap)
-        let mut brackets = CrosshairConfig::for_weapon(WeaponKind::Shotgun);
+        let mut brackets = CrosshairConfig::for_category(WeaponCategory::Shotgun);
         brackets.crosshair_type = CrosshairType::AngleBrackets;
         self.presets.push(CrosshairPreset::from_config(
             "Angle Brackets",

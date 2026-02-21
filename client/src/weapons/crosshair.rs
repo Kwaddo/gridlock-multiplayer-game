@@ -4,7 +4,7 @@
     eventually this will be editable in settings so players can customize their crosshair.
 */
 
-use super::stats::WeaponKind;
+use super::stats::WeaponCategory;
 use macroquad::prelude::Color;
 use serde::{Deserialize, Serialize};
 
@@ -33,22 +33,22 @@ pub struct CrosshairConfig {
 }
 
 impl CrosshairConfig {
-    // default crosshair config per weapon, player can override later in settings
+    // default crosshair config per weapon category, player can override later in settings
     // visual values are unified — only crosshair_type and shotgun gap differ
-    pub fn for_weapon(kind: WeaponKind) -> Self {
-        match kind {
-            WeaponKind::Shotgun => Self {
+    pub fn for_category(cat: WeaponCategory) -> Self {
+        match cat {
+            WeaponCategory::Shotgun => Self {
                 color: Color::from_rgba(255, 255, 255, 255),
                 dot_enabled: true,
                 dot_size: 0.15,
                 line_length: 1.0,
                 line_thickness: 0.2,
-                center_gap: 2.5,
+                center_gap: 3.5,
                 outline_enabled: true,
                 outline_thickness: 0.1,
                 crosshair_type: CrosshairType::FourCurves,
             },
-            WeaponKind::Sniper => Self {
+            WeaponCategory::Sniper => Self {
                 color: Color::from_rgba(255, 255, 255, 255),
                 dot_enabled: false,
                 dot_size: 0.0,
@@ -59,7 +59,7 @@ impl CrosshairConfig {
                 outline_thickness: 0.0,
                 crosshair_type: CrosshairType::Cross,
             },
-            // Pistol, SMG, AR all share the same Cross defaults
+            // Pistol, SMG, AR, Other all share the same Cross defaults
             _ => Self {
                 color: Color::from_rgba(255, 255, 255, 255),
                 dot_enabled: true,

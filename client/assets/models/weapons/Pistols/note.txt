@@ -1,0 +1,19 @@
+deagle.glb
+→ Hand cannon
+Unique trait: sniper pistol (high damage + recoil)
+
+m1911.glb
+→ Classic sidearm
+Unique trait: consistent reliable pistol
+
+raging_judge.glb
+→ Hybrid revolver shotgun
+Unique trait: alt-fire shotgun blast
+
+revolver.glb
+→ Slow high damage pistol
+Unique trait: precision sidearm
+
+suppressed_pistol.glb
+→ Stealth pistol
+Unique trait: silent assassin weapon

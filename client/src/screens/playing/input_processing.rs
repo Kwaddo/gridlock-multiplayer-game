@@ -102,7 +102,9 @@ impl PlayingState {
 
         // Firing: blocked while in post-teleport freeze inside the Maze
         if self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze {
-            if config.bind_fire.is_down() {
+            // Burst weapons keep firing remaining shots even after trigger release
+            let wants_to_fire = config.bind_fire.is_down() || weapon.burst_remaining > 0;
+            if wants_to_fire {
                 if weapon.fire() {
                     fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 
@@ -172,7 +174,8 @@ impl PlayingState {
                         let mut fwd = base_fwd;
                         if spread > 0.0001 {
                             if let Some(ptrn) = stats.pellet_spread {
-                                let (angle, radius) = ptrn.get(i).copied().unwrap_or((0.0, 0.0));
+                                let (angle, radius): (f32, f32) =
+                                    ptrn.get(i).copied().unwrap_or((0.0, 0.0));
                                 let deviation = spread * radius;
                                 fwd = (fwd
                                     + right_vec * (angle.cos() * deviation)
@@ -309,12 +312,17 @@ impl PlayingState {
                                 (closest_blocking_dist, surface_normal)
                             {
                                 let hit_point = eye + fwd * dist;
+                                // apply global scale to the configured radius so the
+                                // on‑screen decals are less intrusive.  The stats values
+                                // can remain as before (e.g. sniper still has a larger
+                                // base value) but the final radius is shrunk uniformly.
                                 self.bullet_holes.push(crate::weapons::effects::BulletHole {
                                     position: hit_point + normal * 0.002,
                                     normal,
                                     lifetime: stats.bullet_hole_lifetime,
                                     max_lifetime: stats.bullet_hole_lifetime,
-                                    size: stats.bullet_hole_size,
+                                    size: stats.bullet_hole_size
+                                        * crate::weapons::effects::BULLET_HOLE_SCALE,
                                     color: stats.bullet_hole_color,
                                     wall_cell: hit_wall_cell,
                                 });

@@ -11,9 +11,17 @@ pub(super) const TAB_NAMES: &[&str] = &[
     "Bots",
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandsAnimRequest {
+    IdleLoop,
+    ReloadOnce,
+    Stop,
+}
+
 pub struct DevModeState {
     pub active_tab: usize,
     pub scroll_offset: f32,
+    pub content_height: f32, // height of last-drawn tab content, used to clamp scroll
     pub infinite_ammo: bool,
     pub no_recoil: bool,
     pub show_hitboxes: bool,
@@ -22,6 +30,11 @@ pub struct DevModeState {
     pub code_input: String,
     pub code_verified: bool,
     pub show_code_prompt: bool,
+    pub hands_anim_request: Option<HandsAnimRequest>,
+    pub precision_mode: bool, // viewmodel: shrinks all step sizes by 10x for micro-adjustments
+    pub force_ads: bool, // simulate ADS being held for viewmodel preview
+    pub viewport_drag_active: bool, // viewmodel: drag on viewport to adjust pos/rot
+    pub viewport_drag_prev_mouse: (f32, f32), // last frame mouse pos for delta calc
 }
 
 impl DevModeState {
@@ -29,6 +42,7 @@ impl DevModeState {
         Self {
             active_tab: 0,
             scroll_offset: 0.0,
+            content_height: 9999.0,
             infinite_ammo: false,
             no_recoil: false,
             show_hitboxes: false,
@@ -37,6 +51,11 @@ impl DevModeState {
             code_input: String::new(),
             code_verified: false,
             show_code_prompt: false,
+            hands_anim_request: None,
+            precision_mode: false,
+            force_ads: false,
+            viewport_drag_active: false,
+            viewport_drag_prev_mouse: (0.0, 0.0),
         }
     }
 

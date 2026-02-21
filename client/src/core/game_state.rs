@@ -1,5 +1,6 @@
 pub enum GameState {
     Login,
+    LobbyInventory,
     Loading,
     Playing,
     Paused,

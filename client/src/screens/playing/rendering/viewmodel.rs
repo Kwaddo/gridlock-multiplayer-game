@@ -6,18 +6,54 @@ use macroquad::window::get_internal_gl;
 
 use super::super::PlayingState;
 
+const HANDS_BASE_SCALE: f32 = 0.35;
+const INSPECT_START_SEC: f32 = 0.35;
+const INSPECT_SWEEP_SEC: f32 = 0.6;
+const INSPECT_HOLD_SEC: f32 = 0.85;
+const INSPECT_RETURN_SEC: f32 = 0.45;
+const INSPECT_LOOK_DOWN_Y: f32 = -0.26;
+const INSPECT_POS_A: Vec3 = Vec3::from_array([0.02, -0.03, -0.04]);
+const INSPECT_ROT_A: Vec3 = Vec3::from_array([-0.22, 0.45, 0.16]);
+const INSPECT_POS_B: Vec3 = Vec3::from_array([-0.03, -0.02, -0.06]);
+const INSPECT_ROT_B: Vec3 = Vec3::from_array([-0.18, -0.6, -0.18]);
+
 impl PlayingState {
     pub(crate) fn draw_viewmodel(&self) {
         let weapon = self.weapons.active();
         let stats = weapon.stats();
 
-        if matches!(stats.crosshair_style, CrosshairStyle::Scope) && weapon.ads_progress > 0.85 {
+        let force_ads = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
+        if matches!(stats.crosshair_style, CrosshairStyle::Scope)
+            && weapon.ads_progress > 0.85
+            && !force_ads
+        {
             return;
         }
 
+        /*
+            ATTEMPT TO GET HAND ANIM MODEL
+        */
+        let hands_anim = self.animated_models.get("fp_hands");
+        // we only ever use the first mesh for the hands model;
+        // older code assumed a single Mesh so adapt accordingly
+        let hands_static = self.models.get("fp_hands").and_then(|mvec| mvec.first());
+
         if let Some(model_key) = stats.viewmodel_model {
-            if let Some(mesh) = self.models.get(model_key) {
-                self.draw_3d_viewmodel(mesh, weapon, stats);
+            if let Some(meshes) = self.models.get(model_key) {
+                for mesh in meshes {
+                    self.draw_3d_viewmodel(mesh, 1.0, 0.0, hands_anim, hands_static, weapon, stats);
+                }
+                return;
+            } else if let Some(animated_model) = self.animated_models.get(model_key) {
+                self.draw_3d_viewmodel(
+                    animated_model.mesh(),
+                    animated_model.normalize_scale,
+                    animated_model.y_offset,
+                    hands_anim,
+                    hands_static,
+                    weapon,
+                    stats,
+                );
                 return;
             } else {
                 println!(
@@ -33,17 +69,59 @@ impl PlayingState {
     fn draw_3d_viewmodel(
         &self,
         mesh: &Mesh,
+        mesh_normalize_scale: f32,
+        mesh_y_offset: f32,
+        hands_anim: Option<&crate::types::animated_model::AnimatedModel>,
+        hands_static: Option<&Mesh>,
         weapon: &crate::weapons::WeaponState,
         stats: &crate::weapons::stats::WeaponStats,
     ) {
-        if stats.crosshair_style == CrosshairStyle::Scope && weapon.ads_progress > 0.9 {
+        let force_ads_preview = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
+        if stats.crosshair_style == CrosshairStyle::Scope
+            && weapon.ads_progress > 0.9
+            && !force_ads_preview
+        {
             return;
         }
 
+        let (base_x, base_y, base_z) = stats.viewmodel_position;
+        let (rot_pitch, rot_yaw, rot_roll) = stats.viewmodel_rotation;
+        let (inspect_pos, inspect_rot, inspect_look_alpha) = match self.inspect_phase {
+            super::super::state::InspectPhase::None => (Vec3::ZERO, Vec3::ZERO, 0.0),
+            super::super::state::InspectPhase::Start => {
+                let t = (self.inspect_timer / INSPECT_START_SEC).clamp(0.0, 1.0);
+                (
+                    Vec3::ZERO.lerp(INSPECT_POS_A, t),
+                    Vec3::ZERO.lerp(INSPECT_ROT_A, t),
+                    t,
+                )
+            }
+            super::super::state::InspectPhase::Sweep => {
+                let t = (self.inspect_timer / INSPECT_SWEEP_SEC).clamp(0.0, 1.0);
+                (
+                    INSPECT_POS_A.lerp(INSPECT_POS_B, t),
+                    INSPECT_ROT_A.lerp(INSPECT_ROT_B, t),
+                    1.0,
+                )
+            }
+            super::super::state::InspectPhase::Hold => {
+                let _ = INSPECT_HOLD_SEC;
+                (INSPECT_POS_B, INSPECT_ROT_B, 1.0)
+            }
+            super::super::state::InspectPhase::Return => {
+                let t = (self.inspect_timer / INSPECT_RETURN_SEC).clamp(0.0, 1.0);
+                (
+                    INSPECT_POS_B.lerp(Vec3::ZERO, t),
+                    INSPECT_ROT_B.lerp(Vec3::ZERO, t),
+                    1.0 - t,
+                )
+            }
+        };
+        // camera and projection setup
         let vm_fov = (60.0f32).to_radians();
         let vm_camera = Camera3D {
-            position: vec3(0.0, 0.0, 0.0),
-            target: vec3(0.0, 0.0, 1.0),
+            position: vec3(0.0, 0.04 * inspect_look_alpha, 0.0),
+            target: vec3(0.0, INSPECT_LOOK_DOWN_Y * inspect_look_alpha, 1.0),
             up: vec3(0.0, 1.0, 0.0),
             fovy: vm_fov,
             z_far: 10.0,
@@ -56,17 +134,48 @@ impl PlayingState {
 
         set_camera(&vm_camera);
 
-        let (base_x, base_y, base_z) = stats.viewmodel_position;
-        let (rot_pitch, rot_yaw, rot_roll) = stats.viewmodel_rotation;
+        let ads_p = if self.dev_mode.is_unlocked() && self.dev_mode.force_ads {
+            1.0
+        } else {
+            weapon.ads_progress
+        };
 
-        let ads_offset_x = 0.08 * weapon.ads_progress;
-        let ads_offset_y = 0.03 * weapon.ads_progress;
-        let mut pos = vec3(
-            -0.35 + base_x + ads_offset_x,
-            -0.25 + base_y + ads_offset_y,
-            0.58 + base_z,
+        // Pair offset only applies during hip-fire — fades to zero as ADS comes in
+        let pair_scale = 1.0 - ads_p;
+        let pair_pos = vec3(
+            weapon.pair_offset_pos.0 * pair_scale,
+            weapon.pair_offset_pos.1 * pair_scale,
+            weapon.pair_offset_pos.2 * pair_scale,
+        );
+        let pair_rot = (
+            weapon.pair_offset_rot.0 * pair_scale,
+            weapon.pair_offset_rot.1 * pair_scale,
+            weapon.pair_offset_rot.2 * pair_scale,
+        );
+        let ads_rot = weapon.ads_rot_offset;
+        let ads_hands_rot = weapon.ads_hands_rot_offset;
+        let ads_hands_pos = vec3(
+            weapon.ads_hands_pos_offset.0 * ads_p,
+            weapon.ads_hands_pos_offset.1 * ads_p,
+            weapon.ads_hands_pos_offset.2 * ads_p,
         );
 
+        let hands_weapon_offset = vec3(
+            stats.viewmodel_hands_offset.0,
+            stats.viewmodel_hands_offset.1,
+            stats.viewmodel_hands_offset.2,
+        );
+
+        let hands_base_anchor =
+            vec3(-0.35, -0.25, 0.58) + hands_weapon_offset + pair_pos + ads_hands_pos;
+        let weapon_base_anchor = vec3(-0.35, -0.25, 0.58);
+        let weapon_local_offset = vec3(
+            base_x + weapon.ads_pos_offset.0 * ads_p,
+            base_y + weapon.ads_pos_offset.1 * ads_p,
+            base_z + weapon.ads_pos_offset.2 * ads_p,
+        ) + pair_pos;
+
+        let mut motion_offset = Vec3::ZERO;
         let horizontal_speed = vec2(
             self.movement_state.velocity.x,
             self.movement_state.velocity.z,
@@ -74,36 +183,105 @@ impl PlayingState {
         .length();
         if horizontal_speed > 0.1 && self.movement_state.is_grounded {
             let t = self.bob_timer;
-            pos.x += t.sin() * 0.008;
-            pos.y += t.cos() * 0.006;
+            // Suppress bob during ADS so large Z offsets don't amplify near the camera plane
+            let bob_scale = 1.0 - ads_p * 0.85;
+            motion_offset.x += t.sin() * 0.008 * bob_scale;
+            motion_offset.y += t.cos() * 0.006 * bob_scale;
         }
 
         if weapon.is_reloading {
             let reload_fraction = (weapon.reload_timer / stats.reload_time).clamp(0.0, 1.0);
-            pos.y -= (reload_fraction * std::f32::consts::PI).sin() * 0.08;
+            motion_offset.y -= (reload_fraction * std::f32::consts::PI).sin() * 0.08;
         }
 
         let kick = weapon.muzzle_flash_timer / 0.08;
-        pos.z += kick * 0.02;
-        pos.y -= kick * 0.01;
+        motion_offset.z += kick * 0.02;
+        motion_offset.y -= kick * 0.01;
+        let hands_anchor = hands_base_anchor + motion_offset + inspect_pos;
+        let weapon_anchor = weapon_base_anchor + motion_offset + inspect_pos;
+        let pos = weapon_anchor + weapon_local_offset;
 
+        let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
+            * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
         let scale_mat = Mat4::from_scale(vec3(
             stats.viewmodel_scale * 28.0,
             stats.viewmodel_scale * 28.0,
             stats.viewmodel_scale * 28.0,
         ));
-        let rot_mat = Mat4::from_euler(EulerRot::XYZ, rot_pitch, rot_yaw, rot_roll);
+        let weapon_rot_mat = Mat4::from_euler(
+            EulerRot::XYZ,
+            rot_pitch + pair_rot.0 + ads_rot.0 * ads_p + inspect_rot.x,
+            rot_yaw + pair_rot.1 + ads_rot.1 * ads_p + inspect_rot.y,
+            rot_roll + pair_rot.2 + ads_rot.2 * ads_p + inspect_rot.z,
+        );
         let trans_mat = Mat4::from_translation(pos);
-        let transform = trans_mat * rot_mat * scale_mat;
+        let transform = trans_mat * weapon_rot_mat * scale_mat * normalize_mat;
 
         gl_use_default_material();
-        let gl = unsafe { get_internal_gl() };
-        gl.quad_gl.depth_test(false);
+        let gl = unsafe { get_internal_gl() }; // unsafe is required to access internal GL for custom shader uniforms
+        gl.quad_gl.depth_test(true);
 
         // avoid allocating a transformed mesh every frame by using the GL model matrix
         gl.quad_gl.push_model_matrix(transform);
         draw_mesh(mesh);
         gl.quad_gl.pop_model_matrix();
+
+        /*
+            DRAWING ANIMATED HANDS HERE
+        */
+
+        let draw_hands = |hands_mesh: &Mesh, normalize_scale: f32, y_offset: f32| {
+            // Keep hands scale independent from weapon scale so tiny weapon tuning
+            // does not make hands disappear.
+            let hands_scale = HANDS_BASE_SCALE * stats.viewmodel_hands_scale.max(0.01);
+            let hands_scale_mat = Mat4::from_scale(Vec3::splat(hands_scale));
+            let hands_trans = Mat4::from_translation(hands_anchor);
+            let hands_rot_mat = Mat4::from_euler(
+                EulerRot::XYZ,
+                stats.viewmodel_hands_rotation.0
+                    + pair_rot.0
+                    + ads_hands_rot.0 * ads_p
+                    + inspect_rot.x,
+                stats.viewmodel_hands_rotation.1
+                    + pair_rot.1
+                    + ads_hands_rot.1 * ads_p
+                    + inspect_rot.y,
+                stats.viewmodel_hands_rotation.2
+                    + pair_rot.2
+                    + ads_hands_rot.2 * ads_p
+                    + inspect_rot.z,
+            );
+            // Some FPS hand exports include hidden/far helper geometry that can poison
+            // auto-normalization (very tiny normalize_scale), so clamp to a sane band.
+            let clamped_normalize = normalize_scale.clamp(0.2, 5.0);
+            let hands_normalize_mat = Mat4::from_translation(vec3(0.0, y_offset, 0.0))
+                * Mat4::from_scale(Vec3::splat(clamped_normalize));
+            let hands_transform =
+                hands_trans * hands_rot_mat * hands_scale_mat * hands_normalize_mat;
+
+            let mut hands_verts = hands_mesh.vertices.clone();
+            for v in &mut hands_verts {
+                v.position = hands_transform.transform_point3(v.position);
+                // Viewmodel hands should be fully opaque regardless of source material alpha.
+                v.color[3] = 255;
+            }
+            let hands_temp = Mesh {
+                vertices: hands_verts,
+                indices: hands_mesh.indices.clone(),
+                texture: hands_mesh.texture.clone(),
+            };
+            draw_mesh(&hands_temp);
+        };
+
+        if let Some(hands_model) = hands_anim {
+            draw_hands(
+                hands_model.mesh(),
+                hands_model.normalize_scale,
+                hands_model.y_offset,
+            );
+        } else if let Some(hands_mesh) = hands_static {
+            draw_hands(hands_mesh, 1.0, 0.0);
+        }
 
         let muzzle_local = vec3(
             stats.viewmodel_muzzle_offset.0,

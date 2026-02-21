@@ -30,7 +30,7 @@ impl PlayingState {
         let desired_static = desired_key.and_then(|k| self.models.get(k));
 
         let anim_model = desired_anim.or_else(|| self.animated_models.get("anim_rifle_idle"));
-        let static_mesh = desired_static.or_else(|| self.models.get("anim_rifle_idle"));
+        let static_mesh_list = desired_static.or_else(|| self.models.get("anim_rifle_idle"));
 
         if p.skin_type.is_model_based() {
             if let Some(anim) = anim_model {
@@ -45,7 +45,7 @@ impl PlayingState {
                 gl.quad_gl.pop_model_matrix();
                 return;
             }
-            if let Some(mesh) = static_mesh {
+            if let Some(meshes) = static_mesh_list {
                 let transform = Mat4::from_translation(render_pos)
                     * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                     * Mat4::from_scale(vec3(
@@ -55,7 +55,9 @@ impl PlayingState {
                     ));
                 let gl = unsafe { get_internal_gl() };
                 gl.quad_gl.push_model_matrix(transform);
-                draw_mesh(mesh);
+                for mesh in meshes {
+                    draw_mesh(mesh);
+                }
                 gl.quad_gl.pop_model_matrix();
                 return;
             }

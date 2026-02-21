@@ -5,6 +5,7 @@
     as additional multipliers without changing this core logic.
 */
 use super::state::WeaponState; //use super means "use from the parent module" (weapons::state)
+use super::stats::FireMode;
 
 /*
     Context flags that affect spread calculation.
@@ -30,8 +31,8 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
     // reset FSA timer on shot (must happen after the check above)
     weapon.fsa_timer = 0.0;
 
-    // FSA first shot: no recoil, no bloom, no crosshair kick — perfectly accurate
-    if fsa_was_active {
+    // Per-weapon FSA kick suppression: precision weapons skip recoil/kick on FSA shot.
+    if fsa_was_active && weapon.stats_data.fsa_suppresses_kick {
         return true;
     }
 
@@ -104,9 +105,9 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     // initially a fast decay
     if weapon.bloom > 0.0 {
         let decay = spread_recovery * 3.0; // initial fast decay
-        weapon.bloom *= (1.0 - decay * delta).max(0.0); // exponential decay
-                                                        // snap to zero when tiny
-        if weapon.bloom < 0.001 {
+        weapon.bloom *= (1.0f32 - decay * delta).max(0.0f32); // exponential decay
+        // avoid tiny residuals
+        if weapon.bloom < 0.0001 {
             weapon.bloom = 0.0;
         }
     }
@@ -147,7 +148,7 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
 
     // crosshair kick decay
     if weapon.crosshair_kick > 0.0 {
-        weapon.crosshair_kick *= (1.0 - weapon.stats().crosshair_kick_decay * delta).max(0.0);
+        weapon.crosshair_kick *= (1.0f32 - weapon.stats().crosshair_kick_decay * delta).max(0.0f32);
     // exponential decay
     } else {
         weapon.crosshair_kick = 0.0;

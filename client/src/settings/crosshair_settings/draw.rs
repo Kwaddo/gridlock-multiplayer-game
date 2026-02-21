@@ -2,7 +2,7 @@ use crate::ui::draw_arc;
 use crate::ui::fonts::{measure_game_text, text_params};
 use crate::weapons::crosshair::CrosshairType;
 use crate::weapons::crosshair_presets::CrosshairPresetManager;
-use crate::weapons::stats::WeaponKind;
+use crate::weapons::stats::WeaponCategory;
 use crate::weapons::WeaponState;
 use crate::weapons::WeaponInventory;
 use macroquad::prelude::*;
@@ -294,7 +294,7 @@ pub fn draw_crosshair_settings(
     let btn_gap = 10.0 * s;
     let btn_fs = (14.0 * s) as u16;
 
-    for (i, kind) in WeaponKind::ALL.iter().enumerate() {
+    for (i, kind) in WeaponCategory::ALL.iter().enumerate() {
         let btn_x = x + (btn_w + btn_gap) * (i as f32);
         let btn_color = if kind == &state.preview_weapon {
             Color::from_rgba(80, 150, 220, 255)
@@ -303,7 +303,7 @@ pub fn draw_crosshair_settings(
         };
         draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
         draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, GRAY);
-        let name = kind.stats().name;
+        let name: &str = kind.display_name();
         let text_w = measure_game_text(name, btn_fs);
         draw_text_ex(
             name,
@@ -313,7 +313,7 @@ pub fn draw_crosshair_settings(
         );
     }
 
-    if state.preview_weapon == WeaponKind::Sniper {
+    if state.preview_weapon == WeaponCategory::Sniper {
         let sniper_y = btn_y + btn_h + 60.0 * s;
         let sniper_fs = (16.0 * s) as u16;
         draw_text_ex(
@@ -401,7 +401,8 @@ pub fn draw_crosshair_settings(
     let row_step = 28.0 * s;
     let section_step = 33.0 * s;
 
-    let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
+    let _cat_idx = weapons.index_for_category(state.preview_weapon);
+    let weapon = &weapons.weapons[_cat_idx];
     let ch = &weapon.crosshair;
 
     draw_toggle_display("Enable dot", ch.dot_enabled, slider_x, slider_y, s);
@@ -603,7 +604,7 @@ pub fn draw_crosshair_settings(
         text_params(tiny_fs, WHITE),
     );
 
-    if state.preview_weapon == WeaponKind::Shotgun && state.shotgun_type_warning {
+    if state.preview_weapon == WeaponCategory::Shotgun && state.shotgun_type_warning {
         draw_shotgun_type_warning(preview_x, btn_row_y, 0.0, 0.0, _mouse, false, s);
     }
 }
@@ -644,7 +645,7 @@ fn draw_crosshair_preview(
     let cx = x + w / 2.0;
     let cy = y + h / 2.0;
 
-    if weapon.kind == WeaponKind::Sniper {
+    if weapon.id.category() == WeaponCategory::Sniper {
         let fs = (14.0 * s) as u16;
         draw_text_ex(
             "Scope preview coming soon",
@@ -661,7 +662,7 @@ fn draw_crosshair_preview(
     let color = xhair.color;
 
     let hip_gap = ((xhair.center_gap * sh) / 100.0) * (1.0 - ads_progress);
-    let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.4 * ads_progress;
+    let ads_rest_gap = ((xhair.center_gap * sh) / 100.0) * 0.7 * ads_progress;
 
     match xhair.crosshair_type {
         CrosshairType::FourCurves => {

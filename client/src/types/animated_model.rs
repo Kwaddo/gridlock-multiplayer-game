@@ -71,6 +71,11 @@ pub struct AnimatedModel {
     duration: f32,
     time: f32,
     skin_accum: f32,
+    playback_loop: bool,
+    playback_paused: bool,
+    playback_finished: bool,
+    playback_start: f32,
+    playback_end: f32,
     /// Uniform scale to apply at draw time so the model is ~1.5 units tall.
     pub normalize_scale: f32,
     /// Y offset so that the model's feet sit at y=0 after scaling.
@@ -85,8 +90,31 @@ impl AnimatedModel {
     }
 
     pub fn update(&mut self, dt: f32) {
-        if self.duration > 0.0 {
-            self.time = (self.time + dt) % self.duration;
+        if self.duration > 0.0 && !self.playback_paused {
+            let start = self.playback_start.clamp(0.0, self.duration);
+            let end = self.playback_end.clamp(start, self.duration);
+            if self.playback_loop {
+                let range = (end - start).max(0.0001);
+                let mut t = self.time + dt;
+                if t < start || t > end {
+                    t = start;
+                }
+                while t > end {
+                    t = start + (t - end);
+                }
+                if t < start {
+                    t = start + (t - start).rem_euclid(range);
+                }
+                self.time = t;
+                self.playback_finished = false;
+            } else {
+                self.time += dt;
+                if self.time >= end {
+                    self.time = end;
+                    self.playback_paused = true;
+                    self.playback_finished = true;
+                }
+            }
         }
 
         // Only reskin vertices at ~30fps to save CPU
@@ -182,6 +210,42 @@ impl AnimatedModel {
                     None
                 }
             })
+    }
+
+    pub fn play_from_start(&mut self, looping: bool) {
+        self.time = 0.0;
+        self.playback_loop = looping;
+        self.playback_paused = false;
+        self.playback_finished = false;
+        self.playback_start = 0.0;
+        self.playback_end = self.duration.max(0.0);
+        self.skin_accum = SKIN_INTERVAL;
+    }
+
+    pub fn stop_at_start(&mut self) {
+        self.time = 0.0;
+        self.playback_loop = false;
+        self.playback_paused = true;
+        self.playback_finished = false;
+        self.playback_start = 0.0;
+        self.playback_end = self.duration.max(0.0);
+        self.skin_accum = SKIN_INTERVAL;
+    }
+
+    pub fn is_playback_finished(&self) -> bool {
+        self.playback_finished
+    }
+
+    pub fn play_segment(&mut self, start: f32, end: f32, looping: bool) {
+        let s = start.max(0.0);
+        let e = end.max(s).min(self.duration.max(0.0));
+        self.time = s;
+        self.playback_loop = looping;
+        self.playback_paused = false;
+        self.playback_finished = false;
+        self.playback_start = s;
+        self.playback_end = e;
+        self.skin_accum = SKIN_INTERVAL;
     }
 }
 
@@ -296,17 +360,33 @@ fn animation_override_index_for_stem(file_stem: &str) -> Option<usize> {
         "walk_forward" => Some(0),
         "walk_left" => Some(0),
         "walk_right" => Some(0),
+        "fps_ak-74m_animations" => Some(1), // Rig|AK_Idle
         _ => None,
     }
 }
 
 pub fn load_gltf_animated_model(path: &str) -> Result<AnimatedModel, String> {
-    load_gltf_animated_model_with_mode(path, ClipSelectionMode::LongestDuration)
+    load_gltf_animated_model_internal(path, ClipSelectionMode::LongestDuration, None)
 }
 
 pub fn load_gltf_animated_model_with_mode(
     path: &str,
     mode: ClipSelectionMode,
+) -> Result<AnimatedModel, String> {
+    load_gltf_animated_model_internal(path, mode, None)
+}
+
+pub fn load_gltf_animated_model_with_clip_index(
+    path: &str,
+    clip_index: usize,
+) -> Result<AnimatedModel, String> {
+    load_gltf_animated_model_internal(path, ClipSelectionMode::LongestDuration, Some(clip_index))
+}
+
+fn load_gltf_animated_model_internal(
+    path: &str,
+    mode: ClipSelectionMode,
+    forced_clip_index: Option<usize>,
 ) -> Result<AnimatedModel, String> {
     let (doc, buffers, images) = gltf::import(path)
         .map_err(|e| format!("failed to import gltf '{}': {e}", path))?;
@@ -360,6 +440,11 @@ pub fn load_gltf_animated_model_with_mode(
     let mut multi_clip_count = 0usize;
     let mut override_found = false;
     for anim in doc.animations() {
+        if let Some(forced) = forced_clip_index {
+            if anim.index() != forced {
+                continue;
+            }
+        }
         multi_clip_count += 1;
         let mut has_channels = false;
         let mut first_t = f32::INFINITY;
@@ -417,6 +502,7 @@ pub fn load_gltf_animated_model_with_mode(
             clip_duration,
             motion_score
         );
+        if forced_clip_index.is_none() {
         if let Some(override_idx) = override_anim_index {
             if anim.index() == override_idx {
                 if has_channels {
@@ -434,6 +520,7 @@ pub fn load_gltf_animated_model_with_mode(
                 );
             }
         }
+        }
         if has_channels
             && (name_score > best_name_score
                 || (name_score == best_name_score && metric > best_metric)
@@ -447,21 +534,21 @@ pub fn load_gltf_animated_model_with_mode(
             selected_anim = Some(anim);
         }
     }
-    if strict_override_mode && multi_clip_count > 1 && override_anim_index.is_none() {
+    if forced_clip_index.is_none() && strict_override_mode && multi_clip_count > 1 && override_anim_index.is_none() {
         return Err(format!(
             "ANIM_REQUIRE_OVERRIDE is enabled and '{}' has {} clips but no override. \
 Add one in animation_override_index_for_stem().",
             path, multi_clip_count
         ));
     }
-    if strict_override_mode && multi_clip_count > 1 && override_anim_index.is_some() && !override_found {
+    if forced_clip_index.is_none() && strict_override_mode && multi_clip_count > 1 && override_anim_index.is_some() && !override_found {
         return Err(format!(
             "ANIM_REQUIRE_OVERRIDE is enabled and '{}' override index {:?} was not found/usable.",
             path, override_anim_index
         ));
     }
     let anim = selected_anim.ok_or_else(|| format!("no usable animation clip found in '{}'", path))?;
-    if multi_clip_count > 1 && override_anim_index.is_none() {
+    if forced_clip_index.is_none() && multi_clip_count > 1 && override_anim_index.is_none() {
         println!(
             "[anim] {} auto-selected anim={} (stem='{}'). To lock this clip, add override: \"{}\" => Some({}),",
             path,
@@ -770,6 +857,11 @@ Add one in animation_override_index_for_stem().",
         duration,
         time: 0.0,
         skin_accum: SKIN_INTERVAL, // force first update
+        playback_loop: true,
+        playback_paused: false,
+        playback_finished: false,
+        playback_start: 0.0,
+        playback_end: duration.max(0.0),
         normalize_scale,
         y_offset,
     };

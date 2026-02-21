@@ -1,0 +1,11 @@
+grenade_launcher.glb
+→ Area denial weapon
+Unique trait: splash damage zoning tool
+
+minigun.glb
+→ Sustained fire monster
+Unique trait: spin-up mechanic + suppression
+
+rpg.glb
+→ High burst damage explosive
+Unique trait: anti-group / anti-vehicle nuke weapon
