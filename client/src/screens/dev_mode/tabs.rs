@@ -683,7 +683,7 @@ pub(super) fn draw_viewmodel_tab(
     if copy_pressed {
         let s = &weapon.stats_data;
         println!(
-            "// {} viewmodel (paste into stats.rs)\n\
+            "// {} viewmodel \n\
              viewmodel_scale: {:.4},\n\
              viewmodel_position: ({:.3}, {:.3}, {:.3}),\n\
              viewmodel_rotation: ({:.3}, {:.3}, {:.3}),\n\
@@ -739,17 +739,23 @@ pub(super) fn draw_viewmodel_tab(
 
     y += draw_section_header("Copy From Weapon", x, y);
     let active_slot = inv.active_slot;
-    let mut copy_from_slot: Option<usize> = None;
+    let mut copy_hip_from_slot: Option<usize> = None;
+    let mut copy_ads_from_slot: Option<usize> = None;
     for i in 0..inv.weapons.len() {
         if i == active_slot { continue; }
         let wname: &'static str = inv.weapons[i].stats_data.name;
-        let label = format!("From: {}", wname);
-        let (h, btn_pressed) = draw_action_button(&label, x, y, 220.0, mouse, clicked);
+        let hip_label = format!("Copy Hip: {}", wname);
+        let (h, hip_pressed) = draw_action_button(&hip_label, x, y, 220.0, mouse, clicked);
         y += h;
-        if btn_pressed { copy_from_slot = Some(i); }
+        if hip_pressed { copy_hip_from_slot = Some(i); }
+
+        let ads_label = format!("Copy ADS: {}", wname);
+        let (h, ads_pressed) = draw_action_button(&ads_label, x, y, 220.0, mouse, clicked);
+        y += h;
+        if ads_pressed { copy_ads_from_slot = Some(i); }
     }
-    if let Some(src) = copy_from_slot {
-        let (scale, pos, rot, muz, hs, ho, hr, ap, ar, ahp, ahr) = {
+    if let Some(src) = copy_hip_from_slot {
+        let (scale, pos, rot, muz, hs, ho, hr, pp, pr) = {
             let sw = &inv.weapons[src];
             (
                 sw.stats_data.viewmodel_scale,
@@ -759,10 +765,8 @@ pub(super) fn draw_viewmodel_tab(
                 sw.stats_data.viewmodel_hands_scale,
                 sw.stats_data.viewmodel_hands_offset,
                 sw.stats_data.viewmodel_hands_rotation,
-                sw.ads_pos_offset,
-                sw.ads_rot_offset,
-                sw.ads_hands_pos_offset,
-                sw.ads_hands_rot_offset,
+                sw.pair_offset_pos,
+                sw.pair_offset_rot,
             )
         };
         let dst = inv.active_mut();
@@ -773,6 +777,20 @@ pub(super) fn draw_viewmodel_tab(
         dst.stats_data.viewmodel_hands_scale = hs;
         dst.stats_data.viewmodel_hands_offset = ho;
         dst.stats_data.viewmodel_hands_rotation = hr;
+        dst.pair_offset_pos = pp;
+        dst.pair_offset_rot = pr;
+    }
+    if let Some(src) = copy_ads_from_slot {
+        let (ap, ar, ahp, ahr) = {
+            let sw = &inv.weapons[src];
+            (
+                sw.ads_pos_offset,
+                sw.ads_rot_offset,
+                sw.ads_hands_pos_offset,
+                sw.ads_hands_rot_offset,
+            )
+        };
+        let dst = inv.active_mut();
         dst.ads_pos_offset = ap;
         dst.ads_rot_offset = ar;
         dst.ads_hands_pos_offset = ahp;
