@@ -51,7 +51,7 @@ pub(super) fn draw_crosshair_and_combat_feedback(
                 let ads_rest_gap = if fsa_active {
                     (sh * 0.3) / 100.0
                 } else {
-                    ((xhair.center_gap * sh) / 100.0) * 0.4 * weapon.ads_progress
+                    ((xhair.center_gap * sh) / 100.0) * 0.7 * weapon.ads_progress
                 };
 
                 let radius = hip_gap + kick_gap + ads_rest_gap + movement_gap;
@@ -427,10 +427,12 @@ pub(super) fn draw_crosshair_and_combat_feedback(
             let dot_radius = 5.0;
             let ring_radius = current_size * 0.3 * pop;
             for (i, &(angle, radius)) in ptrn.iter().enumerate() {
+                let angle: f32 = angle;
+                let radius: f32 = radius;
                 if hit_marker_pellet_mask & (1 << i) != 0 {
-                    let r = ring_radius * radius;
-                    let dx = cx + angle.cos() * r;
-                    let dy = cy - angle.sin() * r;
+                    let r: f32 = ring_radius * radius;
+                    let dx: f32 = cx + angle.cos() * r;
+                    let dy: f32 = cy - angle.sin() * r;
                     draw_circle(dx, dy, dot_radius, RED);
                 }
             }

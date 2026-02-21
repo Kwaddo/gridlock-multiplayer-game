@@ -61,39 +61,10 @@ impl LoginScreen {
             self.active_field = crate::core::game_state::LoginField::Username;
         }
 
-        let mq_y = nm_fy + field_h + 18.0;
-        let mq_label = format!("Model Quality: {}", self.model_quality.label());
-        let mq_w = measure_game_text(&mq_label, 14) + 24.0;
-        let mq_h = 28.0;
-        let mq_x = px + (pw - mq_w) / 2.0;
-        let mq_hover = in_rect(mouse, mq_x, mq_y, mq_w, mq_h);
-        draw_rectangle(
-            mq_x,
-            mq_y,
-            mq_w,
-            mq_h,
-            if mq_hover {
-                Color::new(0.14, 0.16, 0.26, 1.0)
-            } else {
-                Color::new(0.08, 0.10, 0.18, 1.0)
-            },
-        );
-        draw_rectangle_lines(mq_x, mq_y, mq_w, mq_h, 1.0, INPUT_BORDER);
-        let mq_tw = measure_game_text(&mq_label, 14);
-        draw_text_ex(
-            &mq_label,
-            mq_x + (mq_w - mq_tw) / 2.0,
-            mq_y + 19.0,
-            text_params(14, TEXT_LABEL),
-        );
-        if mq_hover && clicked {
-            self.model_quality = self.model_quality.toggle();
-        }
-
         let bw = 220.0;
         let bh = 42.0;
         let bx = px + (pw - bw) / 2.0;
-        let by = mq_y + mq_h + 14.0;
+        let by = nm_fy + field_h + 18.0;
         let hover = in_rect(mouse, bx, by, bw, bh);
         draw_rectangle(bx, by, bw, bh, if hover { ACCENT_HOVER } else { ACCENT });
         let ctxt = "CONNECT";
@@ -109,7 +80,7 @@ impl LoginScreen {
         }
 
         if !self.error_msg.is_empty() {
-            let ey = by + bh + 16.0;
+            let ey = by + bh + 10.0;
             let ew = measure_game_text(&self.error_msg, 15);
             draw_text_ex(
                 &self.error_msg,

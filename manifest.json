@@ -1,0 +1,84 @@
+{
+  "global": {
+
+    "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
+
+    "pistol_shot": "assets/sounds/pew.ogg",
+    "smg_shot": "assets/sounds/pew.ogg",
+    "shotgun_shot": "assets/sounds/pew.ogg",
+    "ar_shot": "assets/sounds/pew.ogg",
+    "sniper_shot": "assets/sounds/pew.ogg",
+    "pistol_icon": "assets/images/weapons/pistol.png",
+    "pistol_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
+    "smg_icon": "assets/images/weapons/smg.png",
+    "shotgun_icon": "assets/images/weapons/shotgun.png",
+    "shotgun_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/shotgun3.png",
+    "ar_icon": "assets/images/weapons/ar.png",
+    "sniper_icon": "assets/images/weapons/Sniper.png",
+
+    "xhair_scope_148": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair148.png",
+    "xhair_scope_141": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair141.png",
+    "xhair_scope_162": "assets/images/weapons/kenney_crosshair-pack/PNG/White Retina/crosshair162.png",
+
+    "m1911_model": "assets/models/weapons/Pistols/m1911.glb",
+    "deagle_model": "assets/models/weapons/Pistols/deagle.glb",
+    "revolver_model": "assets/models/weapons/Pistols/revolver.glb",
+    "suppressed_pistol_model": "assets/models/weapons/Pistols/supressed_pistol.glb",
+    "taurus_raging_model": "assets/models/weapons/Pistols/taurus_raging.glb",
+
+    "mp5_model": "assets/models/weapons/SMGs/mp5.glb",
+    "p90_model": "assets/models/weapons/SMGs/p90.glb",
+    "honey_badger_model": "assets/models/weapons/SMGs/honey_badger.glb",
+    "tommy_gun_model": "assets/models/weapons/SMGs/tommy_gun.glb",
+
+    "benelli_model": "assets/models/weapons/Shotguns/benelli.glb",
+    "spas_model": "assets/models/weapons/Shotguns/spas.glb",
+
+    "m4a1_model": "assets/models/weapons/Assault Rifles/m4a1.glb",
+    "ak_model": "assets/models/weapons/Assault Rifles/ak.glb",
+    "famas_model": "assets/models/weapons/Assault Rifles/famas.glb",
+    "m16_model": "assets/models/weapons/Assault Rifles/m16.glb",
+    "scar_model": "assets/models/weapons/Assault Rifles/scar.glb",
+    "as_val_model": "assets/models/weapons/Assault Rifles/as_val.glb",
+
+    "bolt_action_model": "assets/models/weapons/Snipers/bolt_action.glb",
+    "hunting_rifle_model": "assets/models/weapons/Snipers/hunting_rifle.glb",
+    "semi_auto_sniper_model": "assets/models/weapons/Snipers/semi_auto.glb",
+
+    "grenade_launcher_model": "assets/models/weapons/Other/grenade_launcher.glb",
+    "minigun_model": "assets/models/weapons/Other/minigun.glb",
+    "rpg_model": "assets/models/weapons/Other/rpg.glb",
+
+    "deagle_shot": "assets/sounds/deagle.ogg",
+
+    "anim_crouch": "assets/models/player/Crouch.glb",
+    "anim_crouch_aim": "assets/models/player/Crouch_Aim.glb",
+    "anim_crouch_back": "assets/models/player/Crouch_Back.glb",
+    "anim_crouch_death": "assets/models/player/Crouch_Death.glb",
+    "anim_crouch_forward": "assets/models/player/Crouch_Forward.glb",
+    "anim_crouch_left": "assets/models/player/Crouch_Left.glb",
+    "anim_crouch_right": "assets/models/player/Crouch_Right.glb",
+    "anim_jump": "assets/models/player/Jump.glb",
+    "anim_prone_turn_left": "assets/models/player/Prone_Turn_Left.glb",
+    "anim_prone_death": "assets/models/player/Prone_Death.glb",
+    "anim_prone_forward": "assets/models/player/Prone_Forward.glb",
+    "anim_prone_idle": "assets/models/player/Prone_Idle.glb",
+    "anim_prone_turn_right": "assets/models/player/Prone_Turn_Right.glb",
+    "anim_rifle_aim_idle": "assets/models/player/Rifle_Aim_Idle.glb",
+    "anim_rifle_idle": "assets/models/player/Rifle_Idle.glb",
+    "anim_slide": "assets/models/player/Slide.glb",
+    "anim_sprint_forward": "assets/models/player/Sprint_Forward.glb",
+    "anim_sprint_left": "assets/models/player/Sprint_Left.glb",
+    "anim_sprint_right": "assets/models/player/Sprint_Right.glb",
+    "anim_stand_death": "assets/models/player/Stand_Death.glb",
+    "anim_twerk": "assets/models/player/Twerk.glb",
+    "anim_walk_back": "assets/models/player/Walk_Back.glb",
+    "anim_walk_forward": "assets/models/player/Walk_Forward.glb",
+    "anim_walk_left": "assets/models/player/Walk_Left.glb",
+    "anim_walk_right": "assets/models/player/Walk_Right.glb"
+  },
+  "lobby": {
+    "floor_texture": "assets/images/textures/rocks.png"
+  },
+  "maze": {}
+}

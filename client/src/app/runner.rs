@@ -6,16 +6,35 @@ use std::time::{Duration, Instant};
 
 use client::core::{GameConfig, GameState};
 use client::screens::dev_mode::{draw_dev_overlay, DevModeState};
-use client::screens::{draw_pause_menu, LoginScreen, ModelQuality, PlayingState};
+use client::screens::{draw_pause_menu, LobbyInventoryScreen, LoginScreen, PlayingState};
 use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
 use client::weapons::crosshair_presets::CrosshairPresetManager;
+use client::weapons::loadout::Loadout;
+use client::weapons::WeaponInventory;
 
-use super::asset_cache::{load_cached_manifest, save_cached_manifest};
+use super::asset_cache::load_cached_manifest;
 use super::asset_loader::load_asset_entry;
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
+
+// asset quality selector used when resolving which version of a model to
+// request from the server.  the value is passed down to
+// `resolve_asset_path_for_quality`, which currently just uses it when
+// choosing between `Compressed`/`Full` folders; defaults to `High`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModelQuality {
+    Low,
+    Medium,
+    High,
+}
+
+impl Default for ModelQuality {
+    fn default() -> Self {
+        ModelQuality::High
+    }
+}
 
 pub async fn run() {
     set_default_filter_mode(FilterMode::Nearest);
@@ -33,11 +52,16 @@ pub async fn run() {
     let mut username = String::new();
     let mut server_addr = String::new();
     let mut asset_cache_key = String::new();
-    let mut model_quality = ModelQuality::Compressed;
     let mut config = GameConfig::new();
     let mut preset_manager = CrosshairPresetManager::new("");
     let mut maze: Option<Maze> = None;
     let mut is_fullscreen = true;
+    let mut loadout = Loadout::default_loadout();
+    let mut lobby_inventory = LobbyInventoryScreen::new();
+
+    // currently we always use high quality; eventually this could be
+    // user-configurable via the settings screen.
+    let mut model_quality = ModelQuality::default();
 
     // connection heartbeat / last seen from server
     let mut last_server_contact: Option<Instant> = None;
@@ -65,12 +89,7 @@ pub async fn run() {
                     username = name;
                     player_id = id;
                     server_addr = login_screen.ip_input.clone();
-                    model_quality = login_screen.model_quality;
-                    asset_cache_key = format!(
-                        "{}|model_quality={}",
-                        server_addr,
-                        model_quality.label().to_lowercase()
-                    );
+                    asset_cache_key = server_addr.clone();
                     // mark server contact as fresh on connect
                     last_server_contact = Some(Instant::now());
 
@@ -87,6 +106,43 @@ pub async fn run() {
                     state = GameState::Loading;
                 }
                 login_screen.draw();
+            }
+
+            GameState::LobbyInventory => {
+                let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                if sync.removed_by_server {
+                    socket = None;
+                    login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                    state = GameState::Login;
+                    set_cursor_grab(false);
+                    show_mouse(true);
+                    playing_state.clear_input();
+                    last_server_contact = None;
+                    continue;
+                }
+                if sync.server_seen {
+                    last_server_contact = Some(Instant::now());
+                }
+                if let Some(entries) = sync.assets {
+                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
+                    }
+                }
+                playing_state.simulate(&config, maze.as_ref());
+                playing_state.render(&config, &username, player_id, maze.as_ref());
+
+                draw_rectangle(
+                    0.0,
+                    0.0,
+                    screen_width(),
+                    screen_height(),
+                    Color::from_rgba(0, 0, 0, 150),
+                );
+                lobby_inventory.draw(&loadout);
+                if lobby_inventory.update(&mut loadout) {
+                    playing_state.weapons = WeaponInventory::from_loadout(&loadout);
+                    state = GameState::Paused;
+                }
             }
 
             GameState::Loading => {
@@ -132,6 +188,8 @@ pub async fn run() {
                 }
 
                 if loading_started && loading_index >= loading_assets.len() {
+                    ensure_essential_viewmodel_assets(&mut playing_state).await;
+                    playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                     state = GameState::Playing;
                     set_cursor_grab(true);
                     show_mouse(false);
@@ -271,10 +329,16 @@ pub async fn run() {
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
 
-                if let Some(new_state) =
-                    draw_pause_menu(&config, &mut settings_screen, &mut playing_state.dev_mode)
-                {
+                if let Some(new_state) = draw_pause_menu(
+                    &config,
+                    &mut settings_screen,
+                    &mut playing_state.dev_mode,
+                    maze.is_some(),
+                ) {
                     state = new_state;
+                    if matches!(state, GameState::LobbyInventory) {
+                        lobby_inventory = LobbyInventoryScreen::new();
+                    }
                     if matches!(state, GameState::Playing) {
                         set_cursor_grab(true);
                         show_mouse(false);
@@ -451,6 +515,9 @@ fn resolve_asset_entries_for_quality(
     entries: &[(String, String)],
     model_quality: ModelQuality,
 ) -> Vec<(String, String)> {
+    // the `model_quality` parameter is currently unused; kept so we can
+    // support different heuristics later (low/medium/high).
+    let _ = model_quality;
     entries
         .iter()
         .map(|(key, path)| {
@@ -473,49 +540,67 @@ fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> St
         path.to_string()
     };
 
-    let Some(file_name) = Path::new(&normalized)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_string())
-    else {
+    if Path::new(&normalized).exists() {
+        return normalized;
+    }
+
+    let Some(file_name) = Path::new(&normalized).file_name().and_then(|s| s.to_str()) else {
         return path.to_string();
     };
 
-    let preferred_dir = match model_quality {
-        ModelQuality::Compressed => "assets/models/player/Compressed",
-        ModelQuality::Full => "assets/models/player/Full",
-    };
-    let preferred_path = format!("{}/{}", preferred_dir, file_name);
-    if Path::new(&preferred_path).exists() {
-        return preferred_path;
+    let compressed_path = format!("assets/models/player/Compressed/{}", file_name);
+    if Path::new(&compressed_path).exists() {
+        return compressed_path;
     }
 
-    // Requested behavior: if compressed is missing but full exists, use Rifle_Idle fallback.
-    if matches!(model_quality, ModelQuality::Compressed) {
-        let full_path = format!("assets/models/player/Full/{}", file_name);
-        if Path::new(&full_path).exists() {
-            let compressed_idle = "assets/models/player/Compressed/Rifle_Idle.glb";
-            if Path::new(compressed_idle).exists() {
-                return compressed_idle.to_string();
-            }
-            let full_idle = "assets/models/player/Full/Rifle_Idle.glb";
-            if Path::new(full_idle).exists() {
-                return full_idle.to_string();
-            }
-        }
+    let full_path = format!("assets/models/player/Full/{}", file_name);
+    if Path::new(&full_path).exists() {
+        return full_path;
     }
 
-    let preferred_idle = match model_quality {
-        ModelQuality::Compressed => "assets/models/player/Compressed/Rifle_Idle.glb",
-        ModelQuality::Full => "assets/models/player/Full/Rifle_Idle.glb",
-    };
-    if Path::new(preferred_idle).exists() {
-        return preferred_idle.to_string();
+    let flat_path = format!("assets/models/player/{}", file_name);
+    if Path::new(&flat_path).exists() {
+        return flat_path;
     }
-    let any_idle = "assets/models/player/Full/Rifle_Idle.glb";
-    if Path::new(any_idle).exists() {
-        return any_idle.to_string();
+
+    let compressed_idle = "assets/models/player/Compressed/Rifle_Idle.glb";
+    if Path::new(compressed_idle).exists() {
+        return compressed_idle.to_string();
+    }
+
+    let full_idle = "assets/models/player/Full/Rifle_Idle.glb";
+    if Path::new(full_idle).exists() {
+        return full_idle.to_string();
+    }
+
+    let idle = "assets/models/player/Rifle_Idle.glb";
+    if Path::new(idle).exists() {
+        return idle.to_string();
     }
 
     path.to_string()
+}
+
+async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
+    let required = [
+        ("fp_hands", "assets/models/hand/fps_animated_carbine.glb"),
+        ("m1911_model", "assets/models/weapons/Pistols/m1911.glb"),
+        ("deagle_model", "assets/models/weapons/Pistols/deagle.glb"),
+        ("mp5_model", "assets/models/weapons/SMGs/mp5.glb"),
+        ("spas_model", "assets/models/weapons/Shotguns/spas.glb"),
+        ("m16_model", "assets/models/weapons/Assault Rifles/m16.glb"),
+        (
+            "bolt_action_model",
+            "assets/models/weapons/Snipers/bolt_action.glb",
+        ),
+        ("minigun_model", "assets/models/weapons/Other/minigun.glb"),
+    ];
+
+    for (key, path) in required {
+        if playing_state.models.contains_key(key) || playing_state.animated_models.contains_key(key)
+        {
+            continue;
+        }
+        load_asset_entry(key, path, playing_state).await;
+    }
 }

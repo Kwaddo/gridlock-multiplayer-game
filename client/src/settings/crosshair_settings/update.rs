@@ -1,6 +1,6 @@
 use crate::weapons::crosshair::CrosshairConfig;
 use crate::weapons::crosshair_presets::CrosshairPresetManager;
-use crate::weapons::stats::WeaponKind;
+use crate::weapons::stats::WeaponCategory;
 use crate::weapons::WeaponInventory;
 use macroquad::prelude::*;
 
@@ -60,7 +60,7 @@ pub fn update_crosshair_settings(
     let btn_h = 35.0 * s;
     let btn_gap = 10.0 * s;
 
-    for (i, kind) in WeaponKind::ALL.iter().enumerate() {
+    for (i, kind) in WeaponCategory::ALL.iter().enumerate() {
         let btn_x = x + (btn_w + btn_gap) * (i as f32);
         if clicked
             && mouse.0 >= btn_x
@@ -73,11 +73,12 @@ pub fn update_crosshair_settings(
         }
     }
 
-    if state.preview_weapon == WeaponKind::Sniper {
+    if state.preview_weapon == WeaponCategory::Sniper {
         return;
     }
 
-    let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
+    let _cat_idx = weapons.index_for_category(state.preview_weapon);
+    let weapon = &weapons.weapons[_cat_idx];
     if !state.color_synced {
         state.sync_from_color(weapon.crosshair.color);
     }
@@ -98,7 +99,7 @@ pub fn update_crosshair_settings(
     {
         state.selected_preset = (state.selected_preset + 1) % presets.presets.len();
         let preset = presets.presets[state.selected_preset].clone();
-        let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
+        let weapon = &mut weapons.weapons[_cat_idx];
         preset.apply_to(&mut weapon.crosshair);
         state.color_synced = false;
     }
@@ -124,7 +125,7 @@ pub fn update_crosshair_settings(
     let mut slider_y = preset_y + 45.0 * s;
     let slider_w = left_w;
 
-    let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
+    let weapon = &mut weapons.weapons[_cat_idx];
     let ch = &mut weapon.crosshair;
 
     slider_y += draw_toggle("Enable dot", &mut ch.dot_enabled, slider_x, slider_y, mouse, clicked, s);
@@ -150,7 +151,7 @@ pub fn update_crosshair_settings(
         ch.crosshair_type = CROSSHAIR_TYPES[selected_idx];
     }
 
-    if state.preview_weapon == WeaponKind::Shotgun
+    if state.preview_weapon == WeaponCategory::Shotgun
         && selected_idx != prev_idx
         && !state.shotgun_warning_shown_this_visit
     {
@@ -204,7 +205,7 @@ pub fn update_crosshair_settings(
     );
 
     let (r, g, b) = hsv_to_rgb(state.hue, state.sat, state.val);
-    let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
+    let weapon = &mut weapons.weapons[_cat_idx];
     weapon.crosshair.color = Color::new(r, g, b, state.alpha_val / 255.0);
 
     // Right column buttons (preview area)
@@ -235,14 +236,14 @@ pub fn update_crosshair_settings(
     }
 
     let reset_btn_x = bg_btn_x + small_btn_w + small_gap;
-    let weapon = &mut weapons.weapons[state.preview_weapon.slot() - 1];
+    let weapon = &mut weapons.weapons[_cat_idx];
     if clicked
         && mouse.0 >= reset_btn_x
         && mouse.0 <= reset_btn_x + small_btn_w
         && mouse.1 >= btn_row_y
         && mouse.1 <= btn_row_y + small_btn_h
     {
-        weapon.crosshair = CrosshairConfig::for_weapon(weapon.kind);
+        weapon.crosshair = CrosshairConfig::for_category(weapon.id.category());
         state.color_synced = false;
     }
 
@@ -263,6 +264,7 @@ pub fn update_crosshair_save_prompt(
 ) -> Option<bool> {
     let mouse = mouse_position();
     let clicked = is_mouse_button_pressed(MouseButton::Left);
+    let cat_idx = weapons.index_for_category(state.preview_weapon);
 
     let pw = 400.0;
     let ph = 200.0;
@@ -281,7 +283,7 @@ pub fn update_crosshair_save_prompt(
             && mouse.1 >= btn_y
             && mouse.1 <= btn_y + btn_h
         {
-            let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
+            let weapon = &weapons.weapons[cat_idx];
             presets.overwrite(conflict_idx, &weapon.crosshair);
             state.selected_preset = conflict_idx;
             state.name_conflict_index = None;
@@ -347,7 +349,7 @@ pub fn update_crosshair_save_prompt(
                     state.name_conflict_index = Some(idx);
                 }
             } else {
-                let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
+                let weapon = &weapons.weapons[cat_idx];
                 presets.save_as_new(&state.name_input, &weapon.crosshair);
                 state.selected_preset = presets.presets.len() - 1;
                 state.naming_mode = false;
@@ -397,7 +399,7 @@ pub fn update_crosshair_save_prompt(
             && mouse.1 >= btn_y
             && mouse.1 <= btn_y + btn_h
         {
-            let weapon = &weapons.weapons[state.preview_weapon.slot() - 1];
+            let weapon = &weapons.weapons[cat_idx];
             presets.overwrite(state.selected_preset, &weapon.crosshair);
             state.show_save_prompt = false;
             return if state.save_prompt_is_leave { Some(true) } else { Some(false) };

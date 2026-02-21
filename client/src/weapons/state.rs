@@ -2,10 +2,11 @@
  One instance per weapon the player is carrying.
 */
 use super::crosshair::CrosshairConfig;
-use super::stats::{FireMode, WeaponKind, WeaponStats};
+use super::loadout::Loadout;
+use super::stats::{CrosshairStyle, FireMode, WeaponId, WeaponStats};
 
 pub struct WeaponState {
-    pub kind: WeaponKind,
+    pub id: WeaponId,
     pub stats_data: WeaponStats, // owned mutable copy (const defaults used for reset)
 
     // -- Ammo
@@ -46,13 +47,29 @@ pub struct WeaponState {
     // -- more recoil stats
     pub shot_index: u32, // which bullet in current spray (for recoil patterns)
     pub pattern_reset_timer: f32, // time since triggerer released so it can go back to normal after a while
+
+    // -- Burst fire
+    pub burst_remaining: u32, // shots left in current burst (0 = not bursting)
+
+    // -- Dev: pair lock (hand + gun move together)
+    pub pair_locked: bool,
+    pub pair_offset_pos: (f32, f32, f32), // additive offset applied to both weapon and hands
+    pub pair_offset_rot: (f32, f32, f32), // additive rotation (pitch, yaw, roll) applied to both
+
+    // -- Dev: ADS viewmodel offsets (additive, lerped by ads_progress, independent per weapon)
+    pub ads_pair_locked: bool, // when true, ADS pos/rot sliders move gun+hands together
+    pub ads_pos_offset: (f32, f32, f32), // default (0.08, 0.03, 0.0) — matches old hardcoded shift
+    pub ads_rot_offset: (f32, f32, f32), // rotation delta at full ADS
+    pub ads_hands_pos_offset: (f32, f32, f32), // hands position delta at full ADS
+    pub ads_hands_rot_offset: (f32, f32, f32), // hands rotation delta at full ADS
 }
 
 impl WeaponState {
-    pub fn new(kind: WeaponKind) -> Self {
-        let stats = kind.stats();
+    pub fn new(id: WeaponId) -> Self {
+        let stats = id.stats();
+        let category = id.category();
         Self {
-            kind,
+            id,
             stats_data: stats.clone(),
             ammo: stats.magazine_size,
             reserve: stats.max_reserve,
@@ -68,11 +85,31 @@ impl WeaponState {
             computed_spread: 0.0,
             trigger_held: false,
             muzzle_flash_timer: 0.0,
-            crosshair: CrosshairConfig::for_weapon(kind),
+            crosshair: if stats.crosshair_style == CrosshairStyle::Standard
+                && category == super::stats::WeaponCategory::Sniper
+            {
+                // only snipers need the generic crosshair fallback; other weapon types
+                // (including shotguns) should still receive their category-specific
+                // crosshair config. previously all Standard-style weapons were forced
+                // to use `WeaponCategory::Other` which caused shotguns to show a
+                // plain crosshair instead of the intended "four curves" preset.
+                CrosshairConfig::for_category(super::stats::WeaponCategory::Other)
+            } else {
+                CrosshairConfig::for_category(category)
+            },
             fsa_timer: 0.0,
             crosshair_kick: 0.0,
             shot_index: 0,
             pattern_reset_timer: 0.0,
+            burst_remaining: 0,
+            pair_locked: false,
+            pair_offset_pos: stats.viewmodel_pair_offset_pos,
+            pair_offset_rot: stats.viewmodel_pair_offset_rot,
+            ads_pair_locked: false,
+            ads_pos_offset: stats.viewmodel_ads_pos_offset,
+            ads_rot_offset: stats.viewmodel_ads_rot_offset,
+            ads_hands_pos_offset: stats.viewmodel_ads_hands_pos_offset,
+            ads_hands_rot_offset: stats.viewmodel_ads_hands_rot_offset,
         }
     }
 
@@ -82,7 +119,7 @@ impl WeaponState {
 
     // reset stats to factory defaults (from const definitions)
     pub fn reset_stats(&mut self) {
-        self.stats_data = self.kind.stats().clone();
+        self.stats_data = self.id.stats().clone();
     }
 
     // can we fire right now?
@@ -133,6 +170,7 @@ impl WeaponState {
     pub fn fire(&mut self) -> bool {
         // If empty, pressing fire should auto-reload when we have reserve.
         if self.ammo == 0 {
+            self.burst_remaining = 0; // cancel any in-progress burst
             if self.reserve > 0 {
                 self.start_reload();
             }
@@ -153,11 +191,28 @@ impl WeaponState {
                     return false;
                 }
             }
+            FireMode::Burst(count) => {
+                // Starting a new burst: must release trigger first
+                if self.burst_remaining == 0 {
+                    if self.trigger_held {
+                        return false;
+                    }
+                    self.burst_remaining = count;
+                }
+                // Continuing a burst: auto-fire remaining shots
+                self.burst_remaining -= 1;
+            }
             FireMode::FullAuto => {}
         }
 
         self.ammo -= 1;
         self.fire_cooldown = 1.0 / fire_rate;
+
+        // Extra pause after the last shot of a burst — prevents instant re-burst
+        if matches!(fire_mode, FireMode::Burst(_)) && self.burst_remaining == 0 {
+            self.fire_cooldown += 0.3;
+        }
+
         self.muzzle_flash_timer = 0.08; // 80ms flash
 
         true
@@ -183,11 +238,12 @@ pub struct WeaponInventory {
 }
 
 impl WeaponInventory {
-    // start with all 5 weapons for now
-    pub fn new() -> Self {
-        let weapons = WeaponKind::ALL
+    // build inventory from a loadout (5 slots)
+    pub fn from_loadout(loadout: &Loadout) -> Self {
+        let weapons = loadout
+            .slots
             .iter()
-            .map(|&kind| WeaponState::new(kind))
+            .map(|&id| WeaponState::new(id))
             .collect();
         Self {
             weapons,
@@ -195,6 +251,19 @@ impl WeaponInventory {
             switch_cooldown: 0.0,
             locked_slot: None,
         }
+    }
+
+    // default inventory for backwards compat
+    pub fn new() -> Self {
+        Self::from_loadout(&Loadout::default_loadout())
+    }
+
+    // find the first weapon slot matching a category, or fall back to slot 0.
+    pub fn index_for_category(&self, cat: super::stats::WeaponCategory) -> usize {
+        self.weapons
+            .iter()
+            .position(|w| w.id.category() == cat)
+            .unwrap_or(0)
     }
 
     pub fn active(&self) -> &WeaponState {

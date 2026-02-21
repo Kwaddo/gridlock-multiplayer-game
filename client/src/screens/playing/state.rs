@@ -16,6 +16,22 @@ use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandsPlaybackMode {
+    IdleLoop,
+    ReloadOnce,
+    Stopped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InspectPhase {
+    None,
+    Start,
+    Sweep,
+    Hold,
+    Return,
+}
+
 pub struct PlayingState {
     // ---- pre‑allocated container hints to reduce reallocation spikes ----
     // typical counts observed in-game; tuning these avoids repeated grows
@@ -35,7 +51,10 @@ pub struct PlayingState {
     pub audio_stream_handle: Option<OutputStreamHandle>,
     pub sound_samples: HashMap<String, Arc<[u8]>>,
     pub assets: HashMap<String, Texture2D>,
-    pub models: HashMap<String, Mesh>,
+    // static meshes keyed by logical asset name; some glTF files contain multiple
+    // primitives with different textures, so we now store a vector of meshes
+    // instead of a single mesh.  rendering code will iterate when drawing.
+    pub models: HashMap<String, Vec<Mesh>>,
     pub animated_models: HashMap<String, AnimatedModel>,
     pub asset_source_paths: HashMap<String, String>,
     pub move_dir: Vec3,
@@ -104,6 +123,10 @@ pub struct PlayingState {
     pub announcements: Vec<(String, f32)>,
     pub lobby_console_message: Option<String>,
     pub lobby_console_message_timer: f32,
+    pub hands_playback_mode: HandsPlaybackMode,
+    pub hands_anim_initialized: bool,
+    pub inspect_phase: InspectPhase,
+    pub inspect_timer: f32,
 
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
@@ -202,6 +225,10 @@ impl PlayingState {
             lobby_console_message_timer: 0.0,
             announcements: Vec::with_capacity(Self::INIT_ANNOUNCEMENTS),
             connected_players: Vec::new(),
+            hands_playback_mode: HandsPlaybackMode::IdleLoop,
+            hands_anim_initialized: false,
+            inspect_phase: InspectPhase::None,
+            inspect_timer: 0.0,
 
             // match mode unknown until server indicates otherwise
             match_mode: None,
