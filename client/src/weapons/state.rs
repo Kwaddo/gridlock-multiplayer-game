@@ -48,6 +48,9 @@ pub struct WeaponState {
     pub shot_index: u32, // which bullet in current spray (for recoil patterns)
     pub pattern_reset_timer: f32, // time since triggerer released so it can go back to normal after a while
 
+    // -- Burst fire
+    pub burst_remaining: u32, // shots left in current burst (0 = not bursting)
+
     // -- Dev: pair lock (hand + gun move together)
     pub pair_locked: bool,
     pub pair_offset_pos: (f32, f32, f32), // additive offset applied to both weapon and hands
@@ -87,6 +90,7 @@ impl WeaponState {
             crosshair_kick: 0.0,
             shot_index: 0,
             pattern_reset_timer: 0.0,
+            burst_remaining: 0,
             pair_locked: false,
             pair_offset_pos: stats.viewmodel_pair_offset_pos,
             pair_offset_rot: stats.viewmodel_pair_offset_rot,
@@ -155,6 +159,7 @@ impl WeaponState {
     pub fn fire(&mut self) -> bool {
         // If empty, pressing fire should auto-reload when we have reserve.
         if self.ammo == 0 {
+            self.burst_remaining = 0; // cancel any in-progress burst
             if self.reserve > 0 {
                 self.start_reload();
             }
@@ -175,11 +180,28 @@ impl WeaponState {
                     return false;
                 }
             }
+            FireMode::Burst(count) => {
+                // Starting a new burst: must release trigger first
+                if self.burst_remaining == 0 {
+                    if self.trigger_held {
+                        return false;
+                    }
+                    self.burst_remaining = count;
+                }
+                // Continuing a burst: auto-fire remaining shots
+                self.burst_remaining -= 1;
+            }
             FireMode::FullAuto => {}
         }
 
         self.ammo -= 1;
         self.fire_cooldown = 1.0 / fire_rate;
+
+        // Extra pause after the last shot of a burst — prevents instant re-burst
+        if matches!(fire_mode, FireMode::Burst(_)) && self.burst_remaining == 0 {
+            self.fire_cooldown += 0.3;
+        }
+
         self.muzzle_flash_timer = 0.08; // 80ms flash
 
         true

@@ -64,26 +64,26 @@ pub enum WeaponId {
     M1911,
     Deagle,
     Revolver,
-    // SuppressedPistol,
+    SuppressedPistol,
     // TaurusRaging,
 
     // SMGs
     Mp5,
-    // P90,
+    P90,
     // HoneyBadger,
-    // TommyGun,
+    TommyGun,
 
     // Shotguns
-    // Benelli,
+    Benelli,
     Spas,
 
     // Assault Rifles
-    // M4a1,
-    // Ak,
-    // Famas,
+    M4a1,
+    Ak,
+    Famas,
     M16,
-    // Scar,
-    // AsVal,
+    Scar,
+    AsVal,
 
     // Snipers
     BoltAction,
@@ -102,26 +102,26 @@ impl WeaponId {
         WeaponId::M1911,
         WeaponId::Deagle,
         WeaponId::Revolver,
-        // WeaponId::SuppressedPistol,
+        WeaponId::SuppressedPistol,
         // WeaponId::TaurusRaging,
 
         // SMGs
         WeaponId::Mp5,
-        // WeaponId::P90,
+        WeaponId::P90,
         // WeaponId::HoneyBadger,
-        // WeaponId::TommyGun,
+        WeaponId::TommyGun,
 
         // Shotguns
-        // WeaponId::Benelli,
+        WeaponId::Benelli,
         WeaponId::Spas,
 
         // Assault Rifles
-        // WeaponId::M4a1,
-        // WeaponId::Ak,
-        // WeaponId::Famas,
+        WeaponId::M4a1,
+        WeaponId::Ak,
+        WeaponId::Famas,
         WeaponId::M16,
-        // WeaponId::Scar,
-        // WeaponId::AsVal,
+        WeaponId::Scar,
+        WeaponId::AsVal,
 
         // Snipers
         WeaponId::BoltAction,
@@ -137,21 +137,22 @@ impl WeaponId {
     pub fn category(self) -> WeaponCategory {
         match self {
             WeaponId::M1911 | WeaponId::Deagle | WeaponId::Revolver
-            // | WeaponId::SuppressedPistol | WeaponId::TaurusRaging
+            | WeaponId::SuppressedPistol
+            // | WeaponId::TaurusRaging
             => WeaponCategory::Pistol,
 
-            WeaponId::Mp5
-            // | WeaponId::P90 | WeaponId::HoneyBadger
-            // | WeaponId::TommyGun
+            WeaponId::Mp5 | WeaponId::P90
+            // | WeaponId::HoneyBadger
+            | WeaponId::TommyGun
             => WeaponCategory::Smg,
 
-            // WeaponId::Benelli |
+            WeaponId::Benelli |
             WeaponId::Spas
             => WeaponCategory::Shotgun,
 
-            WeaponId::M16
-            // | WeaponId::M4a1 | WeaponId::Ak | WeaponId::Famas |
-            // | WeaponId::Scar | WeaponId::AsVal
+            WeaponId::M4a1 | WeaponId::Ak | WeaponId::Famas
+            | WeaponId::M16 | WeaponId::Scar
+            | WeaponId::AsVal
             => WeaponCategory::AssaultRifle,
 
             WeaponId::BoltAction
@@ -170,26 +171,26 @@ impl WeaponId {
             WeaponId::M1911 => &pistols::M1911,
             WeaponId::Deagle => &pistols::DEAGLE,
             WeaponId::Revolver => &pistols::REVOLVER,
-            // WeaponId::SuppressedPistol => &pistols::SUPPRESSED_PISTOL,
+            WeaponId::SuppressedPistol => &pistols::SUPPRESSED_PISTOL,
             // WeaponId::TaurusRaging => &pistols::TAURUS_RAGING,
 
             // SMGs
             WeaponId::Mp5 => &smgs::MP5,
-            // WeaponId::P90 => &smgs::P90,
+            WeaponId::P90 => &smgs::P90,
             // WeaponId::HoneyBadger => &smgs::HONEY_BADGER,
-            // WeaponId::TommyGun => &smgs::TOMMY_GUN,
+            WeaponId::TommyGun => &smgs::TOMMY_GUN,
 
             // Shotguns
-            // WeaponId::Benelli => &shotguns::BENELLI,
+            WeaponId::Benelli => &shotguns::BENELLI,
             WeaponId::Spas => &shotguns::SPAS,
 
             // Assault Rifles
-            // WeaponId::M4a1 => &assault_rifles::M4A1,
-            // WeaponId::Ak => &assault_rifles::AK,
-            // WeaponId::Famas => &assault_rifles::FAMAS,
+            WeaponId::M4a1 => &assault_rifles::M4A1,
+            WeaponId::Ak => &assault_rifles::AK,
+            WeaponId::Famas => &assault_rifles::FAMAS,
             WeaponId::M16 => &assault_rifles::M16_STATS,
-            // WeaponId::Scar => &assault_rifles::SCAR,
-            // WeaponId::AsVal => &assault_rifles::AS_VAL,
+            WeaponId::Scar => &assault_rifles::SCAR,
+            WeaponId::AsVal => &assault_rifles::AS_VAL,
 
             // Snipers
             WeaponId::BoltAction => &snipers::BOLT_ACTION,
@@ -225,9 +226,10 @@ pub enum CrosshairStyle {
 // fire mode determines input behaviour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FireMode {
-    SemiAuto,   // one shot per click
-    FullAuto,   // hold to keep firing
-    BoltAction, // delay after each shot
+    SemiAuto,      // one shot per click
+    FullAuto,      // hold to keep firing
+    BoltAction,    // delay after each shot
+    Burst(u32),    // one click fires N shots automatically, then must release
 }
 
 // all the numbers that define how a weapon behaves and feels.
@@ -283,6 +285,7 @@ pub struct WeaponStats {
     // --- Crosshair
     pub crosshair_style: CrosshairStyle, // which render path (Standard = cross/texture, Scope = sniper overlay)
     pub fsa_time: Option<f32>,           // seconds to reach first shot accuracy, None = never (SMG)
+    pub fsa_suppresses_kick: bool,       // when true, FSA shot skips recoil + crosshair kick (precision weapons)
     // visual crosshair config (color, gap, thickness, textures) lives on CrosshairConfig in state.rs
 
     // --- HUD icon

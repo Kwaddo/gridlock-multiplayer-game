@@ -44,6 +44,7 @@ pub const MINIGUN: WeaponStats = WeaponStats {
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None,          // minigun never reaches FSA
+    fsa_suppresses_kick: false,
 
     fire_sound_asset_key: "ar_shot", // placeholder until we get a proper minigun sound
     icon_asset_key: "ar_icon",       // placeholder

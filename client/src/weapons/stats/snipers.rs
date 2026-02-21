@@ -43,6 +43,7 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
 
     crosshair_style: CrosshairStyle::Scope,
     fsa_time: None,
+    fsa_suppresses_kick: false,
 
     fire_sound_asset_key: "sniper_shot",
     icon_asset_key: "sniper_icon",

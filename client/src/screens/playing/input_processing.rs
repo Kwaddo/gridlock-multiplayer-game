@@ -101,7 +101,9 @@ impl PlayingState {
 
         // Firing: blocked while in post-teleport freeze inside the Maze
         if self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze {
-            if config.bind_fire.is_down() {
+            // Burst weapons keep firing remaining shots even after trigger release
+            let wants_to_fire = config.bind_fire.is_down() || weapon.burst_remaining > 0;
+            if wants_to_fire {
                 if weapon.fire() {
                     fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 

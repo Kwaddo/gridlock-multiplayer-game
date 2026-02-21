@@ -43,6 +43,7 @@ pub const MP5: WeaponStats = WeaponStats {
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: None,
+    fsa_suppresses_kick: false,
 
     fire_sound_asset_key: "smg_shot",
     icon_asset_key: "smg_icon",
@@ -89,15 +90,77 @@ pub const MP5: WeaponStats = WeaponStats {
     pattern_reset_time: 0.35,
 };
 
-// TODO: P90 — bullet hose, huge mag + high fire rate
+/// P90 — bullet hose, huge mag + highest fire rate SMG
 pub const P90: WeaponStats = WeaponStats {
     name: "P90",
+    damage: 17.0,
+    headshot_mult: 1.5,
+    fire_rate: 13.0,
+    magazine_size: 50,
+    max_reserve: 150,
+    reload_time: 2.5,
+
+    recoil_vertical: 0.014,
+    recoil_horizontal: 0.012,
+    recoil_recovery: 4.5,
+
+    hip_spread: 0.03,
+    ads_spread: 0.015,
+    spread_per_shot: 0.018,
+    spread_recovery: 2.0,
+    move_spread_mult: 1.1,
+    sprint_spread_mult: 1.5,
+    crouch_spread_mult: 0.85,
+
+    ads_zoom_fov: 70.0,
+    ads_time: 0.18,
+
+    bullet_speed: 190.0,
+    bullet_range: 40.0,
+    tracer_length: 2.0,
+    tracer_color: [255, 200, 80, 255],
+    tracer_thickness: 0.008,
+    tracer_lifetime: 1.0,
+
+    crosshair_kick_per_shot: 0.6,
+    crosshair_kick_decay: 5.0,
+    crosshair_kick_max: 3.0,
+
+    fsa_time: None,
+
+    fire_sound_asset_key: "smg_shot",
+    icon_asset_key: "smg_icon",
+
     viewmodel_model: Some("p90_model"),
     viewmodel_asset_key: None,
+
+    falloff_start: 8.0,
+    falloff_end: 25.0,
+    falloff_min_mult: 0.35,
+
+    // Loose spray — volume over precision
+    recoil_pattern: &[
+        (0.014, 0.0),
+        (0.014, 0.05),
+        (0.013, 0.15),
+        (0.013, 0.25),
+        (0.012, 0.2),
+        (0.012, 0.0),
+        (0.011, -0.15),
+        (0.011, -0.3),
+        (0.010, -0.2),
+        (0.010, -0.05),
+        (0.009, 0.1),
+        (0.009, 0.0),
+    ],
+    pattern_randomness: 0.35,
+    randomness_growth: 0.05,
+    pattern_reset_time: 0.3,
+
     ..MP5
 };
 
-// TODO: Honey Badger — stealth assault SMG hybrid, suppressed + rifle damage feel
+// Honey Badger — stealth assault SMG hybrid, suppressed + rifle damage feel
 pub const HONEY_BADGER: WeaponStats = WeaponStats {
     name: "Honey Badger",
     viewmodel_model: Some("honey_badger_model"),
@@ -105,10 +168,72 @@ pub const HONEY_BADGER: WeaponStats = WeaponStats {
     ..MP5
 };
 
-// TODO: Tommy Gun — vintage SMG, heavy recoil but strong close range
+/// Tommy Gun — vintage SMG, heavy recoil but strong close range, drum mag
 pub const TOMMY_GUN: WeaponStats = WeaponStats {
     name: "Tommy Gun",
+    damage: 23.0,
+    headshot_mult: 1.5,
+    fire_rate: 9.0,
+    magazine_size: 40,
+    max_reserve: 120,
+    reload_time: 2.8,
+
+    recoil_vertical: 0.02,
+    recoil_horizontal: 0.016,
+    recoil_recovery: 3.5,
+
+    hip_spread: 0.035,
+    ads_spread: 0.018,
+    spread_per_shot: 0.02,
+    spread_recovery: 1.8,
+    move_spread_mult: 1.2,
+    sprint_spread_mult: 1.6,
+    crouch_spread_mult: 0.8,
+
+    ads_zoom_fov: 70.0,
+    ads_time: 0.22,
+
+    bullet_speed: 170.0,
+    bullet_range: 35.0,
+    tracer_length: 2.5,
+    tracer_color: [255, 190, 70, 255],
+    tracer_thickness: 0.012,
+    tracer_lifetime: 1.0,
+
+    crosshair_kick_per_shot: 1.2,
+    crosshair_kick_decay: 4.0,
+    crosshair_kick_max: 3.5,
+
+    fsa_time: None,
+
+    fire_sound_asset_key: "smg_shot",
+    icon_asset_key: "smg_icon",
+
     viewmodel_model: Some("tommy_gun_model"),
     viewmodel_asset_key: None,
+
+    falloff_start: 8.0,
+    falloff_end: 25.0,
+    falloff_min_mult: 0.35,
+
+    // Wild pattern — heavy climb with wide horizontal sway
+    recoil_pattern: &[
+        (0.020, 0.0),
+        (0.020, 0.0),
+        (0.022, 0.1),
+        (0.022, 0.25),
+        (0.021, 0.35),
+        (0.020, 0.15),
+        (0.019, -0.15),
+        (0.018, -0.35),
+        (0.017, -0.25),
+        (0.016, -0.1),
+        (0.015, 0.1),
+        (0.014, 0.0),
+    ],
+    pattern_randomness: 0.35,
+    randomness_growth: 0.06,
+    pattern_reset_time: 0.4,
+
     ..MP5
 };
