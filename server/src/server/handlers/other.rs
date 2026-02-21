@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::maze::MazeData;
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
 
-use crate::server::game;
+use crate::server::{broadcast, game};
 
 /// Called when a client reports that they broke a wall at (x,y).
 /// Update the maze and broadcast the event to all connected players.
@@ -58,8 +58,8 @@ pub fn handle_hit(
     _maze: &mut Option<MazeData>,
     _match_running: &mut bool,
     _match_start_time: &mut Option<Instant>,
-    _match_end_pending: &mut Option<(Instant, u32, String)>,
-    _match_mode: u8,
+    match_end_pending: &mut Option<(Instant, u32, String)>,
+    match_mode: u8,
 ) {
     if payload.len() < 8 {
         return;
@@ -123,12 +123,50 @@ pub fn handle_hit(
             // reward killer
             if let Some(killer) = players.get_mut(&attacker) {
                 killer.kills += 1;
+
+                // Gun Game progression: only advance when running in that mode
+                if match_mode == MODE_GUN_GAME {
+                    killer.gun_level = killer.gun_level.saturating_add(1);
+
+                    // check for victory (level beyond progression length)
+                    if (killer.gun_level as usize) > game::GUN_GAME_PROGRESSION.len() {
+                        // announce winner and schedule end
+                        let winner_id = killer.id;
+                        let winner_name = killer.username.clone();
+                        println!("Gun Game winner reached final level: {}", winner_name);
+
+                        let mut end_msg = vec![MSG_MATCH_END];
+                        end_msg.extend_from_slice(&winner_id.to_be_bytes());
+                        let name_bytes = winner_name.as_bytes();
+                        end_msg.push(name_bytes.len() as u8);
+                        end_msg.extend_from_slice(name_bytes);
+                        // include countdown byte so clients can show timer
+                        end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
+                        for p in players.values() {
+                            let _ = socket.send_to(&end_msg, p.socket_addr);
+                        }
+
+                        *match_end_pending = Some((
+                            Instant::now()
+                                + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
+                            winner_id,
+                            winner_name,
+                        ));
+                    }
+                }
+
                 // send kill confirmation to killer
                 let mut kill_msg = vec![MSG_KILL];
                 kill_msg.extend_from_slice(&victim_id.to_be_bytes());
                 kill_msg.push(wbytes.len() as u8);
                 kill_msg.extend_from_slice(wbytes);
                 let _ = socket.send_to(&kill_msg, attacker);
+
+                // immediately propagate score/gun-level changes to everyone so the
+                // scoreboard/weapon lock updates promptly instead of waiting for the
+                // next position packet
+                broadcast::broadcast_state(socket, players);
+                broadcast::broadcast_player_list(socket, players);
             }
 
             // broadcast kill feed
@@ -161,7 +199,7 @@ pub fn handle_hit(
 /// returning their new coordinates.
 pub fn handle_respawn_request(
     socket: &UdpSocket,
-    _maze: &MazeData,
+    maze: &MazeData,
     players: &mut HashMap<SocketAddr, Player>,
     src_addr: SocketAddr,
 ) {
@@ -169,14 +207,15 @@ pub fn handle_respawn_request(
         player.health = player.max_health;
         player.is_alive = true;
 
-        // simple spawn logic from roadmap
-        let spawn = match player.world {
-            WorldId::Lobby => (0.0_f32, 0.5_f32, 0.0_f32),
-            WorldId::Maze => {
-                let spawn_x = 1.5 * game::MAZE_CELL_SIZE;
-                let spawn_z = 1.5 * game::MAZE_CELL_SIZE;
-                (spawn_x, 0.5, spawn_z)
-            }
+        // choose a spawn position based on current world. the maze argument
+        // is provided so we can pick a random safe location instead of always
+        // teleporting to the same corner.
+        let spawn = if player.world == WorldId::Maze {
+            let (sx, sy, sz, _fallback) = maze.random_spawn_world(game::MAZE_CELL_SIZE);
+            (sx, sy, sz)
+        } else {
+            // lobby players respawn at a fixed lobby coordinate
+            (0.0_f32, 0.5_f32, 0.0_f32)
         };
         player.position = spawn;
 

@@ -16,7 +16,7 @@ impl PlayingState {
             }
 
             if let Some(target) = self.pending_world_change.take() {
-                let msg = vec![MSG_WORLD_CHANGE, target.as_u8()];
+                let msg: Vec<u8> = vec![MSG_WORLD_CHANGE, target.as_u8()];
                 let _ = s.send_to(&msg, server_addr);
             }
 

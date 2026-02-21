@@ -44,8 +44,9 @@ impl PlayingState {
         draw_rectangle_lines(sx - bar_w / 2.0, sy, bar_w, bar_h, 1.0, WHITE);
 
         let label = "TARGET DUMMY";
-        let measure = measure_text(label, None, 14, 1.0);
-        draw_text(label, sx - measure.width / 2.0, sy - 4.0, 14.0, WHITE);
+        // use precomputed width stored in playing state to avoid expensive text measurement
+        let measure_w = self.target_dummy_label_dims.0;
+        draw_text(label, sx - measure_w / 2.0, sy - 4.0, 14.0, WHITE);
     }
 
     pub(crate) fn draw_entity_health_bars(&self, camera: &Camera3D) {
@@ -77,7 +78,7 @@ impl PlayingState {
         }
 
         for p in &self.other_players {
-            let world_pos = p.render_position() + vec3(0.0, 2.0, 0.0);
+            let world_pos: Vec3 = p.render_position() + vec3(0.0, 2.0, 0.0);
             let rel = world_pos - camera.position;
             let dot = rel.dot(forward);
             if dot >= 0.1 {
@@ -89,7 +90,7 @@ impl PlayingState {
 
         for bot in &self.practice_bots {
             let p = &bot.player;
-            let world_pos = vec3(p.x, p.y + 2.0, p.z);
+            let world_pos: Vec3 = vec3(p.x, p.y + 2.0, p.z);
             let rel = world_pos - camera.position;
             let dot = rel.dot(forward);
             if dot >= 0.1 {
