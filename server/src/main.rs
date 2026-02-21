@@ -21,7 +21,7 @@ const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 
 // Match / game loop settings (basic foundation)
 const MATCH_DURATION: Duration = Duration::from_secs(120); // match length (seconds)
-const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start (adjust later)
+const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
 const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
 const MATCH_SCORE_TO_WIN: u32 = 20; // kills required to win the match (unused for Gun Game)
 const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts
@@ -63,6 +63,11 @@ fn main() -> std::io::Result<()> {
     let mut buffer: [u8; 512] = [0; 512];
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
 
+    // cache assets manifest to avoid hitting the filesystem on every join
+    let asset_manifest: Option<serde_json::Value> = fs::read_to_string("assets/manifest.json")
+        .ok()
+        .and_then(|data| serde_json::from_str(&data).ok());
+
     // Do not generate a full gameplay maze at server start — create per-match instead.
     let mut maze: Option<MazeData> = None; // Some(...) when a match is running
 
@@ -76,7 +81,9 @@ fn main() -> std::io::Result<()> {
     // last sent authoritative match timer (to avoid spamming identical values)
     let mut last_match_time_sent: Option<u8> = None;
     // current match mode (defaults to Gun Game)
-    let mut match_mode: u8 = MODE_GUN_GAME;
+    let match_mode: u8 = MODE_GUN_GAME;
+    // how many players entered the maze during this match (for last-man-standing detection)
+    let mut match_total_maze_entries: usize = 0;
 
     loop {
         match socket.recv_from(&mut buffer) {
@@ -92,6 +99,7 @@ fn main() -> std::io::Result<()> {
                         match_running,
                         src_addr,
                         payload,
+                        asset_manifest.as_ref(),
                     ),
                     MSG_DISCONNECT => handle_disconnect(&socket, &mut players, src_addr),
                     MSG_POSITION => handle_position(&socket, &mut players, src_addr, payload),
@@ -144,11 +152,8 @@ fn main() -> std::io::Result<()> {
                                 );
 
                                 // broadcast countdown to all connected clients (include selected gamemode)
-                                let cd = vec![
-                                    MSG_MATCH_COUNTDOWN,
-                                    MATCH_START_COUNTDOWN_SECS,
-                                    match_mode,
-                                ];
+                                let cd: [u8; 3] =
+                                    [MSG_MATCH_COUNTDOWN, MATCH_START_COUNTDOWN_SECS, match_mode];
                                 for p in players.values() {
                                     let _ = socket.send_to(&cd, p.socket_addr);
                                 }
@@ -194,18 +199,21 @@ fn main() -> std::io::Result<()> {
                                                 ),
                                         );
 
-                                        let mut response =
-                                            vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
-                                        response.extend_from_slice(&sx.to_be_bytes());
-                                        response.extend_from_slice(&sy.to_be_bytes());
-                                        response.extend_from_slice(&sz.to_be_bytes());
-                                        // include current match mode for clients joining a running match
-                                        response.push(match_mode);
+                                        // build fixed-size buffer: type(1)+world(1)+3*4bytes pos + mode(1)
+                                        let mut response = [0u8; 14];
+                                        response[0] = MSG_WORLD_CHANGE;
+                                        response[1] = WorldId::Maze.as_u8();
+                                        response[2..6].copy_from_slice(&sx.to_be_bytes());
+                                        response[6..10].copy_from_slice(&sy.to_be_bytes());
+                                        response[10..14].copy_from_slice(&sz.to_be_bytes());
+                                        // last byte overwritten by mode
+                                        response[13] = match_mode;
                                         let _ = socket.send_to(&response, req_player.socket_addr);
 
                                         // send maze data to the joining client
                                         current_maze.send(&socket, req_player.socket_addr);
 
+                                        match_total_maze_entries += 1;
                                         println!(
                                             "Player '{}' joined running match (vacant slot)",
                                             req_player.username
@@ -231,7 +239,6 @@ fn main() -> std::io::Result<()> {
                             }
                         }
                     }
-
                     MSG_WALL_BROKEN => {
                         if let Some(ref mut m) = maze {
                             handle_wall_broken(&socket, m, &players, src_addr, payload)
@@ -279,6 +286,7 @@ fn main() -> std::io::Result<()> {
                 match_running = false;
                 match_start_time = None;
                 maze = None;
+                match_total_maze_entries = 0;
             }
         }
 
@@ -301,6 +309,7 @@ fn main() -> std::io::Result<()> {
                     match_running = true;
                     match_start_time = Some(Instant::now());
                     match_warmup_end = None;
+                    match_total_maze_entries = lobby_count;
                     // send initial authoritative match timer to all clients
                     let initial_secs = MATCH_DURATION.as_secs().min(255) as u8;
                     broadcast_match_timer(&socket, &players, initial_secs);
@@ -337,17 +346,50 @@ fn main() -> std::io::Result<()> {
             }
         }
 
-        // If a match is running but there are no players left in the Maze, end it immediately
-        if match_running {
-            let maze_count = players
-                .values()
-                .filter(|p| p.world == WorldId::Maze)
-                .count();
+        // If a match is running, check player counts for early end conditions
+        if match_running && match_end_pending.is_none() {
+            // count maze players and alive players in a single pass
+            let mut maze_count = 0;
+            let mut alive_count = 0;
+            let mut last_alive: Option<&Player> = None;
+            for p in players.values() {
+                if p.world == WorldId::Maze {
+                    maze_count += 1;
+                    if p.is_alive {
+                        alive_count += 1;
+                        last_alive = Some(p);
+                    }
+                }
+            }
+
             if maze_count == 0 {
                 println!("No players remain in match — ending match early");
                 match_running = false;
                 match_start_time = None;
                 maze = None;
+            } else if alive_count == 1 && match_total_maze_entries >= 2 {
+                // Last player standing wins — only trigger when at least 2 players
+                // entered the maze during this match (not just a solo player)
+                let winner = last_alive.unwrap();
+                let winner_id = winner.id;
+                let winner_name = winner.username.clone();
+                println!("Last player standing: '{}' wins the match", winner_name);
+
+                // Broadcast MSG_MATCH_END
+                let mut end_msg = vec![MSG_MATCH_END];
+                end_msg.extend_from_slice(&winner_id.to_be_bytes());
+                let name_bytes = winner_name.as_bytes();
+                end_msg.push(name_bytes.len() as u8);
+                end_msg.extend_from_slice(name_bytes);
+                for p in players.values() {
+                    let _ = socket.send_to(&end_msg, p.socket_addr);
+                }
+
+                match_end_pending = Some((
+                    Instant::now() + Duration::from_secs(MATCH_END_COUNTDOWN_SECS as u64),
+                    winner_id,
+                    winner_name,
+                ));
             }
         }
 
@@ -375,13 +417,14 @@ fn main() -> std::io::Result<()> {
                     match_start_time = None;
                     maze = None;
                     last_match_time_sent = None;
+                    match_total_maze_entries = 0;
                 }
             }
         }
 
-        // If a match-end was scheduled (winner reached score), execute it when the countdown expires
-        if let Some((when, _, winner_name)) = match_end_pending.clone() {
-            if Instant::now() >= when {
+        // If a match-end was scheduled (winner reached score or last-man-standing), execute it when the countdown expires
+        if let Some((when, _, winner_name)) = match_end_pending.as_ref() {
+            if Instant::now() >= *when {
                 println!(
                     "Match end countdown expired — returning players to Lobby (winner {})",
                     winner_name
@@ -398,6 +441,7 @@ fn main() -> std::io::Result<()> {
                 // clear pending flag
                 match_end_pending = None;
                 last_match_time_sent = None;
+                match_total_maze_entries = 0;
             }
         }
     }
@@ -410,7 +454,8 @@ fn process_auto_respawns(
 ) {
     let now = Instant::now();
     // include a bool indicating whether the teleporter fallback was used
-    let mut to_respawn: Vec<(SocketAddr, f32, f32, f32, bool, String)> = Vec::new();
+    let mut to_respawn: Vec<(SocketAddr, f32, f32, f32, bool, String)> =
+        Vec::with_capacity(players.len());
 
     for player in players.values_mut() {
         if player.is_alive || player.world != WorldId::Maze {
@@ -464,6 +509,7 @@ fn handle_join(
     match_running: bool,
     src_addr: SocketAddr,
     payload: &[u8],
+    asset_manifest: Option<&serde_json::Value>,
 ) {
     // Check if player already exists from this address
     if let Some(existing_player) = players.get_mut(&src_addr) {
@@ -500,7 +546,7 @@ fn handle_join(
                 m.send(socket, src_addr);
             }
         }
-        send_assets(socket, src_addr);
+        send_assets(socket, src_addr, asset_manifest);
 
         // broadcast updated connected-player list to everyone
         broadcast_player_list(socket, players);
@@ -543,14 +589,32 @@ fn send_player_list(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>, d
 
 /// Broadcast updated player list to every connected client
 fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) {
+    // build a single buffer and reuse; send_player_list currently allocates each time,
+    // inline the logic here for efficiency.
+    let mut msg: Vec<u8> = Vec::with_capacity(1024);
+
     for p in players.values() {
-        send_player_list(socket, players, p.socket_addr);
+        msg.clear();
+        let count = players.len().min(255) as u8;
+        msg.push(MSG_PLAYER_LIST);
+        msg.push(count);
+        for player in players.values() {
+            msg.extend_from_slice(&player.id.to_be_bytes());
+            let name_bytes = player.username.as_bytes();
+            msg.push(name_bytes.len() as u8);
+            msg.extend_from_slice(name_bytes);
+            msg.extend_from_slice(&player.kills.to_be_bytes());
+            msg.push(player.world.as_u8());
+            msg.push(if player.is_alive { 1u8 } else { 0u8 });
+        }
+        let _ = socket.send_to(&msg, p.socket_addr);
     }
 }
 
 /// Broadcast authoritative match-time remaining (seconds) to all connected clients
 fn broadcast_match_timer(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>, secs: u8) {
-    let msg = vec![MSG_MATCH_TIMER, secs];
+    // fixed-size array avoids allocation
+    let msg: [u8; 2] = [MSG_MATCH_TIMER, secs];
     for p in players.values() {
         let _ = socket.send_to(&msg, p.socket_addr);
     }
@@ -575,10 +639,13 @@ fn move_all_players_to_lobby(
         }
 
         // notify client of world change
-        let mut wc = vec![MSG_WORLD_CHANGE, WorldId::Lobby.as_u8()];
-        wc.extend_from_slice(&0.0f32.to_be_bytes());
-        wc.extend_from_slice(&0.0f32.to_be_bytes());
-        wc.extend_from_slice(&0.0f32.to_be_bytes());
+        // world change to lobby: fixed buffer
+        let mut wc = [0u8; 14];
+        wc[0] = MSG_WORLD_CHANGE;
+        wc[1] = WorldId::Lobby.as_u8();
+        wc[2..6].copy_from_slice(&0.0f32.to_be_bytes());
+        wc[6..10].copy_from_slice(&0.0f32.to_be_bytes());
+        wc[10..14].copy_from_slice(&0.0f32.to_be_bytes());
         let _ = socket.send_to(&wc, p.socket_addr);
     }
 
@@ -641,19 +708,26 @@ fn handle_position(
 }
 
 fn broadcast_state(socket: &UdpSocket, players: &HashMap<SocketAddr, Player>) {
-    // updated this function to build a separate message per receiver filtered by world
+    // build a single reusable buffer to reduce heap churn
+    let mut state_msg: Vec<u8> = Vec::with_capacity(1024);
     for receiver in players.values() {
-        // Only include *alive* players in the per-receiver state snapshot so dead bodies
-        // do not linger client-side as visible, shootable models.
-        let same_world: Vec<&Player> = players
-            .values()
-            .filter(|p| p.world == receiver.world && p.is_alive)
-            .collect();
+        state_msg.clear();
+        state_msg.push(MSG_STATE);
 
-        let mut state_msg = vec![MSG_STATE];
-        state_msg.extend_from_slice(&(same_world.len() as u32).to_be_bytes());
+        // first pass: count matching players to write header
+        let mut count: u32 = 0;
+        for p in players.values() {
+            if p.world == receiver.world && p.is_alive {
+                count += 1;
+            }
+        }
+        state_msg.extend_from_slice(&count.to_be_bytes());
 
-        for player in &same_world {
+        // second pass: append each player's data directly
+        for player in players.values() {
+            if player.world != receiver.world || !player.is_alive {
+                continue;
+            }
             state_msg.extend_from_slice(&player.id.to_be_bytes());
             state_msg.extend_from_slice(&player.position.0.to_be_bytes());
             state_msg.extend_from_slice(&player.position.1.to_be_bytes());
@@ -752,10 +826,13 @@ fn handle_world_change(
 
     println!("Player '{}' moved to {:?}", player.username, target);
 
-    let mut response = vec![MSG_WORLD_CHANGE, target.as_u8()];
-    response.extend_from_slice(&sx.to_be_bytes());
-    response.extend_from_slice(&sy.to_be_bytes());
-    response.extend_from_slice(&sz.to_be_bytes());
+    // send world-change reply using stack buffer
+    let mut response = [0u8; 14];
+    response[0] = MSG_WORLD_CHANGE;
+    response[1] = target.as_u8();
+    response[2..6].copy_from_slice(&sx.to_be_bytes());
+    response[6..10].copy_from_slice(&sy.to_be_bytes());
+    response[10..14].copy_from_slice(&sz.to_be_bytes());
     let _ = socket.send_to(&response, src_addr);
 
     // ensure the client has the maze data when transitioning into the Maze.
@@ -791,14 +868,13 @@ fn handle_discover(
     let _ = socket.send_to(&response, src_addr);
 }
 
-fn send_assets(socket: &UdpSocket, addr: SocketAddr) {
-    let Ok(data) = fs::read_to_string("assets/manifest.json") else {
-        println!("Warning: could not read assets/manifest.json");
-        return;
-    };
-    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&data) else {
-        println!("Warning: invalid assets/manifest.json");
-        return;
+fn send_assets(socket: &UdpSocket, addr: SocketAddr, manifest_opt: Option<&serde_json::Value>) {
+    let manifest = match manifest_opt {
+        Some(m) => m,
+        None => {
+            println!("Warning: could not read assets/manifest.json");
+            return;
+        }
     };
 
     let worlds = [("global", 255u8), ("lobby", 0u8), ("maze", 1u8)];
@@ -808,7 +884,10 @@ fn send_assets(socket: &UdpSocket, addr: SocketAddr) {
             if assets.is_empty() {
                 continue;
             }
-            let mut msg = vec![MSG_ASSETS, *world_id, assets.len() as u8];
+            let mut msg = Vec::with_capacity(256);
+            msg.push(MSG_ASSETS);
+            msg.push(*world_id);
+            msg.push(assets.len() as u8);
             for (key, path) in assets {
                 if let Some(path_str) = path.as_str() {
                     let key_bytes = key.as_bytes();
@@ -870,13 +949,26 @@ fn handle_hit(
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
 ) {
-    // Payload: victim_id (4 bytes), damage (4 bytes)
+    // Payload: victim_id (4 bytes), damage (4 bytes), optional: weapon_len (1), weapon_name (variable)
     if payload.len() < 8 {
         return;
     }
 
     let victim_id = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
     let damage = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+
+    // Parse optional weapon name from payload
+    // raw weapon name supplied by client (may be ignored in favor of authoritative gamemode)
+    let mut weapon_name = if payload.len() >= 9 {
+        let wlen = payload[8] as usize;
+        if payload.len() >= 9 + wlen {
+            String::from_utf8_lossy(&payload[9..9 + wlen]).to_string()
+        } else {
+            "Unknown".to_string()
+        }
+    } else {
+        "Unknown".to_string()
+    };
 
     // Get attacker
     let Some(attacker) = players.get(&src_addr) else {
@@ -965,7 +1057,7 @@ fn handle_hit(
             attacker.kills += 1;
 
             // choose weapon name and (optionally) advance progression only for Gun Game
-            let weapon_name = if match_mode == MODE_GUN_GAME {
+            if match_mode == MODE_GUN_GAME {
                 let weapon_index = (attacker.gun_level as usize).saturating_sub(1);
                 let wn = GUN_GAME_PROGRESSION
                     .get(weapon_index)
@@ -981,27 +1073,27 @@ fn handle_hit(
                         (attacker.gun_level + 1).min(GUN_GAME_PROGRESSION.len() as u32);
                 }
 
-                wn.to_string()
+                weapon_name = wn.to_string();
             } else {
                 // fallback weapon name for unimplemented modes
-                "Gun".to_string()
-            };
+                weapon_name = "Gun".to_string();
+            }
 
             // notify attacker about the kill (victim id)
             let mut kill_msg = vec![MSG_KILL];
             kill_msg.extend_from_slice(&victim_id.to_be_bytes());
             let _ = socket.send_to(&kill_msg, src_addr);
+        }
 
-            // Broadcast kill feed to all players using the weapon the attacker just used
-            let weapon_bytes = weapon_name.as_bytes();
-            let mut kill_feed_msg = vec![MSG_KILL_FEED];
-            kill_feed_msg.extend_from_slice(&attacker_id.to_be_bytes());
-            kill_feed_msg.extend_from_slice(&victim_id.to_be_bytes());
-            kill_feed_msg.push(weapon_bytes.len() as u8);
-            kill_feed_msg.extend_from_slice(weapon_bytes);
-            for player in players.values() {
-                let _ = socket.send_to(&kill_feed_msg, player.socket_addr);
-            }
+        // Broadcast kill feed to all players
+        let weapon_bytes = weapon_name.as_bytes();
+        let mut kill_feed_msg = vec![MSG_KILL_FEED];
+        kill_feed_msg.extend_from_slice(&attacker_id.to_be_bytes());
+        kill_feed_msg.extend_from_slice(&victim_id.to_be_bytes());
+        kill_feed_msg.push(weapon_bytes.len() as u8);
+        kill_feed_msg.extend_from_slice(weapon_bytes);
+        for player in players.values() {
+            let _ = socket.send_to(&kill_feed_msg, player.socket_addr);
         }
         // Immediately broadcast an updated state so the killed player's model is removed
         // from other clients without waiting for the next position update.

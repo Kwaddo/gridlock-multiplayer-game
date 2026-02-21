@@ -33,6 +33,7 @@ impl PlayingState {
                         self.position,
                         config.render_distance,
                         self.dev_mode.show_hitboxes,
+                        &self.destroyed_lights,
                     );
                 }
             }

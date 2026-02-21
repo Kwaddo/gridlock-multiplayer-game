@@ -45,12 +45,16 @@ pub fn sync_world(
             maze_spawn = Some(spawn);
         }
         if let Some(players) = updates.players {
-            let mut existing = std::mem::take(&mut playing_state.other_players);
+            // build a fresh list of other players; we only allocate once
             let mut merged = Vec::with_capacity(players.len());
 
             for mut incoming in players {
-                if let Some(index) = existing.iter().position(|p| p.id == incoming.id) {
-                    let mut current = existing.swap_remove(index);
+                if let Some(index) = playing_state
+                    .other_players
+                    .iter()
+                    .position(|p| p.id == incoming.id)
+                {
+                    let mut current = playing_state.other_players.swap_remove(index);
                     // treat sprinting with a short grace window to avoid walk/sprint flicker
                     let effective_sprinting =
                         incoming.is_sprinting || current.is_sprinting || current.sprint_grace > 0.0;
@@ -177,9 +181,8 @@ pub fn sync_world(
             }
         }
 
-        // Handle match end broadcast
-        let match_end_winner_cloned = updates.match_end_winner.clone();
-        if let Some(winner_name) = match_end_winner_cloned {
+        // Handle match end broadcast (clone only when needed)
+        if let Some(ref winner_name) = updates.match_end_winner {
             // move client back to lobby view and clear local maze
             playing_state.announcements.push((
                 format!("{} won the match! Returning to lobby.", winner_name),
@@ -241,6 +244,8 @@ pub fn sync_world(
         if let Some(spawn) = maze_spawn {
             if !world_change_applied && playing_state.current_world == WorldId::Maze {
                 playing_state.position = spawn;
+                playing_state.destroyed_lights.clear();
+                *maze = None;
             }
         }
         if let Some(broken) = updates.broken_walls {
