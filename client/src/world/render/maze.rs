@@ -234,13 +234,6 @@ pub fn draw_maze(
                 );
             }
 
-<<<<<<< HEAD
-            if let Some(nearest_pipe_z) = pipe_rows.iter().min_by(|a, b| {
-                (*a - light_pos.z)
-                    .abs()
-                    .total_cmp(&(*b - light_pos.z).abs())
-            }) {
-=======
             // find nearest pipe row on-the-fly (avoid allocating/iterating a Vec)
             let mut best_z: Option<f32> = None;
             let mut best_dist = f32::INFINITY;
@@ -254,7 +247,6 @@ pub fn draw_maze(
             }
 
             if let Some(nearest_pipe_z) = best_z {
->>>>>>> alimohsen999/mul-25-implement-gun-game
                 let conduit_len = (nearest_pipe_z - light_pos.z).abs();
                 if conduit_len > 0.06 {
                     let conduit_pos =

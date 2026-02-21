@@ -107,8 +107,6 @@ pub struct PlayingState {
 
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
-<<<<<<< HEAD
-=======
 
     // cached strings used by render to avoid reallocating each frame
     pub(crate) match_start_cached_secs: i32,
@@ -118,7 +116,6 @@ pub struct PlayingState {
 
     // cached measurement for the static "TARGET DUMMY" HUD label
     pub target_dummy_label_dims: (f32, f32),
->>>>>>> alimohsen999/mul-25-implement-gun-game
 }
 
 pub struct KillFeedEntry {
@@ -205,9 +202,6 @@ impl PlayingState {
             lobby_console_message_timer: 0.0,
             announcements: Vec::with_capacity(Self::INIT_ANNOUNCEMENTS),
             connected_players: Vec::new(),
-<<<<<<< HEAD
-            destroyed_lights: HashSet::new(),
-=======
 
             // match mode unknown until server indicates otherwise
             match_mode: None,
@@ -245,7 +239,6 @@ impl PlayingState {
         self.player_index.clear();
         for (i, p) in self.other_players.iter().enumerate() {
             self.player_index.insert(p.id, i);
->>>>>>> alimohsen999/mul-25-implement-gun-game
         }
     }
 }
