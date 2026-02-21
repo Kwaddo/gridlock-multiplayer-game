@@ -16,6 +16,7 @@ pub struct SyncResult {
     pub removed_by_server: bool, // true if server no longer lists our player id (timed-out/removed)
 }
 
+#[inline(always)]
 pub fn sync_world(
     socket: &Option<UdpSocket>,
     player_id: u32,
@@ -45,16 +46,16 @@ pub fn sync_world(
             maze_spawn = Some(spawn);
         }
         if let Some(players) = updates.players {
-            // build a fresh list of other players; we only allocate once
-            let mut merged = Vec::with_capacity(players.len());
+            // track ids we saw this frame so we can prune removed players later
+            playing_state.seen_player_ids.clear();
+            // reserve enough space in case it shrinks
+            playing_state.seen_player_ids.reserve(players.len());
 
             for mut incoming in players {
-                if let Some(index) = playing_state
-                    .other_players
-                    .iter()
-                    .position(|p| p.id == incoming.id)
-                {
-                    let mut current = playing_state.other_players.swap_remove(index);
+                playing_state.seen_player_ids.insert(incoming.id);
+                if let Some(&idx) = playing_state.player_index.get(&incoming.id) {
+                    // update existing player by index
+                    let current = &mut playing_state.other_players[idx];
                     // treat sprinting with a short grace window to avoid walk/sprint flicker
                     let effective_sprinting =
                         incoming.is_sprinting || current.is_sprinting || current.sprint_grace > 0.0;
@@ -76,7 +77,6 @@ pub fn sync_world(
                     // confirmation window before accepting a new MoveDir.
                     let candidate_dir = anim_state.move_dir;
                     if candidate_dir != current.last_move_dir {
-                        // start or refresh a pending candidate — don't switch visuals yet
                         if current.pending_move_dir == Some(candidate_dir) {
                             // pending already in progress; leave it
                         } else {
@@ -85,7 +85,6 @@ pub fn sync_world(
                         }
                         anim_state.move_dir = current.last_move_dir;
                     } else {
-                        // candidate matches current direction — accept immediately and clear pending
                         current.pending_move_dir = None;
                         current.pending_move_timer = 0.0;
                         current.last_move_dir = candidate_dir;
@@ -95,18 +94,14 @@ pub fn sync_world(
                     current.username = incoming.username;
                     current.world = incoming.world;
                     current.skin_type = AnimState::skin_from_state(anim_state, None);
-                    // refresh sprint grace when server reports sprinting
                     if incoming.is_sprinting {
                         current.sprint_grace = OtherPlayer::SPRINT_GRACE;
                     }
-                    // update authoritative flags from server
                     current.is_sprinting = incoming.is_sprinting;
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
-                    // preserve updated kills
                     current.kills = incoming.kills;
-                    merged.push(current);
                 } else {
-                    // for newly-seen players treat sprint flag as fresh and prime the grace timer
+                    // new player
                     if incoming.is_sprinting {
                         incoming.sprint_grace = OtherPlayer::SPRINT_GRACE;
                     }
@@ -124,16 +119,26 @@ pub fn sync_world(
                         incoming.evt_jump_start,
                     );
                     incoming.skin_type = AnimState::skin_from_state(anim_state, None);
-                    // initialize move-direction hysteresis state for new players
                     incoming.last_move_dir = anim_state.move_dir;
                     incoming.pending_move_dir = None;
                     incoming.pending_move_timer = 0.0;
                     incoming.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
-                    merged.push(incoming);
+                    let idx = playing_state.other_players.len();
+                    playing_state.other_players.push(incoming);
+                    playing_state
+                        .player_index
+                        .insert(playing_state.other_players[idx].id, idx);
                 }
             }
 
-            playing_state.other_players = merged;
+            // remove any players the server no longer reports
+            if !playing_state.seen_player_ids.is_empty() {
+                playing_state
+                    .other_players
+                    .retain(|p| playing_state.seen_player_ids.contains(&p.id));
+                // rebuild index after potential removals/shifts
+                playing_state.rebuild_player_index();
+            }
         }
 
         // Update local player's kill count when server provides it via MSG_STATE
@@ -181,21 +186,15 @@ pub fn sync_world(
             }
         }
 
-        // Handle match end broadcast (clone only when needed)
-        if let Some(ref winner_name) = updates.match_end_winner {
-            // move client back to lobby view and clear local maze
-            playing_state.announcements.push((
-                format!("{} won the match! Returning to lobby.", winner_name),
-                6.0,
-            ));
-            playing_state.current_world = WorldId::Lobby;
-            *maze = None;
-            playing_state.local_kills = 0;
+        // NOTE: previously we moved the client to the lobby as soon as a
+        // MSG_MATCH_END packet arrived.  behaviour here should be limited to
+        // queuing up the winner announcement; the server will issue a
+        // MSG_WORLD_CHANGE later when the countdown expires.  leaving the old
+        // teleport logic caused the final scoreboard to flash briefly and then
+        // disappear, and it also wiped out any kill count the player had just
+        // earned.
 
-            // clear any mode-specific restrictions
-            playing_state.match_mode = None;
-            playing_state.weapons.set_locked_slot(None);
-        }
+        // (no longer doing anything here)
 
         let mut world_change_applied = false;
         if let Some((world_id, spawn)) = updates.world_change {
@@ -272,6 +271,7 @@ pub fn sync_world(
         }
         if let Some(kills) = updates.kill_feed {
             for (killer_id, victim_id, weapon) in kills {
+                // push a kill-feed entry for UI
                 playing_state
                     .kill_feed
                     .push(client::screens::playing::KillFeedEntry {
@@ -280,6 +280,17 @@ pub fn sync_world(
                         weapon,
                         timer: 5.0,
                     });
+
+                // if the victim is another player, remove them immediately so no
+                // corpse lingers. the server will eventually stop sending a state
+                // update for the dead player, but the kill-feed packet arrives
+                // slightly earlier and gives us an opportunity to cull them right
+                // away. note: we only remove non-local players here since the
+                // local client handles its own death path separately.
+                if victim_id != player_id {
+                    playing_state.other_players.retain(|p| p.id != victim_id);
+                    playing_state.rebuild_player_index();
+                }
             }
         }
         if updates.death {
@@ -335,7 +346,8 @@ pub fn sync_world(
                     4.0,
                 ));
             }
-            playing_state.local_kills = 0;
+            // leave local_kills alone so final score is visible until we actually
+            // teleport back to the lobby (MSG_WORLD_CHANGE will arrive later).
         }
 
         // Global connected player list (for Tab / scoreboard)

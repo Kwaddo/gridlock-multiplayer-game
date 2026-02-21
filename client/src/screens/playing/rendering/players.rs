@@ -11,6 +11,7 @@ const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
 
 impl PlayingState {
+    #[inline(always)]
     pub(crate) fn draw_other_players(&self) {
         for p in &self.other_players {
             self.draw_player_model(p);
@@ -35,8 +36,7 @@ impl PlayingState {
             if let Some(anim) = anim_model {
                 let s = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
                 let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
-                let transform =
-                    Mat4::from_translation(render_pos + vec3(0.0, y_offset, 0.0))
+                let transform = Mat4::from_translation(render_pos + vec3(0.0, y_offset, 0.0))
                     * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                     * Mat4::from_scale(vec3(s, s, s));
                 let gl = unsafe { get_internal_gl() };
@@ -62,8 +62,18 @@ impl PlayingState {
         }
 
         let color = if p.skin.is_some() { WHITE } else { p.color };
-        draw_cube(render_pos + vec3(0.0, 0.6, 0.0), vec3(0.6, 1.2, 0.4), None, color);
-        draw_cube(render_pos + vec3(0.0, 1.4, 0.0), vec3(0.4, 0.4, 0.4), None, color);
+        draw_cube(
+            render_pos + vec3(0.0, 0.6, 0.0),
+            vec3(0.6, 1.2, 0.4),
+            None,
+            color,
+        );
+        draw_cube(
+            render_pos + vec3(0.0, 1.4, 0.0),
+            vec3(0.4, 0.4, 0.4),
+            None,
+            color,
+        );
     }
 
     pub(crate) fn draw_target_dummy(&self) {
@@ -99,13 +109,16 @@ impl PlayingState {
         }
 
         for p in &self.other_players {
-            Self::draw_entity_hitboxes(p.render_position(), &p.hitboxes);
+            let origin: Vec3 = p.render_position();
+            Self::draw_entity_hitboxes(origin, &p.hitboxes);
         }
         for bot in &self.practice_bots {
-            Self::draw_entity_hitboxes(bot.player.render_position(), &bot.player.hitboxes);
+            let origin: Vec3 = bot.player.render_position();
+            Self::draw_entity_hitboxes(origin, &bot.player.hitboxes);
         }
     }
 
+    #[inline(always)]
     fn draw_entity_hitboxes(origin: Vec3, hitboxes: &[crate::weapons::combat::Hitbox]) {
         for hb in hitboxes {
             let center = origin + hb.center_offset;

@@ -213,7 +213,14 @@ pub fn check_early_end_conditions(
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_total_maze_entries: &mut usize,
     match_start_time: &mut Option<Instant>,
+    match_mode: u8,
 ) {
+    // gun game should never end just because someone died;
+    // kills are handled separately in hit logic
+    if match_mode == MODE_GUN_GAME {
+        return;
+    }
+
     // count maze players and alive players in a single pass
     let mut maze_count = 0;
     let mut alive_count = 0;
@@ -241,12 +248,13 @@ pub fn check_early_end_conditions(
         let winner_name = winner.username.clone();
         println!("Last player standing: '{}' wins the match", winner_name);
 
-        // Broadcast MSG_MATCH_END
+        // Broadcast MSG_MATCH_END (include countdown byte so clients can display timer)
         let mut end_msg = vec![MSG_MATCH_END];
         end_msg.extend_from_slice(&winner_id.to_be_bytes());
         let name_bytes = winner_name.as_bytes();
         end_msg.push(name_bytes.len() as u8);
         end_msg.extend_from_slice(name_bytes);
+        end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
         for p in players.values() {
             let _ = socket.send_to(&end_msg, p.socket_addr);
         }

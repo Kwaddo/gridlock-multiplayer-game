@@ -156,7 +156,7 @@ impl PlayingState {
         stats: &crate::weapons::stats::WeaponStats,
     ) {
         let key = stats.viewmodel_asset_key.unwrap_or(stats.icon_asset_key);
-        let tex = match self.assets.get(key) {
+        let tex: &Texture2D = match self.assets.get(key) {
             Some(t) => t,
             None => {
                 return;

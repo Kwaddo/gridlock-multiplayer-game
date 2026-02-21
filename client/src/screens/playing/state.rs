@@ -17,11 +17,17 @@ use std::sync::Arc;
 use super::super::dev_mode::DevModeState;
 
 pub struct PlayingState {
+    // ---- pre‑allocated container hints to reduce reallocation spikes ----
+    // typical counts observed in-game; tuning these avoids repeated grows
     pub position: Vec3,
     pub yaw: f32,
     pub pitch: f32,
     pub last_mouse_pos: (f32, f32),
     pub other_players: Vec<OtherPlayer>,
+    /// mapping from player ID to index in `other_players` for fast lookup
+    pub player_index: HashMap<u32, usize>,
+    /// temporary reuse for world sync to avoid reallocating each tick
+    pub seen_player_ids: HashSet<u32>,
     pub movement_state: MovementState,
     pub movement_config: MovementConfig,
     pub bob_timer: f32,
@@ -101,6 +107,15 @@ pub struct PlayingState {
 
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
+
+    // cached strings used by render to avoid reallocating each frame
+    pub(crate) match_start_cached_secs: i32,
+    pub(crate) match_start_cached_text: String,
+    pub(crate) post_freeze_cached_secs: i32,
+    pub(crate) post_freeze_cached_text: String,
+
+    // cached measurement for the static "TARGET DUMMY" HUD label
+    pub target_dummy_label_dims: (f32, f32),
 }
 
 pub struct KillFeedEntry {
@@ -125,7 +140,9 @@ impl PlayingState {
             yaw: 0.0,
             pitch: 0.0,
             last_mouse_pos: (0.0, 0.0),
-            other_players: Vec::new(),
+            other_players: Vec::with_capacity(Self::INIT_OTHER_PLAYERS),
+            player_index: HashMap::with_capacity(Self::INIT_OTHER_PLAYERS),
+            seen_player_ids: HashSet::with_capacity(Self::INIT_OTHER_PLAYERS),
             movement_state: MovementState::new(),
             movement_config: MovementConfig::new(),
             bob_timer: 0.0,
@@ -152,12 +169,12 @@ impl PlayingState {
             target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
             hit_marker_timer: 0.0,
             hit_marker_headshot: false,
-            damage_numbers: Vec::new(),
-            tracers: Vec::new(),
-            bullet_holes: Vec::new(),
+            damage_numbers: Vec::with_capacity(Self::INIT_DAMAGE_NUMBERS),
+            tracers: Vec::with_capacity(Self::INIT_TRACERS),
+            bullet_holes: Vec::with_capacity(Self::INIT_BULLET_HOLES),
             hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
-            practice_bots: Vec::new(),
+            practice_bots: Vec::with_capacity(Self::INIT_PRACTICE_BOTS),
             next_bot_id: 9000,
             hp: 100.0,
             max_hp: 100.0,
@@ -183,7 +200,7 @@ impl PlayingState {
             spawn_feedback_timer: 0.0,
             lobby_console_message: None,
             lobby_console_message_timer: 0.0,
-            announcements: Vec::new(),
+            announcements: Vec::with_capacity(Self::INIT_ANNOUNCEMENTS),
             connected_players: Vec::new(),
 
             // match mode unknown until server indicates otherwise
@@ -192,6 +209,36 @@ impl PlayingState {
             // pending forced weapon slot (applied after teleport into Maze)
             pending_forced_weapon_slot: None,
             destroyed_lights: HashSet::new(),
+
+            match_start_cached_secs: -1,
+            match_start_cached_text: String::new(),
+            post_freeze_cached_secs: -1,
+            post_freeze_cached_text: String::new(),
+            target_dummy_label_dims: {
+                let m = crate::ui::fonts::measure_game_text("TARGET DUMMY", 14);
+                (m, 0.0) // width only used currently; height can be computed if needed
+            },
+        }
+    }
+}
+
+// associated constants for preallocated container hints
+impl PlayingState {
+    pub const INIT_OTHER_PLAYERS: usize = 32;
+    pub const INIT_PRACTICE_BOTS: usize = 16;
+    pub const INIT_DAMAGE_NUMBERS: usize = 64;
+    pub const INIT_TRACERS: usize = 128;
+    pub const INIT_BULLET_HOLES: usize = 256;
+    pub const INIT_ANNOUNCEMENTS: usize = 8;
+}
+
+// helper methods that don't involve constants
+impl PlayingState {
+    /// rebuild the fast lookup map after modifying the `other_players` vector.
+    pub fn rebuild_player_index(&mut self) {
+        self.player_index.clear();
+        for (i, p) in self.other_players.iter().enumerate() {
+            self.player_index.insert(p.id, i);
         }
     }
 }
