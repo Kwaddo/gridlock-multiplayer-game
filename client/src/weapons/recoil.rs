@@ -105,9 +105,9 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     // initially a fast decay
     if weapon.bloom > 0.0 {
         let decay = spread_recovery * 3.0; // initial fast decay
-        weapon.bloom *= (1.0 - decay * delta).max(0.0); // exponential decay
-                                                        // snap to zero when tiny
-        if weapon.bloom < 0.001 {
+        weapon.bloom *= (1.0f32 - decay * delta).max(0.0f32); // exponential decay
+        // avoid tiny residuals
+        if weapon.bloom < 0.0001 {
             weapon.bloom = 0.0;
         }
     }
@@ -148,7 +148,7 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
 
     // crosshair kick decay
     if weapon.crosshair_kick > 0.0 {
-        weapon.crosshair_kick *= (1.0 - weapon.stats().crosshair_kick_decay * delta).max(0.0);
+        weapon.crosshair_kick *= (1.0f32 - weapon.stats().crosshair_kick_decay * delta).max(0.0f32);
     // exponential decay
     } else {
         weapon.crosshair_kick = 0.0;

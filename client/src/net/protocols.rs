@@ -17,6 +17,10 @@ pub const MSG_DAMAGE: u8 = 16; // server -> client: you took damage (amount, att
 pub const MSG_KILL: u8 = 17; // server -> client: you killed someone (victim_id, weapon)
 pub const MSG_KILL_FEED: u8 = 18; // server -> all: broadcast kill (killer_id, victim_id)
 pub const MSG_START_GAME: u8 = 19; // client -> server: request to start a match
+                                   // Game mode identifiers used with MSG_START_GAME
+pub const MODE_GUN_GAME: u8 = 1;
+pub const MODE_TEAM_DEATHMATCH: u8 = 2;
+pub const MODE_SEARCH_AND_DESTROY: u8 = 3;
 pub const MSG_START_DENIED: u8 = 20; // server -> client: start request rejected (match running / full)
 pub const MSG_MATCH_JOINED: u8 = 21; // server -> all: announce player joined running match (id, name)
 pub const MSG_MATCH_END: u8 = 22; // server -> all: announce match end (winner_id, name, countdown_secs)

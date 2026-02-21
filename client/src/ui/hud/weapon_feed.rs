@@ -47,6 +47,17 @@ pub(super) fn draw_weapon_and_kill_feed(
         text_params(16, Color::from_rgba(180, 180, 180, 255)),
     );
 
+    // indicate when a server-mode lock is active (e.g. Gun Game)
+    if weapons.locked_slot.is_some() {
+        let lock_text = "(locked)";
+        draw_text_ex(
+            lock_text,
+            name_x + name_w + 8.0,
+            name_y,
+            text_params(12, Color::from_rgba(255, 140, 140, 200)),
+        );
+    }
+
     let icon_w = stats.icon_width;
     let icon_h = stats.icon_height;
     let icon_x = name_x - icon_w - 8.0;
@@ -117,11 +128,13 @@ pub(super) fn draw_weapon_and_kill_feed(
         }
     }
 
-    let feed_x = 12.0; // move kill-feed to top-left
+    let feed_x = 12.0; // kill-feed top-left
     let mut feed_y = 20.0;
     for entry in kill_feed.iter().rev().take(5) {
         let alpha = ((entry.timer / 5.0).min(1.0) * 255.0) as u8;
         let text_color = Color::from_rgba(255, 255, 255, alpha);
+        let accent_color = Color::from_rgba(255, 107, 53, alpha); // orange accent
+        let dim_color = Color::from_rgba(180, 180, 190, alpha);
 
         let killer_name = if entry.killer_id == local_player_id {
             local_username
@@ -142,11 +155,44 @@ pub(super) fn draw_weapon_and_kill_feed(
                 .unwrap_or("Player")
         };
 
+        // highlight the local player's name in orange
+        let killer_color = if entry.killer_id == local_player_id {
+            accent_color
+        } else {
+            text_color
+        };
+        let victim_color = if entry.victim_id == local_player_id {
+            accent_color
+        } else {
+            text_color
+        };
+
+        // draw background pill for readability
+        let full_text = format!("{}  killed  {}", killer_name, victim_name);
+        let full_w = measure_game_text(&full_text, 14);
+        draw_rectangle(
+            feed_x - 4.0,
+            feed_y - 14.0,
+            full_w + 8.0,
+            20.0,
+            Color::from_rgba(8, 10, 16, (alpha as f32 * 0.6) as u8),
+        );
+
         let mut x_offset = feed_x;
 
-        draw_text_ex(killer_name, x_offset, feed_y, text_params(14, text_color));
-        x_offset += measure_game_text(killer_name, 14) + 5.0;
+        // killer name
+        draw_text_ex(killer_name, x_offset, feed_y, text_params(14, killer_color));
+        x_offset += measure_game_text(killer_name, 14) + 4.0;
 
+        // "killed" verb
+        draw_text_ex("killed", x_offset, feed_y, text_params(14, dim_color));
+        x_offset += measure_game_text("killed", 14) + 4.0;
+
+        // victim name
+        draw_text_ex(victim_name, x_offset, feed_y, text_params(14, victim_color));
+        x_offset += measure_game_text(victim_name, 14) + 5.0;
+
+        // weapon icon (if available) or text after victim name
         let weapon_icon_key = format!("{}_icon", entry.weapon.to_lowercase());
         if let Some(icon_tex) = assets.get(&weapon_icon_key) {
             draw_texture_ex(
@@ -159,13 +205,8 @@ pub(super) fn draw_weapon_and_kill_feed(
                     ..Default::default()
                 },
             );
-        } else {
-            let weapon_text = format!("[{}]", entry.weapon);
-            draw_text_ex(&weapon_text, x_offset, feed_y, text_params(12, text_color));
         }
-        x_offset += 20.0;
 
-        draw_text_ex(victim_name, x_offset, feed_y, text_params(14, text_color));
-        feed_y += 20.0;
+        feed_y += 22.0;
     }
 }

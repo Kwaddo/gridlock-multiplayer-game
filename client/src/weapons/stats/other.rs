@@ -37,6 +37,9 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     tracer_color: [255, 160, 60, 255],
     tracer_thickness: 0.012,
     tracer_lifetime: 0.8,
+    bullet_hole_size: 0.4,
+    bullet_hole_lifetime: 5.0,
+    bullet_hole_color: [200, 200, 200, 255],
 
     crosshair_kick_per_shot: 0.3,
     crosshair_kick_decay: 4.0,

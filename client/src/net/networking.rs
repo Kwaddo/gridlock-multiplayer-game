@@ -33,6 +33,8 @@ pub struct NetUpdate {
     pub match_end_countdown: Option<u8>,
     pub player_list: Option<Vec<(u32, String, u32, WorldId, bool)>>,
     pub self_kills: Option<u32>,
+    pub self_gun_level: Option<u8>,
+    pub match_mode: Option<u8>,
     pub death: bool, // You died
 
     // true if poll_updates read at least one packet from the socket during this call
@@ -67,6 +69,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         match_end_countdown: None,
         player_list: None,
         self_kills: None,
+        self_gun_level: None,
+        match_mode: None,
         death: false,
         received_any: false,
     };
@@ -230,6 +234,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     ]);
                     offset += 4;
 
+                    // new: gun level (1 = first weapon)
+                    let gun_level = recv_buf[offset];
+                    offset += 1;
+
                     let name_len = recv_buf[offset] as usize;
                     offset += 1;
                     let name =
@@ -249,10 +257,12 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
                         other_player.evt_landed = (event_flags & EVT_LANDED) != 0;
                         other_player.kills = kills;
+                        other_player.gun_level = gun_level;
                         new_players.push(other_player);
                     } else {
                         // update own-kills value for local UI/scoreboard
                         update.self_kills = Some(kills);
+                        update.self_gun_level = Some(gun_level);
                     }
                 }
                 update.players = Some(new_players);
@@ -272,6 +282,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[13],
                     ]);
                     update.world_change = Some((world, vec3(x, y, z)));
+                    // optional trailing gamemode byte when entering a match
+                    if size >= 15 {
+                        update.match_mode = Some(recv_buf[14]);
+                    }
                 }
             }
             MSG_START_DENIED => {
@@ -289,10 +303,13 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 }
             }
             MSG_MATCH_COUNTDOWN => {
-                // format: [MSG_MATCH_COUNTDOWN][seconds:1]
+                // format: [MSG_MATCH_COUNTDOWN][seconds:1][optional:mode:1]
                 if size >= 2 {
                     let secs = recv_buf[1];
                     update.match_start_countdown = Some(secs);
+                    if size >= 3 {
+                        update.match_mode = Some(recv_buf[2]);
+                    }
                 }
             }
             MSG_MATCH_TIMER => {

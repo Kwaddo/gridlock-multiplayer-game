@@ -295,21 +295,35 @@ fn lift_dark_untextured_color(mut color: [u8; 4]) -> [u8; 4] {
     color
 }
 
-pub async fn load_gltf_static_mesh(path: &str) -> Result<Mesh, String> {
+pub async fn load_gltf_static_mesh(path: &str) -> Result<Vec<Mesh>, String> {
     load_gltf_static_mesh_impl(path, false).await
 }
 
-pub async fn load_gltf_static_mesh_lit(path: &str) -> Result<Mesh, String> {
+/// Load a static mesh with lighting baked into the vertex colors.  This is
+/// mostly useful for untextured models (view‑models, props) so they still have
+/// visible depth without requiring a custom shader.  The resulting meshes still
+/// carry the original `texture` field when present; the material multiply will
+/// dim them according to the baked colours.
+pub async fn load_gltf_static_mesh_lit(path: &str) -> Result<Vec<Mesh>, String> {
     load_gltf_static_mesh_impl(path, true).await
 }
 
-async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<Mesh, String> {
-    let (doc, buffers, images) = gltf::import(path)
-        .map_err(|e| format!("failed to import gltf '{}': {e}", path))?;
+async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<Vec<Mesh>, String> {
+    let (doc, buffers, images) =
+        gltf::import(path).map_err(|e| format!("failed to import gltf '{}': {e}", path))?;
 
-    let mut vertices: Vec<Vertex> = Vec::new();
-    let mut indices: Vec<u16> = Vec::new();
-    let mut mesh_texture: Option<Texture2D> = None;
+    // we'll accumulate one mesh per primitive so that each texture can be
+    // preserved.  vertices/indices for a prim are stored temporarily until the
+    // normalization pass at the end.
+    struct PrimData {
+        vertices: Vec<Vertex>,
+        indices: Vec<u16>,
+        texture: Option<Texture2D>,
+    }
+
+    let mut prims: Vec<PrimData> = Vec::new();
+    let mut global_min = vec3(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+    let mut global_max = vec3(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
 
     for mesh in doc.meshes() {
         for prim in mesh.primitives() {
@@ -317,72 +331,75 @@ async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<M
 
             let mat = prim.material();
 
-            // Prefer KHR_materials_pbrSpecularGlossiness diffuse when present,
-            // fall back to metallic-roughness base color.
-            let (mat_color, base_tex_info) =
-                if let Some(sg) = mat.pbr_specular_glossiness() {
-                    let f = sg.diffuse_factor();
-                    let s = sg.specular_factor(); // [f32; 3], default [1,1,1]
-                    let g = sg.glossiness_factor(); // f32, default 1.0
-                    let tex_idx = sg.diffuse_texture().map(|t| t.texture().source().index());
-                    // No texture: approximate metal appearance by lerping diffuse toward
-                    // specular based on glossiness. High-gloss metals read mostly as specular.
-                    let blend = if tex_idx.is_none() { g * 0.75 } else { 0.0 };
-                    let r = f[0] + (s[0] - f[0]) * blend;
-                    let g_ch = f[1] + (s[1] - f[1]) * blend;
-                    let b = f[2] + (s[2] - f[2]) * blend;
-                    // Force fully opaque for viewmodel models — the deagle's SG materials
-                    // can have alpha < 1 on the diffuse_factor which would make the outer
-                    // shell transparent, revealing the interior geometry.
-                    if bake_lighting && f[3] < 0.99 {
-                        println!("[gltf-lit] prim '{}' has alpha={:.3} — forcing opaque", mat.name().unwrap_or("?"), f[3]);
-                    }
-                    let alpha = if bake_lighting { 255u8 } else { (f[3] * 255.0) as u8 };
-                    let mut color = [
-                        linear_to_srgb(r),
-                        linear_to_srgb(g_ch),
-                        linear_to_srgb(b),
-                        alpha,
-                    ];
-                    if tex_idx.is_none() {
-                        color = lift_dark_untextured_color(color);
-                    }
-                    (color, tex_idx)
+            // determine material color and optional base texture index
+            let (mat_color, base_tex_info) = if let Some(sg) = mat.pbr_specular_glossiness() {
+                let f = sg.diffuse_factor();
+                let s = sg.specular_factor();
+                let g = sg.glossiness_factor();
+                let tex_idx = sg.diffuse_texture().map(|t| t.texture().source().index());
+                let blend = if tex_idx.is_none() { g * 0.75 } else { 0.0 };
+                let r = f[0] + (s[0] - f[0]) * blend;
+                let g_ch = f[1] + (s[1] - f[1]) * blend;
+                let b = f[2] + (s[2] - f[2]) * blend;
+                if bake_lighting && f[3] < 0.99 {
+                    println!(
+                        "[gltf-lit] prim '{}' has alpha={:.3} — forcing opaque",
+                        mat.name().unwrap_or("?"),
+                        f[3]
+                    );
+                }
+                let alpha = if bake_lighting {
+                    255u8
                 } else {
-                    let f = mat.pbr_metallic_roughness().base_color_factor();
-                    let tex_idx = mat.pbr_metallic_roughness().base_color_texture()
-                        .map(|t| t.texture().source().index());
-                    let alpha = if bake_lighting { 255u8 } else { (f[3] * 255.0) as u8 };
-                    let mut color = [
-                        linear_to_srgb(f[0]),
-                        linear_to_srgb(f[1]),
-                        linear_to_srgb(f[2]),
-                        alpha,
-                    ];
-                    if tex_idx.is_none() {
-                        color = lift_dark_untextured_color(color);
-                    }
-                    (color, tex_idx)
+                    (f[3] * 255.0) as u8
                 };
+                let mut color = [
+                    linear_to_srgb(r),
+                    linear_to_srgb(g_ch),
+                    linear_to_srgb(b),
+                    alpha,
+                ];
+                if tex_idx.is_none() {
+                    color = lift_dark_untextured_color(color);
+                }
+                (color, tex_idx)
+            } else {
+                let f = mat.pbr_metallic_roughness().base_color_factor();
+                let tex_idx = mat
+                    .pbr_metallic_roughness()
+                    .base_color_texture()
+                    .map(|t| t.texture().source().index());
+                let alpha = if bake_lighting {
+                    255u8
+                } else {
+                    (f[3] * 255.0) as u8
+                };
+                let mut color = [
+                    linear_to_srgb(f[0]),
+                    linear_to_srgb(f[1]),
+                    linear_to_srgb(f[2]),
+                    alpha,
+                ];
+                if tex_idx.is_none() {
+                    color = lift_dark_untextured_color(color);
+                }
+                (color, tex_idx)
+            };
 
-            if mesh_texture.is_none() {
-                if let Some(image_index) = base_tex_info {
-                    if let Some(image) = images.get(image_index) {
-                        let rgba = gltf_image_to_rgba8(image)?;
-                        if image.width > u16::MAX as u32 || image.height > u16::MAX as u32 {
-                            return Err(format!(
-                                "texture too large for macroquad: {}x{}",
-                                image.width, image.height
-                            ));
-                        }
-                        let tex = Texture2D::from_rgba8(
-                            image.width as u16,
-                            image.height as u16,
-                            &rgba,
-                        );
-                        tex.set_filter(FilterMode::Nearest);
-                        mesh_texture = Some(tex);
+            // load texture for this primitive if we haven't already
+            let mut prim_texture: Option<Texture2D> = None;
+            if let Some(image_index) = base_tex_info {
+                if let Some(image) = images.get(image_index) {
+                    let rgba = gltf_image_to_rgba8(image)?;
+                    if image.width > u16::MAX as u32 || image.height > u16::MAX as u32 {
+                        return Err(format!(
+                            "texture too large for macroquad: {}x{}",
+                            image.width, image.height
+                        ));
                     }
+                    let tex = Texture2D::from_rgba8(image.width as u16, image.height as u16, &rgba);
+                    tex.set_filter(FilterMode::Nearest);
+                    prim_texture = Some(tex);
                 }
             }
 
@@ -399,23 +416,21 @@ async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<M
                 .map(|uv| uv.into_f32().collect())
                 .unwrap_or_default();
 
-            // Light directions in model space.
-            // Viewmodel guns are rendered at yaw=-PI/2, so we pre-rotate the world-space
-            // key light (+90° around Y) to get the correct model-space direction:
-            // world (-0.4, 0.8, 0.5) → model (0.5, 0.8, 0.4)
             let light_dir = vec3(0.5_f32, 0.8, 0.4).normalize();
-            let fill_dir  = vec3(-0.4_f32, -0.3, -0.6).normalize();
+            let fill_dir = vec3(-0.4_f32, -0.3, -0.6).normalize();
 
-            let base = vertices.len() as u32;
+            let mut vertices: Vec<Vertex> = Vec::new();
+            let mut indices: Vec<u16> = Vec::new();
+
             for (i, p) in pos_iter.enumerate() {
                 let n = normals.get(i).copied().unwrap_or([0.0, 1.0, 0.0]);
                 let uv = uvs.get(i).copied().unwrap_or([0.0, 0.0]);
                 let color = if bake_lighting {
                     let nv = vec3(n[0], n[1], n[2]).normalize();
-                    let diff_key  = nv.dot(light_dir).max(0.0);
+                    let diff_key = nv.dot(light_dir).max(0.0);
                     let diff_fill = nv.dot(fill_dir).max(0.0) * 0.25;
-                    let ambient   = 0.30_f32;
-                    let light     = (ambient + diff_key * 0.62 + diff_fill).min(1.0);
+                    let ambient = 0.30_f32;
+                    let light = (ambient + diff_key * 0.62 + diff_fill).min(1.0);
                     [
                         ((mat_color[0] as f32 / 255.0 * light) * 255.0) as u8,
                         ((mat_color[1] as f32 / 255.0 * light) * 255.0) as u8,
@@ -433,11 +448,12 @@ async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<M
                 });
             }
 
+            // indices read same as before, but relative to this primitive's vertex list
             if let Some(read_idx) = reader.read_indices() {
                 match read_idx {
                     ReadIndices::U8(it) => {
                         for i in it {
-                            let idx = base + i as u32;
+                            let idx = i as u32;
                             if idx > u16::MAX as u32 {
                                 return Err("too many vertices".into());
                             }
@@ -446,7 +462,7 @@ async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<M
                     }
                     ReadIndices::U16(it) => {
                         for i in it {
-                            let idx = base + i as u32;
+                            let idx = i as u32;
                             if idx > u16::MAX as u32 {
                                 return Err("too many vertices".into());
                             }
@@ -455,7 +471,7 @@ async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<M
                     }
                     ReadIndices::U32(it) => {
                         for i in it {
-                            let idx = base + i;
+                            let idx = i;
                             if idx > u16::MAX as u32 {
                                 return Err("too many vertices".into());
                             }
@@ -464,50 +480,59 @@ async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<M
                     }
                 }
             } else {
-                let added = (vertices.len() as u32) - base;
+                let added = vertices.len() as u32;
                 for i in 0..added {
-                    let idx = base + i;
-                    if idx > u16::MAX as u32 {
+                    if i > u16::MAX as u32 {
                         return Err("too many vertices".into());
                     }
-                    indices.push(idx as u16);
+                    indices.push(i as u16);
                 }
             }
+
+            // update global extents using positions of this prim
+            for v in &vertices {
+                global_min.x = global_min.x.min(v.position.x);
+                global_min.y = global_min.y.min(v.position.y);
+                global_min.z = global_min.z.min(v.position.z);
+                global_max.x = global_max.x.max(v.position.x);
+                global_max.y = global_max.y.max(v.position.y);
+                global_max.z = global_max.z.max(v.position.z);
+            }
+
+            prims.push(PrimData {
+                vertices,
+                indices,
+                texture: prim_texture,
+            });
         }
     }
 
-    if vertices.is_empty() || indices.is_empty() {
+    if prims.is_empty() {
         return Err("GLB produced empty mesh".into());
     }
 
-    let mut min = vec3(f32::INFINITY, f32::INFINITY, f32::INFINITY);
-    let mut max = vec3(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
-    for v in &vertices {
-        min.x = min.x.min(v.position.x);
-        min.y = min.y.min(v.position.y);
-        min.z = min.z.min(v.position.z);
-        max.x = max.x.max(v.position.x);
-        max.y = max.y.max(v.position.y);
-        max.z = max.z.max(v.position.z);
-    }
-
-    let size = max - min;
+    // compute normalization transform based on global bounds
+    let size = global_max - global_min;
     let current_height = size.y.max(0.0001);
     let target_height = 1.6_f32;
     let scale = target_height / current_height;
 
-    let center_x = (min.x + max.x) * 0.5;
-    let center_z = (min.z + max.z) * 0.5;
+    let center_x = (global_min.x + global_max.x) * 0.5;
+    let center_z = (global_min.z + global_max.z) * 0.5;
 
-    for v in &mut vertices {
-        v.position.x = (v.position.x - center_x) * scale;
-        v.position.y = (v.position.y - min.y) * scale;
-        v.position.z = (v.position.z - center_z) * scale;
+    let mut output: Vec<Mesh> = Vec::with_capacity(prims.len());
+    for mut pd in prims {
+        for v in &mut pd.vertices {
+            v.position.x = (v.position.x - center_x) * scale;
+            v.position.y = (v.position.y - global_min.y) * scale;
+            v.position.z = (v.position.z - center_z) * scale;
+        }
+        output.push(Mesh {
+            vertices: pd.vertices,
+            indices: pd.indices,
+            texture: pd.texture,
+        });
     }
 
-    Ok(Mesh {
-        vertices,
-        indices,
-        texture: mesh_texture,
-    })
+    Ok(output)
 }

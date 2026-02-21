@@ -33,6 +33,7 @@ impl PlayingState {
                         self.position,
                         config.render_distance,
                         self.dev_mode.show_hitboxes,
+                        &self.destroyed_lights,
                     );
                 }
             }
@@ -47,6 +48,7 @@ impl PlayingState {
         self.draw_other_players();
         self.draw_player_hitboxes();
         self.draw_tracers(camera.position);
+        self.draw_bullet_holes();
 
         set_default_camera();
 
@@ -127,8 +129,12 @@ impl PlayingState {
         // Match-start countdown (large center number)
         if self.match_start_countdown_timer > 0.0 {
             let secs = self.match_start_countdown_timer.ceil() as i32;
-            let txt = format!("{}", secs);
-            let w = crate::ui::fonts::measure_game_text(&txt, 96);
+            if secs != self.match_start_cached_secs {
+                self.match_start_cached_secs = secs;
+                self.match_start_cached_text = secs.to_string();
+            }
+            let txt = &self.match_start_cached_text;
+            let w = crate::ui::fonts::measure_game_text(txt, 96);
             // when shown in the Lobby (before teleport), nudge the countdown slightly upward
             let y_center = if self.current_world == WorldId::Lobby {
                 screen_height() / 2.0 - 40.0
@@ -136,15 +142,15 @@ impl PlayingState {
                 screen_height() / 2.0
             };
             draw_text_ex(
-                &txt,
+                txt,
                 (screen_width() - w) / 2.0,
                 y_center,
                 crate::ui::fonts::text_params(96, Color::from_rgba(255, 220, 120, 255)),
             );
-            let sub = "Match starts in".to_string();
-            let sw = crate::ui::fonts::measure_game_text(&sub, 20);
+            let sub = "Match starts in";
+            let sw = crate::ui::fonts::measure_game_text(sub, 20);
             draw_text_ex(
-                &sub,
+                sub,
                 (screen_width() - sw) / 2.0,
                 y_center - 80.0,
                 crate::ui::fonts::text_params(20, Color::from_rgba(200, 200, 200, 200)),
@@ -154,48 +160,39 @@ impl PlayingState {
         // Post-teleport freeze indicator (players cannot move for a short time after being moved into the Maze)
         if self.post_teleport_freeze_timer > 0.0 && self.current_world == WorldId::Maze {
             let secs = self.post_teleport_freeze_timer.ceil() as i32;
-            let txt = format!("Movement & firing locked for {}s", secs);
-            let sw = crate::ui::fonts::measure_game_text(&txt, 20);
+            if secs != self.post_freeze_cached_secs {
+                self.post_freeze_cached_secs = secs;
+                self.post_freeze_cached_text = format!("Movement & firing locked for {}s", secs);
+            }
+            let txt = &self.post_freeze_cached_text;
+            let sw = crate::ui::fonts::measure_game_text(txt, 20);
             draw_text_ex(
-                &txt,
+                txt,
                 (screen_width() - sw) / 2.0,
                 screen_height() / 2.0 + 60.0,
                 crate::ui::fonts::text_params(20, Color::from_rgba(200, 200, 200, 200)),
             );
         }
 
-        // Match-end countdown / winner banner
+        // Victory screen overlay (match end)
         if self.match_end_countdown_timer > 0.0 {
             if let Some(winner) = &self.match_end_winner {
-                let secs = self.match_end_countdown_timer.ceil() as i32;
-                let txt = format!("{} won — returning to lobby in {}s", winner, secs);
-                let w = crate::ui::fonts::measure_game_text(&txt, 22);
-                draw_rectangle(
-                    (screen_width() - w) / 2.0 - 12.0,
-                    40.0 - 24.0,
-                    w + 24.0,
-                    44.0,
-                    Color::from_rgba(8, 10, 12, 200),
-                );
-                draw_text_ex(
-                    &txt,
-                    (screen_width() - w) / 2.0,
-                    40.0,
-                    crate::ui::fonts::text_params(22, YELLOW),
-                );
+                self.draw_victory_screen(winner, player_id);
             }
         }
 
         // Bottom-left announcements (recent events like "PlayerX joined the match")
-        let mut y = screen_height() - 24.0;
-        for (txt, timer) in &self.announcements {
-            let alpha = (timer / 4.0).clamp(0.0, 1.0);
-            let col = Color::from_rgba(200, 200, 200, (220.0 * alpha) as u8);
-            draw_text_ex(txt, 12.0, y, crate::ui::fonts::text_params(14, col));
-            y -= 18.0;
+        if self.match_end_countdown_timer <= 0.0 {
+            let mut y = screen_height() - 24.0;
+            for (txt, timer) in &self.announcements {
+                let alpha: f32 = (timer / 4.0).clamp(0.0, 1.0);
+                let col = Color::from_rgba(200, 200, 200, (220.0 * alpha) as u8);
+                draw_text_ex(txt, 12.0, y, crate::ui::fonts::text_params(14, col));
+                y -= 18.0;
+            }
         }
 
-        if self.is_dead {
+        if self.is_dead && self.match_end_countdown_timer <= 0.0 {
             self.draw_death_screen();
         }
     }

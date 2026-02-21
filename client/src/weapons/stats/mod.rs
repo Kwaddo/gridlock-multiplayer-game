@@ -276,6 +276,11 @@ pub struct WeaponStats {
     pub tracer_thickness: f32, // thickness of the bullet tracer line (units)
     pub tracer_lifetime: f32,  // how long the tracer trail lingers (seconds)
 
+    // --- bullet hole / impact mark config (per-weapon so sniper != pistol)
+    pub bullet_hole_size: f32,      // radius of the impact decal (world units)
+    pub bullet_hole_lifetime: f32,  // how long the mark stays on the wall (seconds)
+    pub bullet_hole_color: [u8; 4], // RGBA tint of the impact mark
+
     // --- Crosshair kick (visual gap expansion on fire, not user-editable)
     pub crosshair_kick_per_shot: f32, // how much gap to add per shot (% of screen height)
     pub crosshair_kick_decay: f32,    // how quickly the gap recovers (units per second)

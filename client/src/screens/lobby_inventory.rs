@@ -1,6 +1,6 @@
 /*
     Module in the lobby screen where players can select weapons to have in their
-    inventory, its cause we have so many weapons that we need a better way to manage them. 
+    inventory, its cause we have so many weapons that we need a better way to manage them.
     It will also show weapon description and stats in the future
 */
 
@@ -157,11 +157,20 @@ impl LobbyInventoryScreen {
             back_y,
             back_w,
             back_h,
-            if back_hover { ACCENT_HOVER } else { Color::new(0.15, 0.17, 0.28, 1.0) },
+            if back_hover {
+                ACCENT_HOVER
+            } else {
+                Color::new(0.15, 0.17, 0.28, 1.0)
+            },
         );
         let bt = "< BACK";
         let btw = measure_game_text(bt, 15);
-        draw_text_ex(bt, back_x + (back_w - btw) / 2.0, back_y + 23.0, text_params(15, WHITE));
+        draw_text_ex(
+            bt,
+            back_x + (back_w - btw) / 2.0,
+            back_y + 23.0,
+            text_params(15, WHITE),
+        );
 
         // --- slots row ---
         let slots_y = panel_y + 54.0;
@@ -256,8 +265,8 @@ impl LobbyInventoryScreen {
                 if y + row_h > list_y && y < list_y + list_h {
                     let row_x = panel_x + 16.0;
                     let row_w = panel_w - 32.0;
-                    let hover = in_rect(mouse, row_x, y, row_w, row_h)
-                        && self.selected_slot.is_some();
+                    let hover =
+                        in_rect(mouse, row_x, y, row_w, row_h) && self.selected_slot.is_some();
                     let in_loadout = loadout_set.contains(&weapon_id);
 
                     let bg = if hover {
@@ -269,7 +278,7 @@ impl LobbyInventoryScreen {
                     };
                     draw_rectangle(row_x, y, row_w, row_h, bg);
 
-                    let name = weapon_id.display_name();
+                    let name: &str = weapon_id.display_name();
                     let text_color = if in_loadout { ACCENT } else { TEXT_LABEL };
                     draw_text_ex(name, row_x + 12.0, y + 21.0, text_params(14, text_color));
 
