@@ -15,6 +15,7 @@ pub enum PropKind {
     Desk = 5,
     Monitor = 6,
     OfficeChair = 7,
+    Foosball = 8,
 }
 
 impl PropKind {

@@ -30,4 +30,5 @@ pub struct BulletHole {
     pub max_lifetime: f32, // initial lifetime (for fade calculation)
     pub size: f32,         // radius of the bullet hole decal
     pub color: [u8; 4],    // RGBA tint of the hole (weapon-dependent)
+    pub wall_cell: Option<(u8, u8)>, // if on a breakable wall, the maze cell coords
 }

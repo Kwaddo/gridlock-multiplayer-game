@@ -65,6 +65,7 @@ fn scatter_room_props(room: &Room, rng: &mut StdRng, props: &mut Vec<Prop>) {
         PropKind::Barrel,
         PropKind::SupplyCrate,
         PropKind::Lamp,
+        PropKind::Foosball,
     ];
     let density = if (room.w as usize * room.h as usize) > 36 {
         6
