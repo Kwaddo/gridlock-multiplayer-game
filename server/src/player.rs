@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+pub use std::net::SocketAddr;
 use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
