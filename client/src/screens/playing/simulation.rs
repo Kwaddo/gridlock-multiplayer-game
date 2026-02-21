@@ -159,15 +159,8 @@ impl PlayingState {
         });
 
         // bullet hole lifetime decay + remove holes on broken walls
-<<<<<<< HEAD
-        for hole in &mut self.bullet_holes {
-            hole.lifetime -= delta;
-        }
-        self.bullet_holes.retain(|h| {
-=======
         self.bullet_holes.retain_mut(|h| {
             h.lifetime -= delta;
->>>>>>> alimohsen999/mul-25-implement-gun-game
             if h.lifetime <= 0.0 {
                 return false;
             }

@@ -200,17 +200,6 @@ impl PlayingState {
                             let prop_hit = maze
                                 .as_ref()
                                 .and_then(|m| m.ray_test_props_with_normal(eye, fwd, range));
-<<<<<<< HEAD
-                            let fc_hit = maze
-                                .as_ref()
-                                .and_then(|m| m.ray_test_floor_ceiling_with_normal(eye, fwd, range));
-                            let light_hit = maze
-                                .as_ref()
-                                .and_then(|m| m.ray_test_ceiling_lights_with_normal(eye, fwd, range, &self.destroyed_lights));
-
-                            // collect all hits as (distance, normal, Option<wall_cell>, is_light_cell)
-                            let mut candidates: Vec<(f32, Vec3, Option<(u8, u8)>, Option<(u8, u8)>)> = Vec::new();
-=======
                             let fc_hit = maze.as_ref().and_then(|m| {
                                 m.ray_test_floor_ceiling_with_normal(eye, fwd, range)
                             });
@@ -230,7 +219,6 @@ impl PlayingState {
                                 Option<(u8, u8)>,
                                 Option<(u8, u8)>,
                             )> = Vec::new();
->>>>>>> alimohsen999/mul-25-implement-gun-game
 
                             if let Some(((wx, wy), d, n)) = wall_hit {
                                 candidates.push((d, n, Some((wx, wy)), None));
@@ -246,11 +234,6 @@ impl PlayingState {
                             }
 
                             // pick the closest
-<<<<<<< HEAD
-                            candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-
-                            if let Some((dist, norm, wall_cell, light_cell)) = candidates.first().copied() {
-=======
                             candidates.sort_by(|a, b| {
                                 a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
                             });
@@ -258,7 +241,6 @@ impl PlayingState {
                             if let Some((dist, norm, wall_cell, light_cell)) =
                                 candidates.first().copied()
                             {
->>>>>>> alimohsen999/mul-25-implement-gun-game
                                 // if closest hit is a wall, damage it
                                 if let Some((wx, wy)) = wall_cell {
                                     if let Some(m) = maze.as_mut() {

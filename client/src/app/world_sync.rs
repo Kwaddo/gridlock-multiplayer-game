@@ -232,8 +232,6 @@ pub fn sync_world(
                 playing_state.match_end_winner = None;
                 playing_state.match_end_countdown_timer = 0.0;
                 playing_state.local_kills = 0;
-<<<<<<< HEAD
-=======
             }
         }
 
@@ -245,7 +243,6 @@ pub fn sync_world(
         if let Some(spawn) = maze_spawn {
             if !world_change_applied && playing_state.current_world == WorldId::Maze {
                 playing_state.position = spawn;
->>>>>>> alimohsen999/mul-25-implement-gun-game
                 playing_state.destroyed_lights.clear();
                 *maze = None;
             }
