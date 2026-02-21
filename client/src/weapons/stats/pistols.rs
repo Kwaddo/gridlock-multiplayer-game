@@ -44,6 +44,7 @@ pub const M1911: WeaponStats = WeaponStats {
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.25),
+    fsa_suppresses_kick: false,
 
     fire_sound_asset_key: "pistol_shot",
     icon_asset_key: "pistol_icon",
@@ -127,6 +128,7 @@ pub const DEAGLE: WeaponStats = WeaponStats {
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.3),
+    fsa_suppresses_kick: false,
 
     fire_sound_asset_key: "deagle_shot",
     icon_asset_key: "pistol_icon",
@@ -210,6 +212,7 @@ pub const REVOLVER: WeaponStats = WeaponStats {
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.35),
+    fsa_suppresses_kick: false,
 
     fire_sound_asset_key: "revolver_shot",
     icon_asset_key: "pistol_icon",
@@ -251,11 +254,67 @@ pub const REVOLVER: WeaponStats = WeaponStats {
     pattern_reset_time: 0.85,
 };
 
-// TODO: Suppressed Pistol — stealth pistol, silent assassin
+/// Suppressed Pistol — stealth sidearm, tight spread + invisible tracers
 pub const SUPPRESSED_PISTOL: WeaponStats = WeaponStats {
     name: "Suppressed Pistol",
+    damage: 24.0,
+    headshot_mult: 2.0,
+    fire_rate: 4.5,
+    magazine_size: 15,
+    max_reserve: 60,
+    reload_time: 1.4,
+
+    recoil_vertical: 0.012,
+    recoil_horizontal: 0.003,
+    recoil_recovery: 6.0,
+
+    hip_spread: 0.008,
+    ads_spread: 0.002,
+    spread_per_shot: 0.012,
+    spread_recovery: 3.0,
+    move_spread_mult: 1.1,
+    sprint_spread_mult: 1.3,
+    crouch_spread_mult: 0.8,
+
+    ads_zoom_fov: 65.0,
+    ads_time: 0.15,
+
+    // Suppressed — invisible tracers, no muzzle flash
+    bullet_speed: 180.0,
+    bullet_range: 35.0,
+    tracer_length: 0.0,
+    tracer_color: [40, 40, 40, 0],
+    tracer_thickness: 0.0,
+    tracer_lifetime: 0.0,
+
+    crosshair_kick_per_shot: 1.0,
+    crosshair_kick_decay: 9.0,
+    crosshair_kick_max: 1.2,
+
+    fsa_time: Some(0.2),
+    fsa_suppresses_kick: false,
+
+    fire_sound_asset_key: "pistol_shot",
+    icon_asset_key: "pistol_icon",
+
     viewmodel_model: Some("suppressed_pistol_model"),
     viewmodel_asset_key: None,
+
+    falloff_start: 12.0,
+    falloff_end: 30.0,
+    falloff_min_mult: 0.45,
+
+    recoil_pattern: &[
+        (0.012, 0.0),
+        (0.011, 0.03),
+        (0.010, -0.03),
+        (0.010, 0.04),
+        (0.009, -0.04),
+    ],
+    pattern_randomness: 0.1,
+    randomness_growth: 0.05,
+    pattern_reset_time: 0.35,
+
     ..M1911
 };
 

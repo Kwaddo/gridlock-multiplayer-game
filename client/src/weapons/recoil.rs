@@ -31,9 +31,8 @@ pub fn apply_shot_recoil(weapon: &mut WeaponState, rng_seed: f32) -> bool {
     // reset FSA timer on shot (must happen after the check above)
     weapon.fsa_timer = 0.0;
 
-    // Keep legacy FSA behavior for full-auto only.
-    // Semi-auto should still apply normal recoil/crosshair kick even when FSA is active.
-    if fsa_was_active && matches!(weapon.stats_data.fire_mode, FireMode::FullAuto) {
+    // Per-weapon FSA kick suppression: precision weapons skip recoil/kick on FSA shot.
+    if fsa_was_active && weapon.stats_data.fsa_suppresses_kick {
         return true;
     }
 

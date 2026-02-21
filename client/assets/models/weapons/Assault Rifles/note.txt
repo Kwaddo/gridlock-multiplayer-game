@@ -21,3 +21,7 @@ Unique trait: tap/burst accuracy king
 scar.glb
 → Heavy rifle
 Unique trait: slower fire rate but hits harder than M4
+
+c7a2.glb
+→ Tactical precision rifle
+Unique trait: ADS reticle weapon with first-shot accuracy bonus
