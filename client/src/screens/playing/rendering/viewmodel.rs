@@ -1,9 +1,10 @@
-use crate::weapons::stats::CrosshairStyle;
+use crate::weapons::stats::{CrosshairStyle, WeaponId};
 
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
 use macroquad::window::get_internal_gl;
 
+use super::super::state::HandsPlaybackMode;
 use super::super::PlayingState;
 
 const HANDS_BASE_SCALE: f32 = 0.35;
@@ -22,6 +23,15 @@ impl PlayingState {
         let weapon = self.weapons.active();
         let stats = weapon.stats();
 
+        // While switching away from knife, keep rendering the knife-lower segment
+        // until simulation promotes back to regular hands.
+        if self.hands_playback_mode == HandsPlaybackMode::KnifeLower {
+            if let Some(knife_model) = self.animated_models.get("fp_hands_knife") {
+                self.draw_knife_viewmodel(knife_model, weapon, stats);
+                return;
+            }
+        }
+
         let force_ads = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
         if matches!(stats.crosshair_style, CrosshairStyle::Scope)
             && weapon.ads_progress > 0.85
@@ -37,11 +47,21 @@ impl PlayingState {
         // we only ever use the first mesh for the hands model;
         // older code assumed a single Mesh so adapt accordingly
         let hands_static = self.models.get("fp_hands").and_then(|mvec| mvec.first());
+        let draw_hands = weapon.id != WeaponId::Knife;
 
         if let Some(model_key) = stats.viewmodel_model {
             if let Some(meshes) = self.models.get(model_key) {
                 for mesh in meshes {
-                    self.draw_3d_viewmodel(mesh, 1.0, 0.0, hands_anim, hands_static, weapon, stats);
+                    self.draw_3d_viewmodel(
+                        mesh,
+                        1.0,
+                        0.0,
+                        hands_anim,
+                        hands_static,
+                        weapon,
+                        stats,
+                        draw_hands,
+                    );
                 }
                 return;
             } else if let Some(animated_model) = self.animated_models.get(model_key) {
@@ -53,6 +73,7 @@ impl PlayingState {
                     hands_static,
                     weapon,
                     stats,
+                    draw_hands,
                 );
                 return;
             } else {
@@ -75,6 +96,7 @@ impl PlayingState {
         hands_static: Option<&Mesh>,
         weapon: &crate::weapons::WeaponState,
         stats: &crate::weapons::stats::WeaponStats,
+        should_draw_hands: bool,
     ) {
         let force_ads_preview = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
         if stats.crosshair_style == CrosshairStyle::Scope
@@ -273,14 +295,16 @@ impl PlayingState {
             draw_mesh(&hands_temp);
         };
 
-        if let Some(hands_model) = hands_anim {
-            draw_hands(
-                hands_model.mesh(),
-                hands_model.normalize_scale,
-                hands_model.y_offset,
-            );
-        } else if let Some(hands_mesh) = hands_static {
-            draw_hands(hands_mesh, 1.0, 0.0);
+        if should_draw_hands {
+            if let Some(hands_model) = hands_anim {
+                draw_hands(
+                    hands_model.mesh(),
+                    hands_model.normalize_scale,
+                    hands_model.y_offset,
+                );
+            } else if let Some(hands_mesh) = hands_static {
+                draw_hands(hands_mesh, 1.0, 0.0);
+            }
         }
 
         let muzzle_local = vec3(
@@ -309,6 +333,77 @@ impl PlayingState {
                 draw_circle(fx, fy, radius, Color::from_rgba(255, 240, 180, alpha));
             }
         }
+    }
+
+    /// Draw the knife viewmodel. The knife_animated.glb includes arms+knife as one unit,
+    /// so we render it like we render hands — a single animated model, no separate weapon mesh.
+    fn draw_knife_viewmodel(
+        &self,
+        knife_model: &crate::types::animated_model::AnimatedModel,
+        _weapon: &crate::weapons::WeaponState,
+        _stats: &crate::weapons::stats::WeaponStats,
+    ) {
+        let vm_fov = (60.0f32).to_radians();
+        let vm_camera = Camera3D {
+            position: vec3(0.0, 0.0, 0.0),
+            target: vec3(0.0, 0.0, 1.0),
+            up: vec3(0.0, 1.0, 0.0),
+            fovy: vm_fov,
+            z_far: 10.0,
+            z_near: 0.01,
+            aspect: Some(screen_width() / screen_height()),
+            projection: Projection::Perspective,
+            render_target: None,
+            viewport: None,
+        };
+        set_camera(&vm_camera);
+
+        // Position the knife model in viewmodel space.
+        // These values will need tuning once the model is visible.
+        let base_pos = vec3(-0.35, -0.25, 0.58);
+
+        let mut motion_offset = Vec3::ZERO;
+        let horizontal_speed = vec2(
+            self.movement_state.velocity.x,
+            self.movement_state.velocity.z,
+        )
+        .length();
+        if horizontal_speed > 0.1 && self.movement_state.is_grounded {
+            let t = self.bob_timer;
+            motion_offset.x += t.sin() * 0.008;
+            motion_offset.y += t.cos() * 0.006;
+        }
+
+        let pos = base_pos + motion_offset;
+
+        let knife_scale = HANDS_BASE_SCALE;
+        let clamped_normalize = knife_model.normalize_scale.clamp(0.2, 5.0);
+        let normalize_mat = Mat4::from_translation(vec3(0.0, knife_model.y_offset, 0.0))
+            * Mat4::from_scale(Vec3::splat(clamped_normalize));
+        let scale_mat = Mat4::from_scale(Vec3::splat(knife_scale));
+        let trans_mat = Mat4::from_translation(pos);
+        let transform = trans_mat * scale_mat * normalize_mat;
+
+        gl_use_default_material();
+        let gl = unsafe { get_internal_gl() };
+        gl.quad_gl.depth_test(true);
+
+        // Transform vertices CPU-side (same approach as hands drawing)
+        let mesh = knife_model.mesh();
+        let mut verts = mesh.vertices.clone();
+        for v in &mut verts {
+            v.position = transform.transform_point3(v.position);
+            v.color[3] = 255;
+        }
+        let temp_mesh = Mesh {
+            vertices: verts,
+            indices: mesh.indices.clone(),
+            texture: mesh.texture.clone(),
+        };
+        draw_mesh(&temp_mesh);
+
+        gl.quad_gl.depth_test(true);
+        set_default_camera();
     }
 
     fn project_to_screen(cam: &Camera3D, world_pos: Vec3) -> Option<(f32, f32)> {

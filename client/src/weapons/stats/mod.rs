@@ -21,6 +21,7 @@ pub mod shotguns;
 pub mod assault_rifles;
 pub mod snipers;
 pub mod other;
+pub mod melee;
 
 // --- weapon category (broad class) ---
 
@@ -32,6 +33,7 @@ pub enum WeaponCategory {
     AssaultRifle,
     Sniper,
     Other,
+    Melee,
 }
 
 impl WeaponCategory {
@@ -52,6 +54,7 @@ impl WeaponCategory {
             WeaponCategory::AssaultRifle => "Assault Rifles",
             WeaponCategory::Sniper => "Snipers",
             WeaponCategory::Other => "Other",
+            WeaponCategory::Melee => "Melee",
         }
     }
 }
@@ -94,6 +97,7 @@ pub enum WeaponId {
     // GrenadeLauncher,
     Minigun,
     // Rpg,
+    Knife,
 }
 
 impl WeaponId {
@@ -132,6 +136,7 @@ impl WeaponId {
         // WeaponId::GrenadeLauncher,
         WeaponId::Minigun,
         // WeaponId::Rpg,
+        // Knife is NOT in ALL — it's always available via X key, not a loadout weapon
     ];
 
     pub fn category(self) -> WeaponCategory {
@@ -161,6 +166,9 @@ impl WeaponId {
             // WeaponId::GrenadeLauncher | WeaponId::Rpg |
             WeaponId::Minigun
             => WeaponCategory::Other,
+
+            WeaponId::Knife
+            => WeaponCategory::Melee,
         }
     }
 
@@ -199,7 +207,8 @@ impl WeaponId {
             // Other
             // WeaponId::GrenadeLauncher => &other::GRENADE_LAUNCHER,
             WeaponId::Minigun => &other::MINIGUN,
-            // WeaponId::Rpg => &other::RPG,
+
+            WeaponId::Knife => &melee::KNIFE,
         }
     }
 
