@@ -22,9 +22,6 @@ pub fn draw_hud(
     player_id: u32,
     position: Vec3,
     yaw: f32,
-    forward: Vec3,
-    right: Vec3,
-    pitch: f32,
     movement_state: &MovementState,
     other_players: &[OtherPlayer],
     weapons: &WeaponInventory,
@@ -102,7 +99,7 @@ pub fn draw_hud(
         match_time_left,
     );
 
-    players::draw_players_overlay(position, forward, right, pitch, other_players);
+    // nametags are now drawn by draw_player_overhead (camera-based projection)
 
     weapon_feed::draw_weapon_and_kill_feed(
         weapons,
