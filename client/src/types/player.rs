@@ -207,6 +207,11 @@ pub struct OtherPlayer {
     pub last_move_dir: MoveDir,
     pub pending_move_dir: Option<MoveDir>,
     pub pending_move_timer: f32,
+    // previous snapshot position used for animation delta calculation
+    pub prev_x: f32,
+    pub prev_z: f32,
+    // grace timer that keeps current walk/run animation briefly after player stops
+    pub move_anim_grace: f32,
 
     // Gun Game progression: 1 = first weapon slot
     pub gun_level: u8,
@@ -261,6 +266,9 @@ impl OtherPlayer {
             last_move_dir: MoveDir::None,
             pending_move_dir: None,
             pending_move_timer: 0.0,
+            prev_x: 0.0,
+            prev_z: 0.0,
+            move_anim_grace: 0.0,
             gun_level: 1,
         }
     }
@@ -344,6 +352,9 @@ impl CombatEntity for OtherPlayer {
         }
         if self.sprint_grace > 0.0 {
             self.sprint_grace = (self.sprint_grace - delta).max(0.0);
+        }
+        if self.move_anim_grace > 0.0 {
+            self.move_anim_grace = (self.move_anim_grace - delta).max(0.0);
         }
 
         if self.pending_move_timer > 0.0 {

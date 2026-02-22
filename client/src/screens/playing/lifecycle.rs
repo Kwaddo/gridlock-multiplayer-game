@@ -56,7 +56,7 @@ impl PlayingState {
             0.0,
             screen_width(),
             screen_height(),
-            Color::from_rgba(0, 0, 0, 180),
+            Color::from_rgba(0, 0, 0, 230),
         );
 
         let cx = screen_width() / 2.0;

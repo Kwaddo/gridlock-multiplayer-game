@@ -62,7 +62,10 @@ impl PlayingState {
         // Lobby console (Start Game) overlay
         self.draw_lobby_console();
 
-        self.draw_viewmodel();
+        // Don't draw viewmodel or gameplay HUD while dead
+        if !self.is_dead {
+            self.draw_viewmodel();
+        }
 
         let forward = vec3(
             self.yaw.cos() * self.pitch.cos(),
@@ -72,7 +75,7 @@ impl PlayingState {
         let right = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
 
         // When lobby console is open, suppress regular HUD (crosshair, minimap, status panels, etc.)
-        if !self.lobby_console_open {
+        if !self.lobby_console_open && !self.is_dead {
             draw_hud(
                 username,
                 player_id,

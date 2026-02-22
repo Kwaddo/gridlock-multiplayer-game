@@ -182,6 +182,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut match_start_time,
                 &mut last_match_time_sent,
                 &mut match_total_maze_entries,
+                &mut match_end_pending,
             );
         }
 
