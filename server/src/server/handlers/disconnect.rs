@@ -16,7 +16,8 @@ pub fn handle_disconnect(
             p.username,
             players.len()
         );
-        // notify remaining clients about updated player list
+        // broadcast state so other clients remove the character immediately
+        broadcast::broadcast_state(socket, players);
         broadcast::broadcast_player_list(socket, players);
     }
 }

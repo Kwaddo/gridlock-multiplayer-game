@@ -1,4 +1,4 @@
-use crate::types::animation_state::MoveDir;
+use crate::types::animation_state::{AnimState, MoveDir};
 use crate::types::world::WorldId;
 use crate::weapons::combat::{default_player_hitboxes, CombatEntity, EntityKind, Hitbox};
 use macroquad::prelude::*;
@@ -212,6 +212,8 @@ pub struct OtherPlayer {
     pub prev_z: f32,
     // grace timer that keeps current walk/run animation briefly after player stops
     pub move_anim_grace: f32,
+    // timestamp of the last frame where position actually changed (for idle detection)
+    pub last_move_time: f64,
 
     // Gun Game progression: 1 = first weapon slot
     pub gun_level: u8,
@@ -269,6 +271,7 @@ impl OtherPlayer {
             prev_x: 0.0,
             prev_z: 0.0,
             move_anim_grace: 0.0,
+            last_move_time: 0.0,
             gun_level: 1,
         }
     }
@@ -363,6 +366,31 @@ impl CombatEntity for OtherPlayer {
                 if let Some(pd) = self.pending_move_dir.take() {
                     self.last_move_dir = pd;
                 }
+            }
+        }
+
+        // Transition to idle if no position change has been seen for a short
+        // grace period. This runs per-frame so it's independent of broadcast
+        // frequency, and avoids flicker caused by broadcasts where this
+        // player's position didn't change.
+        if self.last_move_dir != MoveDir::None {
+            let now = macroquad::time::get_time();
+            if now - self.last_move_time > 0.12 {
+                self.last_move_dir = MoveDir::None;
+                self.pending_move_dir = None;
+                self.pending_move_timer = 0.0;
+                let anim = AnimState::from_movement(
+                    0.0, 0.0, 0.0, 0.0,
+                    self.yaw,
+                    false,
+                    self.is_ads,
+                    self.is_crouching,
+                    false, false, false,
+                );
+                self.skin_type = AnimState::skin_from_state(anim, None);
+                // snap render position so model doesn't slide
+                self.render_x = self.x;
+                self.render_z = self.z;
             }
         }
     }
