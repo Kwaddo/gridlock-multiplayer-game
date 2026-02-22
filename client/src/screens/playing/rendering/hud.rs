@@ -1,5 +1,7 @@
 use macroquad::prelude::*;
 
+use crate::types::maze::Maze;
+
 use super::super::PlayingState;
 
 impl PlayingState {
@@ -44,15 +46,14 @@ impl PlayingState {
         draw_rectangle_lines(sx - bar_w / 2.0, sy, bar_w, bar_h, 1.0, WHITE);
 
         let label = "TARGET DUMMY";
-        // use precomputed width stored in playing state to avoid expensive text measurement
         let measure_w = self.target_dummy_label_dims.0;
         draw_text(label, sx - measure_w / 2.0, sy - 4.0, 14.0, WHITE);
     }
 
     /// Draws nametags (always) and health bars (dev mode) above other players.
-    /// Uses proper camera-based 3D-to-screen projection so tags stay directly
-    /// above the player model.
-    pub(crate) fn draw_player_overhead(&self, camera: &Camera3D) {
+    /// Uses proper camera-based 3D-to-screen projection. Hides tags when a
+    /// maze wall is between the camera and the player.
+    pub(crate) fn draw_player_overhead(&self, camera: &Camera3D, maze: Option<&Maze>) {
         let forward = (camera.target - camera.position).normalize();
         let right = forward.cross(camera.up).normalize();
         let up = right.cross(forward).normalize();
@@ -61,7 +62,7 @@ impl PlayingState {
 
         let show_hp = self.dev_mode.show_health_bars;
 
-        // helper: project a world-space point to screen and draw nametag + optional health bar
+        // helper: project world-space point to screen coordinates
         let project = |world_pos: Vec3| -> Option<(f32, f32)> {
             let rel = world_pos - camera.position;
             let dot = rel.dot(forward);
@@ -73,9 +74,26 @@ impl PlayingState {
             Some((sx, sy))
         };
 
+        // helper: check if a wall blocks line-of-sight to a target position
+        let is_occluded = |target_pos: Vec3| -> bool {
+            if let Some(m) = maze {
+                let dir = target_pos - camera.position;
+                let dist = dir.length();
+                if dist < 0.01 {
+                    return false;
+                }
+                let dir_norm = dir / dist;
+                // check if any wall is between camera and target
+                if let Some((_, wall_dist)) = m.ray_test_walls(camera.position, dir_norm, dist) {
+                    return wall_dist < dist - 0.1;
+                }
+            }
+            false
+        };
+
         // Target dummy (lobby only)
         if show_hp && self.current_world == crate::types::world::WorldId::Lobby {
-            let world_pos = self.target_dummy.position + vec3(0.0, 2.0, 0.0);
+            let world_pos = self.target_dummy.position + vec3(0.0, 1.7, 0.0);
             if let Some((sx, sy)) = project(world_pos) {
                 Self::draw_health_bar(
                     sx,
@@ -89,8 +107,16 @@ impl PlayingState {
 
         // Other players
         for p in &self.other_players {
-            let world_pos = p.render_position() + vec3(0.0, 2.0, 0.0);
-            if let Some((sx, sy)) = project(world_pos) {
+            // Position the tag just above the player model head
+            let player_pos = p.render_position();
+            let tag_pos = player_pos + vec3(0.0, 1.7, 0.0);
+
+            // Skip if behind a wall
+            if is_occluded(player_pos + vec3(0.0, 0.8, 0.0)) {
+                continue;
+            }
+
+            if let Some((sx, sy)) = project(tag_pos) {
                 if show_hp {
                     Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
                 } else {
@@ -102,8 +128,14 @@ impl PlayingState {
         // Practice bots
         for bot in &self.practice_bots {
             let p = &bot.player;
-            let world_pos = vec3(p.x, p.y + 2.0, p.z);
-            if let Some((sx, sy)) = project(world_pos) {
+            let bot_pos = vec3(p.x, p.y, p.z);
+            let tag_pos = bot_pos + vec3(0.0, 1.7, 0.0);
+
+            if is_occluded(bot_pos + vec3(0.0, 0.8, 0.0)) {
+                continue;
+            }
+
+            if let Some((sx, sy)) = project(tag_pos) {
                 if show_hp {
                     Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
                 } else {

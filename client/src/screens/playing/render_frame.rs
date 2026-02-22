@@ -56,7 +56,7 @@ impl PlayingState {
             self.draw_target_dummy_hud(&camera);
         }
 
-        self.draw_player_overhead(&camera);
+        self.draw_player_overhead(&camera, maze);
         self.draw_lobby_console_prompt();
 
         // Lobby console (Start Game) overlay
