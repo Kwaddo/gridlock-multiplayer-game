@@ -26,9 +26,37 @@ pub const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 10; // seconds players cannot m
 
 // --- Gun Game configuration (single-mode for now)
 // Customize this progression to change the sequence of weapons for Gun Game.
-// Names must match client-side `WeaponStats.name` values (e.g. "Pistol", "SMG", "Shotgun", ...)
+// Names must match client-side `WeaponStats.name` values. Keep this in
+// sync with the client `WeaponStats.name` strings (see
+// client/src/weapons/stats/*).
 #[allow(dead_code)]
-pub const GUN_GAME_PROGRESSION: [&str; 5] = ["Pistol", "SMG", "Shotgun", "AssaultRifle", "Sniper"];
+pub const GUN_GAME_PROGRESSION: [&str; 19] = [
+    // Pistols
+    "M1911",
+    "Desert Eagle",
+    "Revolver",
+    "Suppressed Pistol",
+    // SMGs
+    "MP5",
+    "P90",
+    "Tommy Gun",
+    // Shotguns
+    "Benelli",
+    "SPAS-12",
+    // Assault Rifles
+    "M4A1",
+    "AK-47",
+    "FAMAS",
+    "M16",
+    "SCAR-H",
+    "AS VAL",
+    // Snipers
+    "Bolt Action",
+    "Hunting Rifle",
+    "Semi-Auto Sniper",
+    // Other
+    "Minigun",
+];
 
 /// iterate over all alive/dead players and automatically respawn as needed
 pub fn process_auto_respawns(
