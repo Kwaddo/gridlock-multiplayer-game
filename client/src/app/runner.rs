@@ -14,7 +14,7 @@ use client::weapons::crosshair_presets::CrosshairPresetManager;
 use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
-use super::asset_cache::load_cached_manifest;
+use super::asset_cache::{load_cached_manifest, save_cached_manifest};
 use super::asset_loader::load_asset_entry;
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
@@ -127,6 +127,11 @@ pub async fn run() {
                     for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
                         load_asset_entry(&key, &path, &mut playing_state).await;
                     }
+                    if !asset_cache_key.is_empty() {
+                        let mut existing = load_cached_manifest(&asset_cache_key);
+                        merge_manifest_entries(&mut existing, entries);
+                        save_cached_manifest(&asset_cache_key, &existing);
+                    }
                 }
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&config, &username, player_id, maze.as_ref());
@@ -167,6 +172,11 @@ pub async fn run() {
                 if let Some(entries) = sync.assets {
                     for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
                         load_asset_entry(&key, &path, &mut playing_state).await;
+                    }
+                    if !asset_cache_key.is_empty() {
+                        let mut existing = load_cached_manifest(&asset_cache_key);
+                        merge_manifest_entries(&mut existing, entries);
+                        save_cached_manifest(&asset_cache_key, &existing);
                     }
                 }
 
@@ -284,6 +294,11 @@ pub async fn run() {
                     for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
                         load_asset_entry(&key, &path, &mut playing_state).await;
                     }
+                    if !asset_cache_key.is_empty() {
+                        let mut existing = load_cached_manifest(&asset_cache_key);
+                        merge_manifest_entries(&mut existing, entries);
+                        save_cached_manifest(&asset_cache_key, &existing);
+                    }
                 }
 
                 if let Some(new_state) = playing_state.process_local_input(&config, maze.as_mut()) {
@@ -323,6 +338,11 @@ pub async fn run() {
                 if let Some(entries) = sync.assets {
                     for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
                         load_asset_entry(&key, &path, &mut playing_state).await;
+                    }
+                    if !asset_cache_key.is_empty() {
+                        let mut existing = load_cached_manifest(&asset_cache_key);
+                        merge_manifest_entries(&mut existing, entries);
+                        save_cached_manifest(&asset_cache_key, &existing);
                     }
                 }
 
@@ -365,6 +385,9 @@ pub async fn run() {
                 if let Some(entries) = sync.assets {
                     for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
                         load_asset_entry(&key, &path, &mut playing_state).await;
+                    }
+                    if !asset_cache_key.is_empty() {
+                        save_cached_manifest(&asset_cache_key, &entries);
                     }
                 }
 
