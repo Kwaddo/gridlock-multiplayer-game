@@ -1,9 +1,10 @@
-use crate::weapons::stats::CrosshairStyle;
+use crate::weapons::stats::{CrosshairStyle, WeaponId};
 
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
 use macroquad::window::get_internal_gl;
 
+use super::super::state::HandsPlaybackMode;
 use super::super::PlayingState;
 
 const HANDS_BASE_SCALE: f32 = 0.35;
@@ -22,6 +23,26 @@ impl PlayingState {
         let weapon = self.weapons.active();
         let stats = weapon.stats();
 
+        // While switching away from knife, keep rendering the knife-lower segment
+        // until simulation promotes back to regular hands.
+        if self.hands_playback_mode == HandsPlaybackMode::KnifeLower {
+            if let Some(knife_model) = self.animated_models.get("fp_hands_knife") {
+                let knife_weapon = &self.weapons.knife;
+                let knife_stats = knife_weapon.stats();
+                self.draw_3d_viewmodel(
+                    knife_model.mesh(),
+                    knife_model.normalize_scale,
+                    knife_model.y_offset,
+                    None,
+                    None,
+                    knife_weapon,
+                    knife_stats,
+                    false,
+                );
+                return;
+            }
+        }
+
         let force_ads = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
         if matches!(stats.crosshair_style, CrosshairStyle::Scope)
             && weapon.ads_progress > 0.85
@@ -37,11 +58,21 @@ impl PlayingState {
         // we only ever use the first mesh for the hands model;
         // older code assumed a single Mesh so adapt accordingly
         let hands_static = self.models.get("fp_hands").and_then(|mvec| mvec.first());
+        let draw_hands = weapon.id != WeaponId::Knife;
 
         if let Some(model_key) = stats.viewmodel_model {
             if let Some(meshes) = self.models.get(model_key) {
                 for mesh in meshes {
-                    self.draw_3d_viewmodel(mesh, 1.0, 0.0, hands_anim, hands_static, weapon, stats);
+                    self.draw_3d_viewmodel(
+                        mesh,
+                        1.0,
+                        0.0,
+                        hands_anim,
+                        hands_static,
+                        weapon,
+                        stats,
+                        draw_hands,
+                    );
                 }
                 return;
             } else if let Some(animated_model) = self.animated_models.get(model_key) {
@@ -53,6 +84,7 @@ impl PlayingState {
                     hands_static,
                     weapon,
                     stats,
+                    draw_hands,
                 );
                 return;
             } else {
@@ -75,6 +107,7 @@ impl PlayingState {
         hands_static: Option<&Mesh>,
         weapon: &crate::weapons::WeaponState,
         stats: &crate::weapons::stats::WeaponStats,
+        should_draw_hands: bool,
     ) {
         let force_ads_preview = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
         if stats.crosshair_style == CrosshairStyle::Scope
@@ -200,7 +233,11 @@ impl PlayingState {
         let hands_anchor = hands_base_anchor + motion_offset + inspect_pos;
         let weapon_anchor = weapon_base_anchor + motion_offset + inspect_pos;
         let pos = weapon_anchor + weapon_local_offset;
-
+        
+        /*
+            Normalize and transform weapon mesh to world position. We apply normalization first so that
+            the viewmodel_scale stat can be used to tune overall weapon size without affecting the mesh's position offset.
+        */
         let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
             * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
         let scale_mat = Mat4::from_scale(vec3(
@@ -273,14 +310,16 @@ impl PlayingState {
             draw_mesh(&hands_temp);
         };
 
-        if let Some(hands_model) = hands_anim {
-            draw_hands(
-                hands_model.mesh(),
-                hands_model.normalize_scale,
-                hands_model.y_offset,
-            );
-        } else if let Some(hands_mesh) = hands_static {
-            draw_hands(hands_mesh, 1.0, 0.0);
+        if should_draw_hands {
+            if let Some(hands_model) = hands_anim {
+                draw_hands(
+                    hands_model.mesh(),
+                    hands_model.normalize_scale,
+                    hands_model.y_offset,
+                );
+            } else if let Some(hands_mesh) = hands_static {
+                draw_hands(hands_mesh, 1.0, 0.0);
+            }
         }
 
         let muzzle_local = vec3(
@@ -310,7 +349,6 @@ impl PlayingState {
             }
         }
     }
-
     fn project_to_screen(cam: &Camera3D, world_pos: Vec3) -> Option<(f32, f32)> {
         let rel = world_pos - cam.position;
         let forward = (cam.target - cam.position).normalize();
@@ -405,3 +443,4 @@ impl PlayingState {
         }
     }
 }
+

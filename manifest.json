@@ -2,6 +2,7 @@
   "global": {
 
     "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
+    "fp_hands_knife": "assets/models/hand/knife_animated.glb",
 
     "pistol_shot": "assets/sounds/pew.ogg",
     "smg_shot": "assets/sounds/pew.ogg",
@@ -48,7 +49,6 @@
     "grenade_launcher_model": "assets/models/weapons/Other/grenade_launcher.glb",
     "minigun_model": "assets/models/weapons/Other/minigun.glb",
     "rpg_model": "assets/models/weapons/Other/rpg.glb",
-
     "deagle_shot": "assets/sounds/deagle.ogg",
 
     "anim_crouch": "assets/models/player/Crouch.glb",

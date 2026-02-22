@@ -1,5 +1,7 @@
 use client::screens::PlayingState;
-use client::types::animated_model::load_gltf_animated_model;
+use client::types::animated_model::{
+    load_gltf_animated_model, load_gltf_animated_model_with_unskinned,
+};
 use macroquad::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
@@ -57,7 +59,13 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
         // try animated loader first, but if the returned mesh has no texture we
         // fall back to static loader. some static weapon GLBs are exported with
         // a skin/animation placeholder which confuses the animated loader.
-        match load_gltf_animated_model(&resolved_path) {
+        let keep_unskinned_primitives = key == "fp_hands_knife";
+        let animated_result = if keep_unskinned_primitives {
+            load_gltf_animated_model_with_unskinned(&resolved_path, true)
+        } else {
+            load_gltf_animated_model(&resolved_path)
+        };
+        match animated_result {
             Ok(animated) => {
                 if animated.mesh().texture.is_none() {
                     // animated model produced but no texture; try static loader

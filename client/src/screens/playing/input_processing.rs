@@ -15,6 +15,8 @@ use std::io::Cursor;
 
 use super::PlayingState;
 
+const KNIFE_HEAVY_MISS_RECOVERY_SEC: f32 = 1.8;
+
 impl PlayingState {
     #[inline(always)]
     pub fn process_local_input(
@@ -98,14 +100,28 @@ impl PlayingState {
         self.weapons.active_mut().computed_spread = spread;
 
         let mut fire_sound_key: Option<&'static str> = None;
+        let mut knife_heavy_miss_penalty = false;
         let weapon = self.weapons.active_mut();
 
         // Firing: blocked while in post-teleport freeze inside the Maze
         if self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze {
+            let knife_heavy_attack =
+                weapon.id == crate::weapons::stats::WeaponId::Knife
+                    && config.bind_knife_heavy.is_pressed();
             // Burst weapons keep firing remaining shots even after trigger release
-            let wants_to_fire = config.bind_fire.is_down() || weapon.burst_remaining > 0;
+            let wants_to_fire =
+                config.bind_fire.is_down() || weapon.burst_remaining > 0 || knife_heavy_attack;
             if wants_to_fire {
                 if weapon.fire() {
+                    // Signal knife swing animation when melee weapon fires
+                    if weapon.id == crate::weapons::stats::WeaponId::Knife {
+                        if knife_heavy_attack {
+                            self.knife_heavy_swing_requested = true;
+                            self.knife_swing_requested = false;
+                        } else {
+                            self.knife_swing_requested = true;
+                        }
+                    }
                     fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 
                     if self.dev_mode.infinite_ammo {
@@ -156,6 +172,8 @@ impl PlayingState {
                     let right_vec = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
                     let up_vec = right_vec.cross(base_fwd).normalize();
 
+                    let heavy_knife_shot =
+                        weapon.id == crate::weapons::stats::WeaponId::Knife && knife_heavy_attack;
                     let damage = stats.damage;
                     let range = stats.bullet_range;
                     let spread = weapon.computed_spread;
@@ -377,7 +395,19 @@ impl PlayingState {
                                 zone.damage_mult()
                             };
                             let falloff = damage_falloff(dist, stats);
-                            let dmg = damage * mult * falloff;
+                            let dmg = if heavy_knife_shot {
+                                match kind {
+                                    EntityKind::Dummy => self.target_dummy.hp + 1.0,
+                                    // Shield is not yet synced on OtherPlayer, so we currently use known HP.
+                                    EntityKind::Player => self.other_players[idx].hp.max(1.0),
+                                    EntityKind::Bot => {
+                                        self.practice_bots[idx].player.hp.max(1.0)
+                                    }
+                                    _ => damage * mult * falloff,
+                                }
+                            } else {
+                                damage * mult * falloff
+                            };
 
                             match kind {
                                 EntityKind::Dummy => {
@@ -423,6 +453,10 @@ impl PlayingState {
                             }
                         }
                     }
+
+                    if heavy_knife_shot && total_dmg <= 0.0 {
+                        knife_heavy_miss_penalty = true;
+                    }
                 }
                 weapon.trigger_held = true;
             } else {
@@ -431,6 +465,19 @@ impl PlayingState {
         } else {
             // while frozen, ensure trigger_held is false so semi-auto isn't stuck
             weapon.trigger_held = false;
+        }
+
+        if knife_heavy_miss_penalty {
+            // Missed heavy slash penalty: long recovery and no weapon switching.
+            self.weapons.knife.fire_cooldown = self
+                .weapons
+                .knife
+                .fire_cooldown
+                .max(KNIFE_HEAVY_MISS_RECOVERY_SEC);
+            self.weapons.switch_cooldown = self
+                .weapons
+                .switch_cooldown
+                .max(KNIFE_HEAVY_MISS_RECOVERY_SEC);
         }
 
         if let Some(sound_key) = fire_sound_key {
