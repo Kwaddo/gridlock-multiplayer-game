@@ -71,13 +71,7 @@ pub fn process_crouch(config: &GameConfig, is_crouching: bool) -> bool {
 }
 
 // process jump input
-pub fn process_jump(config: &GameConfig, is_grounded: bool, weapons: &mut WeaponInventory) -> bool {
-    let weapon = weapons.active_mut();
-    if weapon.is_aiming && config.bind_jump.is_down() && is_grounded {
-        weapon.is_aiming = false;
-        weapon.ads_progress = 0.0;
-        weapon.jump_cancelled_ads = true; // prevent process_weapon_input from re-enabling ADS this frame
-    }
+pub fn process_jump(config: &GameConfig, is_grounded: bool, _weapons: &mut WeaponInventory) -> bool {
     config.bind_jump.is_down() && is_grounded
 }
 
@@ -113,13 +107,7 @@ pub fn process_weapon_input(inventory: &mut WeaponInventory, config: &GameConfig
         inventory.active_mut().start_reload();
     }
 
-    // ADS (only set if grounded — jump cancels ADS elsewhere)
+    // ADS — always follows the aim button regardless of airborne state
     let weapon = inventory.active_mut();
-    if !weapon.jump_cancelled_ads {
-        weapon.is_aiming = config.bind_aim.is_down();
-    }
-    // clear the flag once aim button is released so player can re-aim
-    if !config.bind_aim.is_down() {
-        weapon.jump_cancelled_ads = false;
-    }
+    weapon.is_aiming = config.bind_aim.is_down();
 }

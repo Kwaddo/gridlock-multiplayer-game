@@ -85,9 +85,8 @@ impl PlayingState {
         if self.is_dead {
             if self.death_timer > 0.0 {
                 self.death_timer -= delta;
-            } else if self.current_world == WorldId::Maze && is_key_pressed(KeyCode::Space) {
-                // allow explicit respawn requests only while in-match (Maze). In the Lobby
-                // the UI still shows the hint but SPACE does nothing.
+            } else if self.current_world == WorldId::Maze {
+                // Auto-respawn once the death timer expires
                 self.pending_respawn = true;
             }
             return;
