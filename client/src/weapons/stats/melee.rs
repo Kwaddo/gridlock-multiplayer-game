@@ -72,10 +72,10 @@ pub const KNIFE: WeaponStats = WeaponStats {
     // on top of hands — it IS the hands model.
     viewmodel_model: Some("fp_hands_knife"),
     viewmodel_asset_key: None,
-    
+
     // draw_3d_viewmodel multiplies by 28.0; this keeps knife close to previous size.
     viewmodel_scale: 0.0025,
-    viewmodel_position: (0.34, 0.1, -0.37),
+    viewmodel_position: (0.345, 0.1, -0.37),
     viewmodel_rotation: (-0.15, 0.0, 0.0),
     viewmodel_muzzle_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_scale: 1.0,

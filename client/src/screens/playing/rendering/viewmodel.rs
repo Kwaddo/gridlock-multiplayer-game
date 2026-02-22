@@ -27,7 +27,18 @@ impl PlayingState {
         // until simulation promotes back to regular hands.
         if self.hands_playback_mode == HandsPlaybackMode::KnifeLower {
             if let Some(knife_model) = self.animated_models.get("fp_hands_knife") {
-                self.draw_knife_viewmodel(knife_model, weapon, stats);
+                let knife_weapon = &self.weapons.knife;
+                let knife_stats = knife_weapon.stats();
+                self.draw_3d_viewmodel(
+                    knife_model.mesh(),
+                    knife_model.normalize_scale,
+                    knife_model.y_offset,
+                    None,
+                    None,
+                    knife_weapon,
+                    knife_stats,
+                    false,
+                );
                 return;
             }
         }
@@ -222,7 +233,11 @@ impl PlayingState {
         let hands_anchor = hands_base_anchor + motion_offset + inspect_pos;
         let weapon_anchor = weapon_base_anchor + motion_offset + inspect_pos;
         let pos = weapon_anchor + weapon_local_offset;
-
+        
+        /*
+            Normalize and transform weapon mesh to world position. We apply normalization first so that
+            the viewmodel_scale stat can be used to tune overall weapon size without affecting the mesh's position offset.
+        */
         let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
             * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
         let scale_mat = Mat4::from_scale(vec3(
@@ -334,78 +349,6 @@ impl PlayingState {
             }
         }
     }
-
-    /// Draw the knife viewmodel. The knife_animated.glb includes arms+knife as one unit,
-    /// so we render it like we render hands — a single animated model, no separate weapon mesh.
-    fn draw_knife_viewmodel(
-        &self,
-        knife_model: &crate::types::animated_model::AnimatedModel,
-        _weapon: &crate::weapons::WeaponState,
-        _stats: &crate::weapons::stats::WeaponStats,
-    ) {
-        let vm_fov = (60.0f32).to_radians();
-        let vm_camera = Camera3D {
-            position: vec3(0.0, 0.0, 0.0),
-            target: vec3(0.0, 0.0, 1.0),
-            up: vec3(0.0, 1.0, 0.0),
-            fovy: vm_fov,
-            z_far: 10.0,
-            z_near: 0.01,
-            aspect: Some(screen_width() / screen_height()),
-            projection: Projection::Perspective,
-            render_target: None,
-            viewport: None,
-        };
-        set_camera(&vm_camera);
-
-        // Position the knife model in viewmodel space.
-        // These values will need tuning once the model is visible.
-        let base_pos = vec3(-0.35, -0.25, 0.58);
-
-        let mut motion_offset = Vec3::ZERO;
-        let horizontal_speed = vec2(
-            self.movement_state.velocity.x,
-            self.movement_state.velocity.z,
-        )
-        .length();
-        if horizontal_speed > 0.1 && self.movement_state.is_grounded {
-            let t = self.bob_timer;
-            motion_offset.x += t.sin() * 0.008;
-            motion_offset.y += t.cos() * 0.006;
-        }
-
-        let pos = base_pos + motion_offset;
-
-        let knife_scale = HANDS_BASE_SCALE;
-        let clamped_normalize = knife_model.normalize_scale.clamp(0.2, 5.0);
-        let normalize_mat = Mat4::from_translation(vec3(0.0, knife_model.y_offset, 0.0))
-            * Mat4::from_scale(Vec3::splat(clamped_normalize));
-        let scale_mat = Mat4::from_scale(Vec3::splat(knife_scale));
-        let trans_mat = Mat4::from_translation(pos);
-        let transform = trans_mat * scale_mat * normalize_mat;
-
-        gl_use_default_material();
-        let gl = unsafe { get_internal_gl() };
-        gl.quad_gl.depth_test(true);
-
-        // Transform vertices CPU-side (same approach as hands drawing)
-        let mesh = knife_model.mesh();
-        let mut verts = mesh.vertices.clone();
-        for v in &mut verts {
-            v.position = transform.transform_point3(v.position);
-            v.color[3] = 255;
-        }
-        let temp_mesh = Mesh {
-            vertices: verts,
-            indices: mesh.indices.clone(),
-            texture: mesh.texture.clone(),
-        };
-        draw_mesh(&temp_mesh);
-
-        gl.quad_gl.depth_test(true);
-        set_default_camera();
-    }
-
     fn project_to_screen(cam: &Camera3D, world_pos: Vec3) -> Option<(f32, f32)> {
         let rel = world_pos - cam.position;
         let forward = (cam.target - cam.position).normalize();
@@ -500,3 +443,4 @@ impl PlayingState {
         }
     }
 }
+

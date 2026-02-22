@@ -15,8 +15,7 @@ use std::io::Cursor;
 
 use super::PlayingState;
 
-const KNIFE_HEAVY_INSTANT_KILL_DAMAGE: f32 = 10_000.0;
-const KNIFE_HEAVY_MISS_RECOVERY_SEC: f32 = 1.0;
+const KNIFE_HEAVY_MISS_RECOVERY_SEC: f32 = 1.8;
 
 impl PlayingState {
     #[inline(always)]
@@ -175,11 +174,7 @@ impl PlayingState {
 
                     let heavy_knife_shot =
                         weapon.id == crate::weapons::stats::WeaponId::Knife && knife_heavy_attack;
-                    let damage = if heavy_knife_shot {
-                        KNIFE_HEAVY_INSTANT_KILL_DAMAGE
-                    } else {
-                        stats.damage
-                    };
+                    let damage = stats.damage;
                     let range = stats.bullet_range;
                     let spread = weapon.computed_spread;
                     let cx = screen_width() / 2.0;
@@ -400,7 +395,19 @@ impl PlayingState {
                                 zone.damage_mult()
                             };
                             let falloff = damage_falloff(dist, stats);
-                            let dmg = damage * mult * falloff;
+                            let dmg = if heavy_knife_shot {
+                                match kind {
+                                    EntityKind::Dummy => self.target_dummy.hp + 1.0,
+                                    // Shield is not yet synced on OtherPlayer, so we currently use known HP.
+                                    EntityKind::Player => self.other_players[idx].hp.max(1.0),
+                                    EntityKind::Bot => {
+                                        self.practice_bots[idx].player.hp.max(1.0)
+                                    }
+                                    _ => damage * mult * falloff,
+                                }
+                            } else {
+                                damage * mult * falloff
+                            };
 
                             match kind {
                                 EntityKind::Dummy => {
