@@ -59,11 +59,12 @@ pub fn sync_world(
                     // treat sprinting with a short grace window to avoid walk/sprint flicker
                     let effective_sprinting =
                         incoming.is_sprinting || current.is_sprinting || current.sprint_grace > 0.0;
-                    // Use prev_x/prev_z for animation delta so we compare the last
-                    // two distinct server snapshots rather than the same position twice
+                    // Compare current known position to incoming position for movement
+                    // direction. Using the immediately previous snapshot (current.x/z)
+                    // is more stable than prev_x/prev_z which can amplify jitter.
                     let mut anim_state = AnimState::from_movement(
-                        current.prev_x,
-                        current.prev_z,
+                        current.x,
+                        current.z,
                         incoming.x,
                         incoming.z,
                         incoming.yaw,
@@ -103,9 +104,12 @@ pub fn sync_world(
                         current.sprint_grace = OtherPlayer::SPRINT_GRACE;
                     }
                     current.is_sprinting = incoming.is_sprinting;
-                    // Save current position as prev before updating snapshot
-                    current.prev_x = current.x;
-                    current.prev_z = current.z;
+                    // When the player has stopped moving, snap render position to
+                    // the actual position so the model doesn't visually slide/drift.
+                    if anim_state.move_dir == MoveDir::None && !incoming.evt_jump_start {
+                        current.render_x = incoming.x;
+                        current.render_z = incoming.z;
+                    }
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     current.kills = incoming.kills;
                     current.hp = incoming.hp;
@@ -177,7 +181,7 @@ pub fn sync_world(
                 let will_be_in_maze = updates
                     .world_change
                     .as_ref()
-                    .map(|(w, _)| *w == WorldId::Maze)
+                    .map(|(w, _, _)| *w == WorldId::Maze)
                     .unwrap_or(false);
 
                 if playing_state.current_world == WorldId::Maze || will_be_in_maze {
@@ -207,15 +211,17 @@ pub fn sync_world(
         // (no longer doing anything here)
 
         let mut world_change_applied = false;
-        if let Some((world_id, spawn)) = updates.world_change {
+        if let Some((world_id, spawn, freeze_secs)) = updates.world_change {
             playing_state.current_world = world_id;
             playing_state.position = spawn;
             playing_state.movement_state.velocity = Vec3::ZERO;
             world_change_applied = true;
 
-            // If we just entered the Maze, start the short post-teleport movement freeze
+            // If we just entered the Maze, start the post-teleport movement freeze
+            // using the server-provided duration so all clients are synchronized.
             if world_id == WorldId::Maze {
-                playing_state.post_teleport_freeze_timer = 10.0;
+                let freeze = freeze_secs.map(|s| s as f32).unwrap_or(10.0);
+                playing_state.post_teleport_freeze_timer = freeze;
                 playing_state.match_time_left = 120.0; // seconds
 
                 // Reset local player state for a fresh match

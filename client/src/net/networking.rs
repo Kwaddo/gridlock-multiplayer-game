@@ -18,7 +18,7 @@ pub const MAZE_WALL_HEIGHT: f32 = 2.4;
 pub struct NetUpdate {
     pub maze: Option<(Maze, Vec3)>,
     pub players: Option<Vec<OtherPlayer>>,
-    pub world_change: Option<(WorldId, Vec3)>,
+    pub world_change: Option<(WorldId, Vec3, Option<u8>)>, // (world, spawn, freeze_secs)
     pub assets: Option<Vec<(String, String)>>, // (key, path)
     pub broken_walls: Option<Vec<(u8, u8)>>,
     pub damage_taken: Option<(f32, Option<u32>)>, // (damage amount, attacker_id)
@@ -299,11 +299,15 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[12],
                         recv_buf[13],
                     ]);
-                    update.world_change = Some((world, vec3(x, y, z)));
-                    // optional trailing gamemode byte when entering a match
+                    // optional trailing bytes: [14]=gamemode, [15]=freeze_secs
+                    let mut freeze_secs: Option<u8> = None;
                     if size >= 15 {
                         update.match_mode = Some(recv_buf[14]);
                     }
+                    if size >= 16 {
+                        freeze_secs = Some(recv_buf[15]);
+                    }
+                    update.world_change = Some((world, vec3(x, y, z), freeze_secs));
                 }
             }
             MSG_START_DENIED => {

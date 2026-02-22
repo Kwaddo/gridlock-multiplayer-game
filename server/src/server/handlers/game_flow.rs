@@ -98,15 +98,12 @@ pub fn handle_start_game(
                         Instant::now() + Duration::from_secs(game::MATCH_POST_TELEPORT_FREEZE_SECS),
                     );
 
-                    // build fixed-size buffer: type(1)+world(1)+3*4bytes pos + mode(1)
-                    let mut response = [0u8; 14];
-                    response[0] = MSG_WORLD_CHANGE;
-                    response[1] = WorldId::Maze.as_u8();
-                    response[2..6].copy_from_slice(&sx.to_be_bytes());
-                    response[6..10].copy_from_slice(&sy.to_be_bytes());
-                    response[10..14].copy_from_slice(&sz.to_be_bytes());
-                    // last byte overwritten by mode
-                    response[13] = match_mode;
+                    let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
+                    response.extend_from_slice(&sx.to_be_bytes());
+                    response.extend_from_slice(&sy.to_be_bytes());
+                    response.extend_from_slice(&sz.to_be_bytes());
+                    response.push(match_mode);
+                    response.push(game::MATCH_POST_TELEPORT_FREEZE_SECS as u8);
                     let _ = socket.send_to(&response, req_player.socket_addr);
 
                     // send maze data to the joining client
@@ -198,6 +195,8 @@ pub fn maybe_start_match(
                 response.extend_from_slice(&sz.to_be_bytes());
                 // attach match mode so clients know which mode is starting
                 response.push(match_mode);
+                // attach freeze duration so all clients use the same value
+                response.push(game::MATCH_POST_TELEPORT_FREEZE_SECS as u8);
                 let _ = socket.send_to(&response, player.socket_addr);
 
                 current_maze.send(&socket, player.socket_addr);
