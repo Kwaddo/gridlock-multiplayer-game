@@ -65,7 +65,9 @@ pub fn handle_hit(
         return;
     }
     let victim_id = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let damage = u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    // Client sends damage as f32 — decode the IEEE 754 bytes then convert to u32
+    let damage_f = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let damage = damage_f.round().max(0.0) as u32;
 
     let mut idx = 8;
     let weapon_name = if idx < payload.len() {
@@ -81,7 +83,13 @@ pub fn handle_hit(
     };
 
     let attacker = match players.get(&src_addr) {
-        Some(a) => a.socket_addr, // just capture addr to lookup later
+        Some(a) => {
+            // No damage allowed in the lobby
+            if a.world == WorldId::Lobby {
+                return;
+            }
+            a.socket_addr
+        }
         None => return,
     };
 
@@ -169,7 +177,7 @@ pub fn handle_hit(
                 broadcast::broadcast_player_list(socket, players);
             }
 
-            // broadcast kill feed
+            // broadcast kill feed (include weapon name so client can display it)
             let mut feed = vec![MSG_KILL_FEED];
             if let Some(killer) = players.get(&attacker) {
                 feed.extend_from_slice(&killer.id.to_be_bytes());
@@ -177,6 +185,8 @@ pub fn handle_hit(
                 feed.extend_from_slice(&0u32.to_be_bytes());
             }
             feed.extend_from_slice(&victim_id.to_be_bytes());
+            feed.push(wbytes.len() as u8);
+            feed.extend_from_slice(wbytes);
             for p in players.values() {
                 let _ = socket.send_to(&feed, p.socket_addr);
             }
@@ -184,7 +194,8 @@ pub fn handle_hit(
             // non-lethal damage
             victim.health -= damage;
             let mut dmg_msg = vec![MSG_DAMAGE];
-            dmg_msg.extend_from_slice(&damage.to_be_bytes());
+            // Send damage as f32 to match client's f32::from_be_bytes() decoding
+            dmg_msg.extend_from_slice(&(damage as f32).to_be_bytes());
             if let Some(att) = players.get(&attacker) {
                 dmg_msg.extend_from_slice(&att.id.to_be_bytes());
             } else {

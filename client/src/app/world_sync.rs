@@ -100,6 +100,8 @@ pub fn sync_world(
                     current.is_sprinting = incoming.is_sprinting;
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     current.kills = incoming.kills;
+                    current.hp = incoming.hp;
+                    current.max_hp = incoming.max_hp;
                 } else {
                     // new player
                     if incoming.is_sprinting {
