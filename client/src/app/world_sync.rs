@@ -7,7 +7,7 @@ use macroquad::prelude::*;
 use client::net::poll_updates;
 use client::net::protocols::MODE_GUN_GAME;
 use client::screens::PlayingState;
-use client::types::animation_state::AnimState;
+use client::types::animation_state::{AnimState, MoveDir};
 use client::types::maze::Maze;
 
 pub struct SyncResult {
@@ -59,9 +59,11 @@ pub fn sync_world(
                     // treat sprinting with a short grace window to avoid walk/sprint flicker
                     let effective_sprinting =
                         incoming.is_sprinting || current.is_sprinting || current.sprint_grace > 0.0;
+                    // Use prev_x/prev_z for animation delta so we compare the last
+                    // two distinct server snapshots rather than the same position twice
                     let mut anim_state = AnimState::from_movement(
-                        current.x,
-                        current.z,
+                        current.prev_x,
+                        current.prev_z,
                         incoming.x,
                         incoming.z,
                         incoming.yaw,
@@ -72,6 +74,18 @@ pub fn sync_world(
                         false,
                         incoming.evt_jump_start,
                     );
+
+                    // When the server shows movement, refresh the grace timer so the
+                    // walk animation persists briefly after the player stops
+                    if anim_state.move_dir != MoveDir::None {
+                        current.move_anim_grace = 0.15;
+                    }
+
+                    // If the delta shows idle but the grace timer is still active,
+                    // keep the last known movement direction for smooth deceleration
+                    if anim_state.move_dir == MoveDir::None && current.move_anim_grace > 0.0 {
+                        anim_state.move_dir = current.last_move_dir;
+                    }
 
                     // Hysteresis: avoid rapid forward/side animation flips by requiring a short
                     // confirmation window before accepting a new MoveDir.
@@ -98,6 +112,9 @@ pub fn sync_world(
                         current.sprint_grace = OtherPlayer::SPRINT_GRACE;
                     }
                     current.is_sprinting = incoming.is_sprinting;
+                    // Save current position as prev before updating snapshot
+                    current.prev_x = current.x;
+                    current.prev_z = current.z;
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     current.kills = incoming.kills;
                     current.hp = incoming.hp;
