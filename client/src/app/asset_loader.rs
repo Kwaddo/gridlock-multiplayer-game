@@ -104,8 +104,8 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                                 .asset_source_paths
                                 .insert(key_string.clone(), path_string.clone());
                             println!(
-                                "Loaded animated GLTF model (no texture, static fallback failed): {} ({} verts) from {}",
-                                key_string, vertex_count, path_string
+                                "Loaded animated GLTF model (no texture, static fallback failed): {} ({} verts) from {}. Error is {:?}",
+                                key_string, vertex_count, path_string, static_err
                             );
                         }
                     }
