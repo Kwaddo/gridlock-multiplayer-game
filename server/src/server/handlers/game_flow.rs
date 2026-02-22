@@ -183,8 +183,14 @@ pub fn maybe_start_match(
                     Instant::now() + Duration::from_secs(game::MATCH_POST_TELEPORT_FREEZE_SECS),
                 );
 
-                // reset per-player Gun Game progression at match start
+                // reset all per-match player state so everyone starts fresh
                 player.gun_level = 1;
+                player.health = player.max_health;
+                player.shield = 0;
+                player.is_alive = true;
+                player.kills = 0;
+                player.deaths = 0;
+                player.death_time = None;
 
                 let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
                 response.extend_from_slice(&sx.to_be_bytes());
@@ -271,11 +277,12 @@ pub fn check_early_end_conditions(
 pub fn update_match_timer(
     socket: &UdpSocket,
     players: &mut HashMap<SocketAddr, Player>,
-    maze: &mut Option<MazeData>,
+    _maze: &mut Option<MazeData>,
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
     last_match_time_sent: &mut Option<u8>,
-    match_total_maze_entries: &mut usize,
+    _match_total_maze_entries: &mut usize,
+    match_end_pending: &mut Option<(Instant, u32, String)>,
 ) {
     if let Some(start) = match_start_time {
         let elapsed = Instant::now().duration_since(*start);
@@ -291,15 +298,37 @@ pub fn update_match_timer(
             *last_match_time_sent = Some(remaining_secs);
         }
 
-        // timeout -> move players to lobby
-        if elapsed >= game::MATCH_DURATION {
-            println!("Match duration elapsed — returning players to Lobby");
-            broadcast::move_all_players_to_lobby(socket, players, false);
+        // timeout -> show match-end screen then return to lobby after countdown
+        if elapsed >= game::MATCH_DURATION && match_end_pending.is_none() {
+            println!("Match duration elapsed — showing end screen");
             *match_running = false;
-            *match_start_time = None;
-            *maze = None;
-            *last_match_time_sent = None;
-            *match_total_maze_entries = 0;
+
+            // find the player with the most kills as the winner
+            let winner = players
+                .values()
+                .filter(|p| p.world == WorldId::Maze)
+                .max_by_key(|p| p.kills);
+            let (winner_id, winner_name) = match winner {
+                Some(w) => (w.id, w.username.clone()),
+                None => (0, "Nobody".to_string()),
+            };
+
+            // broadcast MSG_MATCH_END with countdown
+            let mut end_msg = vec![MSG_MATCH_END];
+            end_msg.extend_from_slice(&winner_id.to_be_bytes());
+            let name_bytes = winner_name.as_bytes();
+            end_msg.push(name_bytes.len() as u8);
+            end_msg.extend_from_slice(name_bytes);
+            end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
+            for p in players.values() {
+                let _ = socket.send_to(&end_msg, p.socket_addr);
+            }
+
+            *match_end_pending = Some((
+                Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
+                winner_id,
+                winner_name,
+            ));
         }
     }
 }

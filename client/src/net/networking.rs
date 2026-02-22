@@ -238,6 +238,22 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     let gun_level = recv_buf[offset];
                     offset += 1;
 
+                    // health and max_health (f32 each)
+                    let hp = f32::from_be_bytes([
+                        recv_buf[offset],
+                        recv_buf[offset + 1],
+                        recv_buf[offset + 2],
+                        recv_buf[offset + 3],
+                    ]);
+                    offset += 4;
+                    let max_hp = f32::from_be_bytes([
+                        recv_buf[offset],
+                        recv_buf[offset + 1],
+                        recv_buf[offset + 2],
+                        recv_buf[offset + 3],
+                    ]);
+                    offset += 4;
+
                     let name_len = recv_buf[offset] as usize;
                     offset += 1;
                     let name =
@@ -258,6 +274,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.evt_landed = (event_flags & EVT_LANDED) != 0;
                         other_player.kills = kills;
                         other_player.gun_level = gun_level;
+                        other_player.hp = hp;
+                        other_player.max_hp = max_hp;
                         new_players.push(other_player);
                     } else {
                         // update own-kills value for local UI/scoreboard

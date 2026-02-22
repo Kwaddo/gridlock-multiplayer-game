@@ -438,9 +438,12 @@ impl PlayingState {
                         });
                     }
 
-                    for (victim_id, damage) in player_damage_by_id {
-                        if damage > 0.0 {
-                            self.pending_hits.push((victim_id, damage));
+                    // Only send hit reports outside the lobby
+                    if self.current_world != WorldId::Lobby {
+                        for (victim_id, damage) in player_damage_by_id {
+                            if damage > 0.0 {
+                                self.pending_hits.push((victim_id, damage));
+                            }
                         }
                     }
 

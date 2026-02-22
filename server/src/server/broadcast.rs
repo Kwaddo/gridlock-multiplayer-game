@@ -157,6 +157,10 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
             // include gun progression level for Gun Game (1 = first weapon)
             state_msg.push(player.gun_level as u8);
 
+            // include health and max_health so other clients can render health bars
+            state_msg.extend_from_slice(&(player.health as f32).to_be_bytes());
+            state_msg.extend_from_slice(&(player.max_health as f32).to_be_bytes());
+
             let name_bytes = player.username.as_bytes();
             state_msg.push(name_bytes.len() as u8);
             state_msg.extend_from_slice(name_bytes);
