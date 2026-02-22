@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use crate::ui::fonts::{measure_game_text, text_params};
 use crate::ui::OtherPlayer;
+use crate::weapons::stats::WeaponId;
 use crate::weapons::WeaponInventory;
 
 pub(super) fn draw_weapon_and_kill_feed(
@@ -16,26 +17,28 @@ pub(super) fn draw_weapon_and_kill_feed(
     let weapon = weapons.active();
     let stats = weapon.stats();
 
-    let ammo_text = if weapon.is_reloading {
-        "RELOADING...".to_string()
-    } else {
-        format!("{} / {}", weapon.ammo, weapon.reserve)
-    };
+    if weapon.id != WeaponId::Knife {
+        let ammo_text = if weapon.is_reloading {
+            "RELOADING...".to_string()
+        } else {
+            format!("{} / {}", weapon.ammo, weapon.reserve)
+        };
 
-    let ammo_w = measure_game_text(&ammo_text, 24);
-    draw_text_ex(
-        &ammo_text,
-        screen_width() - ammo_w - 20.0,
-        screen_height() - 60.0,
-        text_params(
-            24,
-            if weapon.ammo == 0 && !weapon.is_reloading {
-                RED
-            } else {
-                WHITE
-            },
-        ),
-    );
+        let ammo_w = measure_game_text(&ammo_text, 24);
+        draw_text_ex(
+            &ammo_text,
+            screen_width() - ammo_w - 20.0,
+            screen_height() - 60.0,
+            text_params(
+                24,
+                if weapon.ammo == 0 && !weapon.is_reloading {
+                    RED
+                } else {
+                    WHITE
+                },
+            ),
+        );
+    }
 
     let name_w = measure_game_text(stats.name, 16);
     let name_x = screen_width() - name_w - 20.0;
@@ -63,11 +66,7 @@ pub(super) fn draw_weapon_and_kill_feed(
     let icon_x = name_x - icon_w - 8.0;
     let icon_y = name_y - icon_h + 4.0;
 
-    let kick_y = if weapon.muzzle_flash_timer > 0.0 {
-        (weapon.muzzle_flash_timer / 0.08) * 6.0
-    } else {
-        0.0
-    };
+    let kick_y = 0.0;
 
     if let Some(tex) = assets.get(stats.icon_asset_key) {
         draw_texture_ex(
@@ -90,42 +89,6 @@ pub(super) fn draw_weapon_and_kill_feed(
             Color::from_rgba(80, 80, 80, 150),
         );
         draw_rectangle_lines(icon_x, icon_y + kick_y, icon_w, icon_h, 1.0, GRAY);
-    }
-
-    if weapon.muzzle_flash_timer > 0.0 {
-        let t = weapon.muzzle_flash_timer / 0.08;
-        let alpha = (t * 255.0) as u8;
-        let flash_x = if stats.icon_flip_x {
-            icon_x + 6.0
-        } else {
-            icon_x + icon_w - 6.0
-        };
-        let flash_y = icon_y + kick_y + 5.0;
-
-        draw_circle(
-            flash_x,
-            flash_y,
-            14.0 * t,
-            Color::from_rgba(255, 180, 50, alpha / 2),
-        );
-        draw_circle(
-            flash_x,
-            flash_y,
-            6.0 * t,
-            Color::from_rgba(255, 240, 180, alpha),
-        );
-        for i in 0..4 {
-            let angle = (i as f32) * 0.8 + t * 3.0;
-            let len = 10.0 * t;
-            draw_line(
-                flash_x,
-                flash_y,
-                flash_x + angle.cos() * len,
-                flash_y + angle.sin() * len,
-                1.5,
-                Color::from_rgba(255, 200, 80, alpha),
-            );
-        }
     }
 
     let feed_x = 12.0; // kill-feed top-left

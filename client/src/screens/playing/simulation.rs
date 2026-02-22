@@ -20,14 +20,6 @@ const HANDS_RELOAD_START_SEC: f32 = 0.0;
 const HANDS_RELOAD_END_SEC: f32 = 1.85;
 // Carbine all-in-one clip segments (fps_animated_carbine.glb).
 #[allow(dead_code)]
-const CARBINE_LOWER_START_SEC: f32 = 4.43;
-#[allow(dead_code)]
-const CARBINE_LOWER_END_SEC: f32 = 4.80;
-#[allow(dead_code)]
-const CARBINE_DRAW_COCK_START_SEC: f32 = 4.81;
-#[allow(dead_code)]
-const CARBINE_DRAW_COCK_END_SEC: f32 = 6.00;
-#[allow(dead_code)]
 const CARBINE_MELEE_HIT_START_SEC: f32 = 6.79;
 #[allow(dead_code)]
 const CARBINE_MELEE_HIT_END_SEC: f32 = 7.40;
@@ -177,6 +169,7 @@ impl PlayingState {
                     self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
                 }
             }
+
         }
 
         // --- Knife animation state machine ---
