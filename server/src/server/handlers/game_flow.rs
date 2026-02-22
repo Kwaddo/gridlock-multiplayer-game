@@ -183,8 +183,14 @@ pub fn maybe_start_match(
                     Instant::now() + Duration::from_secs(game::MATCH_POST_TELEPORT_FREEZE_SECS),
                 );
 
-                // reset per-player Gun Game progression at match start
+                // reset all per-match player state so everyone starts fresh
                 player.gun_level = 1;
+                player.health = player.max_health;
+                player.shield = 0;
+                player.is_alive = true;
+                player.kills = 0;
+                player.deaths = 0;
+                player.death_time = None;
 
                 let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
                 response.extend_from_slice(&sx.to_be_bytes());

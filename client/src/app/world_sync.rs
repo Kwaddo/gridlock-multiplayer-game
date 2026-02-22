@@ -75,22 +75,18 @@ pub fn sync_world(
                         incoming.evt_jump_start,
                     );
 
-                    // When the server shows movement, refresh the grace timer so the
-                    // walk animation persists briefly after the player stops
-                    if anim_state.move_dir != MoveDir::None {
-                        current.move_anim_grace = 0.15;
-                    }
-
-                    // If the delta shows idle but the grace timer is still active,
-                    // keep the last known movement direction for smooth deceleration
-                    if anim_state.move_dir == MoveDir::None && current.move_anim_grace > 0.0 {
-                        anim_state.move_dir = current.last_move_dir;
-                    }
-
                     // Hysteresis: avoid rapid forward/side animation flips by requiring a short
                     // confirmation window before accepting a new MoveDir.
+                    // Transitions to idle (None) are applied instantly so stopping feels responsive.
                     let candidate_dir = anim_state.move_dir;
-                    if candidate_dir != current.last_move_dir {
+                    if candidate_dir == MoveDir::None || candidate_dir == current.last_move_dir {
+                        // idle or same direction — accept immediately
+                        current.pending_move_dir = None;
+                        current.pending_move_timer = 0.0;
+                        current.last_move_dir = candidate_dir;
+                        anim_state.move_dir = candidate_dir;
+                    } else {
+                        // direction change (e.g. forward→left) — require brief confirmation
                         if current.pending_move_dir == Some(candidate_dir) {
                             // pending already in progress; leave it
                         } else {
@@ -98,11 +94,6 @@ pub fn sync_world(
                             current.pending_move_timer = OtherPlayer::MOVE_DIR_GRACE;
                         }
                         anim_state.move_dir = current.last_move_dir;
-                    } else {
-                        current.pending_move_dir = None;
-                        current.pending_move_timer = 0.0;
-                        current.last_move_dir = candidate_dir;
-                        anim_state.move_dir = candidate_dir;
                     }
 
                     current.username = incoming.username;
@@ -224,8 +215,21 @@ pub fn sync_world(
 
             // If we just entered the Maze, start the short post-teleport movement freeze
             if world_id == WorldId::Maze {
-                playing_state.post_teleport_freeze_timer = 10.0; // start client-side match timer to mirror server MATCH_DURATION
+                playing_state.post_teleport_freeze_timer = 10.0;
                 playing_state.match_time_left = 120.0; // seconds
+
+                // Reset local player state for a fresh match
+                playing_state.is_dead = false;
+                playing_state.hp = playing_state.max_hp;
+                playing_state.shield = 0.0;
+                playing_state.death_timer = 0.0;
+                playing_state.local_kills = 0;
+                playing_state.movement_state.velocity = Vec3::ZERO;
+
+                // Clear stale other-player data so animations don't carry over
+                playing_state.other_players.clear();
+                playing_state.player_index.clear();
+                playing_state.seen_player_ids.clear();
 
                 // if a forced slot was received earlier while we were still in the lobby,
                 // apply it now that the teleport is complete
@@ -240,6 +244,17 @@ pub fn sync_world(
                 playing_state.match_mode = None;
                 playing_state.weapons.set_locked_slot(None);
                 playing_state.pending_forced_weapon_slot = None;
+
+                // Reset local player state when returning to lobby
+                playing_state.is_dead = false;
+                playing_state.hp = playing_state.max_hp;
+                playing_state.shield = 0.0;
+                playing_state.death_timer = 0.0;
+
+                // Clear stale other-player data
+                playing_state.other_players.clear();
+                playing_state.player_index.clear();
+                playing_state.seen_player_ids.clear();
             }
             // If the server attached a match_mode to the world-change packet, remember it.
             // We used to clear `*maze` here, but that meant the very maze we just received
