@@ -380,12 +380,17 @@ impl CombatEntity for OtherPlayer {
                 self.pending_move_dir = None;
                 self.pending_move_timer = 0.0;
                 let anim = AnimState::from_movement(
-                    0.0, 0.0, 0.0, 0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
                     self.yaw,
                     false,
                     self.is_ads,
                     self.is_crouching,
-                    false, false, false,
+                    false,
+                    false,
+                    false,
                 );
                 self.skin_type = AnimState::skin_from_state(anim, None);
                 // snap render position so model doesn't slide

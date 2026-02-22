@@ -235,6 +235,10 @@ pub struct WeaponInventory {
     pub switch_cooldown: f32, // prevents rapid switching but its not that noticeable and it simplifies input handling
     /// When set, only this slot may be selected by the local client (used for Gun Game).
     pub locked_slot: Option<usize>,
+    /// Knife is its own thing, separate from loadout slots (like Fortnite pickaxe).
+    /// X toggles between knife and the last active gun slot.
+    pub knife: WeaponState,
+    pub knife_active: bool,
 }
 
 impl WeaponInventory {
@@ -250,6 +254,8 @@ impl WeaponInventory {
             active_slot: 0,
             switch_cooldown: 0.0,
             locked_slot: None,
+            knife: WeaponState::new(WeaponId::Knife),
+            knife_active: false,
         }
     }
 
@@ -267,11 +273,19 @@ impl WeaponInventory {
     }
 
     pub fn active(&self) -> &WeaponState {
-        &self.weapons[self.active_slot]
+        if self.knife_active {
+            &self.knife
+        } else {
+            &self.weapons[self.active_slot]
+        }
     }
 
     pub fn active_mut(&mut self) -> &mut WeaponState {
-        &mut self.weapons[self.active_slot]
+        if self.knife_active {
+            &mut self.knife
+        } else {
+            &mut self.weapons[self.active_slot]
+        }
     }
 
     /// Enforce allowed weapon slot for game modes like Gun Game. Pass `None` to clear the lock.
@@ -287,6 +301,25 @@ impl WeaponInventory {
         }
     }
 
+    /// Toggle knife on/off. X key behavior: if holding a gun → switch to knife.
+    /// If holding knife → switch back to the current gun slot.
+    pub fn toggle_knife(&mut self) -> bool {
+        if self.switch_cooldown > 0.0 {
+            return false;
+        }
+        if self.knife_active {
+            // put knife away, go back to gun
+            self.knife_active = false;
+            self.switch_cooldown = 0.3;
+            true
+        } else {
+            // put gun away, pull out knife
+            self.knife_active = true;
+            self.switch_cooldown = 0.3;
+            true
+        }
+    }
+
     // switch to a specific slot (0-4). returns true if switched.
     pub fn switch_to(&mut self, slot: usize) -> bool {
         // honor server-enforced lock (e.g. Gun Game)
@@ -294,6 +327,17 @@ impl WeaponInventory {
             if slot != locked {
                 return false;
             }
+        }
+
+        // If knife is active, switching to a gun slot puts the knife away
+        if self.knife_active {
+            if slot < self.weapons.len() && self.switch_cooldown <= 0.0 {
+                self.knife_active = false;
+                self.active_slot = slot;
+                self.switch_cooldown = 0.3;
+                return true;
+            }
+            return false;
         }
 
         if slot < self.weapons.len() && slot != self.active_slot && self.switch_cooldown <= 0.0 {
@@ -310,10 +354,18 @@ impl WeaponInventory {
         }
     }
 
-    // scroll to next/prev weapon.
+    // scroll to next/prev weapon (scrolling puts knife away if active).
     pub fn scroll(&mut self, direction: i32) {
         // scrolling is not allowed when a locked slot is active
         if self.locked_slot.is_some() {
+            return;
+        }
+        // If knife is out, scroll puts it away and returns to current gun slot
+        if self.knife_active {
+            if self.switch_cooldown <= 0.0 {
+                self.knife_active = false;
+                self.switch_cooldown = 0.3;
+            }
             return;
         }
         let len = self.weapons.len() as i32;
@@ -329,5 +381,6 @@ impl WeaponInventory {
         for w in &mut self.weapons {
             w.update(delta);
         }
+        self.knife.update(delta);
     }
 }

@@ -67,8 +67,9 @@ pub fn sync_world(
                     let pos_changed = (dx * dx + dz * dz) > 1.0e-4;
 
                     if pos_changed {
-                        let effective_sprinting =
-                            incoming.is_sprinting || current.is_sprinting || current.sprint_grace > 0.0;
+                        let effective_sprinting = incoming.is_sprinting
+                            || current.is_sprinting
+                            || current.sprint_grace > 0.0;
                         let anim_state = AnimState::from_movement(
                             current.x,
                             current.z,
