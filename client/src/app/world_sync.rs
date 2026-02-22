@@ -56,60 +56,52 @@ pub fn sync_world(
                 if let Some(&idx) = playing_state.player_index.get(&incoming.id) {
                     // update existing player by index
                     let current = &mut playing_state.other_players[idx];
-                    // treat sprinting with a short grace window to avoid walk/sprint flicker
-                    let effective_sprinting =
-                        incoming.is_sprinting || current.is_sprinting || current.sprint_grace > 0.0;
-                    // Compare current known position to incoming position for movement
-                    // direction. Using the immediately previous snapshot (current.x/z)
-                    // is more stable than prev_x/prev_z which can amplify jitter.
-                    let mut anim_state = AnimState::from_movement(
-                        current.x,
-                        current.z,
-                        incoming.x,
-                        incoming.z,
-                        incoming.yaw,
-                        effective_sprinting,
-                        incoming.is_ads,
-                        incoming.is_crouching,
-                        false,
-                        false,
-                        incoming.evt_jump_start,
-                    );
 
-                    // Hysteresis: avoid rapid forward/side animation flips by requiring a short
-                    // confirmation window before accepting a new MoveDir.
-                    // Transitions to idle (None) are applied instantly so stopping feels responsive.
-                    let candidate_dir = anim_state.move_dir;
-                    if candidate_dir == MoveDir::None || candidate_dir == current.last_move_dir {
-                        // idle or same direction — accept immediately
-                        current.pending_move_dir = None;
-                        current.pending_move_timer = 0.0;
-                        current.last_move_dir = candidate_dir;
-                        anim_state.move_dir = candidate_dir;
-                    } else {
-                        // direction change (e.g. forward→left) — require brief confirmation
-                        if current.pending_move_dir == Some(candidate_dir) {
-                            // pending already in progress; leave it
-                        } else {
-                            current.pending_move_dir = Some(candidate_dir);
-                            current.pending_move_timer = OtherPlayer::MOVE_DIR_GRACE;
+                    // Check if this player's position actually changed.
+                    // The server broadcasts state on every position packet from
+                    // ANY player, so most broadcasts carry the same position for
+                    // players who didn't move. Only recompute animations when
+                    // the position genuinely changed.
+                    let dx = incoming.x - current.x;
+                    let dz = incoming.z - current.z;
+                    let pos_changed = (dx * dx + dz * dz) > 1.0e-4;
+
+                    if pos_changed {
+                        let effective_sprinting =
+                            incoming.is_sprinting || current.is_sprinting || current.sprint_grace > 0.0;
+                        let anim_state = AnimState::from_movement(
+                            current.x,
+                            current.z,
+                            incoming.x,
+                            incoming.z,
+                            incoming.yaw,
+                            effective_sprinting,
+                            incoming.is_ads,
+                            incoming.is_crouching,
+                            false,
+                            false,
+                            incoming.evt_jump_start,
+                        );
+
+                        let candidate_dir = anim_state.move_dir;
+                        if candidate_dir != MoveDir::None {
+                            current.last_move_dir = candidate_dir;
                         }
-                        anim_state.move_dir = current.last_move_dir;
+                        current.skin_type = AnimState::skin_from_state(anim_state, None);
+                        current.last_move_time = macroquad::time::get_time();
                     }
+                    // When position is unchanged we do nothing — the per-frame
+                    // update() on OtherPlayer will transition to idle after a
+                    // short grace period using last_move_time.
 
                     current.username = incoming.username;
                     current.world = incoming.world;
-                    current.skin_type = AnimState::skin_from_state(anim_state, None);
                     if incoming.is_sprinting {
                         current.sprint_grace = OtherPlayer::SPRINT_GRACE;
                     }
                     current.is_sprinting = incoming.is_sprinting;
-                    // When the player has stopped moving, snap render position to
-                    // the actual position so the model doesn't visually slide/drift.
-                    if anim_state.move_dir == MoveDir::None && !incoming.evt_jump_start {
-                        current.render_x = incoming.x;
-                        current.render_z = incoming.z;
-                    }
+                    current.is_ads = incoming.is_ads;
+                    current.is_crouching = incoming.is_crouching;
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     current.kills = incoming.kills;
                     current.hp = incoming.hp;

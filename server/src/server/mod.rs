@@ -126,7 +126,11 @@ pub fn run() -> std::io::Result<()> {
         if let Some(ref m) = maze {
             game::process_auto_respawns(&socket, m, &mut players);
         }
-        game::cleanup_inactive_players(&mut players);
+        if game::cleanup_inactive_players(&mut players) {
+            // players were removed — broadcast so other clients drop their characters
+            broadcast::broadcast_state(&socket, &players);
+            broadcast::broadcast_player_list(&socket, &players);
+        }
 
         // If a match is running but there are no players left in the Maze, end it immediately
         if match_running {

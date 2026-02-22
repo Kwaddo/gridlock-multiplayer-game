@@ -114,8 +114,9 @@ pub fn process_auto_respawns(
     }
 }
 
-/// Remove players whose last activity timestamp is older than the timeout constant
-pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) {
+/// Remove players whose last activity timestamp is older than the timeout constant.
+/// Returns true if any players were removed.
+pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) -> bool {
     let now = Instant::now();
     let mut to_remove = Vec::new();
 
@@ -125,6 +126,7 @@ pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) {
         }
     }
 
+    let removed_any = !to_remove.is_empty();
     for addr in to_remove {
         if let Some(p) = players.remove(&addr) {
             println!(
@@ -134,4 +136,5 @@ pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) {
             );
         }
     }
+    removed_any
 }
