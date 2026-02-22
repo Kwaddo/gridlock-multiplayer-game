@@ -49,24 +49,34 @@ impl PlayingState {
         draw_text(label, sx - measure_w / 2.0, sy - 4.0, 14.0, WHITE);
     }
 
-    pub(crate) fn draw_entity_health_bars(&self, camera: &Camera3D) {
-        if !self.dev_mode.show_health_bars {
-            return;
-        }
-
+    /// Draws nametags (always) and health bars (dev mode) above other players.
+    /// Uses proper camera-based 3D-to-screen projection so tags stay directly
+    /// above the player model.
+    pub(crate) fn draw_player_overhead(&self, camera: &Camera3D) {
         let forward = (camera.target - camera.position).normalize();
         let right = forward.cross(camera.up).normalize();
         let up = right.cross(forward).normalize();
         let fov_rad = camera.fovy;
         let fov_scale = screen_height() / (2.0 * (fov_rad / 2.0).tan());
 
-        if self.current_world == crate::types::world::WorldId::Lobby {
-            let world_pos = self.target_dummy.position + vec3(0.0, 2.0, 0.0);
+        let show_hp = self.dev_mode.show_health_bars;
+
+        // helper: project a world-space point to screen and draw nametag + optional health bar
+        let project = |world_pos: Vec3| -> Option<(f32, f32)> {
             let rel = world_pos - camera.position;
             let dot = rel.dot(forward);
-            if dot >= 0.1 {
-                let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
-                let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
+            if dot < 0.1 {
+                return None;
+            }
+            let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
+            let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
+            Some((sx, sy))
+        };
+
+        // Target dummy (lobby only)
+        if show_hp && self.current_world == crate::types::world::WorldId::Lobby {
+            let world_pos = self.target_dummy.position + vec3(0.0, 2.0, 0.0);
+            if let Some((sx, sy)) = project(world_pos) {
                 Self::draw_health_bar(
                     sx,
                     sy,
@@ -77,28 +87,36 @@ impl PlayingState {
             }
         }
 
+        // Other players
         for p in &self.other_players {
-            let world_pos: Vec3 = p.render_position() + vec3(0.0, 2.0, 0.0);
-            let rel = world_pos - camera.position;
-            let dot = rel.dot(forward);
-            if dot >= 0.1 {
-                let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
-                let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
-                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
+            let world_pos = p.render_position() + vec3(0.0, 2.0, 0.0);
+            if let Some((sx, sy)) = project(world_pos) {
+                if show_hp {
+                    Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
+                } else {
+                    Self::draw_nametag(sx, sy, &p.username, p.color);
+                }
             }
         }
 
+        // Practice bots
         for bot in &self.practice_bots {
             let p = &bot.player;
-            let world_pos: Vec3 = vec3(p.x, p.y + 2.0, p.z);
-            let rel = world_pos - camera.position;
-            let dot = rel.dot(forward);
-            if dot >= 0.1 {
-                let sx = screen_width() / 2.0 + (rel.dot(right) / dot) * fov_scale;
-                let sy = screen_height() / 2.0 - (rel.dot(up) / dot) * fov_scale;
-                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
+            let world_pos = vec3(p.x, p.y + 2.0, p.z);
+            if let Some((sx, sy)) = project(world_pos) {
+                if show_hp {
+                    Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
+                } else {
+                    Self::draw_nametag(sx, sy, &p.username, p.color);
+                }
             }
         }
+    }
+
+    fn draw_nametag(sx: f32, sy: f32, label: &str, color: Color) {
+        use crate::ui::fonts::{measure_game_text, text_params};
+        let label_w = measure_game_text(label, 14);
+        draw_text_ex(label, sx - label_w / 2.0, sy, text_params(14, color));
     }
 
     fn draw_health_bar(sx: f32, sy: f32, hp: f32, max_hp: f32, label: &str) {

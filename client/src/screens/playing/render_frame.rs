@@ -56,7 +56,7 @@ impl PlayingState {
             self.draw_target_dummy_hud(&camera);
         }
 
-        self.draw_entity_health_bars(&camera);
+        self.draw_player_overhead(&camera);
         self.draw_lobby_console_prompt();
 
         // Lobby console (Start Game) overlay
@@ -67,13 +67,6 @@ impl PlayingState {
             self.draw_viewmodel();
         }
 
-        let forward = vec3(
-            self.yaw.cos() * self.pitch.cos(),
-            self.pitch.sin(),
-            self.yaw.sin() * self.pitch.cos(),
-        );
-        let right = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
-
         // When lobby console is open, suppress regular HUD (crosshair, minimap, status panels, etc.)
         if !self.lobby_console_open && !self.is_dead {
             draw_hud(
@@ -81,9 +74,6 @@ impl PlayingState {
                 player_id,
                 self.position,
                 self.yaw,
-                forward,
-                right,
-                self.pitch,
                 &self.movement_state,
                 &self.other_players,
                 &self.weapons,
