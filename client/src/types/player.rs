@@ -218,7 +218,7 @@ pub struct OtherPlayer {
 }
 
 impl OtherPlayer {
-    const POSITION_SMOOTH_RATE: f32 = 14.0;
+    const POSITION_SMOOTH_RATE: f32 = 22.0;
     const YAW_SMOOTH_RATE: f32 = 18.0;
     const SNAP_DISTANCE: f32 = 5.0;
     /// how long we continue treating a player as "sprinting" after the last sprint flag

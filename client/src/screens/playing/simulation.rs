@@ -202,14 +202,14 @@ impl PlayingState {
             }
         }
 
-        // Match-start countdown (server-initiated)
+        // Match-start countdown (server-initiated, display only)
+        // The actual freeze timer is set when the MSG_WORLD_CHANGE arrives from the
+        // server (with an authoritative freeze duration) so that all clients are
+        // synchronized regardless of connection speed.
         if self.match_start_countdown_timer > 0.0 {
             self.match_start_countdown_timer = (self.match_start_countdown_timer - delta).max(0.0);
             if self.match_start_countdown_timer <= 0.0 {
-                // small 'Go' announcement
                 self.announcements.push(("GO!".to_string(), 1.5));
-                // start client-side movement & shooting freeze for the initial match window
-                self.post_teleport_freeze_timer = 10.0;
             }
         }
 

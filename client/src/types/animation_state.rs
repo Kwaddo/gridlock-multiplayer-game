@@ -40,9 +40,11 @@ impl AnimState {
         let dz = z - prev_z;
         let move_len_sq = dx * dx + dz * dz;
 
-        // Very small threshold so high-FPS tiny per-frame movement still counts as movement.
-        // A larger cutoff causes rapid idle<->move flicker when displacement per frame is tiny.
-        let move_dir = if move_len_sq <= 1.0e-8 {
+        // Threshold tuned for network snapshot comparison: positions may have small
+        // floating-point drift even when the player is stationary. A value of 1e-4
+        // corresponds to ~0.01 world-units of movement, well below perceptible motion
+        // but large enough to filter out network noise and float rounding.
+        let move_dir = if move_len_sq <= 1.0e-4 {
             MoveDir::None
         } else {
             let v = vec2(dx, dz).normalize();
