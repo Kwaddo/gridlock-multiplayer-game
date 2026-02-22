@@ -21,6 +21,11 @@ pub enum HandsPlaybackMode {
     IdleLoop,
     ReloadOnce,
     Stopped,
+    // Knife-specific states (knife_animated.glb replaces hands entirely)
+    KnifeIdle,
+    KnifeSwing,   // playing one of the swing segments, returns to KnifeIdle when done
+    KnifeLower,   // lowering animation when switching away from knife
+    KnifeEquip,   // raising animation when switching to knife
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,6 +130,11 @@ pub struct PlayingState {
     pub lobby_console_message_timer: f32,
     pub hands_playback_mode: HandsPlaybackMode,
     pub hands_anim_initialized: bool,
+    pub knife_swing_index: u8,     // cycles 0..2 for light slashes (swings 1-3)
+    pub knife_swing_requested: bool, // set by input_processing when knife fires
+    pub knife_heavy_swing_requested: bool, // set by input_processing for right-click heavy slash
+    pub knife_anim_initialized: bool, // whether fp_hands_knife has been set up
+    pub prev_weapon_was_knife: bool,  // track weapon switches to/from knife
     pub inspect_phase: InspectPhase,
     pub inspect_timer: f32,
 
@@ -227,6 +237,11 @@ impl PlayingState {
             connected_players: Vec::new(),
             hands_playback_mode: HandsPlaybackMode::IdleLoop,
             hands_anim_initialized: false,
+            knife_swing_index: 0,
+            knife_swing_requested: false,
+            knife_heavy_swing_requested: false,
+            knife_anim_initialized: false,
+            prev_weapon_was_knife: false,
             inspect_phase: InspectPhase::None,
             inspect_timer: 0.0,
 

@@ -6,6 +6,7 @@ use crate::types::maze::Maze;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 use crate::weapons::combat::{default_player_hitboxes, CombatEntity, HitZone, Hitbox};
+use crate::weapons::stats::WeaponId;
 
 use macroquad::prelude::*;
 use std::collections::HashMap;
@@ -17,6 +18,36 @@ const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
 const HANDS_RELOAD_START_SEC: f32 = 0.0;
 const HANDS_RELOAD_END_SEC: f32 = 1.85;
+// Carbine all-in-one clip segments (fps_animated_carbine.glb).
+#[allow(dead_code)]
+const CARBINE_LOWER_START_SEC: f32 = 4.43;
+#[allow(dead_code)]
+const CARBINE_LOWER_END_SEC: f32 = 4.80;
+#[allow(dead_code)]
+const CARBINE_DRAW_COCK_START_SEC: f32 = 4.81;
+#[allow(dead_code)]
+const CARBINE_DRAW_COCK_END_SEC: f32 = 6.00;
+#[allow(dead_code)]
+const CARBINE_MELEE_HIT_START_SEC: f32 = 6.79;
+#[allow(dead_code)]
+const CARBINE_MELEE_HIT_END_SEC: f32 = 7.40;
+
+// Knife animation segments (knife_animated.glb — single baked clip)
+const KNIFE_IDLE_START: f32 = 0.0;
+const KNIFE_IDLE_END: f32 = 1.36;
+const KNIFE_SWING1_START: f32 = 1.37;
+const KNIFE_SWING1_END: f32 = 2.03;
+const KNIFE_SWING2_START: f32 = 2.04;
+const KNIFE_SWING2_END: f32 = 2.70;
+const KNIFE_SWING3_START: f32 = 2.70;
+const KNIFE_SWING3_END: f32 = 3.43;
+const KNIFE_SWING4_START: f32 = 3.47;
+const KNIFE_SWING4_END: f32 = 4.16;
+const KNIFE_LOWER_START: f32 = 4.17;
+const KNIFE_LOWER_END: f32 = 4.50;
+const KNIFE_EQUIP_START: f32 = 4.51;
+const KNIFE_EQUIP_END: f32 = 4.83;
+
 const INSPECT_START_SEC: f32 = 0.35;
 const INSPECT_SWEEP_SEC: f32 = 0.60;
 const INSPECT_HOLD_SEC: f32 = 0.85;
@@ -149,9 +180,103 @@ impl PlayingState {
             }
         }
 
+        // --- Knife animation state machine ---
+        // This must be outside the `if let Some(hands)` block above because it
+        // borrows a different key ("fp_hands_knife") from animated_models.
+        let is_knife = self.weapons.active().id == WeaponId::Knife;
+        let was_knife = self.prev_weapon_was_knife;
+
+        if is_knife {
+            if let Some(knife) = self.animated_models.get_mut("fp_hands_knife") {
+                // First time equipping knife, or switching TO knife from another weapon
+                if !self.knife_anim_initialized || (!was_knife && is_knife) {
+                    knife.play_segment(KNIFE_EQUIP_START, KNIFE_EQUIP_END, false);
+                    self.hands_playback_mode = HandsPlaybackMode::KnifeEquip;
+                    self.knife_anim_initialized = true;
+                    self.knife_swing_index = 0;
+                }
+
+                // Heavy swing request (right-click) takes priority over light chain.
+                if self.knife_heavy_swing_requested {
+                    self.knife_heavy_swing_requested = false;
+                    self.knife_swing_requested = false;
+                    knife.play_segment(KNIFE_SWING4_START, KNIFE_SWING4_END, false);
+                    self.hands_playback_mode = HandsPlaybackMode::KnifeSwing;
+                } else if self.knife_swing_requested {
+                    // Handle light swing request (set by input_processing when weapon.fire() succeeds)
+                    self.knife_swing_requested = false;
+                    let (start, end) = match self.knife_swing_index {
+                        0 => (KNIFE_SWING1_START, KNIFE_SWING1_END),
+                        1 => (KNIFE_SWING2_START, KNIFE_SWING2_END),
+                        2 => (KNIFE_SWING3_START, KNIFE_SWING3_END),
+                        _ => (KNIFE_SWING1_START, KNIFE_SWING1_END),
+                    };
+                    knife.play_segment(start, end, false);
+                    self.hands_playback_mode = HandsPlaybackMode::KnifeSwing;
+                    self.knife_swing_index = (self.knife_swing_index + 1) % 3;
+                }
+
+                // Transition back to idle when swing/equip finishes
+                match self.hands_playback_mode {
+                    HandsPlaybackMode::KnifeSwing | HandsPlaybackMode::KnifeEquip => {
+                        if knife.is_playback_finished() {
+                            knife.play_segment(KNIFE_IDLE_START, KNIFE_IDLE_END, true);
+                            self.hands_playback_mode = HandsPlaybackMode::KnifeIdle;
+                        }
+                    }
+                    HandsPlaybackMode::KnifeIdle => {} // looping idle, nothing to do
+                    _ => {
+                        // If somehow in a non-knife state while knife is active, start idle
+                        knife.play_segment(KNIFE_IDLE_START, KNIFE_IDLE_END, true);
+                        self.hands_playback_mode = HandsPlaybackMode::KnifeIdle;
+                    }
+                }
+            }
+        } else if was_knife {
+            // Just switched away from knife: play lower and keep it active until finished.
+            if let Some(knife) = self.animated_models.get_mut("fp_hands_knife") {
+                knife.play_segment(KNIFE_LOWER_START, KNIFE_LOWER_END, false);
+            }
+            self.hands_playback_mode = HandsPlaybackMode::KnifeLower;
+            self.knife_anim_initialized = false;
+            self.knife_swing_requested = false;
+            self.knife_heavy_swing_requested = false;
+        } else if self.hands_playback_mode == HandsPlaybackMode::KnifeLower {
+            let lower_finished = self
+                .animated_models
+                .get("fp_hands_knife")
+                .map(|knife| knife.is_playback_finished())
+                .unwrap_or(true);
+            if lower_finished {
+                self.knife_anim_initialized = false;
+                self.knife_swing_requested = false;
+                self.knife_heavy_swing_requested = false;
+                self.knife_swing_index = 0;
+                if let Some(hands) = self.animated_models.get_mut("fp_hands") {
+                    let hands_is_all_in_one = self
+                        .asset_source_paths
+                        .get("fp_hands")
+                        .map(|p| p.contains("fps_animated_carbine.glb"))
+                        .unwrap_or(false);
+                    if hands_is_all_in_one {
+                        hands.stop_at_start();
+                        self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                    } else {
+                        hands.play_from_start(true);
+                        self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
+                    }
+                } else {
+                    self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
+                }
+            }
+        } else {
+            self.knife_heavy_swing_requested = false;
+        }
+        self.prev_weapon_was_knife = is_knife;
+
         // Advance world/player clips plus first-person hands.
         for (key, model) in self.animated_models.iter_mut() {
-            if key.starts_with("anim_") || key == "fp_hands" {
+            if key.starts_with("anim_") || key == "fp_hands" || key == "fp_hands_knife" {
                 model.update(delta);
             }
         }
@@ -552,3 +677,4 @@ impl PlayingState {
         }
     }
 }
+
