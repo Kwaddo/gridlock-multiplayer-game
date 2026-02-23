@@ -33,8 +33,8 @@ impl PlayingState {
         self.last_damage_attacker = attacker_id.and_then(|aid| {
             self.connected_players
                 .iter()
-                .find(|(id, _name, _)| *id == aid)
-                .map(|(_, name, _): &(u32, String, u32)| name.clone())
+                .find(|(id, ..)| *id == aid)
+                .map(|(_, name, ..)| name.clone())
         });
 
         if self.hp <= 0.0 {
@@ -70,6 +70,22 @@ impl PlayingState {
             cy - 80.0,
             text_params(48, RED),
         );
+
+        // show who killed us and with what weapon
+        if let Some(killer) = &self.death_killer_name {
+            let killed_by = if let Some(weapon) = &self.death_weapon_name {
+                format!("Killed by {} with {}", killer, weapon)
+            } else {
+                format!("Killed by {}", killer)
+            };
+            let kw = measure_game_text(&killed_by, 20);
+            draw_text_ex(
+                &killed_by,
+                cx - kw / 2.0,
+                cy - 40.0,
+                text_params(20, Color::from_rgba(255, 160, 160, 255)),
+            );
+        }
 
         if self.current_world == WorldId::Lobby {
             if self.death_timer <= 0.0 {
@@ -131,6 +147,8 @@ impl PlayingState {
         self.death_timer = 0.0;
         self.position = spawn_pos;
         self.movement_state.velocity = Vec3::ZERO;
+        self.death_killer_name = None;
+        self.death_weapon_name = None;
     }
 
     /// Full-screen victory overlay displayed when the match ends.
@@ -207,7 +225,7 @@ impl PlayingState {
         let mut sorted_players = self.connected_players.clone();
         sorted_players.sort_by(|a, b| b.2.cmp(&a.2));
 
-        for (i, (pid, name, kills)) in sorted_players.iter().take(12).enumerate() {
+        for (i, (pid, name, kills, _deaths, _gun_level)) in sorted_players.iter().take(12).enumerate() {
             let is_local = *pid == local_player_id;
             let is_winner = name == winner_name;
             let row_y = cy - 13.0;
