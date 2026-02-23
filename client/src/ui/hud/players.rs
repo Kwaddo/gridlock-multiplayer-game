@@ -36,65 +36,99 @@ pub(super) fn draw_players_overlay(
 /// rendered only when the caller explicitly invokes `draw_player_list`.
 
 pub fn draw_player_list(
-    connected_players: &[(u32, String, u32)],
+    connected_players: &[(u32, String, u32, u32, u8)], // (id, name, kills, deaths, gun_level)
     self_id: u32,
     self_kills: u32,
+    self_deaths: u32,
+    self_gun_level: u8,
     in_game: bool,
 ) {
-    use crate::ui::fonts::{measure_game_text, text_params};
+    use crate::ui::fonts::text_params;
 
-    // build combined list (include local player if not present in connected_players)
-    let mut rows: Vec<(String, u32, bool)> = Vec::new();
+    // (name, kills, deaths, gun_level, is_self)
+    let mut rows: Vec<(String, u32, u32, u8, bool)> = Vec::new();
     let mut seen_self = false;
-    for (id, name, kills) in connected_players.iter() {
+    for (id, name, kills, deaths, gun_level) in connected_players.iter() {
         let is_self = *id == self_id;
         if is_self { seen_self = true; }
-        rows.push((name.clone(), *kills, is_self));
+        rows.push((name.clone(), *kills, *deaths, *gun_level, is_self));
     }
     if !seen_self {
-        rows.push(("You".to_string(), self_kills, true));
+        rows.push(("You".to_string(), self_kills, self_deaths, self_gun_level, true));
     }
 
     if in_game {
-        // sort by kills desc
         rows.sort_by(|a, b| b.1.cmp(&a.1));
     } else {
         rows.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
     }
 
-    // layout
+    // layout — wider to fit K/D/A + weapon columns
     let row_h = 28.0;
-    let w = 420.0;
+    let w = 560.0;
     let h = (rows.len() as f32 + 1.0) * row_h + 28.0;
     let x = (screen_width() - w) / 2.0;
     let y = 120.0;
 
+    let header_color = Color::from_rgba(160, 160, 170, 255);
+    let dim_color = Color::from_rgba(120, 120, 130, 255);
+
     draw_rectangle(x - 8.0, y - 12.0, w + 16.0, h + 24.0, Color::from_rgba(8, 10, 12, 220));
     draw_rectangle_lines(x - 8.0, y - 12.0, w + 16.0, h + 24.0, 2.0, Color::from_rgba(200, 200, 200, 60));
 
-    // header
+    // title
     let title = if in_game { "Scoreboard" } else { "Players online" };
     draw_text_ex(title, x + 12.0, y + 20.0, text_params(22, YELLOW));
 
-    // rows
-    let mut py = y + 50.0;
-    for (i, (name, score, is_self)) in rows.iter().enumerate() {
-        let score_text = format!("{}", score);
-        let score_w = measure_game_text(&score_text, 18);
+    // column headers
+    let col_name_x = x + 14.0;
+    let col_k_x = x + w - 220.0;
+    let col_d_x = x + w - 170.0;
+    let col_a_x = x + w - 120.0;
+    let col_wep_x = x + w - 60.0;
 
+    let header_y = y + 42.0;
+    draw_text_ex("K", col_k_x + 4.0, header_y, text_params(13, header_color));
+    draw_text_ex("D", col_d_x + 4.0, header_y, text_params(13, header_color));
+    draw_text_ex("A", col_a_x + 4.0, header_y, text_params(13, header_color));
+    if in_game {
+        draw_text_ex("WPN", col_wep_x - 4.0, header_y, text_params(13, header_color));
+    }
+
+    // rows
+    let mut py = y + 62.0;
+    for (i, (name, kills, deaths, gun_level, is_self)) in rows.iter().enumerate() {
         let bg_alpha = if *is_self { 0.08 } else { 0.0 };
         if bg_alpha > 0.0 {
             draw_rectangle(x + 8.0, py - 18.0, w - 16.0, row_h - 4.0, Color::from_rgba(255, 255, 255, (bg_alpha * 255.0) as u8));
         }
 
+        let name_color = if *is_self { Color::from_rgba(180, 220, 255, 255) } else { WHITE };
+
+        // rank + name
         draw_text_ex(
             &format!("{}. {}", i + 1, name),
-            x + 14.0,
+            col_name_x,
             py,
-            text_params(18, if *is_self { Color::from_rgba(180, 220, 255, 255) } else { WHITE }),
+            text_params(18, name_color),
         );
 
-        draw_text_ex(&score_text, x + w - 28.0 - score_w, py, text_params(18, WHITE));
+        // K
+        let k_text = format!("{}", kills);
+        draw_text_ex(&k_text, col_k_x, py, text_params(18, WHITE));
+
+        // D
+        let d_text = format!("{}", deaths);
+        draw_text_ex(&d_text, col_d_x, py, text_params(18, dim_color));
+
+        // A (assists not tracked yet)
+        draw_text_ex("0", col_a_x, py, text_params(18, dim_color));
+
+        // weapon number (gun_level) — only in match
+        if in_game {
+            let wep_text = format!("{}", gun_level);
+            draw_text_ex(&wep_text, col_wep_x, py, text_params(18, Color::from_rgba(255, 200, 100, 255)));
+        }
 
         py += row_h;
     }

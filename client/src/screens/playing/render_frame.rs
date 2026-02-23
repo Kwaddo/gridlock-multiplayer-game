@@ -102,6 +102,8 @@ impl PlayingState {
                 &self.connected_players,
                 player_id,
                 self.local_kills,
+                self.local_deaths,
+                (self.weapons.active_slot + 1) as u8,
                 self.current_world == WorldId::Maze,
             );
         }

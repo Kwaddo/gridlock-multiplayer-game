@@ -122,7 +122,12 @@ pub struct PlayingState {
 
     pub kill_feed: Vec<KillFeedEntry>,
     pub local_kills: u32,
-    pub connected_players: Vec<(u32, String, u32)>,
+    pub local_deaths: u32,
+    pub connected_players: Vec<(u32, String, u32, u32, u8)>, // (id, name, kills, deaths, gun_level)
+
+    // death screen: who killed us and with what weapon
+    pub death_killer_name: Option<String>,
+    pub death_weapon_name: Option<String>,
 
     // short bottom-left announcements (message, timer)
     pub announcements: Vec<(String, f32)>,
@@ -218,6 +223,9 @@ impl PlayingState {
             invulnerability_timer: 0.0,
             kill_feed: Vec::new(),
             local_kills: 0,
+            local_deaths: 0,
+            death_killer_name: None,
+            death_weapon_name: None,
             // countdown timers
             match_start_countdown_timer: 0.0,
             match_end_countdown_timer: 0.0,

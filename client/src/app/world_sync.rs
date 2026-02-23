@@ -313,8 +313,8 @@ pub fn sync_world(
                 playing_state
                     .connected_players
                     .iter()
-                    .find(|(id, _n, _)| *id == aid)
-                    .map(|(_, name, _)| format!("Hit by {}", name))
+                    .find(|(id, ..)| *id == aid)
+                    .map(|(_, name, ..)| format!("Hit by {}", name))
                     .unwrap_or_else(|| "Hit!".to_string())
             } else {
                 "Hit!".to_string()
@@ -351,6 +351,17 @@ pub fn sync_world(
             // dead until they respawn; calling `die()` every poll would keep
             // resetting the death timer and prevent auto-respawn.
             if !playing_state.is_dead {
+                // resolve killer name from the connected_players list
+                if let Some(killer_id) = updates.death_killer_id {
+                    playing_state.death_killer_name = playing_state
+                        .connected_players
+                        .iter()
+                        .find(|(id, ..)| *id == killer_id)
+                        .map(|(_, name, ..)| name.clone());
+                } else {
+                    playing_state.death_killer_name = None;
+                }
+                playing_state.death_weapon_name = updates.death_weapon.clone();
                 playing_state.die(None);
             }
         }
@@ -413,14 +424,19 @@ pub fn sync_world(
             // detect whether the server still knows about *us* — if not, server removed us (timed out)
             let still_present = list
                 .iter()
-                .any(|(id, _name, _kills, _world, _alive)| *id == player_id);
+                .any(|(id, _name, _kills, _deaths, _world, _alive, _gl)| *id == player_id);
             if !still_present {
                 result.removed_by_server = true;
             }
 
+            // track local deaths from the player list
+            if let Some(me) = list.iter().find(|(id, ..)| *id == player_id) {
+                playing_state.local_deaths = me.3;
+            }
+
             playing_state.connected_players = list
                 .into_iter()
-                .map(|(id, name, kills, _world, _alive)| (id, name, kills))
+                .map(|(id, name, kills, deaths, _world, _alive, gun_level)| (id, name, kills, deaths, gun_level))
                 .collect();
         }
 

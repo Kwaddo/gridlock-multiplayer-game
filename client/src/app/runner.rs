@@ -353,7 +353,7 @@ pub async fn run() {
                     &config,
                     &mut settings_screen,
                     &mut playing_state.dev_mode,
-                    maze.is_some(),
+                    playing_state.current_world == client::types::world::WorldId::Maze,
                 ) {
                     state = new_state;
                     if matches!(state, GameState::LobbyInventory) {

@@ -31,12 +31,14 @@ pub struct NetUpdate {
     pub match_time_left: Option<u8>,
     pub match_end_winner: Option<String>,
     pub match_end_countdown: Option<u8>,
-    pub player_list: Option<Vec<(u32, String, u32, WorldId, bool)>>,
+    pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8)>>, // (id, name, kills, deaths, world, alive, gun_level)
     pub self_kills: Option<u32>,
     pub self_gun_level: Option<u8>,
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
-    pub death: bool, // You died
+    pub death: bool,                          // You died
+    pub death_killer_id: Option<u32>,          // who killed us (from MSG_DEATH)
+    pub death_weapon: Option<String>,          // weapon used to kill us (from MSG_DEATH)
 
     // true if poll_updates read at least one packet from the socket during this call
     pub received_any: bool,
@@ -73,6 +75,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         self_gun_level: None,
         match_mode: None,
         death: false,
+        death_killer_id: None,
+        death_weapon: None,
         received_any: false,
         self_freeze_secs: None,
     };
@@ -389,7 +393,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
             }
             MSG_PLAYER_LIST => {
                 // format: [MSG_PLAYER_LIST][count:1][entries...]
-                // entry: [id:4][name_len:1][name bytes][kills:4][world:1][alive:1]
+                // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1]
                 if size >= 2 {
                     let count = recv_buf[1] as usize;
                     let mut offset = 2usize;
@@ -407,7 +411,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 4;
                         let name_len = recv_buf[offset] as usize;
                         offset += 1;
-                        if offset + name_len + 6 > size {
+                        if offset + name_len + 11 > size {
                             break;
                         }
                         let name = String::from_utf8_lossy(&recv_buf[offset..offset + name_len])
@@ -420,12 +424,21 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                             recv_buf[offset + 3],
                         ]);
                         offset += 4;
+                        let deaths = u32::from_be_bytes([
+                            recv_buf[offset],
+                            recv_buf[offset + 1],
+                            recv_buf[offset + 2],
+                            recv_buf[offset + 3],
+                        ]);
+                        offset += 4;
                         let world_id = recv_buf[offset];
                         offset += 1;
                         let alive = recv_buf[offset] != 0;
                         offset += 1;
+                        let gun_level = recv_buf[offset];
+                        offset += 1;
                         let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
-                        list.push((id, name, kills, world, alive));
+                        list.push((id, name, kills, deaths, world, alive, gun_level));
                     }
                     update.player_list = Some(list);
                 }
@@ -508,6 +521,21 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
             }
             MSG_DEATH => {
                 update.death = true;
+                // format: [MSG_DEATH][killer_id:4][weapon_len:1][weapon bytes]
+                if size >= 5 {
+                    let killer_id = u32::from_be_bytes([
+                        recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4],
+                    ]);
+                    update.death_killer_id = Some(killer_id);
+                    if size >= 6 {
+                        let weapon_len = recv_buf[5] as usize;
+                        if size >= 6 + weapon_len {
+                            update.death_weapon = Some(
+                                String::from_utf8_lossy(&recv_buf[6..6 + weapon_len]).to_string(),
+                            );
+                        }
+                    }
+                }
             }
             MSG_RESPAWN => {
                 if size >= 13 {

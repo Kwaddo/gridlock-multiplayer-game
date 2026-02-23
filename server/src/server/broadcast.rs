@@ -13,7 +13,7 @@ pub fn send_player_list(
     dest: std::net::SocketAddr,
 ) {
     // format: [MSG_PLAYER_LIST][count:1][entries...]
-    // entry: [id:4][name_len:1][name bytes][kills:4][world:1][alive:1]
+    // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1]
     let count = players.len().min(255) as u8;
     let mut msg = vec![MSG_PLAYER_LIST, count];
     for p in players.values() {
@@ -22,8 +22,10 @@ pub fn send_player_list(
         msg.push(name_bytes.len() as u8);
         msg.extend_from_slice(name_bytes);
         msg.extend_from_slice(&p.kills.to_be_bytes());
+        msg.extend_from_slice(&p.deaths.to_be_bytes());
         msg.push(p.world.as_u8());
         msg.push(if p.is_alive { 1u8 } else { 0u8 });
+        msg.push(p.gun_level as u8);
     }
     let _ = socket.send_to(&msg, dest);
 }
@@ -45,8 +47,10 @@ pub fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<std::net::Soc
             msg.push(name_bytes.len() as u8);
             msg.extend_from_slice(name_bytes);
             msg.extend_from_slice(&player.kills.to_be_bytes());
+            msg.extend_from_slice(&player.deaths.to_be_bytes());
             msg.push(player.world.as_u8());
             msg.push(if player.is_alive { 1u8 } else { 0u8 });
+            msg.push(player.gun_level as u8);
         }
         let _ = socket.send_to(&msg, p.socket_addr);
     }
