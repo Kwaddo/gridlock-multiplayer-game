@@ -29,7 +29,6 @@ pub(super) fn draw_players_overlay(
             );
         }
     }
-
 }
 
 /// Draws the in-world nametags (keeps existing behaviour) and the scoreboard/list is
@@ -51,11 +50,29 @@ pub fn draw_player_list(
     let mut seen_self = false;
     for (id, name, kills, deaths, gun_level, team, weapon) in connected_players.iter() {
         let is_self = *id == self_id;
-        if is_self { seen_self = true; }
-        rows.push((name.clone(), *kills, *deaths, *gun_level, is_self, *team, weapon.clone()));
+        if is_self {
+            seen_self = true;
+        }
+        rows.push((
+            name.clone(),
+            *kills,
+            *deaths,
+            *gun_level,
+            is_self,
+            *team,
+            weapon.clone(),
+        ));
     }
     if !seen_self {
-        rows.push(("You".to_string(), self_kills, self_deaths, self_gun_level, true, 0u8, "".to_string()));
+        rows.push((
+            "You".to_string(),
+            self_kills,
+            self_deaths,
+            self_gun_level,
+            true,
+            0u8,
+            "".to_string(),
+        ));
     }
 
     if in_game {
@@ -74,11 +91,28 @@ pub fn draw_player_list(
     let header_color = Color::from_rgba(160, 160, 170, 255);
     let dim_color = Color::from_rgba(120, 120, 130, 255);
 
-    draw_rectangle(x - 8.0, y - 12.0, w + 16.0, h + 24.0, Color::from_rgba(8, 10, 12, 220));
-    draw_rectangle_lines(x - 8.0, y - 12.0, w + 16.0, h + 24.0, 2.0, Color::from_rgba(200, 200, 200, 60));
+    draw_rectangle(
+        x - 8.0,
+        y - 12.0,
+        w + 16.0,
+        h + 24.0,
+        Color::from_rgba(8, 10, 12, 220),
+    );
+    draw_rectangle_lines(
+        x - 8.0,
+        y - 12.0,
+        w + 16.0,
+        h + 24.0,
+        2.0,
+        Color::from_rgba(200, 200, 200, 60),
+    );
 
     // title
-    let title = if in_game { "Scoreboard" } else { "Players online" };
+    let title = if in_game {
+        "Scoreboard"
+    } else {
+        "Players online"
+    };
     draw_text_ex(title, x + 12.0, y + 20.0, text_params(22, YELLOW));
 
     // column headers
@@ -93,7 +127,12 @@ pub fn draw_player_list(
     draw_text_ex("D", col_d_x + 4.0, header_y, text_params(13, header_color));
     draw_text_ex("A", col_a_x + 4.0, header_y, text_params(13, header_color));
     if in_game {
-        draw_text_ex("WPN", col_wep_x - 4.0, header_y, text_params(13, header_color));
+        draw_text_ex(
+            "WPN",
+            col_wep_x - 4.0,
+            header_y,
+            text_params(13, header_color),
+        );
     }
 
     // rows
@@ -101,10 +140,25 @@ pub fn draw_player_list(
     for (i, (name, kills, deaths, gun_level, is_self, team, weapon)) in rows.iter().enumerate() {
         let bg_alpha = if *is_self { 0.08 } else { 0.0 };
         if bg_alpha > 0.0 {
-            draw_rectangle(x + 8.0, py - 18.0, w - 16.0, row_h - 4.0, Color::from_rgba(255, 255, 255, (bg_alpha * 255.0) as u8));
+            draw_rectangle(
+                x + 8.0,
+                py - 18.0,
+                w - 16.0,
+                row_h - 4.0,
+                Color::from_rgba(255, 255, 255, (bg_alpha * 255.0) as u8),
+            );
         }
 
-        let name_color = if *is_self { Color::from_rgba(180, 220, 255, 255) } else { WHITE };
+        // Color player names by team when available (shades of red/blue).
+        let name_color = if *is_self {
+            Color::from_rgba(180, 220, 255, 255)
+        } else {
+            match *team {
+                1 => Color::from_rgba(230, 120, 120, 255),
+                2 => Color::from_rgba(120, 170, 230, 255),
+                _ => WHITE,
+            }
+        };
 
         // team badge (only show for Team Deathmatch)
         let show_team = match match_mode {
@@ -116,12 +170,19 @@ pub fn draw_player_list(
             let badge_w = 18.0;
             let badge_h = 18.0;
             let badge_color = match *team {
-                1 => Color::from_rgba(200, 60, 60, 255), // Red
+                1 => Color::from_rgba(200, 60, 60, 255),  // Red
                 2 => Color::from_rgba(60, 120, 200, 255), // Blue
                 _ => Color::from_rgba(120, 120, 120, 255),
             };
             draw_rectangle(badge_x, py - 16.0, badge_w, badge_h, badge_color);
-            draw_rectangle_lines(badge_x, py - 16.0, badge_w, badge_h, 1.0, Color::from_rgba(0,0,0,100));
+            draw_rectangle_lines(
+                badge_x,
+                py - 16.0,
+                badge_w,
+                badge_h,
+                1.0,
+                Color::from_rgba(0, 0, 0, 100),
+            );
         }
 
         // rank + name
@@ -145,8 +206,17 @@ pub fn draw_player_list(
 
         // weapon column: show weapon name when available (prefer weapon string), fall back to gun_level number
         if in_game {
-            let wtext = if !weapon.is_empty() { weapon.clone() } else { format!("W{}", gun_level) };
-            draw_text_ex(&wtext, col_wep_x - 40.0, py, text_params(14, Color::from_rgba(255, 200, 100, 255)));
+            let wtext = if !weapon.is_empty() {
+                weapon.clone()
+            } else {
+                format!("W{}", gun_level)
+            };
+            draw_text_ex(
+                &wtext,
+                col_wep_x - 40.0,
+                py,
+                text_params(14, Color::from_rgba(255, 200, 100, 255)),
+            );
         }
 
         py += row_h;

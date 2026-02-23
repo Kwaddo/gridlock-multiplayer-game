@@ -174,11 +174,22 @@ pub fn maybe_start_match(
 
             // Collect the list of players who will be moved into the maze so
             // we can assign teams and unique loadouts deterministically.
-            let joiners: Vec<std::net::SocketAddr> = players
-                .values()
-                .filter(|p| p.world == WorldId::Lobby)
-                .map(|p| p.socket_addr)
+            // Use a deterministic order (player id ascending) so clients and
+            // server will agree on previewed team assignments.
+            let mut joiner_pairs: Vec<(std::net::SocketAddr, u32)> = players
+                .iter()
+                .filter_map(|(addr, p)| {
+                    if p.world == WorldId::Lobby {
+                        Some((*addr, p.id))
+                    } else {
+                        None
+                    }
+                })
                 .collect();
+            // sort by player id to get a stable ordering
+            joiner_pairs.sort_by_key(|(_, id)| *id);
+            let joiners: Vec<std::net::SocketAddr> =
+                joiner_pairs.iter().map(|(addr, _)| *addr).collect();
 
             // track assigned primaries per team so teammates don't share
             let mut red_assigned: Vec<String> = Vec::new();
@@ -194,8 +205,13 @@ pub fn maybe_start_match(
                         Instant::now() + Duration::from_secs(game::MATCH_POST_TELEPORT_FREEZE_SECS),
                     );
 
-                    // reset all per-match player state so everyone starts fresh
-                    player.gun_level = 1;
+                    // reset per-match player state. For Gun Game we reset
+                    // gun progression and assign team primaries; for other
+                    // modes (e.g. TDM) we preserve the player's current
+                    // weapon/gun level unless they lack one.
+                    if match_mode == MODE_GUN_GAME {
+                        player.gun_level = 1;
+                    }
                     player.health = player.max_health;
                     player.shield = 0;
                     player.is_alive = true;
@@ -219,20 +235,26 @@ pub fn maybe_start_match(
                         &mut blue_assigned
                     };
 
-                    let mut chosen = None;
-                    for &w in pool.iter() {
-                        if !assigned.iter().any(|a| a == w) {
-                            chosen = Some(w.to_string());
-                            break;
+                    // Assign a team primary only if we're in Gun Game (we use
+                    // team loadouts for Gun Game players) or if the player
+                    // has no current weapon assigned yet. This avoids
+                    // forcibly changing a player's weapon on TDM match start
+                    // unless they don't have one.
+                    if match_mode == MODE_GUN_GAME || player.current_weapon.is_empty() {
+                        let mut chosen = None;
+                        for &w in pool.iter() {
+                            if !assigned.iter().any(|a| a == w) {
+                                chosen = Some(w.to_string());
+                                break;
+                            }
                         }
+                        if chosen.is_none() {
+                            chosen = pool.get(0).map(|s| s.to_string());
+                        }
+                        let weapon = chosen.unwrap_or_else(|| "Knife".to_string());
+                        assigned.push(weapon.clone());
+                        player.current_weapon = weapon.clone();
                     }
-                    if chosen.is_none() {
-                        // fallback: wrap to first
-                        chosen = pool.get(0).map(|s| s.to_string());
-                    }
-                    let weapon = chosen.unwrap_or_else(|| "Knife".to_string());
-                    assigned.push(weapon.clone());
-                    player.current_weapon = weapon.clone();
 
                     let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
                     response.extend_from_slice(&sx.to_be_bytes());
@@ -315,6 +337,51 @@ pub fn check_early_end_conditions(
             winner_id,
             winner_name,
         ));
+    }
+
+    // Team Deathmatch early win: if one team reaches the score threshold,
+    // end the match with that team as the winner. Only applies to TDM.
+    if match_mode == MODE_TEAM_DEATHMATCH {
+        let mut red_kills: u32 = 0;
+        let mut blue_kills: u32 = 0;
+        for p in players.values() {
+            if p.world == WorldId::Maze {
+                match p.team {
+                    Team::Red => red_kills = red_kills.saturating_add(p.kills),
+                    Team::Blue => blue_kills = blue_kills.saturating_add(p.kills),
+                    _ => {}
+                }
+            }
+        }
+        if red_kills >= game::MATCH_SCORE_TO_WIN || blue_kills >= game::MATCH_SCORE_TO_WIN {
+            let (winner_team_name, winner_id) = if red_kills >= game::MATCH_SCORE_TO_WIN {
+                ("Red Team".to_string(), 0u32)
+            } else {
+                ("Blue Team".to_string(), 0u32)
+            };
+
+            println!(
+                "Team Deathmatch win: {} reached {} kills",
+                winner_team_name,
+                game::MATCH_SCORE_TO_WIN
+            );
+            // Broadcast MSG_MATCH_END with a placeholder id (0) and a team name.
+            let mut end_msg = vec![MSG_MATCH_END];
+            end_msg.extend_from_slice(&winner_id.to_be_bytes());
+            let name_bytes = winner_team_name.as_bytes();
+            end_msg.push(name_bytes.len() as u8);
+            end_msg.extend_from_slice(name_bytes);
+            end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
+            for p in players.values() {
+                let _ = socket.send_to(&end_msg, p.socket_addr);
+            }
+
+            *match_end_pending = Some((
+                Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
+                winner_id,
+                winner_team_name,
+            ));
+        }
     }
 }
 
