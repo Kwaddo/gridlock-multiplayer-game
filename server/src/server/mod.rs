@@ -118,6 +118,9 @@ pub fn run() -> std::io::Result<()> {
                             handlers::handle_respawn_request(&socket, m, &mut players, src_addr)
                         }
                     }
+                    MSG_SET_TEAM => {
+                        handlers::handle_set_team(&socket, &mut players, src_addr, payload)
+                    }
                     _ => println!("Unknown message type: {}", msg_type),
                 }
             }

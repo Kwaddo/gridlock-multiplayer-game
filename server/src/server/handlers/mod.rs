@@ -21,4 +21,5 @@ pub use other::{
     handle_discover,
     handle_hit,
     handle_respawn_request,
+    handle_set_team,
 };

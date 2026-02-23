@@ -28,6 +28,12 @@ impl PlayingState {
                 let _ = s.send_to(&msg, server_addr);
             }
 
+            // Send requested team selection (from lobby console)
+            if let Some(team) = self.pending_set_team.take() {
+                let msg = vec![crate::net::protocols::MSG_SET_TEAM, team];
+                let _ = s.send_to(&msg, server_addr);
+            }
+
             while let Some((x, y)) = self.pending_broken_walls.pop() {
                 let msg = vec![MSG_WALL_BROKEN, x, y];
                 let _ = s.send_to(&msg, server_addr);

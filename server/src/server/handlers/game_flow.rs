@@ -3,6 +3,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use crate::maze::MazeData;
+use crate::player::Team;
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
 
@@ -171,35 +172,80 @@ pub fn maybe_start_match(
             *last_match_time_sent = Some(initial_secs);
             // set per-player post-teleport freeze for each player moved into the Maze
 
-            for player in players.values_mut().filter(|p| p.world == WorldId::Lobby) {
-                let (sx, sy, sz, _used_fallback) =
-                    current_maze.random_spawn_world(game::MAZE_CELL_SIZE);
-                player.world = WorldId::Maze;
-                player.position = (sx, sy, sz);
-                player.post_teleport_freeze_until = Some(
-                    Instant::now() + Duration::from_secs(game::MATCH_POST_TELEPORT_FREEZE_SECS),
-                );
+            // Collect the list of players who will be moved into the maze so
+            // we can assign teams and unique loadouts deterministically.
+            let joiners: Vec<std::net::SocketAddr> = players
+                .values()
+                .filter(|p| p.world == WorldId::Lobby)
+                .map(|p| p.socket_addr)
+                .collect();
 
-                // reset all per-match player state so everyone starts fresh
-                player.gun_level = 1;
-                player.health = player.max_health;
-                player.shield = 0;
-                player.is_alive = true;
-                player.kills = 0;
-                player.deaths = 0;
-                player.death_time = None;
+            // track assigned primaries per team so teammates don't share
+            let mut red_assigned: Vec<String> = Vec::new();
+            let mut blue_assigned: Vec<String> = Vec::new();
 
-                let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
-                response.extend_from_slice(&sx.to_be_bytes());
-                response.extend_from_slice(&sy.to_be_bytes());
-                response.extend_from_slice(&sz.to_be_bytes());
-                // attach match mode so clients know which mode is starting
-                response.push(match_mode);
-                // attach freeze duration so all clients use the same value
-                response.push(game::MATCH_POST_TELEPORT_FREEZE_SECS as u8);
-                let _ = socket.send_to(&response, player.socket_addr);
+            for (i, addr) in joiners.iter().enumerate() {
+                if let Some(player) = players.get_mut(addr) {
+                    let (sx, sy, sz, _used_fallback) =
+                        current_maze.random_spawn_world(game::MAZE_CELL_SIZE);
+                    player.world = WorldId::Maze;
+                    player.position = (sx, sy, sz);
+                    player.post_teleport_freeze_until = Some(
+                        Instant::now() + Duration::from_secs(game::MATCH_POST_TELEPORT_FREEZE_SECS),
+                    );
 
-                current_maze.send(&socket, player.socket_addr);
+                    // reset all per-match player state so everyone starts fresh
+                    player.gun_level = 1;
+                    player.health = player.max_health;
+                    player.shield = 0;
+                    player.is_alive = true;
+                    player.kills = 0;
+                    player.deaths = 0;
+                    player.death_time = None;
+
+                    // assign team by alternating to balance teams
+                    let team = if i % 2 == 0 { Team::Red } else { Team::Blue };
+                    player.team = team;
+
+                    // pick a primary for this player avoiding duplicates when possible
+                    let pool = match team {
+                        Team::Red => &game::TEAM_LOADOUT_RED,
+                        Team::Blue => &game::TEAM_LOADOUT_BLUE,
+                        Team::Spectator => &game::TEAM_LOADOUT_RED,
+                    };
+                    let assigned = if team == Team::Red {
+                        &mut red_assigned
+                    } else {
+                        &mut blue_assigned
+                    };
+
+                    let mut chosen = None;
+                    for &w in pool.iter() {
+                        if !assigned.iter().any(|a| a == w) {
+                            chosen = Some(w.to_string());
+                            break;
+                        }
+                    }
+                    if chosen.is_none() {
+                        // fallback: wrap to first
+                        chosen = pool.get(0).map(|s| s.to_string());
+                    }
+                    let weapon = chosen.unwrap_or_else(|| "Knife".to_string());
+                    assigned.push(weapon.clone());
+                    player.current_weapon = weapon.clone();
+
+                    let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
+                    response.extend_from_slice(&sx.to_be_bytes());
+                    response.extend_from_slice(&sy.to_be_bytes());
+                    response.extend_from_slice(&sz.to_be_bytes());
+                    // attach match mode so clients know which mode is starting
+                    response.push(match_mode);
+                    // attach freeze duration so all clients use the same value
+                    response.push(game::MATCH_POST_TELEPORT_FREEZE_SECS as u8);
+                    let _ = socket.send_to(&response, player.socket_addr);
+
+                    current_maze.send(&socket, player.socket_addr);
+                }
             }
 
             // broadcast updated player list/state so clients update immediately

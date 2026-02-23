@@ -7,6 +7,28 @@ pub enum WorldId {
     Maze = 1,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Team {
+    Spectator = 0,
+    Red = 1,
+    Blue = 2,
+}
+
+#[allow(dead_code)]
+impl Team {
+    pub fn from_u8(value: u8) -> Option<Team> {
+        match value {
+            0 => Some(Team::Spectator),
+            1 => Some(Team::Red),
+            2 => Some(Team::Blue),
+            _ => None,
+        }
+    }
+    pub fn as_u8(self) -> u8 {
+        self as u8
+    }
+}
+
 impl WorldId {
     pub fn from_u8(value: u8) -> Option<WorldId> {
         match value {
@@ -50,6 +72,10 @@ pub struct Player {
 
     pub evt_jump_start: bool, // for precise jump animation timing
     pub evt_landed: bool,     // for precise landing animation timing
+    // team for team-based modes
+    pub team: Team,
+    // player's currently assigned primary weapon (knife is implicitly available)
+    pub current_weapon: String,
 }
 
 impl Player {
@@ -80,6 +106,8 @@ impl Player {
             is_airborne: false,
             evt_jump_start: false,
             evt_landed: false,
+            team: Team::Spectator,
+            current_weapon: "Knife".to_string(),
         }
     }
 }
