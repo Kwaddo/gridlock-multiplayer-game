@@ -437,6 +437,21 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 1;
                         let gun_level = recv_buf[offset];
                         offset += 1;
+                        // server now appends `team:1` + `weapon_len:1` + `weapon bytes` to each entry;
+                        // consume those bytes but keep the old tuple shape so UI code remains compatible.
+                        if offset + 2 > size {
+                            break;
+                        }
+                        let _team = recv_buf[offset];
+                        offset += 1;
+                        let weapon_len = recv_buf[offset] as usize;
+                        offset += 1;
+                        if offset + weapon_len > size {
+                            break;
+                        }
+                        // skip weapon bytes
+                        offset += weapon_len;
+
                         let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
                         list.push((id, name, kills, deaths, world, alive, gun_level));
                     }

@@ -178,6 +178,26 @@ impl PlayingState {
             }
         }
 
+        // Team selection (Lobby only) — small row under time options
+        let team_w = 110.0;
+        let team_h = 32.0;
+        let total_team_w = team_w * 3.0 + 2.0 * 12.0;
+        let team_start_x = panel_x + (panel_w - total_team_w) / 2.0;
+        let team_y = panel_y + 240.0;
+        let team_options = [("Auto", 0u8), ("Red", 1u8), ("Blue", 2u8)];
+        for (i, &(label, team_val)) in team_options.iter().enumerate() {
+            let x = team_start_x + i as f32 * (team_w + 12.0);
+            let bg = Color::from_rgba(60, 60, 60, 255);
+            let hover = DARKGRAY;
+            if crate::ui::is_button_clicked(x, team_y, team_w, team_h, label, bg, hover) {
+                // queue network request to change team (sent in send_network)
+                self.pending_set_team = Some(team_val);
+                // transient feedback in console
+                self.lobby_console_message = Some(format!("Requested team: {}", label));
+                self.lobby_console_message_timer = 3.0;
+            }
+        }
+
         // Show transient console feedback (multi-line if needed)
         if let Some(msg) = &self.lobby_console_message {
             let _msg_h = wrap_and_draw(

@@ -58,6 +58,50 @@ pub const GUN_GAME_PROGRESSION: [&str; 19] = [
     "Minigun",
 ];
 
+// Team loadouts: list of primary weapons available per team. Knife is always
+// implicitly available as a melee weapon.
+pub const TEAM_LOADOUT_RED: [&str; 5] = ["M4A1", "MP5", "Benelli", "Desert Eagle", "Bolt Action"];
+
+pub const TEAM_LOADOUT_BLUE: [&str; 5] =
+    ["AK-47", "P90", "SPAS-12", "Revolver", "Semi-Auto Sniper"];
+
+use crate::player::Team;
+
+/// Choose a weapon for `player` from their team's loadout attempting to avoid
+/// duplicates currently assigned to teammates when possible.
+pub fn choose_team_weapon_for_player(
+    players: &std::collections::HashMap<std::net::SocketAddr, crate::player::Player>,
+    player: &crate::player::Player,
+) -> String {
+    let pool: &[&str] = match player.team {
+        Team::Red => &TEAM_LOADOUT_RED,
+        Team::Blue => &TEAM_LOADOUT_BLUE,
+        Team::Spectator => return "Knife".to_string(),
+    };
+
+    // collect weapons already used by teammates
+    let mut used = std::collections::HashSet::new();
+    for p in players.values() {
+        if p.team == player.team {
+            if !p.current_weapon.is_empty() {
+                used.insert(p.current_weapon.clone());
+            }
+        }
+    }
+
+    // pick the first unused weapon from pool
+    for &w in pool.iter() {
+        if !used.contains(w) {
+            return w.to_string();
+        }
+    }
+
+    // all weapons used by teammates (or pool empty) — fall back to first
+    pool.get(0)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "Knife".to_string())
+}
+
 /// iterate over all alive/dead players and automatically respawn as needed
 pub fn process_auto_respawns(
     socket: &UdpSocket,
@@ -119,6 +163,17 @@ pub fn process_auto_respawns(
         respawn_msg.extend_from_slice(&sz.to_be_bytes());
         // extra byte: 0 = random spawn, 1 = teleporter fallback
         respawn_msg.push(if used_fallback { 1u8 } else { 0u8 });
+        // choose and assign a team weapon for the respawned player (avoid
+        // duplicating teammates' primaries when possible)
+        let chosen_weapon = if let Some(pref) = players.get(&socket_addr) {
+            choose_team_weapon_for_player(players, pref)
+        } else {
+            "Knife".to_string()
+        };
+        if let Some(pmut) = players.get_mut(&socket_addr) {
+            pmut.current_weapon = chosen_weapon;
+        }
+
         let _ = socket.send_to(&respawn_msg, socket_addr);
     }
 }
