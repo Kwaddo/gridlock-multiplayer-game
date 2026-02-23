@@ -13,7 +13,7 @@ pub const M16_STATS: WeaponStats = WeaponStats {
     fire_rate: 7.0,
     magazine_size: 30,
     max_reserve: 120,
-    reload_time: 2.5,
+    reload_time: 1.85,
 
     recoil_vertical: 0.01,
     recoil_horizontal: 0.008,
@@ -100,7 +100,7 @@ pub const M4A1: WeaponStats = WeaponStats {
     fire_rate: 8.0,
     magazine_size: 30,
     max_reserve: 90,
-    reload_time: 2.2,
+    reload_time: 1.85,
 
     recoil_vertical: 0.008,
     recoil_horizontal: 0.005,
@@ -168,7 +168,7 @@ pub const AK: WeaponStats = WeaponStats {
     fire_rate: 6.0,
     magazine_size: 30,
     max_reserve: 90,
-    reload_time: 2.5,
+    reload_time: 1.85,
 
     recoil_vertical: 0.025,
     recoil_horizontal: 0.018,
@@ -238,7 +238,7 @@ pub const FAMAS: WeaponStats = WeaponStats {
     fire_rate: 8.0, // speed within burst — extra pause after last shot added in fire logic
     magazine_size: 30,
     max_reserve: 90,
-    reload_time: 2.3,
+    reload_time: 1.85,
 
     recoil_vertical: 0.012,
     recoil_horizontal: 0.006,
@@ -307,7 +307,7 @@ pub const SCAR: WeaponStats = WeaponStats {
     fire_rate: 6.5,
     magazine_size: 25,
     max_reserve: 75,
-    reload_time: 2.4,
+    reload_time: 1.85,
 
     recoil_vertical: 0.018,
     recoil_horizontal: 0.01,
@@ -375,7 +375,7 @@ pub const AS_VAL: WeaponStats = WeaponStats {
     fire_rate: 10.0,
     magazine_size: 20,
     max_reserve: 80,
-    reload_time: 2.0,
+    reload_time: 1.85,
 
     recoil_vertical: 0.009,
     recoil_horizontal: 0.006,

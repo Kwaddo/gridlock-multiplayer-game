@@ -25,7 +25,7 @@ pub const SPAS: WeaponStats = WeaponStats {
     fire_rate: 1.0,
     magazine_size: 7,
     max_reserve: 28,
-    reload_time: 2.2,
+    reload_time: 1.85,
 
     recoil_vertical: 0.07,
     recoil_horizontal: 0.025,
@@ -116,7 +116,7 @@ pub const BENELLI: WeaponStats = WeaponStats {
     fire_rate: 2.5,
     magazine_size: 6,
     max_reserve: 30,
-    reload_time: 2.0,
+    reload_time: 1.85,
 
     recoil_vertical: 0.05,
     recoil_horizontal: 0.02,
@@ -155,4 +155,103 @@ pub const BENELLI: WeaponStats = WeaponStats {
     falloff_min_mult: 0.15,
 
     ..SPAS
+};
+
+/// Sawnoff — double-barrel close-range shotgun, massive damage up close, slow fire rate.
+/// Uses a unique hand animation model (fp_hands_sawnoff) that includes the gun,
+/// similar to the knife.
+pub const SAWNOFF: WeaponStats = WeaponStats {
+    name: "Sawnoff",
+    fire_mode: FireMode::SemiAuto,
+
+    damage: 15.0,
+    headshot_mult: 1.5,
+    pellet_count: 10,
+    pellet_spread: Some(
+        &[
+            (0.0, 0.0),       // center
+            (0.3927, 1.0),    // wide ring — sawnoff has big spread
+            (1.1781, 1.0),
+            (1.9635, 1.0),
+            (2.7489, 1.0),
+            (3.5343, 1.0),
+            (4.3197, 1.0),
+            (5.1051, 1.0),
+            (5.8905, 1.0),
+            (0.7854, 0.5),    // inner ring for density
+        ]
+    ),
+
+    fire_rate: 5.0, // instant
+    magazine_size: 2,
+    max_reserve: 20,
+    reload_time: 3.10,
+
+    recoil_vertical: 0.12,
+    recoil_horizontal: 0.05,
+    recoil_recovery: 2.0,
+
+    hip_spread: 0.08,
+    ads_spread: 0.05,
+    spread_per_shot: 0.06,
+    spread_recovery: 0.6,
+    move_spread_mult: 1.2,
+    sprint_spread_mult: 1.1,
+    crouch_spread_mult: 0.9,
+
+    ads_zoom_fov: 80.0,
+    ads_time: 0.2,
+    ads_sensitivity: None,
+
+    bullet_speed: 140.0,
+    bullet_range: 12.0,
+    tracer_length: 1.2,
+    tracer_color: [255, 160, 50, 255],
+    tracer_thickness: 0.009,
+    tracer_lifetime: 0.6,
+    bullet_hole_size: 0.35,
+    bullet_hole_lifetime: 5.0,
+    bullet_hole_color: [200, 200, 200, 255],
+
+    crosshair_kick_per_shot: 3.0,
+    crosshair_kick_decay: 6.0,
+    crosshair_kick_max: 5.0,
+
+    crosshair_style: CrosshairStyle::Standard,
+    fsa_time: None,
+    fsa_suppresses_kick: false,
+
+    fire_sound_asset_key: "shotgun_shot",
+    icon_asset_key: "shotgun_icon",
+    icon_width: 90.0,
+    icon_height: 45.0,
+    icon_flip_x: false,
+
+    // Sawnoff model includes hands — rendered as a single animated model
+    // like the knife (fp_hands_knife). No separate hands drawn.
+    viewmodel_model: Some("fp_hands_sawnoff"),
+    viewmodel_asset_key: None,
+
+    viewmodel_scale: 0.0025,
+    viewmodel_position: (0.345, 0.1, -0.37),
+    viewmodel_rotation: (-0.15, 0.0, 0.0),
+    viewmodel_muzzle_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_scale: 1.0,
+    viewmodel_hands_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_rotation: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
+
+    falloff_start: 3.0,
+    falloff_end: 10.0,
+    falloff_min_mult: 0.15,
+
+    recoil_pattern: &[],
+    pattern_randomness: 0.0,
+    randomness_growth: 0.0,
+    pattern_reset_time: 0.0,
 };

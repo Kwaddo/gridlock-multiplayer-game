@@ -26,6 +26,18 @@ pub enum HandsPlaybackMode {
     KnifeSwing,   // playing one of the swing segments, returns to KnifeIdle when done
     KnifeLower,   // lowering animation when switching away from knife
     KnifeEquip,   // raising animation when switching to knife
+    // Sawnoff-specific states (sawnoff_animated.glb includes hands)
+    SawnoffIdle,
+    SawnoffShot,    // playing shot animation, returns to SawnoffIdle when done
+    SawnoffReload,  // playing reload animation, returns to SawnoffIdle when done
+    SawnoffEquip,   // equip animation when switching to sawnoff
+    SawnoffLower,   // lowering animation when switching away from sawnoff
+    // Minigun-specific states (minigun_animated.glb includes hands)
+    MinigunIdle,
+    MinigunShooting, // playing shoot loop
+    MinigunReload,   // playing reload animation
+    MinigunEquip,    // equip animation when switching to minigun
+    MinigunLower,    // lowering animation when switching away
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,11 +147,18 @@ pub struct PlayingState {
     pub lobby_console_message_timer: f32,
     pub hands_playback_mode: HandsPlaybackMode,
     pub hands_anim_initialized: bool,
+    pub prev_was_reloading: bool, // edge detection for reload anim trigger
     pub knife_swing_index: u8,     // cycles 0..2 for light slashes (swings 1-3)
     pub knife_swing_requested: bool, // set by input_processing when knife fires
     pub knife_heavy_swing_requested: bool, // set by input_processing for right-click heavy slash
     pub knife_anim_initialized: bool, // whether fp_hands_knife has been set up
     pub prev_weapon_was_knife: bool,  // track weapon switches to/from knife
+    pub sawnoff_shot_requested: bool, // set by input_processing when sawnoff fires
+    pub sawnoff_anim_initialized: bool, // whether fp_hands_sawnoff has been set up
+    pub prev_weapon_was_sawnoff: bool,  // track weapon switches to/from sawnoff
+    pub minigun_anim_initialized: bool,
+    pub prev_weapon_was_minigun: bool,
+    pub minigun_was_firing: bool, // tracks whether minigun was firing last frame
     pub inspect_phase: InspectPhase,
     pub inspect_timer: f32,
 
@@ -247,11 +266,18 @@ impl PlayingState {
             connected_players: Vec::new(),
             hands_playback_mode: HandsPlaybackMode::IdleLoop,
             hands_anim_initialized: false,
+            prev_was_reloading: false,
             knife_swing_index: 0,
             knife_swing_requested: false,
             knife_heavy_swing_requested: false,
             knife_anim_initialized: false,
             prev_weapon_was_knife: false,
+            sawnoff_shot_requested: false,
+            sawnoff_anim_initialized: false,
+            prev_weapon_was_sawnoff: false,
+            minigun_anim_initialized: false,
+            prev_weapon_was_minigun: false,
+            minigun_was_firing: false,
             inspect_phase: InspectPhase::None,
             inspect_timer: 0.0,
 

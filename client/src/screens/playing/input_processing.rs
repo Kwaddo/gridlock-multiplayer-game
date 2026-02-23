@@ -122,6 +122,10 @@ impl PlayingState {
                             self.knife_swing_requested = true;
                         }
                     }
+                    // Signal sawnoff shot animation
+                    if weapon.id == crate::weapons::stats::WeaponId::Sawnoff {
+                        self.sawnoff_shot_requested = true;
+                    }
                     fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 
                     if self.dev_mode.infinite_ammo {

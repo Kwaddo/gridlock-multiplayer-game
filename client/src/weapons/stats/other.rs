@@ -1,4 +1,4 @@
-use super::{CrosshairStyle, FireMode, WeaponStats, VM_BASE_POS, VM_BASE_ROT, VM_BASE_SCALE};
+use super::{CrosshairStyle, FireMode, WeaponStats};
 
 /// Minigun — sustained fire monster, spin-up mechanic + suppression
 pub const MINIGUN: WeaponStats = WeaponStats {
@@ -13,7 +13,7 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     fire_rate: 20.0,        // absurd fire rate
     magazine_size: 100,
     max_reserve: 200,
-    reload_time: 5.0,       // long reload — you pay for the mag size
+    reload_time: 2.23,       // matches minigun_animated.glb reload segment
 
     recoil_vertical: 0.005, // low per shot but adds up fast at 20 rps
     recoil_horizontal: 0.008,
@@ -55,18 +55,20 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     icon_height: 50.0,
     icon_flip_x: false,
 
-    viewmodel_model: Some("minigun_model"),
+    // Minigun model includes hands — rendered as a single animated model
+    // like the sawnoff/knife. No separate hands drawn.
+    viewmodel_model: Some("fp_hands_minigun"),
     viewmodel_asset_key: None,
-    viewmodel_scale: VM_BASE_SCALE,
-    viewmodel_position: VM_BASE_POS,
-    viewmodel_rotation: VM_BASE_ROT,
-    viewmodel_muzzle_offset: (-1.00, 0.02, -0.25),
-    viewmodel_hands_scale: 1.93,
+    viewmodel_scale: 0.0025,
+    viewmodel_position: (0.345, 0.1, -0.37),
+    viewmodel_rotation: (-0.15, 0.0, 0.0),
+    viewmodel_muzzle_offset: (0.0, 0.0, 0.0),
+    viewmodel_hands_scale: 1.0,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
-    viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
+    viewmodel_hands_rotation: (0.0, 0.0, 0.0),
     viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
     viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
-    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
+    viewmodel_ads_pos_offset: (0.0, 0.0, 0.0),
     viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
     viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
     viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),

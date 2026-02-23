@@ -12,7 +12,7 @@ pub const MP5: WeaponStats = WeaponStats {
     fire_rate: 11.0,
     magazine_size: 30,
     max_reserve: 120,
-    reload_time: 1.8,
+    reload_time: 1.61,
 
     recoil_vertical: 0.012,
     recoil_horizontal: 0.01,
@@ -101,7 +101,7 @@ pub const P90: WeaponStats = WeaponStats {
     fire_rate: 13.0,
     magazine_size: 50,
     max_reserve: 150,
-    reload_time: 2.5,
+    reload_time: 1.61,
 
     recoil_vertical: 0.014,
     recoil_horizontal: 0.012,
@@ -179,7 +179,7 @@ pub const TOMMY_GUN: WeaponStats = WeaponStats {
     fire_rate: 9.0,
     magazine_size: 40,
     max_reserve: 120,
-    reload_time: 2.8,
+    reload_time: 1.61,
 
     recoil_vertical: 0.02,
     recoil_horizontal: 0.016,
