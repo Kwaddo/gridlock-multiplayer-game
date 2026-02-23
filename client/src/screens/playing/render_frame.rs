@@ -62,8 +62,8 @@ impl PlayingState {
         // Lobby console (Start Game) overlay
         self.draw_lobby_console(config);
 
-        // Don't draw viewmodel or gameplay HUD while dead
-        if !self.is_dead {
+        // Don't draw viewmodel while dead or when lobby console is open
+        if !self.is_dead && !self.lobby_console_open {
             self.draw_viewmodel();
         }
 

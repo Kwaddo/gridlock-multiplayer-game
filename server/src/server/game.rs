@@ -18,7 +18,7 @@ pub const MATCH_DURATION: Duration = Duration::from_secs(120); // match length (
 pub const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
 pub const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
 #[allow(dead_code)]
-pub const MATCH_SCORE_TO_WIN: u32 = 20; // kills required to win the match (unused for Gun Game)
+pub const MATCH_SCORE_TO_WIN: u32 = 100; // kills required to win the match (used for TDM)
 
 pub const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts // seconds shown to players before a match actually starts
 pub const MATCH_END_COUNTDOWN_SECS: u8 = 6; // seconds to wait after a win before returning players to lobby
@@ -29,7 +29,6 @@ pub const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 10; // seconds players cannot m
 // Names must match client-side `WeaponStats.name` values. Keep this in
 // sync with the client `WeaponStats.name` strings (see
 // client/src/weapons/stats/*).
-#[allow(dead_code)]
 pub const GUN_GAME_PROGRESSION: [&str; 19] = [
     // Pistols
     "M1911",

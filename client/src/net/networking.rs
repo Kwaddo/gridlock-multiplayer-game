@@ -279,6 +279,31 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 1;
                     }
 
+                    // NOTE: server now appends `team:1` + `weapon_len:1` + `weapon bytes`
+                    // to each MSG_STATE entry. Older client parsers didn't consume
+                    // these bytes which caused subsequent reads to become
+                    // misaligned (weapon strings appearing as player names).
+                    // Consume them here to keep the message offsets in sync.
+                    let mut _team: u8 = 0;
+                    if offset < size {
+                        _team = recv_buf[offset];
+                        offset += 1;
+                        // weapon length + bytes
+                        if offset < size {
+                            let wlen = recv_buf[offset] as usize;
+                            offset += 1;
+                            if offset + wlen <= size {
+                                // discard weapon bytes for now (we keep weapon info
+                                // in MSG_PLAYER_LIST which the UI uses). If desired
+                                // later, we could store this on OtherPlayer.
+                                offset += wlen;
+                            } else {
+                                // malformed/partial packet: clamp to available
+                                offset = size;
+                            }
+                        }
+                    }
+
                     if id != player_id {
                         let mut other_player = OtherPlayer::new(id, name, world);
                         other_player.x = x;
