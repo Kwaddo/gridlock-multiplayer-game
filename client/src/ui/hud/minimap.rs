@@ -44,6 +44,7 @@ pub fn draw_minimap(
     local_yaw: f32,
     other_players: &[OtherPlayer],
     current_world: WorldId,
+    local_team: u8,
     config: &GameConfig,
 ) {
     let diameter = minimap_diameter(config);
@@ -57,13 +58,21 @@ pub fn draw_minimap(
     if circular {
         draw_circle(center_x, center_y, half + 1.0, BG_COLOR);
     } else {
-        draw_rectangle(center_x - half, center_y - half, diameter, diameter, BG_COLOR);
+        draw_rectangle(
+            center_x - half,
+            center_y - half,
+            diameter,
+            diameter,
+            BG_COLOR,
+        );
     }
 
     match current_world {
         WorldId::Maze => {
             if let Some(maze) = maze {
-                draw_maze_layer(maze, local_pos, center_x, center_y, half, diameter, circular);
+                draw_maze_layer(
+                    maze, local_pos, center_x, center_y, half, diameter, circular,
+                );
             }
         }
         WorldId::Lobby => {
@@ -82,6 +91,7 @@ pub fn draw_minimap(
         half,
         circular,
         ppwu,
+        local_team,
     );
 
     // Local player arrow (rotates to show facing direction)
@@ -94,7 +104,14 @@ pub fn draw_minimap(
     } else {
         let tl_x = center_x - half;
         let tl_y = center_y - half;
-        draw_rectangle_lines(tl_x - 1.0, tl_y - 1.0, diameter + 2.0, diameter + 2.0, 3.0, BORDER_GLOW);
+        draw_rectangle_lines(
+            tl_x - 1.0,
+            tl_y - 1.0,
+            diameter + 2.0,
+            diameter + 2.0,
+            3.0,
+            BORDER_GLOW,
+        );
         draw_rectangle_lines(tl_x, tl_y, diameter, diameter, 2.0, BORDER_COLOR);
     }
 }
@@ -190,8 +207,10 @@ fn draw_lobby_layer(
             let wz = player_tz + dy;
 
             // Only draw within the lobby floor bounds (-25..25)
-            if (wx as f32) < -floor_half || (wx as f32) >= floor_half
-                || (wz as f32) < -floor_half || (wz as f32) >= floor_half
+            if (wx as f32) < -floor_half
+                || (wx as f32) >= floor_half
+                || (wz as f32) < -floor_half
+                || (wz as f32) >= floor_half
             {
                 continue;
             }
@@ -204,12 +223,22 @@ fn draw_lobby_layer(
                 continue;
             }
 
-            let color = Color::new(LOBBY_FLOOR_COLOR.r, LOBBY_FLOOR_COLOR.g, LOBBY_FLOOR_COLOR.b, LOBBY_FLOOR_COLOR.a * alpha);
+            let color = Color::new(
+                LOBBY_FLOOR_COLOR.r,
+                LOBBY_FLOOR_COLOR.g,
+                LOBBY_FLOOR_COLOR.b,
+                LOBBY_FLOOR_COLOR.a * alpha,
+            );
             let tp = tile_px / 2.0;
             draw_rectangle(sx - tp, sy - tp, tile_px, tile_px, color);
 
             // Draw grid lines on tile edges (matching in-game 1-unit grid)
-            let grid_c = Color::new(LOBBY_GRID_COLOR.r, LOBBY_GRID_COLOR.g, LOBBY_GRID_COLOR.b, LOBBY_GRID_COLOR.a * alpha);
+            let grid_c = Color::new(
+                LOBBY_GRID_COLOR.r,
+                LOBBY_GRID_COLOR.g,
+                LOBBY_GRID_COLOR.b,
+                LOBBY_GRID_COLOR.a * alpha,
+            );
             draw_line(sx - tp, sy - tp, sx + tp, sy - tp, 0.5, grid_c); // top
             draw_line(sx - tp, sy - tp, sx - tp, sy + tp, 0.5, grid_c); // left
         }
@@ -259,7 +288,14 @@ fn draw_lobby_layer(
             draw_rectangle(sx - w / 2.0, sy - h / 2.0, w, h, fill);
             // bright border for visibility
             let border = Color::new(1.0, 0.55, 0.38, alpha);
-            draw_rectangle_lines(sx - w / 2.0 - 1.0, sy - h / 2.0 - 1.0, w + 2.0, h + 2.0, 1.0, border);
+            draw_rectangle_lines(
+                sx - w / 2.0 - 1.0,
+                sy - h / 2.0 - 1.0,
+                w + 2.0,
+                h + 2.0,
+                1.0,
+                border,
+            );
         }
     }
 }
@@ -288,10 +324,19 @@ fn draw_other_players(
     half: f32,
     circular: bool,
     ppwu: f32,
+    local_team: u8,
 ) {
     for p in other_players {
         if p.world != current_world || !p.is_alive() {
             continue;
+        }
+
+        // If we're in the Maze and have a non-spectator team, only draw
+        // teammates on the minimap so enemies are not revealed there.
+        if current_world == WorldId::Maze && local_team != 0 {
+            if p.team != local_team {
+                continue;
+            }
         }
 
         let sx = center_x + (p.render_x - local_pos.x) * ppwu;
@@ -305,7 +350,13 @@ fn draw_other_players(
         let dot_size = (ppwu * 0.9).clamp(3.0, 6.0);
         let c = p.color;
         draw_circle(sx, sy, dot_size, Color::new(c.r, c.g, c.b, c.a * alpha));
-        draw_circle_lines(sx, sy, dot_size, 1.0, Color::new(0.0, 0.0, 0.0, 0.5 * alpha));
+        draw_circle_lines(
+            sx,
+            sy,
+            dot_size,
+            1.0,
+            Color::new(0.0, 0.0, 0.0, 0.5 * alpha),
+        );
     }
 }
 
@@ -354,14 +405,7 @@ fn draw_player_arrow(center_x: f32, center_y: f32, yaw: f32, ppwu: f32) {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-fn fade_alpha(
-    sx: f32,
-    sy: f32,
-    center_x: f32,
-    center_y: f32,
-    half: f32,
-    circular: bool,
-) -> f32 {
+fn fade_alpha(sx: f32, sy: f32, center_x: f32, center_y: f32, half: f32, circular: bool) -> f32 {
     if circular {
         let dist = ((sx - center_x).powi(2) + (sy - center_y).powi(2)).sqrt();
         smoothstep_fade(dist / half)

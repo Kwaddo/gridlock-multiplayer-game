@@ -6,8 +6,8 @@ use crate::maze::MazeData;
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
 
-use crate::server::{broadcast, game};
 use crate::player::Team;
+use crate::server::{broadcast, game};
 
 /// Called when a client reports that they broke a wall at (x,y).
 /// Update the maze and broadcast the event to all connected players.
@@ -278,12 +278,24 @@ pub fn handle_respawn_request(
         player.health = player.max_health;
         player.is_alive = true;
 
-        // choose a spawn position based on current world. the maze argument
-        // is provided so we can pick a random safe location instead of always
-        // teleporting to the same corner.
+        // choose a spawn position based on current world. For team modes we
+        // assign deterministic team spawns (opposing corners) so players
+        // don't get randomized spawns that break team placement.
         let spawn = if player.world == WorldId::Maze {
-            let (sx, sy, sz, _fallback) = maze.random_spawn_world(game::MAZE_CELL_SIZE);
-            (sx, sy, sz)
+            match player.team {
+                Team::Red => {
+                    let (red, _blue) = maze.team_spawn_positions(game::MAZE_CELL_SIZE);
+                    red
+                }
+                Team::Blue => {
+                    let (_red, blue) = maze.team_spawn_positions(game::MAZE_CELL_SIZE);
+                    blue
+                }
+                _ => {
+                    let (sx, sy, sz, _fallback) = maze.random_spawn_world(game::MAZE_CELL_SIZE);
+                    (sx, sy, sz)
+                }
+            }
         } else {
             // lobby players respawn at a fixed lobby coordinate
             (0.0_f32, 0.5_f32, 0.0_f32)

@@ -69,6 +69,14 @@ impl PlayingState {
 
         // When lobby console is open, suppress regular HUD (crosshair, minimap, status panels, etc.)
         if !self.lobby_console_open && !self.is_dead {
+            // compute local team from connected_players (default spectator 0)
+            let local_team = self
+                .connected_players
+                .iter()
+                .find(|(id, ..)| *id == player_id)
+                .map(|(_, _name, _kills, _deaths, _gl, team, _wep)| *team)
+                .unwrap_or(0u8);
+
             draw_hud(
                 username,
                 player_id,
@@ -92,6 +100,7 @@ impl PlayingState {
                 self.last_damage_attacker.as_deref(),
                 maze,
                 self.current_world,
+                local_team,
                 config,
             );
         }

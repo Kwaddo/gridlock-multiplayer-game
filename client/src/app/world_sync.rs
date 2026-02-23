@@ -5,7 +5,7 @@ use client::ui::OtherPlayer;
 use macroquad::prelude::*;
 
 use client::net::poll_updates;
-use client::net::protocols::MODE_GUN_GAME;
+use client::net::protocols::{MODE_GUN_GAME, MODE_TEAM_DEATHMATCH};
 use client::screens::PlayingState;
 use client::types::animation_state::{AnimState, MoveDir};
 use client::types::maze::Maze;
@@ -106,6 +106,7 @@ pub fn sync_world(
                     current.is_crouching = incoming.is_crouching;
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     current.kills = incoming.kills;
+                    current.team = incoming.team;
                     current.hp = incoming.hp;
                     current.max_hp = incoming.max_hp;
                 } else {
@@ -501,38 +502,53 @@ pub fn sync_world(
                 )
                 .collect();
 
-            // Apply team-based color shades to OtherPlayer models. We look up
-            // each OtherPlayer's team from `connected_players` and set a base
-            // team color (red/blue). To add variety, slightly vary brightness
-            // deterministically by player id.
+            // Apply team-based color shades to OtherPlayer models, but only
+            // when we're actually in the Maze (in-match). In the lobby we
+            // prefer the deterministic per-id color so lobby previewing isn't
+            // misleading. This ensures team colors are visible during TDM.
             let team_map: std::collections::HashMap<u32, u8> = playing_state
                 .connected_players
                 .iter()
                 .map(|(id, _name, _kills, _deaths, _gl, team, _wep)| (*id, *team))
                 .collect();
 
-            for p in playing_state.other_players.iter_mut() {
-                if let Some(team) = team_map.get(&p.id) {
-                    // base team colors
-                    let (br, bg, bb) = match *team {
-                        1 => (200u8, 60u8, 60u8),   // Red team
-                        2 => (60u8, 120u8, 200u8),  // Blue team
-                        _ => (120u8, 120u8, 120u8), // default/neutral
-                    };
-                    // vary brightness slightly by id to give distinct shades
-                    let hue_variation = ((p.id.wrapping_mul(97)).wrapping_add(53) % 32) as i32 - 16;
-                    let adjust = |c: u8| -> u8 {
-                        let v = c as i32 + hue_variation;
-                        v.clamp(0, 255) as u8
-                    };
-                    p.color = macroquad::prelude::Color::from_rgba(
-                        adjust(br),
-                        adjust(bg),
-                        adjust(bb),
-                        255,
-                    );
-                } else {
-                    // fallback to deterministic id-based color if no team info
+            // Apply team colors when we are in the Maze OR when the current
+            // authoritative match mode is Team Deathmatch. The latter covers
+            // edge cases where world-change timing may differ between
+            // packets but we still want team tinting during TDM.
+            if playing_state.current_world == WorldId::Maze
+                || playing_state.match_mode == Some(MODE_TEAM_DEATHMATCH)
+            {
+                for p in playing_state.other_players.iter_mut() {
+                    if let Some(team) = team_map.get(&p.id) {
+                        // base team colors
+                        let (br, bg, bb) = match *team {
+                            1 => (200u8, 60u8, 60u8),   // Red team
+                            2 => (60u8, 120u8, 200u8),  // Blue team
+                            _ => (120u8, 120u8, 120u8), // default/neutral
+                        };
+                        // vary brightness slightly by id to give distinct shades
+                        let hue_variation =
+                            ((p.id.wrapping_mul(97)).wrapping_add(53) % 32) as i32 - 16;
+                        let adjust = |c: u8| -> u8 {
+                            let v = c as i32 + hue_variation;
+                            v.clamp(0, 255) as u8
+                        };
+                        p.color = macroquad::prelude::Color::from_rgba(
+                            adjust(br),
+                            adjust(bg),
+                            adjust(bb),
+                            255,
+                        );
+                    } else {
+                        // fallback to deterministic id-based color if no team info
+                        p.color = client::types::player::OtherPlayer::color_for_id(p.id);
+                    }
+                }
+            } else {
+                // In lobby: use deterministic per-id colors so lobby roster
+                // shows neutral, non-team-tinted previews.
+                for p in playing_state.other_players.iter_mut() {
                     p.color = client::types::player::OtherPlayer::color_for_id(p.id);
                 }
             }
