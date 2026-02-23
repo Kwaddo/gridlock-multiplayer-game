@@ -159,6 +159,8 @@ pub struct PlayingState {
 pub struct KillFeedEntry {
     pub killer_id: u32,
     pub victim_id: u32,
+    pub killer_name: String,
+    pub victim_name: String,
     pub weapon: String,
     pub timer: f32,
 }

@@ -109,7 +109,7 @@ pub async fn run() {
             }
 
             GameState::LobbyInventory => {
-                let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
                 if sync.removed_by_server {
                     socket = None;
                     login_screen.error_msg = "Timed out / disconnected by server.".to_string();
@@ -153,7 +153,7 @@ pub async fn run() {
             GameState::Loading => {
                 login_screen.update_background();
 
-                let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
                 if sync.removed_by_server {
                     // server removed our player (timed out) — go back to connection page
                     socket = None;
@@ -230,7 +230,7 @@ pub async fn run() {
                 if playing_state.dev_mode.show_code_prompt {
                     set_cursor_grab(false);
                     show_mouse(true);
-                    let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                    let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
                     if sync.removed_by_server {
                         socket = None;
                         login_screen.error_msg = "Timed out / disconnected by server.".to_string();
@@ -274,7 +274,7 @@ pub async fn run() {
                     continue;
                 }
 
-                let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
 
                 if sync.removed_by_server {
                     socket = None;
@@ -319,7 +319,7 @@ pub async fn run() {
             }
 
             GameState::Paused => {
-                let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
 
                 if sync.removed_by_server {
                     socket = None;
@@ -368,7 +368,7 @@ pub async fn run() {
             }
 
             GameState::Settings => {
-                let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
                 if sync.removed_by_server {
                     socket = None;
                     login_screen.error_msg = "Timed out / disconnected by server.".to_string();
@@ -432,7 +432,7 @@ pub async fn run() {
                     continue;
                 }
 
-                let sync = sync_world(&socket, player_id, &mut playing_state, &mut maze);
+                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
                 if sync.removed_by_server {
                     socket = None;
                     login_screen.error_msg = "Timed out / disconnected by server.".to_string();
