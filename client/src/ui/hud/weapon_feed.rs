@@ -9,10 +9,10 @@ use crate::weapons::WeaponInventory;
 pub(super) fn draw_weapon_and_kill_feed(
     weapons: &WeaponInventory,
     assets: &HashMap<String, Texture2D>,
-    other_players: &[OtherPlayer],
+    _other_players: &[OtherPlayer],
     kill_feed: &[crate::screens::playing::KillFeedEntry],
     local_player_id: u32,
-    local_username: &str,
+    _local_username: &str,
 ) {
     let weapon = weapons.active();
     let stats = weapon.stats();
@@ -97,26 +97,11 @@ pub(super) fn draw_weapon_and_kill_feed(
         let alpha = ((entry.timer / 5.0).min(1.0) * 255.0) as u8;
         let text_color = Color::from_rgba(255, 255, 255, alpha);
         let accent_color = Color::from_rgba(255, 107, 53, alpha); // orange accent
-        let dim_color = Color::from_rgba(180, 180, 190, alpha);
+        let weapon_color = Color::from_rgba(200, 200, 210, alpha);
 
-        let killer_name = if entry.killer_id == local_player_id {
-            local_username
-        } else {
-            other_players
-                .iter()
-                .find(|p| p.id == entry.killer_id)
-                .map(|p| p.username.as_str())
-                .unwrap_or("Player")
-        };
-        let victim_name = if entry.victim_id == local_player_id {
-            local_username
-        } else {
-            other_players
-                .iter()
-                .find(|p| p.id == entry.victim_id)
-                .map(|p| p.username.as_str())
-                .unwrap_or("Player")
-        };
+        // use pre-resolved names stored at creation time (survives player removal)
+        let killer_name = entry.killer_name.as_str();
+        let victim_name = entry.victim_name.as_str();
 
         // highlight the local player's name in orange
         let killer_color = if entry.killer_id == local_player_id {
@@ -130,8 +115,9 @@ pub(super) fn draw_weapon_and_kill_feed(
             text_color
         };
 
-        // draw background pill for readability
-        let full_text = format!("{}  killed  {}", killer_name, victim_name);
+        // measure full width for background pill (name [weapon icon/text] name)
+        let weapon_display = format!("[{}]", entry.weapon);
+        let full_text = format!("{}  {}  {}", killer_name, weapon_display, victim_name);
         let full_w = measure_game_text(&full_text, 14);
         draw_rectangle(
             feed_x - 4.0,
@@ -147,15 +133,7 @@ pub(super) fn draw_weapon_and_kill_feed(
         draw_text_ex(killer_name, x_offset, feed_y, text_params(14, killer_color));
         x_offset += measure_game_text(killer_name, 14) + 4.0;
 
-        // "killed" verb
-        draw_text_ex("killed", x_offset, feed_y, text_params(14, dim_color));
-        x_offset += measure_game_text("killed", 14) + 4.0;
-
-        // victim name
-        draw_text_ex(victim_name, x_offset, feed_y, text_params(14, victim_color));
-        x_offset += measure_game_text(victim_name, 14) + 5.0;
-
-        // weapon icon (if available) or text after victim name
+        // weapon icon or weapon name in brackets
         let weapon_icon_key = format!("{}_icon", entry.weapon.to_lowercase());
         if let Some(icon_tex) = assets.get(&weapon_icon_key) {
             draw_texture_ex(
@@ -168,7 +146,14 @@ pub(super) fn draw_weapon_and_kill_feed(
                     ..Default::default()
                 },
             );
+            x_offset += 20.0;
+        } else {
+            draw_text_ex(&weapon_display, x_offset, feed_y, text_params(14, weapon_color));
+            x_offset += measure_game_text(&weapon_display, 14) + 4.0;
         }
+
+        // victim name
+        draw_text_ex(victim_name, x_offset, feed_y, text_params(14, victim_color));
 
         feed_y += 22.0;
     }

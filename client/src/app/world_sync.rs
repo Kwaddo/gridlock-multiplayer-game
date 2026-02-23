@@ -20,6 +20,7 @@ pub struct SyncResult {
 pub fn sync_world(
     socket: &Option<UdpSocket>,
     player_id: u32,
+    username: &str,
     playing_state: &mut PlayingState,
     maze: &mut Option<Maze>,
 ) -> SyncResult {
@@ -327,12 +328,38 @@ pub fn sync_world(
         }
         if let Some(kills) = updates.kill_feed {
             for (killer_id, victim_id, weapon) in kills {
+                // resolve names now so they persist even after player models are removed
+                let killer_name = if killer_id == player_id {
+                    username.to_string()
+                } else {
+                    playing_state.connected_players.iter()
+                        .find(|(id, ..)| *id == killer_id)
+                        .map(|(_, name, ..)| name.clone())
+                        .or_else(|| playing_state.other_players.iter()
+                            .find(|p| p.id == killer_id)
+                            .map(|p| p.username.clone()))
+                        .unwrap_or_else(|| "Player".to_string())
+                };
+                let victim_name = if victim_id == player_id {
+                    username.to_string()
+                } else {
+                    playing_state.connected_players.iter()
+                        .find(|(id, ..)| *id == victim_id)
+                        .map(|(_, name, ..)| name.clone())
+                        .or_else(|| playing_state.other_players.iter()
+                            .find(|p| p.id == victim_id)
+                            .map(|p| p.username.clone()))
+                        .unwrap_or_else(|| "Player".to_string())
+                };
+
                 // push a kill-feed entry for UI
                 playing_state
                     .kill_feed
                     .push(client::screens::playing::KillFeedEntry {
                         killer_id,
                         victim_id,
+                        killer_name,
+                        victim_name,
                         weapon,
                         timer: 5.0,
                     });
