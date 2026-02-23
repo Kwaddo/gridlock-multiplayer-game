@@ -31,14 +31,14 @@ pub struct NetUpdate {
     pub match_time_left: Option<u8>,
     pub match_end_winner: Option<String>,
     pub match_end_countdown: Option<u8>,
-    pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8)>>, // (id, name, kills, deaths, world, alive, gun_level)
+    pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8, u8, String)>>, // (id, name, kills, deaths, world, alive, gun_level, team, weapon)
     pub self_kills: Option<u32>,
     pub self_gun_level: Option<u8>,
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
-    pub death: bool,                          // You died
-    pub death_killer_id: Option<u32>,          // who killed us (from MSG_DEATH)
-    pub death_weapon: Option<String>,          // weapon used to kill us (from MSG_DEATH)
+    pub death: bool,                  // You died
+    pub death_killer_id: Option<u32>, // who killed us (from MSG_DEATH)
+    pub death_weapon: Option<String>, // weapon used to kill us (from MSG_DEATH)
 
     // true if poll_updates read at least one packet from the socket during this call
     pub received_any: bool,
@@ -438,22 +438,25 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         let gun_level = recv_buf[offset];
                         offset += 1;
                         // server now appends `team:1` + `weapon_len:1` + `weapon bytes` to each entry;
-                        // consume those bytes but keep the old tuple shape so UI code remains compatible.
                         if offset + 2 > size {
                             break;
                         }
-                        let _team = recv_buf[offset];
+                        let team = recv_buf[offset];
                         offset += 1;
                         let weapon_len = recv_buf[offset] as usize;
                         offset += 1;
                         if offset + weapon_len > size {
                             break;
                         }
-                        // skip weapon bytes
+                        let weapon =
+                            String::from_utf8_lossy(&recv_buf[offset..offset + weapon_len])
+                                .to_string();
                         offset += weapon_len;
 
                         let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
-                        list.push((id, name, kills, deaths, world, alive, gun_level));
+                        list.push((
+                            id, name, kills, deaths, world, alive, gun_level, team, weapon,
+                        ));
                     }
                     update.player_list = Some(list);
                 }
@@ -538,9 +541,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 update.death = true;
                 // format: [MSG_DEATH][killer_id:4][weapon_len:1][weapon bytes]
                 if size >= 5 {
-                    let killer_id = u32::from_be_bytes([
-                        recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4],
-                    ]);
+                    let killer_id =
+                        u32::from_be_bytes([recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4]]);
                     update.death_killer_id = Some(killer_id);
                     if size >= 6 {
                         let weapon_len = recv_buf[5] as usize;

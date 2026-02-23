@@ -455,7 +455,7 @@ pub fn sync_world(
             // detect whether the server still knows about *us* — if not, server removed us (timed out)
             let still_present = list
                 .iter()
-                .any(|(id, _name, _kills, _deaths, _world, _alive, _gl)| *id == player_id);
+                .any(|(id, _name, _kills, _deaths, _world, _alive, _gl, _team, _weapon)| *id == player_id);
             if !still_present {
                 result.removed_by_server = true;
             }
@@ -474,9 +474,12 @@ pub fn sync_world(
                 playing_state.rebuild_player_index();
             }
 
+            // `list` now has entries: (id, name, kills, deaths, world, alive, gun_level, team, weapon)
             playing_state.connected_players = list
                 .into_iter()
-                .map(|(id, name, kills, deaths, _world, _alive, gun_level)| (id, name, kills, deaths, gun_level))
+                .map(|(id, name, kills, deaths, _world, _alive, gun_level, team, weapon)| {
+                    (id, name, kills, deaths, gun_level, team, weapon)
+                })
                 .collect();
         }
 

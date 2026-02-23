@@ -105,6 +105,7 @@ impl PlayingState {
                 self.local_deaths,
                 (self.weapons.active_slot + 1) as u8,
                 self.current_world == WorldId::Maze,
+                self.match_mode,
             );
         }
 
