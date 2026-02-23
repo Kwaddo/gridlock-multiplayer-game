@@ -209,10 +209,6 @@ pub fn handle_hit(
             kill_msg.push(wbytes.len() as u8);
             kill_msg.extend_from_slice(wbytes);
             let _ = socket.send_to(&kill_msg, attacker);
-
-            // propagate score/gun-level changes
-            broadcast::broadcast_state(socket, players);
-            broadcast::broadcast_player_list(socket, players);
         }
 
         // If needed, reset victim's gun level now that the killer borrow has ended
@@ -221,6 +217,10 @@ pub fn handle_hit(
                 vmut.gun_level = 1;
             }
         }
+
+        // propagate score/gun-level changes (after victim reset so clients see updated gun_level)
+        broadcast::broadcast_state(socket, players);
+        broadcast::broadcast_player_list(socket, players);
 
         // broadcast kill feed (include weapon name so client can display it)
         let mut feed = vec![MSG_KILL_FEED];

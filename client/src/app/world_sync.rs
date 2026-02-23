@@ -230,6 +230,7 @@ pub fn sync_world(
                 playing_state.shield = 0.0;
                 playing_state.death_timer = 0.0;
                 playing_state.local_kills = 0;
+                playing_state.local_deaths = 0;
                 playing_state.movement_state.velocity = Vec3::ZERO;
 
                 // Clear stale other-player data so animations don't carry over
@@ -256,6 +257,8 @@ pub fn sync_world(
                 playing_state.hp = playing_state.max_hp;
                 playing_state.shield = 0.0;
                 playing_state.death_timer = 0.0;
+                playing_state.local_kills = 0;
+                playing_state.local_deaths = 0;
 
                 // Clear stale other-player data
                 playing_state.other_players.clear();
@@ -272,6 +275,7 @@ pub fn sync_world(
                 playing_state.match_end_winner = None;
                 playing_state.match_end_countdown_timer = 0.0;
                 playing_state.local_kills = 0;
+                playing_state.local_deaths = 0;
             }
         }
 
@@ -432,6 +436,15 @@ pub fn sync_world(
             // track local deaths from the player list
             if let Some(me) = list.iter().find(|(id, ..)| *id == player_id) {
                 playing_state.local_deaths = me.3;
+            }
+
+            // remove 3D models of players who are no longer in the server's player list
+            // (disconnected or timed out) — this ensures their model disappears instantly
+            let server_ids: std::collections::HashSet<u32> = list.iter().map(|(id, ..)| *id).collect();
+            let before = playing_state.other_players.len();
+            playing_state.other_players.retain(|p| server_ids.contains(&p.id));
+            if playing_state.other_players.len() != before {
+                playing_state.rebuild_player_index();
             }
 
             playing_state.connected_players = list
