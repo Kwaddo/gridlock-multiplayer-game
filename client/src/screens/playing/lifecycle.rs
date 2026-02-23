@@ -223,9 +223,10 @@ impl PlayingState {
 
         // Sort players by kills (descending)
         let mut sorted_players = self.connected_players.clone();
+        // connected_players: (id, name, kills, deaths, gun_level, team, weapon)
         sorted_players.sort_by(|a, b| b.2.cmp(&a.2));
 
-        for (i, (pid, name, kills, _deaths, _gun_level)) in sorted_players.iter().take(12).enumerate() {
+        for (i, (pid, name, kills, _deaths, _gun_level, _team, _weapon)) in sorted_players.iter().take(12).enumerate() {
             let is_local = *pid == local_player_id;
             let is_winner = name == winner_name;
             let row_y = cy - 13.0;

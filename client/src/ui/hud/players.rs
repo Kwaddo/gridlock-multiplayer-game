@@ -36,25 +36,26 @@ pub(super) fn draw_players_overlay(
 /// rendered only when the caller explicitly invokes `draw_player_list`.
 
 pub fn draw_player_list(
-    connected_players: &[(u32, String, u32, u32, u8)], // (id, name, kills, deaths, gun_level)
+    connected_players: &[(u32, String, u32, u32, u8, u8, String)], // (id, name, kills, deaths, gun_level, team, weapon)
     self_id: u32,
     self_kills: u32,
     self_deaths: u32,
     self_gun_level: u8,
     in_game: bool,
+    match_mode: Option<u8>,
 ) {
     use crate::ui::fonts::text_params;
 
-    // (name, kills, deaths, gun_level, is_self)
-    let mut rows: Vec<(String, u32, u32, u8, bool)> = Vec::new();
+    // (name, kills, deaths, gun_level, is_self, team, weapon)
+    let mut rows: Vec<(String, u32, u32, u8, bool, u8, String)> = Vec::new();
     let mut seen_self = false;
-    for (id, name, kills, deaths, gun_level) in connected_players.iter() {
+    for (id, name, kills, deaths, gun_level, team, weapon) in connected_players.iter() {
         let is_self = *id == self_id;
         if is_self { seen_self = true; }
-        rows.push((name.clone(), *kills, *deaths, *gun_level, is_self));
+        rows.push((name.clone(), *kills, *deaths, *gun_level, is_self, *team, weapon.clone()));
     }
     if !seen_self {
-        rows.push(("You".to_string(), self_kills, self_deaths, self_gun_level, true));
+        rows.push(("You".to_string(), self_kills, self_deaths, self_gun_level, true, 0u8, "".to_string()));
     }
 
     if in_game {
@@ -97,13 +98,31 @@ pub fn draw_player_list(
 
     // rows
     let mut py = y + 62.0;
-    for (i, (name, kills, deaths, gun_level, is_self)) in rows.iter().enumerate() {
+    for (i, (name, kills, deaths, gun_level, is_self, team, weapon)) in rows.iter().enumerate() {
         let bg_alpha = if *is_self { 0.08 } else { 0.0 };
         if bg_alpha > 0.0 {
             draw_rectangle(x + 8.0, py - 18.0, w - 16.0, row_h - 4.0, Color::from_rgba(255, 255, 255, (bg_alpha * 255.0) as u8));
         }
 
         let name_color = if *is_self { Color::from_rgba(180, 220, 255, 255) } else { WHITE };
+
+        // team badge (only show for Team Deathmatch)
+        let show_team = match match_mode {
+            Some(m) => m == crate::net::protocols::MODE_TEAM_DEATHMATCH,
+            None => false,
+        };
+        if show_team {
+            let badge_x = col_name_x - 28.0;
+            let badge_w = 18.0;
+            let badge_h = 18.0;
+            let badge_color = match *team {
+                1 => Color::from_rgba(200, 60, 60, 255), // Red
+                2 => Color::from_rgba(60, 120, 200, 255), // Blue
+                _ => Color::from_rgba(120, 120, 120, 255),
+            };
+            draw_rectangle(badge_x, py - 16.0, badge_w, badge_h, badge_color);
+            draw_rectangle_lines(badge_x, py - 16.0, badge_w, badge_h, 1.0, Color::from_rgba(0,0,0,100));
+        }
 
         // rank + name
         draw_text_ex(
@@ -124,10 +143,10 @@ pub fn draw_player_list(
         // A (assists not tracked yet)
         draw_text_ex("0", col_a_x, py, text_params(18, dim_color));
 
-        // weapon number (gun_level) — only in match
+        // weapon column: show weapon name when available (prefer weapon string), fall back to gun_level number
         if in_game {
-            let wep_text = format!("{}", gun_level);
-            draw_text_ex(&wep_text, col_wep_x, py, text_params(18, Color::from_rgba(255, 200, 100, 255)));
+            let wtext = if !weapon.is_empty() { weapon.clone() } else { format!("W{}", gun_level) };
+            draw_text_ex(&wtext, col_wep_x - 40.0, py, text_params(14, Color::from_rgba(255, 200, 100, 255)));
         }
 
         py += row_h;
