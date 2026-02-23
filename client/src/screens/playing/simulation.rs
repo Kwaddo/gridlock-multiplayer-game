@@ -216,9 +216,10 @@ impl PlayingState {
                 .map(|p| Self::is_all_in_one_hands_source(p))
                 .unwrap_or(false);
             let (reload_start, reload_end) = Self::reload_segment_for_hands_key(hands_key);
+            let hands_key_changed = self.prev_hands_key.as_deref() != Some(hands_key);
 
             if let Some(hands) = self.animated_models.get_mut(hands_key) {
-                if !self.hands_anim_initialized {
+                if !self.hands_anim_initialized || hands_key_changed {
                     if hands_is_all_in_one {
                         // This file has a single combined clip ("allanims"), so idle is a held pose.
                         hands.stop_at_start();
@@ -585,6 +586,7 @@ impl PlayingState {
                 model.update(delta);
             }
         }
+        self.prev_hands_key = active_hands_key.map(|k| k.to_string());
 
         self.target_dummy.update(delta);
         for p in &mut self.other_players {

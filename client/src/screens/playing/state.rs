@@ -147,6 +147,7 @@ pub struct PlayingState {
     pub lobby_console_message_timer: f32,
     pub hands_playback_mode: HandsPlaybackMode,
     pub hands_anim_initialized: bool,
+    pub prev_hands_key: Option<String>, // tracks active hands rig key across swaps
     pub prev_was_reloading: bool, // edge detection for reload anim trigger
     pub knife_swing_index: u8,     // cycles 0..2 for light slashes (swings 1-3)
     pub knife_swing_requested: bool, // set by input_processing when knife fires
@@ -266,6 +267,7 @@ impl PlayingState {
             connected_players: Vec::new(),
             hands_playback_mode: HandsPlaybackMode::IdleLoop,
             hands_anim_initialized: false,
+            prev_hands_key: None,
             prev_was_reloading: false,
             knife_swing_index: 0,
             knife_swing_requested: false,
