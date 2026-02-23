@@ -61,7 +61,7 @@ pub const GUN_GAME_PROGRESSION: [&str; 19] = [
 /// iterate over all alive/dead players and automatically respawn as needed
 pub fn process_auto_respawns(
     socket: &UdpSocket,
-    maze: &MazeData,
+    maze: Option<&MazeData>,
     players: &mut HashMap<SocketAddr, Player>,
 ) {
     let now = Instant::now();
@@ -70,7 +70,11 @@ pub fn process_auto_respawns(
         Vec::with_capacity(players.len());
 
     for player in players.values_mut() {
-        if player.is_alive || player.world != WorldId::Maze {
+        // Auto-respawn any dead player after the configured delay, regardless of
+        // whether their `world` field currently indicates `Maze`. Some clients
+        // can be 'offscreen' and temporarily report different world states;
+        // we should still auto-respawn players who are dead.
+        if player.is_alive {
             continue;
         }
 
@@ -84,8 +88,13 @@ pub fn process_auto_respawns(
             player.shield = 0;
             player.death_time = None;
 
-            // choose a random spawn inside the maze (may fallback to teleporter)
-            let (sx, sy, sz, used_fallback) = maze.random_spawn_world(MAZE_CELL_SIZE);
+            // choose spawn position based on player's current world. If they
+            // were in the Maze and a MazeData is available, pick a random maze
+            // spawn; otherwise fall back to the lobby spawn location.
+            let (sx, sy, sz, used_fallback) = match (player.world, maze) {
+                (WorldId::Maze, Some(m)) => m.random_spawn_world(MAZE_CELL_SIZE),
+                _ => (0.0_f32, 0.5_f32, 0.0_f32, false),
+            };
             player.position = (sx, sy, sz);
             to_respawn.push((
                 player.socket_addr,

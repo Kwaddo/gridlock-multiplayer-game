@@ -178,7 +178,14 @@ pub fn sync_world(
                     .unwrap_or(false);
 
                 if playing_state.current_world == WorldId::Maze || will_be_in_maze {
-                    let _ = playing_state.weapons.switch_to(slot);
+                    // Only force a switch to the server-selected gun slot when the
+                    // local player is not currently holding the knife. We still
+                    // apply the lock so the server restricts which gun can be
+                    // selected, but allow the local knife toggle to remain
+                    // active for UX (knife hits are handled server-side).
+                    if !playing_state.weapons.knife_active {
+                        let _ = playing_state.weapons.switch_to(slot);
+                    }
                     playing_state.weapons.set_locked_slot(Some(slot));
                     playing_state.pending_forced_weapon_slot = None;
                 } else {
@@ -280,6 +287,18 @@ pub fn sync_world(
                 *maze = None;
             }
         }
+
+        // If we did not apply a world_change this poll but the server included
+        // an authoritative per-player freeze in MSG_STATE, use it as a fallback
+        // to enforce movement/weapon locks when the MSG_WORLD_CHANGE packet
+        // was lost while entering the Maze.
+        if !world_change_applied {
+            if let Some(secs) = updates.self_freeze_secs {
+                if playing_state.current_world == WorldId::Maze {
+                    playing_state.post_teleport_freeze_timer = secs as f32;
+                }
+            }
+        }
         if let Some(broken) = updates.broken_walls {
             if let Some(m) = maze.as_mut() {
                 for (x, y) in broken {
@@ -327,7 +346,13 @@ pub fn sync_world(
             }
         }
         if updates.death {
-            playing_state.die(None);
+            // Only trigger death logic when transitioning from alive -> dead.
+            // Servers send periodic MSG_STATE entries marking a player as
+            // dead until they respawn; calling `die()` every poll would keep
+            // resetting the death timer and prevent auto-respawn.
+            if !playing_state.is_dead {
+                playing_state.die(None);
+            }
         }
         if let Some(spawn_pos) = updates.respawn_pos {
             playing_state.respawn(spawn_pos);

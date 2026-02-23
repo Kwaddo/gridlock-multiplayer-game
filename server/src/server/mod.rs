@@ -40,6 +40,10 @@ pub fn run() -> std::io::Result<()> {
     let mut match_end_pending: Option<(Instant, u32, String)> = None;
     // last sent authoritative match timer (to avoid spamming identical values)
     let mut last_match_time_sent: Option<u8> = None;
+    // last sent warmup countdown (MSG_MATCH_COUNTDOWN)
+    let mut last_warmup_sent: Option<u8> = None;
+    // last sent match-end countdown (MSG_MATCH_END countdown byte)
+    let mut last_end_countdown_sent: Option<u8> = None;
     // current match mode (defaults to Gun Game)
     let match_mode: u8 = MODE_GUN_GAME;
     // how many players entered the maze during this match (for last-man-standing detection)
@@ -123,9 +127,9 @@ pub fn run() -> std::io::Result<()> {
             Err(err) => return Err(err),
         }
 
-        if let Some(ref m) = maze {
-            game::process_auto_respawns(&socket, m, &mut players);
-        }
+        // Always attempt to auto-respawn dead players; maze may be None if no
+        // match is currently generated but players still need respawn handling.
+        game::process_auto_respawns(&socket, maze.as_ref(), &mut players);
         if game::cleanup_inactive_players(&mut players) {
             // players were removed — broadcast so other clients drop their characters
             broadcast::broadcast_state(&socket, &players);
@@ -160,6 +164,27 @@ pub fn run() -> std::io::Result<()> {
                 &mut match_total_maze_entries,
                 match_mode,
             );
+        }
+
+        // Periodically rebroadcast warmup countdown so clients that missed
+        // the original packet can catch up (helps offscreen/paused clients).
+        if let Some(end) = match_warmup_end {
+            let secs = if Instant::now() >= end {
+                0u8
+            } else {
+                end.saturating_duration_since(Instant::now())
+                    .as_secs()
+                    .min(255) as u8
+            };
+            if last_warmup_sent != Some(secs) {
+                let cd: [u8; 3] = [MSG_MATCH_COUNTDOWN, secs, match_mode];
+                for p in players.values() {
+                    let _ = socket.send_to(&cd, p.socket_addr);
+                }
+                last_warmup_sent = Some(secs);
+            }
+        } else {
+            last_warmup_sent = None;
         }
 
         // If a match is running, check player counts for early end conditions
@@ -205,6 +230,33 @@ pub fn run() -> std::io::Result<()> {
                     winner_name,
                 );
             }
+        }
+
+        // Rebroadcast match-end countdown periodically so offscreen clients
+        // display the remaining end-of-match timer even if they missed the
+        // original MSG_MATCH_END packet.
+        if let Some((when, winner_id, winner_name)) = match_end_pending.clone() {
+            let secs = if Instant::now() >= when {
+                0u8
+            } else {
+                when.saturating_duration_since(Instant::now())
+                    .as_secs()
+                    .min(255) as u8
+            };
+            if last_end_countdown_sent != Some(secs) {
+                let mut end_msg = vec![MSG_MATCH_END];
+                end_msg.extend_from_slice(&winner_id.to_be_bytes());
+                let name_bytes = winner_name.as_bytes();
+                end_msg.push(name_bytes.len() as u8);
+                end_msg.extend_from_slice(name_bytes);
+                end_msg.push(secs);
+                for p in players.values() {
+                    let _ = socket.send_to(&end_msg, p.socket_addr);
+                }
+                last_end_countdown_sent = Some(secs);
+            }
+        } else {
+            last_end_countdown_sent = None;
         }
     }
 }

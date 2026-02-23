@@ -111,59 +111,73 @@ pub fn handle_hit(
     }
     let victim_addr = victim_addr_opt.unwrap();
 
-    // borrow both attacker and victim separately to avoid double mutable borrow
-    if let Some(victim) = players.get_mut(&victim_addr) {
+    // avoid holding multiple simultaneous mutable borrows of `players` by doing
+    // short-lived immutable checks, then separate mutable borrows for victim and
+    // killer. We'll record if the victim needs to be reset after killer handling.
+    // First, perform immutable checks on the victim
+    {
+        let victim_ref = match players.get(&victim_addr) {
+            Some(v) => v,
+            None => return,
+        };
         // If the victim is in their per-player post-teleport freeze, ignore hits
-        if victim
+        if victim_ref
             .post_teleport_freeze_until
             .map_or(false, |t| t > Instant::now())
-            && victim.world == WorldId::Maze
+            && victim_ref.world == WorldId::Maze
         {
             return;
         }
-        if !victim.is_alive {
+        if !victim_ref.is_alive {
             return;
         }
+    }
 
-        if damage >= victim.health {
-            // fatal blow
-            victim.is_alive = false;
-            victim.deaths += 1;
+    if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
+        // fatal blow: mutate victim in a short scope and send death message
+        let wbytes = weapon_name.as_bytes();
 
-            // notify victim of death
-            let mut death_msg = vec![MSG_DEATH];
-            // attacker id
-            if let Some(att) = players.get(&attacker) {
-                death_msg.extend_from_slice(&att.id.to_be_bytes());
-            } else {
-                death_msg.extend_from_slice(&0u32.to_be_bytes());
+        {
+            if let Some(vmut) = players.get_mut(&victim_addr) {
+                vmut.is_alive = false;
+                vmut.deaths += 1;
             }
-            let wbytes = weapon_name.as_bytes();
-            death_msg.push(wbytes.len() as u8);
-            death_msg.extend_from_slice(wbytes);
-            let _ = socket.send_to(&death_msg, victim_addr);
+        }
 
-            // reward killer
-            if let Some(killer) = players.get_mut(&attacker) {
-                killer.kills += 1;
+        // notify victim of death (include attacker id if known)
+        let mut death_msg = vec![MSG_DEATH];
+        if let Some(att) = players.get(&attacker) {
+            death_msg.extend_from_slice(&att.id.to_be_bytes());
+        } else {
+            death_msg.extend_from_slice(&0u32.to_be_bytes());
+        }
+        death_msg.push(wbytes.len() as u8);
+        death_msg.extend_from_slice(wbytes);
+        let _ = socket.send_to(&death_msg, victim_addr);
 
-                // Gun Game progression: only advance when running in that mode
-                if match_mode == MODE_GUN_GAME {
-                    killer.gun_level = killer.gun_level.saturating_add(1);
+        // reward killer — separate mutable borrow
+        let mut victim_reset_required = false;
+        if let Some(killer) = players.get_mut(&attacker) {
+            killer.kills += 1;
 
-                    // check for victory (level beyond progression length)
-                    if (killer.gun_level as usize) > game::GUN_GAME_PROGRESSION.len() {
-                        // announce winner and schedule end
+            if match_mode == MODE_GUN_GAME {
+                let is_knife = weapon_name.eq_ignore_ascii_case("knife");
+                // Define the special knife level as one past the gun progression.
+                let final_knife_level = (game::GUN_GAME_PROGRESSION.len() + 1) as u32;
+                if is_knife {
+                    // Knife only triggers an immediate win when the killer is on the
+                    // dedicated knife level (final_knife_level). Otherwise a knife
+                    // kill simply sets the victim back to the first gun.
+                    if killer.gun_level == final_knife_level {
                         let winner_id = killer.id;
                         let winner_name = killer.username.clone();
-                        println!("Gun Game winner reached final level: {}", winner_name);
+                        println!("Gun Game winner (knife final): {}", winner_name);
 
                         let mut end_msg = vec![MSG_MATCH_END];
                         end_msg.extend_from_slice(&winner_id.to_be_bytes());
                         let name_bytes = winner_name.as_bytes();
                         end_msg.push(name_bytes.len() as u8);
                         end_msg.extend_from_slice(name_bytes);
-                        // include countdown byte so clients can show timer
                         end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
                         for p in players.values() {
                             let _ = socket.send_to(&end_msg, p.socket_addr);
@@ -175,49 +189,65 @@ pub fn handle_hit(
                             winner_id,
                             winner_name,
                         ));
+                    } else {
+                        // non-final knife: mark victim to be reset after we drop this mutable borrow
+                        victim_reset_required = true;
+                    }
+                } else {
+                    // Non-knife kills advance the killer along the progression.
+                    // Allow progression to reach the special knife level (one past
+                    // the last gun) so the player becomes 'knife-only'.
+                    if (killer.gun_level as usize) < game::GUN_GAME_PROGRESSION.len() + 1 {
+                        killer.gun_level = killer.gun_level.saturating_add(1);
                     }
                 }
-
-                // send kill confirmation to killer
-                let mut kill_msg = vec![MSG_KILL];
-                kill_msg.extend_from_slice(&victim_id.to_be_bytes());
-                kill_msg.push(wbytes.len() as u8);
-                kill_msg.extend_from_slice(wbytes);
-                let _ = socket.send_to(&kill_msg, attacker);
-
-                // immediately propagate score/gun-level changes to everyone so the
-                // scoreboard/weapon lock updates promptly instead of waiting for the
-                // next position packet
-                broadcast::broadcast_state(socket, players);
-                broadcast::broadcast_player_list(socket, players);
             }
 
-            // broadcast kill feed (include weapon name so client can display it)
-            let mut feed = vec![MSG_KILL_FEED];
-            if let Some(killer) = players.get(&attacker) {
-                feed.extend_from_slice(&killer.id.to_be_bytes());
-            } else {
-                feed.extend_from_slice(&0u32.to_be_bytes());
-            }
-            feed.extend_from_slice(&victim_id.to_be_bytes());
-            feed.push(wbytes.len() as u8);
-            feed.extend_from_slice(wbytes);
-            for p in players.values() {
-                let _ = socket.send_to(&feed, p.socket_addr);
-            }
-        } else {
-            // non-lethal damage
-            victim.health -= damage;
-            let mut dmg_msg = vec![MSG_DAMAGE];
-            // Send damage as f32 to match client's f32::from_be_bytes() decoding
-            dmg_msg.extend_from_slice(&(damage as f32).to_be_bytes());
-            if let Some(att) = players.get(&attacker) {
-                dmg_msg.extend_from_slice(&att.id.to_be_bytes());
-            } else {
-                dmg_msg.extend_from_slice(&0u32.to_be_bytes());
-            }
-            let _ = socket.send_to(&dmg_msg, victim_addr);
+            // send kill confirmation to killer
+            let mut kill_msg = vec![MSG_KILL];
+            kill_msg.extend_from_slice(&victim_id.to_be_bytes());
+            kill_msg.push(wbytes.len() as u8);
+            kill_msg.extend_from_slice(wbytes);
+            let _ = socket.send_to(&kill_msg, attacker);
+
+            // propagate score/gun-level changes
+            broadcast::broadcast_state(socket, players);
+            broadcast::broadcast_player_list(socket, players);
         }
+
+        // If needed, reset victim's gun level now that the killer borrow has ended
+        if victim_reset_required {
+            if let Some(vmut) = players.get_mut(&victim_addr) {
+                vmut.gun_level = 1;
+            }
+        }
+
+        // broadcast kill feed (include weapon name so client can display it)
+        let mut feed = vec![MSG_KILL_FEED];
+        if let Some(killer) = players.get(&attacker) {
+            feed.extend_from_slice(&killer.id.to_be_bytes());
+        } else {
+            feed.extend_from_slice(&0u32.to_be_bytes());
+        }
+        feed.extend_from_slice(&victim_id.to_be_bytes());
+        feed.push(wbytes.len() as u8);
+        feed.extend_from_slice(wbytes);
+        for p in players.values() {
+            let _ = socket.send_to(&feed, p.socket_addr);
+        }
+    } else {
+        // non-lethal damage: apply mutation in a short scope and send damage msg
+        if let Some(vmut) = players.get_mut(&victim_addr) {
+            vmut.health -= damage;
+        }
+        let mut dmg_msg = vec![MSG_DAMAGE];
+        dmg_msg.extend_from_slice(&(damage as f32).to_be_bytes());
+        if let Some(att) = players.get(&attacker) {
+            dmg_msg.extend_from_slice(&att.id.to_be_bytes());
+        } else {
+            dmg_msg.extend_from_slice(&0u32.to_be_bytes());
+        }
+        let _ = socket.send_to(&dmg_msg, victim_addr);
     }
 }
 

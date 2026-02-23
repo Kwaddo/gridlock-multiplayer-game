@@ -35,6 +35,7 @@ pub struct NetUpdate {
     pub self_kills: Option<u32>,
     pub self_gun_level: Option<u8>,
     pub match_mode: Option<u8>,
+    pub self_freeze_secs: Option<u8>,
     pub death: bool, // You died
 
     // true if poll_updates read at least one packet from the socket during this call
@@ -73,6 +74,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         match_mode: None,
         death: false,
         received_any: false,
+        self_freeze_secs: None,
     };
 
     let mut recv_buf: [u8; 8192] = [0; 8192];
@@ -266,6 +268,13 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 1;
                     }
 
+                    // new: remaining post-teleport freeze seconds (0 = none)
+                    let mut freeze_secs: u8 = 0;
+                    if offset < size {
+                        freeze_secs = recv_buf[offset];
+                        offset += 1;
+                    }
+
                     if id != player_id {
                         let mut other_player = OtherPlayer::new(id, name, world);
                         other_player.x = x;
@@ -299,6 +308,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         if !alive {
                             update.death = true;
                         }
+                        // record authoritative post-teleport freeze so client can
+                        // apply movement/weapon locks even if the MSG_WORLD_CHANGE
+                        // packet was lost while joining the match.
+                        update.self_freeze_secs = Some(freeze_secs);
                     }
                 }
                 update.players = Some(new_players);
