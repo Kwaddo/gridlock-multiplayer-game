@@ -158,7 +158,20 @@ pub fn process_auto_respawns(
             // were in the Maze and a MazeData is available, pick a random maze
             // spawn; otherwise fall back to the lobby spawn location.
             let (sx, sy, sz, used_fallback) = match (player.world, maze) {
-                (WorldId::Maze, Some(m)) => m.random_spawn_world(MAZE_CELL_SIZE),
+                (WorldId::Maze, Some(m)) => {
+                    // If player is on a team, use deterministic team spawn positions
+                    match player.team {
+                        crate::player::Team::Red => {
+                            let (red, _blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
+                            (red.0, red.1, red.2, false)
+                        }
+                        crate::player::Team::Blue => {
+                            let (_red, blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
+                            (blue.0, blue.1, blue.2, false)
+                        }
+                        _ => m.random_spawn_world(MAZE_CELL_SIZE),
+                    }
+                }
                 _ => (0.0_f32, 0.5_f32, 0.0_f32, false),
             };
             player.position = (sx, sy, sz);

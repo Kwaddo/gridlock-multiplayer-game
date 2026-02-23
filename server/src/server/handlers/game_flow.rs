@@ -7,7 +7,15 @@ use crate::player::Team;
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
 
-use crate::server::{broadcast, game};
+use crate::server::{
+    broadcast,
+    game::{
+        MATCH_DURATION, MATCH_END_COUNTDOWN_SECS, MATCH_MAX_PLAYERS,
+        MATCH_POST_TELEPORT_FREEZE_SECS, MATCH_SCORE_TO_WIN, MATCH_START_COUNTDOWN_SECS,
+        MAZE_CELL_SIZE, MAZE_HEIGHT, MAZE_WIDTH, MIN_PLAYERS_TO_START, TEAM_LOADOUT_BLUE,
+        TEAM_LOADOUT_RED,
+    },
+};
 
 /// Handle a `MSG_START_GAME` packet sent from a lobby player.  This routine does not
 /// actually start the match, but instead updates state and may broadcast countdowns.
@@ -44,27 +52,21 @@ pub fn handle_start_game(
             .values()
             .filter(|p| p.world == WorldId::Lobby)
             .count();
-        if lobby_count >= game::MIN_PLAYERS_TO_START {
+        if lobby_count >= MIN_PLAYERS_TO_START {
             // schedule a warmup/countdown before the match starts so all clients
             // can show a synchronized countdown UI.
             *match_warmup_end =
-                Some(Instant::now() + Duration::from_secs(game::MATCH_START_COUNTDOWN_SECS as u64));
+                Some(Instant::now() + Duration::from_secs(MATCH_START_COUNTDOWN_SECS as u64));
 
             // broadcast countdown to all connected clients (include selected gamemode)
-            let cd: [u8; 3] = [
-                MSG_MATCH_COUNTDOWN,
-                game::MATCH_START_COUNTDOWN_SECS,
-                match_mode,
-            ];
+            let cd: [u8; 3] = [MSG_MATCH_COUNTDOWN, MATCH_START_COUNTDOWN_SECS, match_mode];
             for p in players.values() {
                 let _ = socket.send_to(&cd, p.socket_addr);
             }
 
             println!(
                 "Match start requested by {} — mode {} — countdown {}s",
-                src_addr,
-                match_mode,
-                game::MATCH_START_COUNTDOWN_SECS
+                src_addr, match_mode, MATCH_START_COUNTDOWN_SECS
             );
         } else {
             println!(
@@ -79,7 +81,19 @@ pub fn handle_start_game(
             .values()
             .filter(|p| p.world == WorldId::Maze)
             .count();
-        if maze_count < game::MATCH_MAX_PLAYERS {
+        if maze_count < MATCH_MAX_PLAYERS {
+            // compute team counts before taking a mutable borrow of the
+            // joining requester so we don't hold mutable and immutable
+            // borrows at the same time
+            let red_count = players
+                .values()
+                .filter(|p| p.world == WorldId::Maze && p.team == Team::Red)
+                .count();
+            let blue_count = players
+                .values()
+                .filter(|p| p.world == WorldId::Maze && p.team == Team::Blue)
+                .count();
+
             if let Some(req_player) = players.get_mut(&src_addr) {
                 if req_player.world == WorldId::Lobby {
                     let current_maze = match &*maze {
@@ -90,21 +104,28 @@ pub fn handle_start_game(
                             return;
                         }
                     };
+                    // assign team by balancing current maze teams
+                    req_player.team = if red_count <= blue_count {
+                        Team::Red
+                    } else {
+                        Team::Blue
+                    };
+
                     let (sx, sy, sz, _used_fallback) =
-                        current_maze.random_spawn_world(game::MAZE_CELL_SIZE);
+                        current_maze.random_spawn_world(MAZE_CELL_SIZE);
                     req_player.world = WorldId::Maze;
                     req_player.position = (sx, sy, sz);
                     // set per-player freeze for newly-teleported joiners
-                    req_player.post_teleport_freeze_until = Some(
-                        Instant::now() + Duration::from_secs(game::MATCH_POST_TELEPORT_FREEZE_SECS),
-                    );
+                    req_player.post_teleport_freeze_until =
+                        Some(Instant::now() + Duration::from_secs(MATCH_POST_TELEPORT_FREEZE_SECS));
 
                     let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
+                    let (sx, sy, sz) = req_player.position;
                     response.extend_from_slice(&sx.to_be_bytes());
                     response.extend_from_slice(&sy.to_be_bytes());
                     response.extend_from_slice(&sz.to_be_bytes());
                     response.push(match_mode);
-                    response.push(game::MATCH_POST_TELEPORT_FREEZE_SECS as u8);
+                    response.push(MATCH_POST_TELEPORT_FREEZE_SECS as u8);
                     let _ = socket.send_to(&response, req_player.socket_addr);
 
                     // send maze data to the joining client
@@ -125,6 +146,11 @@ pub fn handle_start_game(
                     for p in players.values() {
                         let _ = socket.send_to(&ann, p.socket_addr);
                     }
+
+                    // After assigning team and moving the player, broadcast
+                    // authoritative state and player list so clients update.
+                    broadcast::broadcast_state(socket, players);
+                    broadcast::broadcast_player_list(socket, players);
                 }
             }
         } else {
@@ -151,7 +177,7 @@ pub fn maybe_start_match(
     if let Some(end) = *match_warmup_end {
         if Instant::now() >= end {
             // start the match now (generate maze, move lobby players into Maze)
-            *maze = Some(MazeData::new(game::MAZE_WIDTH, game::MAZE_HEIGHT));
+            *maze = Some(MazeData::new(MAZE_WIDTH, MAZE_HEIGHT));
             let current_maze = maze.as_ref().unwrap();
             let lobby_count = players
                 .values()
@@ -167,7 +193,7 @@ pub fn maybe_start_match(
             *match_warmup_end = None;
             *match_total_maze_entries = lobby_count;
             // send initial authoritative match timer to all clients
-            let initial_secs = game::MATCH_DURATION.as_secs().min(255) as u8;
+            let initial_secs = MATCH_DURATION.as_secs().min(255) as u8;
             broadcast::broadcast_match_timer(socket, players, initial_secs);
             *last_match_time_sent = Some(initial_secs);
             // set per-player post-teleport freeze for each player moved into the Maze
@@ -195,15 +221,37 @@ pub fn maybe_start_match(
             let mut red_assigned: Vec<String> = Vec::new();
             let mut blue_assigned: Vec<String> = Vec::new();
 
+            // For Team Deathmatch compute two deterministic spawn positions
+            // (red, blue) that are farthest apart in the generated maze.
+            let team_spawns = if match_mode == crate::protocols::MODE_TEAM_DEATHMATCH {
+                Some(current_maze.team_spawn_positions(MAZE_CELL_SIZE))
+            } else {
+                None
+            };
+
             for (i, addr) in joiners.iter().enumerate() {
                 if let Some(player) = players.get_mut(addr) {
-                    let (sx, sy, sz, _used_fallback) =
-                        current_maze.random_spawn_world(game::MAZE_CELL_SIZE);
                     player.world = WorldId::Maze;
-                    player.position = (sx, sy, sz);
-                    player.post_teleport_freeze_until = Some(
-                        Instant::now() + Duration::from_secs(game::MATCH_POST_TELEPORT_FREEZE_SECS),
-                    );
+                    // choose spawn based on match mode / team
+                    if let Some((red_spawn, blue_spawn)) = team_spawns {
+                        let team = if i % 2 == 0 {
+                            crate::player::Team::Red
+                        } else {
+                            crate::player::Team::Blue
+                        };
+                        let spawn = match team {
+                            crate::player::Team::Red => red_spawn,
+                            crate::player::Team::Blue => blue_spawn,
+                            _ => red_spawn,
+                        };
+                        player.position = spawn;
+                    } else {
+                        let (sx, sy, sz, _used_fallback) =
+                            current_maze.random_spawn_world(MAZE_CELL_SIZE);
+                        player.position = (sx, sy, sz);
+                    }
+                    player.post_teleport_freeze_until =
+                        Some(Instant::now() + Duration::from_secs(MATCH_POST_TELEPORT_FREEZE_SECS));
 
                     // reset per-match player state. For Gun Game we reset
                     // gun progression and assign team primaries; for other
@@ -225,9 +273,9 @@ pub fn maybe_start_match(
 
                     // pick a primary for this player avoiding duplicates when possible
                     let pool = match team {
-                        Team::Red => &game::TEAM_LOADOUT_RED,
-                        Team::Blue => &game::TEAM_LOADOUT_BLUE,
-                        Team::Spectator => &game::TEAM_LOADOUT_RED,
+                        Team::Red => &TEAM_LOADOUT_RED,
+                        Team::Blue => &TEAM_LOADOUT_BLUE,
+                        Team::Spectator => &TEAM_LOADOUT_RED,
                     };
                     let assigned = if team == Team::Red {
                         &mut red_assigned
@@ -257,13 +305,15 @@ pub fn maybe_start_match(
                     }
 
                     let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
+                    // extract the authoritative spawn coordinates from the player
+                    let (sx, sy, sz) = player.position;
                     response.extend_from_slice(&sx.to_be_bytes());
                     response.extend_from_slice(&sy.to_be_bytes());
                     response.extend_from_slice(&sz.to_be_bytes());
                     // attach match mode so clients know which mode is starting
                     response.push(match_mode);
                     // attach freeze duration so all clients use the same value
-                    response.push(game::MATCH_POST_TELEPORT_FREEZE_SECS as u8);
+                    response.push(MATCH_POST_TELEPORT_FREEZE_SECS as u8);
                     let _ = socket.send_to(&response, player.socket_addr);
 
                     current_maze.send(&socket, player.socket_addr);
@@ -293,7 +343,6 @@ pub fn check_early_end_conditions(
     if match_mode == MODE_GUN_GAME {
         return;
     }
-
     // count maze players and alive players in a single pass
     let mut maze_count = 0;
     let mut alive_count = 0;
@@ -313,9 +362,11 @@ pub fn check_early_end_conditions(
         *match_running = false;
         *match_start_time = None;
         *maze = None;
-    } else if alive_count == 1 && *match_total_maze_entries >= 2 {
+    } else if match_mode != MODE_TEAM_DEATHMATCH && alive_count == 1 && *match_total_maze_entries >= 2 {
         // Last player standing wins — only trigger when at least 2 players
-        // entered the maze during this match (not just a solo player)
+        // entered the maze during this match (not just a solo player). For
+        // team-based modes (TDM, S&D) we don't end the match on a single
+        // player's death — team scoring determines match end.
         let winner = last_alive.unwrap();
         let winner_id = winner.id;
         let winner_name = winner.username.clone();
@@ -327,13 +378,13 @@ pub fn check_early_end_conditions(
         let name_bytes = winner_name.as_bytes();
         end_msg.push(name_bytes.len() as u8);
         end_msg.extend_from_slice(name_bytes);
-        end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
+        end_msg.push(MATCH_END_COUNTDOWN_SECS);
         for p in players.values() {
             let _ = socket.send_to(&end_msg, p.socket_addr);
         }
 
         *match_end_pending = Some((
-            Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
+            Instant::now() + Duration::from_secs(MATCH_END_COUNTDOWN_SECS as u64),
             winner_id,
             winner_name,
         ));
@@ -353,8 +404,8 @@ pub fn check_early_end_conditions(
                 }
             }
         }
-        if red_kills >= game::MATCH_SCORE_TO_WIN || blue_kills >= game::MATCH_SCORE_TO_WIN {
-            let (winner_team_name, winner_id) = if red_kills >= game::MATCH_SCORE_TO_WIN {
+        if red_kills >= MATCH_SCORE_TO_WIN || blue_kills >= MATCH_SCORE_TO_WIN {
+            let (winner_team_name, winner_id) = if red_kills >= MATCH_SCORE_TO_WIN {
                 ("Red Team".to_string(), 0u32)
             } else {
                 ("Blue Team".to_string(), 0u32)
@@ -362,8 +413,7 @@ pub fn check_early_end_conditions(
 
             println!(
                 "Team Deathmatch win: {} reached {} kills",
-                winner_team_name,
-                game::MATCH_SCORE_TO_WIN
+                winner_team_name, MATCH_SCORE_TO_WIN
             );
             // Broadcast MSG_MATCH_END with a placeholder id (0) and a team name.
             let mut end_msg = vec![MSG_MATCH_END];
@@ -371,13 +421,13 @@ pub fn check_early_end_conditions(
             let name_bytes = winner_team_name.as_bytes();
             end_msg.push(name_bytes.len() as u8);
             end_msg.extend_from_slice(name_bytes);
-            end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
+            end_msg.push(MATCH_END_COUNTDOWN_SECS);
             for p in players.values() {
                 let _ = socket.send_to(&end_msg, p.socket_addr);
             }
 
             *match_end_pending = Some((
-                Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
+                Instant::now() + Duration::from_secs(MATCH_END_COUNTDOWN_SECS as u64),
                 winner_id,
                 winner_team_name,
             ));
@@ -401,10 +451,10 @@ pub fn update_match_timer(
         let elapsed = Instant::now().duration_since(*start);
 
         // send authoritative remaining-time to clients (only when value changes)
-        let remaining_secs = if elapsed >= game::MATCH_DURATION {
+        let remaining_secs = if elapsed >= MATCH_DURATION {
             0u8
         } else {
-            (game::MATCH_DURATION - elapsed).as_secs().min(255) as u8
+            (MATCH_DURATION - elapsed).as_secs().min(255) as u8
         };
         if *last_match_time_sent != Some(remaining_secs) {
             let _ = broadcast::broadcast_match_timer(socket, players, remaining_secs);
@@ -412,7 +462,7 @@ pub fn update_match_timer(
         }
 
         // timeout -> show match-end screen then return to lobby after countdown
-        if elapsed >= game::MATCH_DURATION && match_end_pending.is_none() {
+        if elapsed >= MATCH_DURATION && match_end_pending.is_none() {
             println!("Match duration elapsed — showing end screen");
             *match_running = false;
 
@@ -454,13 +504,13 @@ pub fn update_match_timer(
             let name_bytes = winner_name.as_bytes();
             end_msg.push(name_bytes.len() as u8);
             end_msg.extend_from_slice(name_bytes);
-            end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
+            end_msg.push(MATCH_END_COUNTDOWN_SECS);
             for p in players.values() {
                 let _ = socket.send_to(&end_msg, p.socket_addr);
             }
 
             *match_end_pending = Some((
-                Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
+                Instant::now() + Duration::from_secs(MATCH_END_COUNTDOWN_SECS as u64),
                 winner_id,
                 winner_name,
             ));

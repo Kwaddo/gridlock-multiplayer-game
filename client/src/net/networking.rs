@@ -327,6 +327,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         if alive {
                             new_players.push(other_player);
                         }
+                        // store team for minimap filtering
+                        if let Some(lp) = new_players.last_mut() {
+                            lp.team = _team;
+                        }
                     } else {
                         // update own-kills value for local UI/scoreboard
                         update.self_kills = Some(kills);
