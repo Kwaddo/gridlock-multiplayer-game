@@ -69,7 +69,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
         };
         match animated_result {
             Ok(animated) => {
-                if animated.mesh().texture.is_none() {
+                if !animated.has_any_texture() {
                     // animated model produced but no texture; try static loader
                     match load_gltf_static_mesh(&resolved_path).await {
                         Ok(mut meshes) => {
@@ -98,7 +98,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                         }
                         Err(static_err) => {
                             // static path failed; keep the textureless animated mesh
-                            let vertex_count = animated.mesh().vertices.len();
+                            let vertex_count = animated.total_vertex_count();
                             playing_state
                                 .animated_models
                                 .insert(key_string.clone(), animated);
@@ -112,7 +112,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                         }
                     }
                 } else {
-                    let vertex_count = animated.mesh().vertices.len();
+                    let vertex_count = animated.total_vertex_count();
                     playing_state
                         .animated_models
                         .insert(key_string.clone(), animated);

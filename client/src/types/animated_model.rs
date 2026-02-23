@@ -62,10 +62,7 @@ struct RigidVertex {
 }
 
 pub struct AnimatedModel {
-    mesh: Mesh,
-    skin_vertices: Vec<SkinVertex>,
-    rigid_vertices: Vec<RigidVertex>,
-    skinned_vertex_count: usize,
+    parts: Vec<AnimatedPart>,
     node_rest: Vec<LocalTransform>,
     node_pose: Vec<LocalTransform>,
     node_parents: Vec<Option<usize>>,
@@ -94,9 +91,28 @@ pub struct AnimatedModel {
 
 const SKIN_INTERVAL: f32 = 1.0 / 30.0; // skin at 30fps max
 
+struct AnimatedPart {
+    mesh: Mesh,
+    skin_vertices: Vec<SkinVertex>,
+    rigid_vertices: Vec<RigidVertex>,
+    skinned_vertex_count: usize,
+}
+
 impl AnimatedModel {
     pub fn mesh(&self) -> &Mesh {
-        &self.mesh
+        &self.parts[0].mesh
+    }
+
+    pub fn meshes(&self) -> impl Iterator<Item = &Mesh> {
+        self.parts.iter().map(|p| &p.mesh)
+    }
+
+    pub fn has_any_texture(&self) -> bool {
+        self.parts.iter().any(|p| p.mesh.texture.is_some())
+    }
+
+    pub fn total_vertex_count(&self) -> usize {
+        self.parts.iter().map(|p| p.mesh.vertices.len()).sum()
     }
 
     pub fn update(&mut self, dt: f32) {
@@ -157,56 +173,62 @@ impl AnimatedModel {
             self.skin_mats[i] = global * self.inverse_bind[i];
         }
 
-        for (i, vtx) in self.skin_vertices.iter().enumerate() {
-            let mut p = Vec3::ZERO;
-            let mut n = Vec3::ZERO;
-            let mut total_w = 0.0;
-            let bind_p = vtx.bind_position.extend(1.0);
-            let bind_n = vtx.bind_normal.extend(0.0);
+        for part in &mut self.parts {
+            for (i, vtx) in part.skin_vertices.iter().enumerate() {
+                let mut p = Vec3::ZERO;
+                let mut n = Vec3::ZERO;
+                let mut total_w = 0.0;
+                let bind_p = vtx.bind_position.extend(1.0);
+                let bind_n = vtx.bind_normal.extend(0.0);
 
-            for j in 0..4 {
-                let w = vtx.weights[j];
-                if w <= 0.0 {
-                    continue;
+                for j in 0..4 {
+                    let w = vtx.weights[j];
+                    if w <= 0.0 {
+                        continue;
+                    }
+                    let joint_idx = vtx.joints[j] as usize;
+                    if joint_idx >= self.skin_mats.len() {
+                        continue;
+                    }
+                    let m = self.skin_mats[joint_idx];
+                    p += (m * bind_p).truncate() * w;
+                    n += (m * bind_n).truncate() * w;
+                    total_w += w;
                 }
-                let joint_idx = vtx.joints[j] as usize;
-                if joint_idx >= self.skin_mats.len() {
-                    continue;
-                }
-                let m = self.skin_mats[joint_idx];
-                p += (m * bind_p).truncate() * w;
-                n += (m * bind_n).truncate() * w;
-                total_w += w;
+
+                let out_p = if total_w > 0.0 {
+                    p
+                } else {
+                    vtx.bind_position
+                };
+                let out_n = if n.length_squared() > 0.0 {
+                    n.normalize()
+                } else {
+                    vtx.bind_normal
+                };
+                part.mesh.vertices[i].position = out_p;
+                part.mesh.vertices[i].normal = out_n.extend(0.0);
             }
 
-            let out_p = if total_w > 0.0 {
-                p
-            } else {
-                vtx.bind_position
-            };
-            let out_n = if n.length_squared() > 0.0 {
-                n.normalize()
-            } else {
-                vtx.bind_normal
-            };
-            self.mesh.vertices[i].position = out_p;
-            self.mesh.vertices[i].normal = out_n.extend(0.0);
         }
 
         // Rigid (unskinned) primitives still follow node animation transforms.
-        for i in 0..self.rigid_vertices.len() {
-            let vtx = self.rigid_vertices[i];
-            let out_idx = self.skinned_vertex_count + i;
-            if out_idx >= self.mesh.vertices.len() {
-                continue;
+        for part_idx in 0..self.parts.len() {
+            let rigid_vertices = self.parts[part_idx].rigid_vertices.clone();
+            let skinned_vertex_count = self.parts[part_idx].skinned_vertex_count;
+            for (i, vtx) in rigid_vertices.iter().enumerate() {
+                let out_idx = skinned_vertex_count + i;
+                if out_idx >= self.parts[part_idx].mesh.vertices.len() {
+                    continue;
+                }
+                let global = self.global_for_node(vtx.node_idx);
+                let out_p = global.transform_point3(vtx.bind_position);
+                let out_n = (global * vtx.bind_normal.extend(0.0))
+                    .truncate()
+                    .normalize_or_zero();
+                self.parts[part_idx].mesh.vertices[out_idx].position = out_p;
+                self.parts[part_idx].mesh.vertices[out_idx].normal = out_n.extend(0.0);
             }
-            let global = self.global_for_node(vtx.node_idx);
-            let out_p = global.transform_point3(vtx.bind_position);
-            let out_n = (global * vtx.bind_normal.extend(0.0))
-                .truncate()
-                .normalize_or_zero();
-            self.mesh.vertices[out_idx].position = out_p;
-            self.mesh.vertices[out_idx].normal = out_n.extend(0.0);
         }
     }
 
@@ -633,17 +655,9 @@ Add one in animation_override_index_for_stem().",
         anim.index()
     );
 
-    // Merge ALL skinned primitives into combined vertex/index buffers
+    // Build one animated part per primitive so each part keeps its own texture/material.
+    let mut parts: Vec<AnimatedPart> = Vec::new();
     let mut all_positions: Vec<Vec3> = Vec::new();
-    let mut all_normals: Vec<Vec3> = Vec::new();
-    let mut all_uvs: Vec<Vec2> = Vec::new();
-    let mut all_joints: Vec<[u16; 4]> = Vec::new();
-    let mut all_weights: Vec<[f32; 4]> = Vec::new();
-    let mut all_indices: Vec<u16> = Vec::new();
-    let mut all_colors: Vec<[u8; 4]> = Vec::new();
-    let mut rigid_runtime_vertices: Vec<Vertex> = Vec::new();
-    let mut rigid_vertices: Vec<RigidVertex> = Vec::new();
-    let mut mesh_texture: Option<Texture2D> = None;
 
     println!("[anim] '{}' merging {} skinned primitives", path, skinned_prims.len());
 
@@ -693,24 +707,25 @@ Add one in animation_override_index_for_stem().",
             }
         }
 
-        // Load texture from first primitive that has one
-        if mesh_texture.is_none() {
-            if let Some(base_color) = sp
-                .material()
-                .pbr_metallic_roughness()
-                .base_color_texture()
-            {
+        let mesh_texture = sp
+            .material()
+            .pbr_metallic_roughness()
+            .base_color_texture()
+            .and_then(|base_color| {
                 let image_index = base_color.texture().source().index();
-                if let Some(image) = images.get(image_index) {
-                    let rgba = gltf_image_to_rgba8(image)?;
-                    if image.width <= u16::MAX as u32 && image.height <= u16::MAX as u32 {
-                        let tex = Texture2D::from_rgba8(image.width as u16, image.height as u16, &rgba);
-                        tex.set_filter(FilterMode::Nearest);
-                        mesh_texture = Some(tex);
-                    }
+                images.get(image_index)
+            })
+            .map(|image| {
+                let rgba = gltf_image_to_rgba8(image).ok()?;
+                if image.width <= u16::MAX as u32 && image.height <= u16::MAX as u32 {
+                    let tex = Texture2D::from_rgba8(image.width as u16, image.height as u16, &rgba);
+                    tex.set_filter(FilterMode::Nearest);
+                    Some(tex)
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .flatten();
 
         let f = sp.material().pbr_metallic_roughness().base_color_factor();
         let mat_color = [
@@ -720,42 +735,67 @@ Add one in animation_override_index_for_stem().",
             (f[3] * 255.0) as u8,
         ];
 
-        // Read indices with offset for merged vertex buffer
-        let base_vertex = all_positions.len() as u16;
+        // Primitive-local indices.
         let prim_indices: Vec<u16> = match reader.read_indices() {
-            Some(ReadIndices::U8(it)) => it.map(|i| i as u16 + base_vertex).collect(),
-            Some(ReadIndices::U16(it)) => it.map(|i| i + base_vertex).collect(),
+            Some(ReadIndices::U8(it)) => it.map(|i| i as u16).collect(),
+            Some(ReadIndices::U16(it)) => it.collect(),
             Some(ReadIndices::U32(it)) => {
                 let mut out = Vec::new();
                 for i in it {
-                    let shifted = i as u32 + base_vertex as u32;
-                    if shifted > u16::MAX as u32 {
-                        return Err(format!("merged index {} exceeds u16 in '{}'", shifted, path));
+                    if i > u16::MAX as u32 {
+                        return Err(format!("index {} exceeds u16 in '{}'", i, path));
                     }
-                    out.push(shifted as u16);
+                    out.push(i as u16);
                 }
                 out
             }
             None => {
                 let mut out = Vec::with_capacity(positions.len());
                 for i in 0..positions.len() {
-                    let shifted = i as u32 + base_vertex as u32;
-                    if shifted > u16::MAX as u32 {
-                        return Err(format!("merged vertex index {} exceeds u16 in '{}'", shifted, path));
+                    if i > u16::MAX as usize {
+                        return Err(format!("vertex index {} exceeds u16 in '{}'", i, path));
                     }
-                    out.push(shifted as u16);
+                    out.push(i as u16);
                 }
                 out
             }
         };
 
-        all_colors.extend(vec![mat_color; positions.len()]);
+        let runtime_vertices: Vec<Vertex> = positions
+            .iter()
+            .zip(normals.iter())
+            .zip(uvs.iter())
+            .map(|((p, n), uv)| Vertex {
+                position: *p,
+                uv: *uv,
+                color: mat_color,
+                normal: n.extend(0.0),
+            })
+            .collect();
+        let skin_vertices: Vec<SkinVertex> = positions
+            .iter()
+            .zip(normals.iter())
+            .zip(joints.iter())
+            .zip(weights.iter())
+            .map(|(((p, n), j), w)| SkinVertex {
+                bind_position: *p,
+                bind_normal: *n,
+                joints: *j,
+                weights: *w,
+            })
+            .collect();
+
         all_positions.extend_from_slice(&positions);
-        all_normals.extend_from_slice(&normals);
-        all_uvs.extend_from_slice(&uvs);
-        all_joints.extend_from_slice(&joints);
-        all_weights.extend(weights);
-        all_indices.extend_from_slice(&prim_indices);
+        parts.push(AnimatedPart {
+            mesh: Mesh {
+                vertices: runtime_vertices,
+                indices: prim_indices,
+                texture: mesh_texture,
+            },
+            skin_vertices,
+            rigid_vertices: Vec::new(),
+            skinned_vertex_count: positions.len(),
+        });
     }
 
     println!("[anim] '{}' merging {} rigid primitives", path, rigid_prims.len());
@@ -783,27 +823,25 @@ Add one in animation_override_index_for_stem().",
             ));
         }
 
-        if mesh_texture.is_none() {
-            if let Some(base_color) = rp
-                .material()
-                .pbr_metallic_roughness()
-                .base_color_texture()
-            {
+        let mesh_texture = rp
+            .material()
+            .pbr_metallic_roughness()
+            .base_color_texture()
+            .and_then(|base_color| {
                 let image_index = base_color.texture().source().index();
-                if let Some(image) = images.get(image_index) {
-                    let rgba = gltf_image_to_rgba8(image)?;
-                    if image.width <= u16::MAX as u32 && image.height <= u16::MAX as u32 {
-                        let tex = Texture2D::from_rgba8(
-                            image.width as u16,
-                            image.height as u16,
-                            &rgba,
-                        );
-                        tex.set_filter(FilterMode::Nearest);
-                        mesh_texture = Some(tex);
-                    }
+                images.get(image_index)
+            })
+            .map(|image| {
+                let rgba = gltf_image_to_rgba8(image).ok()?;
+                if image.width <= u16::MAX as u32 && image.height <= u16::MAX as u32 {
+                    let tex = Texture2D::from_rgba8(image.width as u16, image.height as u16, &rgba);
+                    tex.set_filter(FilterMode::Nearest);
+                    Some(tex)
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .flatten();
 
         let f = rp.material().pbr_metallic_roughness().base_color_factor();
         let mat_color = [
@@ -813,37 +851,36 @@ Add one in animation_override_index_for_stem().",
             (f[3] * 255.0) as u8,
         ];
 
-        let base_vertex = (all_positions.len() + rigid_runtime_vertices.len()) as u16;
         let prim_indices: Vec<u16> = match reader.read_indices() {
-            Some(ReadIndices::U8(it)) => it.map(|i| i as u16 + base_vertex).collect(),
-            Some(ReadIndices::U16(it)) => it.map(|i| i + base_vertex).collect(),
+            Some(ReadIndices::U8(it)) => it.map(|i| i as u16).collect(),
+            Some(ReadIndices::U16(it)) => it.collect(),
             Some(ReadIndices::U32(it)) => {
                 let mut out = Vec::new();
                 for i in it {
-                    let shifted = i as u32 + base_vertex as u32;
-                    if shifted > u16::MAX as u32 {
-                        return Err(format!("merged rigid index {} exceeds u16 in '{}'", shifted, path));
+                    if i > u16::MAX as u32 {
+                        return Err(format!("rigid index {} exceeds u16 in '{}'", i, path));
                     }
-                    out.push(shifted as u16);
+                    out.push(i as u16);
                 }
                 out
             }
             None => {
                 let mut out = Vec::with_capacity(positions.len());
                 for i in 0..positions.len() {
-                    let shifted = i as u32 + base_vertex as u32;
-                    if shifted > u16::MAX as u32 {
+                    if i > u16::MAX as usize {
                         return Err(format!(
-                            "merged rigid vertex index {} exceeds u16 in '{}'",
-                            shifted, path
+                            "rigid vertex index {} exceeds u16 in '{}'",
+                            i, path
                         ));
                     }
-                    out.push(shifted as u16);
+                    out.push(i as u16);
                 }
                 out
             }
         };
 
+        let mut rigid_runtime_vertices: Vec<Vertex> = Vec::with_capacity(positions.len());
+        let mut rigid_vertices: Vec<RigidVertex> = Vec::with_capacity(positions.len());
         for i in 0..positions.len() {
             rigid_runtime_vertices.push(Vertex {
                 position: positions[i],
@@ -857,36 +894,30 @@ Add one in animation_override_index_for_stem().",
                 node_idx: *node_idx,
             });
         }
-        all_indices.extend_from_slice(&prim_indices);
+        all_positions.extend_from_slice(&positions);
+        parts.push(AnimatedPart {
+            mesh: Mesh {
+                vertices: rigid_runtime_vertices,
+                indices: prim_indices,
+                texture: mesh_texture,
+            },
+            skin_vertices: Vec::new(),
+            rigid_vertices,
+            skinned_vertex_count: 0,
+        });
     }
-
-    let mut runtime_vertices: Vec<Vertex> = all_positions
-        .iter()
-        .zip(all_normals.iter())
-        .zip(all_uvs.iter())
-        .zip(all_colors.iter())
-        .map(|(((p, n), uv), col)| Vertex {
-            position: *p,
-            uv: *uv,
-            color: *col,
-            normal: n.extend(0.0),
-        })
-        .collect();
-    runtime_vertices.extend_from_slice(&rigid_runtime_vertices);
-    let skin_vertices: Vec<SkinVertex> = all_positions
-        .iter()
-        .zip(all_normals.iter())
-        .zip(all_joints.iter())
-        .zip(all_weights.iter())
-        .map(|(((p, n), j), w)| SkinVertex {
-            bind_position: *p,
-            bind_normal: *n,
-            joints: *j,
-            weights: *w,
-        })
-        .collect();
-
-    println!("[anim] '{}' total vertices={} indices={}", path, runtime_vertices.len(), all_indices.len());
+    if parts.is_empty() {
+        return Err(format!("no renderable primitives found in '{}'", path));
+    }
+    let total_vertices: usize = parts.iter().map(|p| p.mesh.vertices.len()).sum();
+    let total_indices: usize = parts.iter().map(|p| p.mesh.indices.len()).sum();
+    println!(
+        "[anim] '{}' total vertices={} indices={} parts={}",
+        path,
+        total_vertices,
+        total_indices,
+        parts.len()
+    );
 
     let node_count = doc.nodes().len();
     let mut node_parents = vec![None; node_count];
@@ -1008,14 +1039,7 @@ Add one in animation_override_index_for_stem().",
     let y_offset = -min_y * normalize_scale; // shift feet to y=0
 
     let mut model = AnimatedModel {
-        mesh: Mesh {
-            vertices: runtime_vertices,
-            indices: all_indices,
-            texture: mesh_texture,
-        },
-        skin_vertices,
-        rigid_vertices,
-        skinned_vertex_count: all_positions.len(),
+        parts,
         node_pose: node_rest.clone(),
         node_rest,
         node_parents,
