@@ -107,6 +107,8 @@ pub fn move_all_players_to_lobby(
         let _ = socket.send_to(&wc, p.socket_addr);
     }
 
+    // re-balance lobby teams now that all players are back in lobby
+    crate::server::game::auto_assign_lobby_teams(players);
     // broadcast final state and player-list so clients update immediately
     broadcast_state(socket, players);
     broadcast_player_list(socket, players);

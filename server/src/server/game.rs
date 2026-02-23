@@ -66,6 +66,29 @@ pub const TEAM_LOADOUT_BLUE: [&str; 5] =
 
 use crate::player::Team;
 
+/// Auto-assign balanced teams (Red/Blue) to all players currently in the lobby.
+/// Uses a deterministic ordering (player ID ascending) and alternates assignments
+/// so all clients can predict the same result.
+pub fn auto_assign_lobby_teams(players: &mut HashMap<SocketAddr, Player>) {
+    let mut lobby_pairs: Vec<(SocketAddr, u32)> = players
+        .iter()
+        .filter_map(|(addr, p)| {
+            if p.world == WorldId::Lobby {
+                Some((*addr, p.id))
+            } else {
+                None
+            }
+        })
+        .collect();
+    lobby_pairs.sort_by_key(|(_, id)| *id);
+
+    for (i, (addr, _)) in lobby_pairs.iter().enumerate() {
+        if let Some(p) = players.get_mut(addr) {
+            p.team = if i % 2 == 0 { Team::Red } else { Team::Blue };
+        }
+    }
+}
+
 /// Choose a weapon for `player` from their team's loadout attempting to avoid
 /// duplicates currently assigned to teammates when possible.
 pub fn choose_team_weapon_for_player(

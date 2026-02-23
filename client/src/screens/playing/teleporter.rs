@@ -242,45 +242,56 @@ impl PlayingState {
                 Color::from_rgba(200, 200, 200, 60),
             );
 
-            // titles
+            // titles (with player counts) — counts are computed after
+            // preview_red/preview_blue are populated below, so we defer drawing.
+            // (moved after team split below)
+
+            // Use the server-authoritative team assignments from the
+            // broadcast player list (teams are auto-assigned on the server).
+            let mut preview_red: Vec<&(u32, String, u32, u32, u8, u8, String)> = Vec::new();
+            let mut preview_blue: Vec<&(u32, String, u32, u32, u8, u8, String)> = Vec::new();
+            for entry in self.connected_players.iter() {
+                match entry.5 {
+                    1 => preview_red.push(entry),
+                    2 => preview_blue.push(entry),
+                    _ => {
+                        // unassigned — fall back to alternating by count
+                        if preview_red.len() <= preview_blue.len() {
+                            preview_red.push(entry);
+                        } else {
+                            preview_blue.push(entry);
+                        }
+                    }
+                }
+            }
+
+            // draw subtitle indicating auto-assignment
+            let auto_label = "Auto-Assigned (Balanced)";
+            let auto_w = measure_text(auto_label, None, 14, 1.0);
             draw_text(
-                "Red Team",
+                auto_label,
+                panel_x + (panel_w - auto_w.width) / 2.0,
+                roster_y - 6.0,
+                14.0,
+                Color::from_rgba(120, 220, 120, 220),
+            );
+
+            // team titles with player counts
+            let red_title = format!("Red Team ({})", preview_red.len());
+            draw_text(
+                &red_title,
                 roster_x_left + 12.0,
                 roster_y + 24.0,
                 20.0,
                 Color::from_rgba(230, 120, 120, 255),
             );
+            let blue_title = format!("Blue Team ({})", preview_blue.len());
             draw_text(
-                "Blue Team",
+                &blue_title,
                 roster_x_right + 12.0,
                 roster_y + 24.0,
                 20.0,
                 Color::from_rgba(120, 170, 230, 255),
-            );
-
-            // Preview team assignment for the upcoming match. We use a
-            // deterministic ordering (player id ascending) and alternate
-            // assignments so the server and client agree on which players
-            // will be on Red/Blue when the match starts.
-            let mut sorted_players = self.connected_players.clone();
-            sorted_players.sort_by_key(|entry| entry.0);
-            let mut preview_red: Vec<(u32, String, u32, u32, u8, u8, String)> = Vec::new();
-            let mut preview_blue: Vec<(u32, String, u32, u32, u8, u8, String)> = Vec::new();
-            for (i, entry) in sorted_players.into_iter().enumerate() {
-                if i % 2 == 0 {
-                    preview_red.push(entry);
-                } else {
-                    preview_blue.push(entry);
-                }
-            }
-
-            // draw a small subtitle indicating this is a preview
-            draw_text(
-                "Preview assignment",
-                panel_x + (panel_w / 2.0) - 64.0,
-                roster_y - 6.0,
-                14.0,
-                Color::from_rgba(180, 180, 180, 200),
             );
 
             // draw names with K/D and preview team color (clip if too many)
