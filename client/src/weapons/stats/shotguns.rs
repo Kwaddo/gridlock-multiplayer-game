@@ -164,8 +164,8 @@ pub const SAWNOFF: WeaponStats = WeaponStats {
     name: "Sawnoff",
     fire_mode: FireMode::SemiAuto,
 
-    damage: 15.0,
-    headshot_mult: 1.5,
+    damage: 72.0,
+    headshot_mult: 2.0,
     pellet_count: 10,
     pellet_spread: Some(
         &[
