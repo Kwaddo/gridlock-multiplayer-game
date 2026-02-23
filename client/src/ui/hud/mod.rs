@@ -97,6 +97,7 @@ pub fn draw_hud(
         shield,
         max_shield,
         match_time_left,
+        config,
     );
 
     // nametags are now drawn by draw_player_overhead (camera-based projection)

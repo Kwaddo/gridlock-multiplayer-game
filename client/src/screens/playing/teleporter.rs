@@ -6,7 +6,7 @@ use super::PlayingState;
 
 impl PlayingState {
     /// Modal lobby console UI (pause-menu style). Blocks gameplay input while open.
-    pub(super) fn draw_lobby_console(&mut self) {
+    pub(super) fn draw_lobby_console(&mut self, config: &mut crate::core::GameConfig) {
         use crate::ui::is_button_clicked;
 
         if self.current_world != WorldId::Lobby || !self.lobby_console_open {
@@ -122,6 +122,59 @@ impl PlayingState {
                     2.0,
                     YELLOW,
                 );
+            }
+        }
+
+        // Match time selection (Default / 15m / 30m / Infinite) — small row under modes
+        let time_w = 110.0;
+        let time_h = 32.0;
+        let total_time_w = time_w * 4.0 + 3.0 * 12.0;
+        let time_start_x = panel_x + (panel_w - total_time_w) / 2.0;
+        let time_y = panel_y + 200.0;
+        let time_options = ["Default", "15m", "30m", "Infinite"];
+        for (i, &label) in time_options.iter().enumerate() {
+            let x = time_start_x + i as f32 * (time_w + 12.0);
+            let active = if label == "Infinite" {
+                config.hide_match_timer
+            } else if label == "Default" {
+                config.match_time_override_secs.is_none() && !config.hide_match_timer
+            } else if label == "15m" {
+                config.match_time_override_secs == Some(15 * 60)
+            } else if label == "30m" {
+                config.match_time_override_secs == Some(30 * 60)
+            } else {
+                false
+            };
+            let bg = if active {
+                Color::from_rgba(40, 120, 40, 255)
+            } else {
+                Color::from_rgba(60, 60, 60, 255)
+            };
+            let hover = if active {
+                Color::from_rgba(50, 140, 50, 255)
+            } else {
+                DARKGRAY
+            };
+            if crate::ui::is_button_clicked(x, time_y, time_w, time_h, label, bg, hover) {
+                match label {
+                    "Default" => {
+                        config.match_time_override_secs = None;
+                        config.hide_match_timer = false;
+                    }
+                    "15m" => {
+                        config.match_time_override_secs = Some(15 * 60);
+                        config.hide_match_timer = false;
+                    }
+                    "30m" => {
+                        config.match_time_override_secs = Some(30 * 60);
+                        config.hide_match_timer = false;
+                    }
+                    "Infinite" => {
+                        config.match_time_override_secs = None;
+                        config.hide_match_timer = true;
+                    }
+                    _ => {}
+                }
             }
         }
 

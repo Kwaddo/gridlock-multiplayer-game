@@ -96,6 +96,51 @@ pub fn update_sliders(
             }
         }
     }
+
+    // Match Time override / infinite toggle row
+    let time_row_y = shape_row_y + gui_btn_h + 18.0 * s;
+    if clicked {
+        // Default (use server)
+        let bx0 = gui_start_x;
+        if mouse.0 >= bx0
+            && mouse.0 <= bx0 + gui_btn_w
+            && mouse.1 >= time_row_y
+            && mouse.1 <= time_row_y + gui_btn_h
+        {
+            config.match_time_override_secs = None;
+            config.hide_match_timer = false;
+        }
+        // 15 minutes
+        let bx1 = gui_start_x + (gui_btn_w + gui_btn_gap) * 1.0;
+        if mouse.0 >= bx1
+            && mouse.0 <= bx1 + gui_btn_w
+            && mouse.1 >= time_row_y
+            && mouse.1 <= time_row_y + gui_btn_h
+        {
+            config.match_time_override_secs = Some(15 * 60);
+            config.hide_match_timer = false;
+        }
+        // 30 minutes
+        let bx2 = gui_start_x + (gui_btn_w + gui_btn_gap) * 2.0;
+        if mouse.0 >= bx2
+            && mouse.0 <= bx2 + gui_btn_w
+            && mouse.1 >= time_row_y
+            && mouse.1 <= time_row_y + gui_btn_h
+        {
+            config.match_time_override_secs = Some(30 * 60);
+            config.hide_match_timer = false;
+        }
+        // Infinite (hide)
+        let bx3 = gui_start_x + (gui_btn_w + gui_btn_gap) * 3.0;
+        if mouse.0 >= bx3
+            && mouse.0 <= bx3 + gui_btn_w
+            && mouse.1 >= time_row_y
+            && mouse.1 <= time_row_y + gui_btn_h
+        {
+            config.match_time_override_secs = None;
+            config.hide_match_timer = true;
+        }
+    }
 }
 
 pub fn draw_sliders(
@@ -107,45 +152,39 @@ pub fn draw_sliders(
     panel_top: f32,
     s: f32,
 ) {
-    let label_fs = (18.0 * s) as u16;
-    let btn_fs = (14.0 * s) as u16;
-
-    // GUI Scale row
+    // Recompute layout values (must match update)
     let gui_row_y = panel_top + 50.0 * s;
-    draw_text_ex(
-        "GUI Scale",
-        label_x,
-        gui_row_y + 20.0 * s,
-        text_params(label_fs, WHITE),
-    );
-
     let gui_btn_w = 60.0 * s;
     let gui_btn_h = 28.0 * s;
     let gui_btn_gap = 8.0 * s;
     let gui_start_x = slider_x;
 
-    let effective = config.effective_gui_scale();
+    let label_fs = (18.0 * s) as u16;
+    let btn_fs = (20.0 * s) as u16;
 
+    // GUI Scale row (draw)
+    draw_text_ex(
+        "UI Scale",
+        label_x,
+        gui_row_y + 16.0 * s,
+        text_params(label_fs, WHITE),
+    );
+    let effective = config.effective_gui_scale();
     for (i, &(label, value)) in GUI_SCALE_OPTIONS.iter().enumerate() {
         let bx = gui_start_x + (gui_btn_w + gui_btn_gap) * (i as f32);
         let is_active = config.gui_scale == value;
-
         let bg = if is_active {
             Color::from_rgba(80, 150, 220, 255)
         } else {
             Color::from_rgba(45, 45, 45, 255)
         };
-
         draw_rectangle(bx, gui_row_y, gui_btn_w, gui_btn_h, bg);
         draw_rectangle_lines(bx, gui_row_y, gui_btn_w, gui_btn_h, 1.0, GRAY);
-
-        // For auto, show the resolved value
         let display = if value == 0 {
             format!("Auto({})", effective)
         } else {
             label.to_string()
         };
-
         let tw = measure_game_text(&display, btn_fs);
         draw_text_ex(
             &display,
@@ -155,7 +194,7 @@ pub fn draw_sliders(
         );
     }
 
-    // Sensitivity row
+    // Sensitivity row (draw)
     let row_y = gui_row_y + gui_btn_h + 20.0 * s;
     sensitivity::draw(
         config.sensitivity,
@@ -167,11 +206,11 @@ pub fn draw_sliders(
         s,
     );
 
-    // FOV row
+    // FOV row (draw)
     let row_y2 = row_y + 60.0 * s;
     fov::draw(config.fov, label_x, slider_x, slider_w, btn_size, row_y2, s);
 
-    // Minimap Size row
+    // Minimap Size row (draw)
     let minimap_row_y = row_y2 + 60.0 * s;
     draw_text_ex(
         "Minimap Size",
@@ -190,7 +229,7 @@ pub fn draw_sliders(
         btn_fs,
     );
 
-    // Minimap Shape row
+    // Minimap Shape row (draw)
     let shape_row_y = minimap_row_y + gui_btn_h + 12.0 * s;
     draw_text_ex(
         "Minimap Shape",
@@ -208,6 +247,45 @@ pub fn draw_sliders(
         gui_btn_gap,
         btn_fs,
     );
+
+    // Match Time row (draw)
+    let time_row_y = shape_row_y + gui_btn_h + 18.0 * s;
+    draw_text_ex(
+        "Match Time",
+        label_x,
+        time_row_y + 20.0 * s,
+        text_params(label_fs, WHITE),
+    );
+    let options = ["Default", "15m", "30m", "Infinite"];
+    for (i, &label) in options.iter().enumerate() {
+        let bx = slider_x + (gui_btn_w + gui_btn_gap) * (i as f32);
+        let active = if label == "Infinite" {
+            config.hide_match_timer
+        } else if label == "Default" {
+            config.match_time_override_secs.is_none() && !config.hide_match_timer
+        } else if label == "15m" {
+            config.match_time_override_secs == Some(15 * 60)
+        } else if label == "30m" {
+            config.match_time_override_secs == Some(30 * 60)
+        } else {
+            false
+        };
+
+        let bg = if active {
+            Color::from_rgba(80, 150, 220, 255)
+        } else {
+            Color::from_rgba(45, 45, 45, 255)
+        };
+        draw_rectangle(bx, time_row_y, gui_btn_w, gui_btn_h, bg);
+        draw_rectangle_lines(bx, time_row_y, gui_btn_w, gui_btn_h, 1.0, GRAY);
+        let tw = measure_game_text(label, btn_fs);
+        draw_text_ex(
+            label,
+            bx + (gui_btn_w - tw) / 2.0,
+            time_row_y + gui_btn_h * 0.68,
+            text_params(btn_fs, WHITE),
+        );
+    }
 }
 
 fn draw_button_row(

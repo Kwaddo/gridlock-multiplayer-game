@@ -134,7 +134,7 @@ pub async fn run() {
                     }
                 }
                 playing_state.simulate(&config, maze.as_ref());
-                playing_state.render(&config, &username, player_id, maze.as_ref());
+                playing_state.render(&mut config, &username, player_id, maze.as_ref());
 
                 draw_rectangle(
                     0.0,
@@ -253,7 +253,7 @@ pub async fn run() {
                     }
 
                     playing_state.simulate(&config, maze.as_ref());
-                    playing_state.render(&config, &username, player_id, maze.as_ref());
+                    playing_state.render(&mut config, &username, player_id, maze.as_ref());
                     if DevModeState::update_code_prompt(&mut playing_state.dev_mode) {
                         state = GameState::DevMode;
                         set_cursor_grab(false);
@@ -315,7 +315,7 @@ pub async fn run() {
 
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.send_network(&socket, &server_addr);
-                playing_state.render(&config, &username, player_id, maze.as_ref());
+                playing_state.render(&mut config, &username, player_id, maze.as_ref());
             }
 
             GameState::Paused => {
@@ -347,7 +347,7 @@ pub async fn run() {
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
-                playing_state.render(&config, &username, player_id, maze.as_ref());
+                playing_state.render(&mut config, &username, player_id, maze.as_ref());
 
                 if let Some(new_state) = draw_pause_menu(
                     &config,
@@ -392,7 +392,7 @@ pub async fn run() {
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
-                playing_state.render(&config, &username, player_id, maze.as_ref());
+                playing_state.render(&mut config, &username, player_id, maze.as_ref());
 
                 draw_rectangle(
                     0.0,
@@ -453,7 +453,7 @@ pub async fn run() {
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
-                playing_state.render(&config, &username, player_id, maze.as_ref());
+                playing_state.render(&mut config, &username, player_id, maze.as_ref());
 
                 draw_dev_overlay(
                     &mut playing_state.dev_mode,

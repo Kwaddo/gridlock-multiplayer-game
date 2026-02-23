@@ -88,6 +88,13 @@ pub fn handle_hit(
             if a.world == WorldId::Lobby {
                 return;
             }
+            // If the attacker is in their per-player post-teleport freeze, ignore hits
+            if a.post_teleport_freeze_until
+                .map_or(false, |t| t > Instant::now())
+                && a.world == WorldId::Maze
+            {
+                return;
+            }
             a.socket_addr
         }
         None => return,
@@ -106,6 +113,14 @@ pub fn handle_hit(
 
     // borrow both attacker and victim separately to avoid double mutable borrow
     if let Some(victim) = players.get_mut(&victim_addr) {
+        // If the victim is in their per-player post-teleport freeze, ignore hits
+        if victim
+            .post_teleport_freeze_until
+            .map_or(false, |t| t > Instant::now())
+            && victim.world == WorldId::Maze
+        {
+            return;
+        }
         if !victim.is_alive {
             return;
         }

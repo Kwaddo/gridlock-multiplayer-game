@@ -88,6 +88,10 @@ pub struct GameConfig {
     pub minimap_shape: u8,
     // Audio
     pub mute_audio: bool,
+    // Match timer override: None = use server/default, Some(seconds) = show this local timer
+    pub match_time_override_secs: Option<u32>,
+    // If true, hide the match timer (treat as infinite locally)
+    pub hide_match_timer: bool,
 }
 
 impl GameConfig {
@@ -144,6 +148,8 @@ impl GameConfig {
             minimap_shape: 0, // Circle
             // Audio
             mute_audio: true,
+            match_time_override_secs: None,
+            hide_match_timer: false,
         }
     }
 

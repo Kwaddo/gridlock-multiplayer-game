@@ -108,9 +108,11 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
         state_msg.push(MSG_STATE);
 
         // first pass: count matching players to write header
+        // include players in the same world even if they're dead so clients
+        // receive "alive" status updates for offscreen deaths
         let mut count: u32 = 0;
         for p in players.values() {
-            if p.world == receiver.world && p.is_alive {
+            if p.world == receiver.world {
                 count += 1;
             }
         }
@@ -118,7 +120,7 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
 
         // second pass: append each player's data directly
         for player in players.values() {
-            if player.world != receiver.world || !player.is_alive {
+            if player.world != receiver.world {
                 continue;
             }
             state_msg.extend_from_slice(&player.id.to_be_bytes());
@@ -164,6 +166,8 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
             let name_bytes = player.username.as_bytes();
             state_msg.push(name_bytes.len() as u8);
             state_msg.extend_from_slice(name_bytes);
+            // include alive flag so clients learn of deaths even when offscreen
+            state_msg.push(if player.is_alive { 1u8 } else { 0u8 });
         }
 
         let _ = socket.send_to(&state_msg, receiver.socket_addr);
