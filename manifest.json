@@ -1,8 +1,12 @@
 {
   "global": {
-
     "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
     "fp_hands_knife": "assets/models/hand/knife_animated.glb",
+    "fp_hands_pistol": "assets/models/hand/fps_pistol_animated.glb",
+    "fp_hands_smg": "assets/models/hand/fps_animated_smg.glb",
+    "fp_hands_sniper": "assets/models/hand/sniper_animated.glb",
+    "fp_hands_minigun": "assets/models/hand/minigun_animated.glb",
+    "fp_hands_sawnoff": "assets/models/hand/sawnoff_animated.glb",
 
     "pistol_shot": "assets/sounds/pew.ogg",
     "smg_shot": "assets/sounds/pew.ogg",

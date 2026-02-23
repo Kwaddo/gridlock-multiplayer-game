@@ -12,7 +12,7 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
     fire_rate: 0.8,
     magazine_size: 1,
     max_reserve: 8,
-    reload_time: 3.7,
+    reload_time: 1.60,
 
     recoil_vertical: 0.08,
     recoil_horizontal: 0.01,
@@ -89,7 +89,7 @@ pub const HUNTING_RIFLE: WeaponStats = WeaponStats {
     fire_rate: 1.2,
     magazine_size: 1,
     max_reserve: 10,
-    reload_time: 3.0,
+    reload_time: 1.60,
 
     recoil_vertical: 0.06,
     recoil_horizontal: 0.008,
@@ -143,7 +143,7 @@ pub const SEMI_AUTO_SNIPER: WeaponStats = WeaponStats {
     fire_rate: 2.0,
     magazine_size: 10,
     max_reserve: 30,
-    reload_time: 2.8,
+    reload_time: 1.60,
 
     recoil_vertical: 0.04,
     recoil_horizontal: 0.006,

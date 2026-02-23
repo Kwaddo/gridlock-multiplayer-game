@@ -2,11 +2,11 @@ use macroquad::prelude::*;
 use macroquad::window::gl_set_drawcall_buffer_capacity;
 use std::net::UdpSocket;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::{ Duration, Instant };
 
-use client::core::{GameConfig, GameState};
-use client::screens::dev_mode::{draw_dev_overlay, DevModeState};
-use client::screens::{draw_pause_menu, LobbyInventoryScreen, LoginScreen, PlayingState};
+use client::core::{ GameConfig, GameState };
+use client::screens::dev_mode::{ draw_dev_overlay, DevModeState };
+use client::screens::{ draw_pause_menu, LobbyInventoryScreen, LoginScreen, PlayingState };
 use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
@@ -14,7 +14,7 @@ use client::weapons::crosshair_presets::CrosshairPresetManager;
 use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
-use super::asset_cache::{load_cached_manifest, save_cached_manifest};
+use super::asset_cache::{ load_cached_manifest, save_cached_manifest };
 use super::asset_loader::load_asset_entry;
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
@@ -141,7 +141,7 @@ pub async fn run() {
                     0.0,
                     screen_width(),
                     screen_height(),
-                    Color::from_rgba(0, 0, 0, 150),
+                    Color::from_rgba(0, 0, 0, 150)
                 );
                 lobby_inventory.draw(&loadout);
                 if lobby_inventory.update(&mut loadout) {
@@ -210,7 +210,7 @@ pub async fn run() {
                     loading_assets.len(),
                     loading_index,
                     &loading_current,
-                    loading_started,
+                    loading_started
                 );
             }
 
@@ -230,7 +230,13 @@ pub async fn run() {
                 if playing_state.dev_mode.show_code_prompt {
                     set_cursor_grab(false);
                     show_mouse(true);
-                    let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
+                    let sync = sync_world(
+                        &socket,
+                        player_id,
+                        &username,
+                        &mut playing_state,
+                        &mut maze
+                    );
                     if sync.removed_by_server {
                         socket = None;
                         login_screen.error_msg = "Timed out / disconnected by server.".to_string();
@@ -245,9 +251,10 @@ pub async fn run() {
                         last_server_contact = Some(Instant::now());
                     }
                     if let Some(entries) = sync.assets {
-                        for (key, path) in
-                            resolve_asset_entries_for_quality(&entries, model_quality)
-                        {
+                        for (key, path) in resolve_asset_entries_for_quality(
+                            &entries,
+                            model_quality
+                        ) {
                             load_asset_entry(&key, &path, &mut playing_state).await;
                         }
                     }
@@ -262,8 +269,9 @@ pub async fn run() {
                     }
                     DevModeState::draw_code_prompt(&playing_state.dev_mode);
 
-                    if !playing_state.dev_mode.show_code_prompt
-                        && !matches!(state, GameState::DevMode)
+                    if
+                        !playing_state.dev_mode.show_code_prompt &&
+                        !matches!(state, GameState::DevMode)
                     {
                         set_cursor_grab(true);
                         show_mouse(false);
@@ -349,12 +357,14 @@ pub async fn run() {
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&mut config, &username, player_id, maze.as_ref());
 
-                if let Some(new_state) = draw_pause_menu(
-                    &config,
-                    &mut settings_screen,
-                    &mut playing_state.dev_mode,
-                    playing_state.current_world == client::types::world::WorldId::Maze,
-                ) {
+                if
+                    let Some(new_state) = draw_pause_menu(
+                        &config,
+                        &mut settings_screen,
+                        &mut playing_state.dev_mode,
+                        playing_state.current_world == client::types::world::WorldId::Maze
+                    )
+                {
                     state = new_state;
                     if matches!(state, GameState::LobbyInventory) {
                         lobby_inventory = LobbyInventoryScreen::new();
@@ -399,20 +409,22 @@ pub async fn run() {
                     0.0,
                     screen_width(),
                     screen_height(),
-                    Color::from_rgba(0, 0, 0, 180),
+                    Color::from_rgba(0, 0, 0, 180)
                 );
 
                 settings_screen.draw(
                     &config,
                     &playing_state.weapons,
                     &preset_manager,
-                    &playing_state.assets,
+                    &playing_state.assets
                 );
-                if settings_screen.update(
-                    &mut config,
-                    &mut playing_state.weapons,
-                    &mut preset_manager,
-                ) {
+                if
+                    settings_screen.update(
+                        &mut config,
+                        &mut playing_state.weapons,
+                        &mut preset_manager
+                    )
+                {
                     state = GameState::Paused;
                 }
             }
@@ -469,9 +481,9 @@ pub async fn run() {
                             y,
                             w,
                             mouse,
-                            clicked,
+                            clicked
                         );
-                    },
+                    }
                 );
             }
 
@@ -487,9 +499,10 @@ pub async fn run() {
         // Keepalive: if connected, periodically send a lightweight position update so the
         // server treats us as active even when idle/paused. Interval is less than server timeout.
         if socket.is_some() {
-            if last_keepalive
-                .map(|t| Instant::now().duration_since(t) > Duration::from_secs(4))
-                .unwrap_or(true)
+            if
+                last_keepalive
+                    .map(|t| Instant::now().duration_since(t) > Duration::from_secs(4))
+                    .unwrap_or(true)
             {
                 playing_state.send_network(&socket, &server_addr);
                 last_keepalive = Some(Instant::now());
@@ -536,19 +549,14 @@ fn merge_manifest_entries(existing: &mut Vec<(String, String)>, incoming: Vec<(S
 
 fn resolve_asset_entries_for_quality(
     entries: &[(String, String)],
-    model_quality: ModelQuality,
+    model_quality: ModelQuality
 ) -> Vec<(String, String)> {
     // the `model_quality` parameter is currently unused; kept so we can
     // support different heuristics later (low/medium/high).
     let _ = model_quality;
     entries
         .iter()
-        .map(|(key, path)| {
-            (
-                key.clone(),
-                resolve_asset_path_for_quality(path, model_quality),
-            )
-        })
+        .map(|(key, path)| { (key.clone(), resolve_asset_path_for_quality(path, model_quality)) })
         .collect()
 }
 
@@ -557,17 +565,15 @@ fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> St
     if !path.ends_with(".glb") || !path.starts_with("assets/models/player/") {
         return path.to_string();
     }
-    let normalized = if path.contains('\\') {
-        path.replace('\\', "/")
-    } else {
-        path.to_string()
-    };
+    let normalized = if path.contains('\\') { path.replace('\\', "/") } else { path.to_string() };
 
     if Path::new(&normalized).exists() {
         return normalized;
     }
 
-    let Some(file_name) = Path::new(&normalized).file_name().and_then(|s| s.to_str()) else {
+    let Some(file_name) = Path::new(&normalized)
+        .file_name()
+        .and_then(|s| s.to_str()) else {
         return path.to_string();
     };
 
@@ -607,20 +613,25 @@ fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> St
 async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
     let required = [
         ("fp_hands", "assets/models/hand/fps_animated_carbine.glb"),
+        ("fp_hands_pistol", "assets/models/hand/fps_pistol_animated.glb"),
+
+        ("fp_hands_smg", "assets/models/hand/fps_animated_smg.glb"),
+        ("fp_hands_sniper", "assets/models/hand/sniper_animated.glb"),
+        ("fp_hands_minigun", "assets/models/hand/minigun_animated.glb"),
+        ("fp_hands_sawnoff", "assets/models/hand/sawnoff_animated.glb"),
         ("m1911_model", "assets/models/weapons/Pistols/m1911.glb"),
         ("deagle_model", "assets/models/weapons/Pistols/deagle.glb"),
         ("mp5_model", "assets/models/weapons/SMGs/mp5.glb"),
         ("spas_model", "assets/models/weapons/Shotguns/spas.glb"),
         ("m16_model", "assets/models/weapons/Assault Rifles/m16.glb"),
-        (
-            "bolt_action_model",
-            "assets/models/weapons/Snipers/bolt_action.glb",
-        ),
+        ("bolt_action_model", "assets/models/weapons/Snipers/bolt_action.glb"),
         ("minigun_model", "assets/models/weapons/Other/minigun.glb"),
     ];
 
     for (key, path) in required {
-        if playing_state.models.contains_key(key) || playing_state.animated_models.contains_key(key)
+        if
+            playing_state.models.contains_key(key) ||
+            playing_state.animated_models.contains_key(key)
         {
             continue;
         }

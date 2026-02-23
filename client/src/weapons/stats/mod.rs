@@ -79,6 +79,7 @@ pub enum WeaponId {
     // Shotguns
     Benelli,
     Spas,
+    Sawnoff,
 
     // Assault Rifles
     M4a1,
@@ -118,6 +119,7 @@ impl WeaponId {
         // Shotguns
         WeaponId::Benelli,
         WeaponId::Spas,
+        WeaponId::Sawnoff,
 
         // Assault Rifles
         WeaponId::M4a1,
@@ -152,7 +154,8 @@ impl WeaponId {
             => WeaponCategory::Smg,
 
             WeaponId::Benelli |
-            WeaponId::Spas
+            WeaponId::Spas |
+            WeaponId::Sawnoff
             => WeaponCategory::Shotgun,
 
             WeaponId::M4a1 | WeaponId::Ak | WeaponId::Famas
@@ -190,6 +193,7 @@ impl WeaponId {
             // Shotguns
             WeaponId::Benelli => &shotguns::BENELLI,
             WeaponId::Spas => &shotguns::SPAS,
+            WeaponId::Sawnoff => &shotguns::SAWNOFF,
 
             // Assault Rifles
             WeaponId::M4a1 => &assault_rifles::M4A1,
