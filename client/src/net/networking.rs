@@ -19,7 +19,7 @@ pub struct NetUpdate {
     pub maze: Option<(Maze, Vec3)>,
     pub players: Option<Vec<OtherPlayer>>,
     pub world_change: Option<(WorldId, Vec3, Option<u8>)>, // (world, spawn, freeze_secs)
-    pub assets: Option<Vec<(String, String)>>, // (key, path)
+    pub assets: Option<Vec<(String, String)>>,             // (key, path)
     pub broken_walls: Option<Vec<(u8, u8)>>,
     pub damage_taken: Option<(f32, Option<u32>)>, // (damage amount, attacker_id)
     pub kill_feed: Option<Vec<(u32, u32, String)>>, // (killer_id, victim_id, weapon)
@@ -259,6 +259,12 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     let name =
                         String::from_utf8_lossy(&recv_buf[offset..offset + name_len]).to_string();
                     offset += name_len;
+                    // new: alive flag (1 = alive, 0 = dead)
+                    let mut alive = true;
+                    if offset < size {
+                        alive = recv_buf[offset] != 0;
+                        offset += 1;
+                    }
 
                     if id != player_id {
                         let mut other_player = OtherPlayer::new(id, name, world);
@@ -276,11 +282,23 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.gun_level = gun_level;
                         other_player.hp = hp;
                         other_player.max_hp = max_hp;
-                        new_players.push(other_player);
+                        // Only add other players who are alive; dead players are
+                        // represented by the alive flag and will be removed by
+                        // the client when appropriate so offscreen deaths are
+                        // reliably propagated.
+                        if alive {
+                            new_players.push(other_player);
+                        }
                     } else {
                         // update own-kills value for local UI/scoreboard
                         update.self_kills = Some(kills);
                         update.self_gun_level = Some(gun_level);
+                        // If the server reports we are dead in the state packet,
+                        // mark death so UI/state paths handle it even if MSG_DEATH
+                        // was missed.
+                        if !alive {
+                            update.death = true;
+                        }
                     }
                 }
                 update.players = Some(new_players);

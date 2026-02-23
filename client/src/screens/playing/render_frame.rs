@@ -11,7 +11,7 @@ use super::PlayingState;
 impl PlayingState {
     pub fn render(
         &mut self,
-        config: &GameConfig,
+        config: &mut GameConfig,
         username: &str,
         player_id: u32,
         maze: Option<&Maze>,
@@ -60,7 +60,7 @@ impl PlayingState {
         self.draw_lobby_console_prompt();
 
         // Lobby console (Start Game) overlay
-        self.draw_lobby_console();
+        self.draw_lobby_console(config);
 
         // Don't draw viewmodel or gameplay HUD while dead
         if !self.is_dead {
