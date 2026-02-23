@@ -1,4 +1,4 @@
-use crate::net::protocols::MODE_GUN_GAME;
+use crate::net::protocols::MODE_TEAM_DEATHMATCH;
 use crate::physics::movement::{MovementConfig, MovementState};
 use crate::screens::target_dummy::TargetDummy;
 use crate::types::ai::simulated_player::SimulatedPlayer;
@@ -201,7 +201,7 @@ impl PlayingState {
             current_world: WorldId::Lobby,
             pending_world_change: None,
             pending_start_request: false,
-            pending_start_gamemode: MODE_GUN_GAME,
+            pending_start_gamemode: MODE_TEAM_DEATHMATCH,
             pending_set_team: None,
             lobby_console_open: false,
             pending_broken_walls: Vec::new(),

@@ -44,8 +44,8 @@ pub fn run() -> std::io::Result<()> {
     let mut last_warmup_sent: Option<u8> = None;
     // last sent match-end countdown (MSG_MATCH_END countdown byte)
     let mut last_end_countdown_sent: Option<u8> = None;
-    // current match mode (defaults to Gun Game)
-    let match_mode: u8 = MODE_GUN_GAME;
+    // current match mode (defaults to Team Deathmatch)
+    let mut match_mode: u8 = MODE_TEAM_DEATHMATCH;
     // how many players entered the maze during this match (for last-man-standing detection)
     let mut match_total_maze_entries: usize = 0;
 
@@ -83,6 +83,16 @@ pub fn run() -> std::io::Result<()> {
 
                     // client requests to start a match from the lobby
                     MSG_START_GAME => {
+                        // read the requested game mode from the payload
+                        if !payload.is_empty() {
+                            let requested = payload[0];
+                            if requested == MODE_GUN_GAME
+                                || requested == MODE_TEAM_DEATHMATCH
+                                || requested == MODE_SEARCH_AND_DESTROY
+                            {
+                                match_mode = requested;
+                            }
+                        }
                         handlers::handle_start_game(
                             &socket,
                             &mut players,
@@ -215,6 +225,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut last_match_time_sent,
                 &mut match_total_maze_entries,
                 &mut match_end_pending,
+                match_mode,
             );
         }
 

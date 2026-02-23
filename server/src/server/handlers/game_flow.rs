@@ -395,6 +395,7 @@ pub fn update_match_timer(
     last_match_time_sent: &mut Option<u8>,
     _match_total_maze_entries: &mut usize,
     match_end_pending: &mut Option<(Instant, u32, String)>,
+    match_mode: u8,
 ) {
     if let Some(start) = match_start_time {
         let elapsed = Instant::now().duration_since(*start);
@@ -415,14 +416,36 @@ pub fn update_match_timer(
             println!("Match duration elapsed — showing end screen");
             *match_running = false;
 
-            // find the player with the most kills as the winner
-            let winner = players
-                .values()
-                .filter(|p| p.world == WorldId::Maze)
-                .max_by_key(|p| p.kills);
-            let (winner_id, winner_name) = match winner {
-                Some(w) => (w.id, w.username.clone()),
-                None => (0, "Nobody".to_string()),
+            // For TDM: determine winner by team total kills
+            let (winner_id, winner_name) = if match_mode == MODE_TEAM_DEATHMATCH {
+                let mut red_kills: u32 = 0;
+                let mut blue_kills: u32 = 0;
+                for p in players.values() {
+                    if p.world == WorldId::Maze {
+                        match p.team {
+                            Team::Red => red_kills = red_kills.saturating_add(p.kills),
+                            Team::Blue => blue_kills = blue_kills.saturating_add(p.kills),
+                            _ => {}
+                        }
+                    }
+                }
+                if red_kills > blue_kills {
+                    (0u32, "Red Team".to_string())
+                } else if blue_kills > red_kills {
+                    (0u32, "Blue Team".to_string())
+                } else {
+                    (0u32, "Draw".to_string())
+                }
+            } else {
+                // Other modes: find the player with the most kills as the winner
+                let winner = players
+                    .values()
+                    .filter(|p| p.world == WorldId::Maze)
+                    .max_by_key(|p| p.kills);
+                match winner {
+                    Some(w) => (w.id, w.username.clone()),
+                    None => (0, "Nobody".to_string()),
+                }
             };
 
             // broadcast MSG_MATCH_END with countdown
