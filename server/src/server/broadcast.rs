@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::UdpSocket;
+use std::time::Instant;
 
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
@@ -118,6 +119,8 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
         }
         state_msg.extend_from_slice(&count.to_be_bytes());
 
+        let now = Instant::now();
+
         // second pass: append each player's data directly
         for player in players.values() {
             if player.world != receiver.world {
@@ -168,6 +171,14 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
             state_msg.extend_from_slice(name_bytes);
             // include alive flag so clients learn of deaths even when offscreen
             state_msg.push(if player.is_alive { 1u8 } else { 0u8 });
+            // include remaining post-teleport freeze seconds so clients can
+            // recover authoritative freeze state if they missed the world-change
+            // packet. Represent as a single byte (0 = no freeze).
+            let freeze_secs: u8 = match player.post_teleport_freeze_until {
+                Some(t) if t > now => t.saturating_duration_since(now).as_secs().min(255) as u8,
+                _ => 0u8,
+            };
+            state_msg.push(freeze_secs);
         }
 
         let _ = socket.send_to(&state_msg, receiver.socket_addr);
