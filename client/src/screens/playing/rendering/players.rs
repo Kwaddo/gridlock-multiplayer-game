@@ -44,28 +44,29 @@ impl PlayingState {
                 // Tint model by player color when a skin texture isn't used.
                 // Clone vertices and modulate vertex colors by `p.color` so
                 // textured and untextured meshes both receive the tint.
-                let base_mesh = anim.mesh();
-                if p.color != WHITE {
-                    let mut verts = base_mesh.vertices.clone();
-                    for v in &mut verts {
-                        // v.color is [u8;4] in macroquad Vertex
-                        let r = (v.color[0] as f32 / 255.0) * p.color.r;
-                        let g = (v.color[1] as f32 / 255.0) * p.color.g;
-                        let b = (v.color[2] as f32 / 255.0) * p.color.b;
-                        let a = v.color[3];
-                        v.color[0] = (r.clamp(0.0, 1.0) * 255.0) as u8;
-                        v.color[1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
-                        v.color[2] = (b.clamp(0.0, 1.0) * 255.0) as u8;
-                        v.color[3] = a;
+                for base_mesh in anim.meshes() {
+                    if p.color != WHITE {
+                        let mut verts = base_mesh.vertices.clone();
+                        for v in &mut verts {
+                            // v.color is [u8;4] in macroquad Vertex
+                            let r = (v.color[0] as f32 / 255.0) * p.color.r;
+                            let g = (v.color[1] as f32 / 255.0) * p.color.g;
+                            let b = (v.color[2] as f32 / 255.0) * p.color.b;
+                            let a = v.color[3];
+                            v.color[0] = (r.clamp(0.0, 1.0) * 255.0) as u8;
+                            v.color[1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
+                            v.color[2] = (b.clamp(0.0, 1.0) * 255.0) as u8;
+                            v.color[3] = a;
+                        }
+                        let temp = macroquad::models::Mesh {
+                            vertices: verts,
+                            indices: base_mesh.indices.clone(),
+                            texture: base_mesh.texture.clone(),
+                        };
+                        draw_mesh(&temp);
+                    } else {
+                        draw_mesh(base_mesh);
                     }
-                    let temp = macroquad::models::Mesh {
-                        vertices: verts,
-                        indices: base_mesh.indices.clone(),
-                        texture: base_mesh.texture.clone(),
-                    };
-                    draw_mesh(&temp);
-                } else {
-                    draw_mesh(base_mesh);
                 }
                 gl.quad_gl.pop_model_matrix();
                 return;

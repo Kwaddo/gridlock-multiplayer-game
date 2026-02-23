@@ -92,6 +92,9 @@ impl PlayingState {
         if id == WeaponId::Minigun {
             return "fp_hands_minigun";
         }
+        if id == WeaponId::Sawnoff {
+            return "fp_hands_sawnoff";
+        }
         match id.category() {
             WeaponCategory::Pistol => "fp_hands_pistol",
             WeaponCategory::Smg => "fp_hands_smg",
@@ -191,68 +194,81 @@ impl PlayingState {
 
         self.weapons.update(delta);
 
-        let preferred_hands_key = Self::preferred_hands_key_for_weapon(self.weapons.active().id);
-        let hands_key = if self.animated_models.contains_key(preferred_hands_key)
-            || self.models.contains_key(preferred_hands_key)
-        {
-            preferred_hands_key
-        } else {
-            "fp_hands"
-        };
-        let hands_is_all_in_one = self
-            .asset_source_paths
-            .get(hands_key)
-            .map(|p| Self::is_all_in_one_hands_source(p))
-            .unwrap_or(false);
-        let (reload_start, reload_end) = Self::reload_segment_for_hands_key(hands_key);
+        let active_weapon_id = self.weapons.active().id;
+        let reloading_started = self.weapons.active().is_reloading && !self.prev_was_reloading;
+        let uses_special_hands_machine = matches!(
+            active_weapon_id,
+            WeaponId::Knife | WeaponId::Sawnoff | WeaponId::Minigun
+        );
 
-        if let Some(hands) = self.animated_models.get_mut(hands_key) {
-            if !self.hands_anim_initialized {
-                if hands_is_all_in_one {
-                    // This file has a single combined clip ("allanims"), so idle is a held pose.
-                    hands.stop_at_start();
-                    self.hands_playback_mode = HandsPlaybackMode::Stopped;
-                } else {
-                    hands.play_from_start(true);
-                    self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
-                }
-                self.hands_anim_initialized = true;
-            }
+        if !uses_special_hands_machine {
+            let preferred_hands_key = Self::preferred_hands_key_for_weapon(active_weapon_id);
+            let hands_key = if self.animated_models.contains_key(preferred_hands_key)
+                || self.models.contains_key(preferred_hands_key)
+            {
+                preferred_hands_key
+            } else {
+                "fp_hands"
+            };
+            let hands_is_all_in_one = self
+                .asset_source_paths
+                .get(hands_key)
+                .map(|p| Self::is_all_in_one_hands_source(p))
+                .unwrap_or(false);
+            let (reload_start, reload_end) = Self::reload_segment_for_hands_key(hands_key);
 
-            if let Some(request) = self.dev_mode.hands_anim_request.take() {
-                match request {
-                    HandsAnimRequest::IdleLoop => {
-                        if hands_is_all_in_one {
-                            hands.stop_at_start();
-                            self.hands_playback_mode = HandsPlaybackMode::Stopped;
-                        } else {
-                            hands.play_from_start(true);
-                            self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
-                        }
-                    }
-                    HandsAnimRequest::ReloadOnce => {
-                        hands.play_segment(reload_start, reload_end, false);
-                        self.hands_playback_mode = HandsPlaybackMode::ReloadOnce;
-                    }
-                    HandsAnimRequest::Stop => {
+            if let Some(hands) = self.animated_models.get_mut(hands_key) {
+                if !self.hands_anim_initialized {
+                    if hands_is_all_in_one {
+                        // This file has a single combined clip ("allanims"), so idle is a held pose.
                         hands.stop_at_start();
                         self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                    } else {
+                        hands.play_from_start(true);
+                        self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
+                    }
+                    self.hands_anim_initialized = true;
+                }
+
+                if let Some(request) = self.dev_mode.hands_anim_request.take() {
+                    match request {
+                        HandsAnimRequest::IdleLoop => {
+                            if hands_is_all_in_one {
+                                hands.stop_at_start();
+                                self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                            } else {
+                                hands.play_from_start(true);
+                                self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
+                            }
+                        }
+                        HandsAnimRequest::ReloadOnce => {
+                            hands.play_segment(reload_start, reload_end, false);
+                            self.hands_playback_mode = HandsPlaybackMode::ReloadOnce;
+                        }
+                        HandsAnimRequest::Stop => {
+                            hands.stop_at_start();
+                            self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                        }
+                    }
+                }
+
+                if reloading_started {
+                    hands.play_segment(reload_start, reload_end, false);
+                    self.hands_playback_mode = HandsPlaybackMode::ReloadOnce;
+                }
+
+                if self.hands_playback_mode == HandsPlaybackMode::ReloadOnce
+                    && hands.is_playback_finished()
+                {
+                    if hands_is_all_in_one {
+                        hands.stop_at_start();
+                        self.hands_playback_mode = HandsPlaybackMode::Stopped;
+                    } else {
+                        hands.play_from_start(true);
+                        self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
                     }
                 }
             }
-
-            if self.hands_playback_mode == HandsPlaybackMode::ReloadOnce
-                && hands.is_playback_finished()
-            {
-                if hands_is_all_in_one {
-                    hands.stop_at_start();
-                    self.hands_playback_mode = HandsPlaybackMode::Stopped;
-                } else {
-                    hands.play_from_start(true);
-                    self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
-                }
-            }
-
         }
 
         // --- Knife animation state machine ---
@@ -366,8 +382,8 @@ impl PlayingState {
             if let Some(sawnoff) = self.animated_models.get_mut("fp_hands_sawnoff") {
                 // First time equipping sawnoff, or switching TO sawnoff
                 if !self.sawnoff_anim_initialized || (!was_sawnoff && is_sawnoff) {
-                    sawnoff.play_segment(SAWNOFF_EQUIP_START_SEC, SAWNOFF_EQUIP_END_SEC, false);
-                    self.hands_playback_mode = HandsPlaybackMode::SawnoffEquip;
+                    sawnoff.stop_at_start();
+                    self.hands_playback_mode = HandsPlaybackMode::SawnoffIdle;
                     self.sawnoff_anim_initialized = true;
                 }
 
@@ -376,6 +392,11 @@ impl PlayingState {
                     self.sawnoff_shot_requested = false;
                     sawnoff.play_segment(SAWNOFF_SHOT_START_SEC, SAWNOFF_SHOT_END_SEC, false);
                     self.hands_playback_mode = HandsPlaybackMode::SawnoffShot;
+                }
+                if reloading_started {
+                    self.sawnoff_shot_requested = false;
+                    sawnoff.play_segment(SAWNOFF_RELOAD_START_SEC, SAWNOFF_RELOAD_END_SEC, false);
+                    self.hands_playback_mode = HandsPlaybackMode::SawnoffReload;
                 }
 
                 // Transition back to idle when shot/equip/reload finishes
@@ -443,8 +464,8 @@ impl PlayingState {
         if is_minigun {
             if let Some(minigun) = self.animated_models.get_mut("fp_hands_minigun") {
                 if !self.minigun_anim_initialized || (!was_minigun && is_minigun) {
-                    minigun.play_segment(MINIGUN_EQUIP_START_SEC, MINIGUN_EQUIP_END_SEC, false);
-                    self.hands_playback_mode = HandsPlaybackMode::MinigunEquip;
+                    minigun.stop_at_start();
+                    self.hands_playback_mode = HandsPlaybackMode::MinigunIdle;
                     self.minigun_anim_initialized = true;
                     self.minigun_was_firing = false;
                 }
@@ -461,6 +482,10 @@ impl PlayingState {
                         true,
                     );
                     self.hands_playback_mode = HandsPlaybackMode::MinigunShooting;
+                }
+                if reloading_started {
+                    minigun.play_segment(MINIGUN_RELOAD_START_SEC, MINIGUN_RELOAD_END_SEC, false);
+                    self.hands_playback_mode = HandsPlaybackMode::MinigunReload;
                 }
                 self.minigun_was_firing = is_firing;
 
@@ -522,17 +547,41 @@ impl PlayingState {
         }
         self.prev_weapon_was_minigun = is_minigun;
 
-        // Advance world/player clips plus first-person hands.
+        // Advance world/player clips plus only the active first-person hands model.
+        let active_hands_key = if is_knife {
+            Some("fp_hands_knife")
+        } else if is_sawnoff {
+            Some("fp_hands_sawnoff")
+        } else if is_minigun {
+            Some("fp_hands_minigun")
+        } else {
+            let preferred = Self::preferred_hands_key_for_weapon(active_weapon_id);
+            if self.animated_models.contains_key(preferred) || self.models.contains_key(preferred) {
+                Some(preferred)
+            } else {
+                Some("fp_hands")
+            }
+        };
+
         for (key, model) in self.animated_models.iter_mut() {
-            if key.starts_with("anim_")
-                || key == "fp_hands"
+            let should_update = if key.starts_with("anim_") {
+                true
+            } else if key == "fp_hands_knife" {
+                is_knife || self.hands_playback_mode == HandsPlaybackMode::KnifeLower
+            } else if key == "fp_hands_sawnoff" {
+                is_sawnoff
+            } else if key == "fp_hands_minigun" {
+                is_minigun
+            } else if key == "fp_hands"
                 || key == "fp_hands_pistol"
                 || key == "fp_hands_smg"
                 || key == "fp_hands_sniper"
-                || key == "fp_hands_minigun"
-                || key == "fp_hands_sawnoff"
-                || key == "fp_hands_knife"
             {
+                !uses_special_hands_machine && active_hands_key == Some(key.as_str())
+            } else {
+                false
+            };
+            if should_update {
                 model.update(delta);
             }
         }
@@ -722,6 +771,7 @@ impl PlayingState {
         if !was_grounded && self.movement_state.is_grounded {
             self.just_landed = true;
         }
+        self.prev_was_reloading = self.weapons.active().is_reloading;
 
         /*
             this is the function that actually updates the players hitbox

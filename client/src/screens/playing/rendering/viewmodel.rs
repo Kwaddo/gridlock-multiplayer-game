@@ -1,4 +1,4 @@
-use crate::weapons::stats::{CrosshairStyle, WeaponId};
+use crate::weapons::stats::{CrosshairStyle, WeaponCategory, WeaponId};
 
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
@@ -19,6 +19,21 @@ const INSPECT_POS_B: Vec3 = Vec3::from_array([-0.03, -0.02, -0.06]);
 const INSPECT_ROT_B: Vec3 = Vec3::from_array([-0.18, -0.6, -0.18]);
 
 impl PlayingState {
+    fn preferred_hands_key_for_viewmodel(id: WeaponId) -> &'static str {
+        if id == WeaponId::Minigun {
+            return "fp_hands_minigun";
+        }
+        if id == WeaponId::Sawnoff {
+            return "fp_hands_sawnoff";
+        }
+        match id.category() {
+            WeaponCategory::Pistol => "fp_hands_pistol",
+            WeaponCategory::Smg => "fp_hands_smg",
+            WeaponCategory::Sniper => "fp_hands_sniper",
+            _ => "fp_hands",
+        }
+    }
+
     pub(crate) fn draw_viewmodel(&self) {
         let weapon = self.weapons.active();
         let stats = weapon.stats();
@@ -29,16 +44,18 @@ impl PlayingState {
             if let Some(knife_model) = self.animated_models.get("fp_hands_knife") {
                 let knife_weapon = &self.weapons.knife;
                 let knife_stats = knife_weapon.stats();
-                self.draw_3d_viewmodel(
-                    knife_model.mesh(),
-                    knife_model.normalize_scale,
-                    knife_model.y_offset,
-                    None,
-                    None,
-                    knife_weapon,
-                    knife_stats,
-                    false,
-                );
+                for mesh in knife_model.meshes() {
+                    self.draw_3d_viewmodel(
+                        mesh,
+                        knife_model.normalize_scale,
+                        knife_model.y_offset,
+                        None,
+                        None,
+                        knife_weapon,
+                        knife_stats,
+                        false,
+                    );
+                }
                 return;
             }
         }
@@ -51,14 +68,20 @@ impl PlayingState {
             return;
         }
 
-        /*
-            ATTEMPT TO GET HAND ANIM MODEL
-        */
-        let hands_anim = self.animated_models.get("fp_hands");
+        let preferred_hands_key = Self::preferred_hands_key_for_viewmodel(weapon.id);
+        let hands_anim = self
+            .animated_models
+            .get(preferred_hands_key)
+            .or_else(|| self.animated_models.get("fp_hands"));
         // we only ever use the first mesh for the hands model;
         // older code assumed a single Mesh so adapt accordingly
-        let hands_static = self.models.get("fp_hands").and_then(|mvec| mvec.first());
-        let draw_hands = weapon.id != WeaponId::Knife;
+        let hands_static = self
+            .models
+            .get(preferred_hands_key)
+            .and_then(|mvec| mvec.first())
+            .or_else(|| self.models.get("fp_hands").and_then(|mvec| mvec.first()));
+        // These weapons already include hands in their animated viewmodel.
+        let draw_hands = !matches!(weapon.id, WeaponId::Knife | WeaponId::Sawnoff | WeaponId::Minigun);
 
         if let Some(model_key) = stats.viewmodel_model {
             if let Some(meshes) = self.models.get(model_key) {
@@ -76,16 +99,18 @@ impl PlayingState {
                 }
                 return;
             } else if let Some(animated_model) = self.animated_models.get(model_key) {
-                self.draw_3d_viewmodel(
-                    animated_model.mesh(),
-                    animated_model.normalize_scale,
-                    animated_model.y_offset,
-                    hands_anim,
-                    hands_static,
-                    weapon,
-                    stats,
-                    draw_hands,
-                );
+                for mesh in animated_model.meshes() {
+                    self.draw_3d_viewmodel(
+                        mesh,
+                        animated_model.normalize_scale,
+                        animated_model.y_offset,
+                        hands_anim,
+                        hands_static,
+                        weapon,
+                        stats,
+                        draw_hands,
+                    );
+                }
                 return;
             } else {
                 println!(
@@ -209,23 +234,6 @@ impl PlayingState {
         ) + pair_pos;
 
         let mut motion_offset = Vec3::ZERO;
-        let horizontal_speed = vec2(
-            self.movement_state.velocity.x,
-            self.movement_state.velocity.z,
-        )
-        .length();
-        if horizontal_speed > 0.1 && self.movement_state.is_grounded {
-            let t = self.bob_timer;
-            // Suppress bob during ADS so large Z offsets don't amplify near the camera plane
-            let bob_scale = 1.0 - ads_p * 0.85;
-            motion_offset.x += t.sin() * 0.008 * bob_scale;
-            motion_offset.y += t.cos() * 0.006 * bob_scale;
-        }
-
-        if weapon.is_reloading {
-            let reload_fraction = (weapon.reload_timer / stats.reload_time).clamp(0.0, 1.0);
-            motion_offset.y -= (reload_fraction * std::f32::consts::PI).sin() * 0.08;
-        }
 
         let kick = weapon.muzzle_flash_timer / 0.08;
         motion_offset.z += kick * 0.02;
@@ -312,11 +320,9 @@ impl PlayingState {
 
         if should_draw_hands {
             if let Some(hands_model) = hands_anim {
-                draw_hands(
-                    hands_model.mesh(),
-                    hands_model.normalize_scale,
-                    hands_model.y_offset,
-                );
+                for mesh in hands_model.meshes() {
+                    draw_hands(mesh, hands_model.normalize_scale, hands_model.y_offset);
+                }
             } else if let Some(hands_mesh) = hands_static {
                 draw_hands(hands_mesh, 1.0, 0.0);
             }
@@ -389,24 +395,7 @@ impl PlayingState {
 
         let hip_pos = vec2(screen_w * 0.68, screen_h * 0.88);
         let ads_pos = vec2(screen_w * 0.53, screen_h * 0.78);
-        let mut pos = hip_pos.lerp(ads_pos, weapon.ads_progress);
-
-        let horizontal_speed = vec2(
-            self.movement_state.velocity.x,
-            self.movement_state.velocity.z,
-        )
-        .length();
-        if horizontal_speed > 0.1 && self.movement_state.is_grounded {
-            let t = self.bob_timer;
-            pos.x += t.sin() * 5.0;
-            pos.y += t.cos() * 3.0;
-        }
-
-        if weapon.is_reloading {
-            let reload_fraction =
-                (weapon.reload_timer / weapon.stats().reload_time).clamp(0.0, 1.0);
-            pos.y += (reload_fraction * std::f32::consts::PI).sin() * 12.0;
-        }
+        let pos = hip_pos.lerp(ads_pos, weapon.ads_progress);
 
         let draw_pos = vec2(pos.x - size.x, pos.y - size.y);
 
@@ -443,4 +432,3 @@ impl PlayingState {
         }
     }
 }
-
