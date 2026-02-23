@@ -241,14 +241,6 @@ impl PlayingState {
                 }
             }
 
-            // Auto-trigger reload animation on rising edge (not-reloading -> reloading)
-            let is_reloading = self.weapons.active().is_reloading;
-            if is_reloading && !self.prev_was_reloading {
-                hands.play_segment(reload_start, reload_end, false);
-                self.hands_playback_mode = HandsPlaybackMode::ReloadOnce;
-            }
-            self.prev_was_reloading = is_reloading;
-
             if self.hands_playback_mode == HandsPlaybackMode::ReloadOnce
                 && hands.is_playback_finished()
             {
@@ -379,14 +371,6 @@ impl PlayingState {
                     self.sawnoff_anim_initialized = true;
                 }
 
-                // Reload request from weapon state
-                if self.weapons.active().is_reloading
-                    && self.hands_playback_mode != HandsPlaybackMode::SawnoffReload
-                {
-                    sawnoff.play_segment(SAWNOFF_RELOAD_START_SEC, SAWNOFF_RELOAD_END_SEC, false);
-                    self.hands_playback_mode = HandsPlaybackMode::SawnoffReload;
-                }
-
                 // Shot request
                 if self.sawnoff_shot_requested {
                     self.sawnoff_shot_requested = false;
@@ -462,15 +446,6 @@ impl PlayingState {
                     minigun.play_segment(MINIGUN_EQUIP_START_SEC, MINIGUN_EQUIP_END_SEC, false);
                     self.hands_playback_mode = HandsPlaybackMode::MinigunEquip;
                     self.minigun_anim_initialized = true;
-                    self.minigun_was_firing = false;
-                }
-
-                // Reload
-                if self.weapons.active().is_reloading
-                    && self.hands_playback_mode != HandsPlaybackMode::MinigunReload
-                {
-                    minigun.play_segment(MINIGUN_RELOAD_START_SEC, MINIGUN_RELOAD_END_SEC, false);
-                    self.hands_playback_mode = HandsPlaybackMode::MinigunReload;
                     self.minigun_was_firing = false;
                 }
 
