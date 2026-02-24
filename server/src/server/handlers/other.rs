@@ -9,6 +9,8 @@ use crate::protocols::*;
 use crate::player::Team;
 use crate::server::{broadcast, game};
 
+const BACKSTAB_CONE_DOT: f32 = 0.5;
+
 /// Called when a client reports that they broke a wall at (x,y).
 /// Update the maze and broadcast the event to all connected players.
 pub fn handle_wall_broken(
@@ -75,12 +77,19 @@ pub fn handle_hit(
         let name_len = payload[idx] as usize;
         idx += 1;
         if idx + name_len <= payload.len() {
-            String::from_utf8_lossy(&payload[idx..idx + name_len]).to_string()
+            let name = String::from_utf8_lossy(&payload[idx..idx + name_len]).to_string();
+            idx += name_len;
+            name
         } else {
             String::new()
         }
     } else {
         String::new()
+    };
+    let is_backstab_claim = if idx < payload.len() {
+        payload[idx] != 0
+    } else {
+        false
     };
 
     let attacker = match players.get(&src_addr) {
@@ -133,6 +142,25 @@ pub fn handle_hit(
             return;
         }
     }
+
+    let backstab_verified = if is_backstab_claim && weapon_name.eq_ignore_ascii_case("knife") {
+        let atk_yaw = players.get(&src_addr).map(|a| a.yaw).unwrap_or(0.0);
+        let vic_yaw = players.get(&victim_addr).map(|v| v.yaw).unwrap_or(0.0);
+        let atk_fwd = (atk_yaw.cos(), atk_yaw.sin());
+        let vic_fwd = (vic_yaw.cos(), vic_yaw.sin());
+        let dot = atk_fwd.0 * vic_fwd.0 + atk_fwd.1 * vic_fwd.1;
+        dot > BACKSTAB_CONE_DOT
+    } else {
+        false
+    };
+    let damage = if backstab_verified {
+        players
+            .get(&victim_addr)
+            .map(|v| v.health.saturating_add(1))
+            .unwrap_or(damage)
+    } else {
+        damage
+    };
 
     if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
         // fatal blow: mutate victim in a short scope and send death message

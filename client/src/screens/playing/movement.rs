@@ -77,6 +77,18 @@ impl PlayingState {
             speed
         };
 
+        let speed = if self.weapons.knife_active {
+            speed * crate::weapons::stats::melee::KNIFE_SPEED_BONUS
+        } else {
+            speed
+        };
+
+        let speed = if self.knife_miss_slow_timer > 0.0 {
+            speed * crate::weapons::stats::melee::KNIFE_MISS_MOVE_SLOW
+        } else {
+            speed
+        };
+
         let target_velocity = self.move_dir * speed;
         let rate = if !self.movement_state.is_grounded {
             2.0 // Low air control

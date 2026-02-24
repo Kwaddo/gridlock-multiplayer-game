@@ -39,7 +39,7 @@ impl PlayingState {
                 let _ = s.send_to(&msg, server_addr);
             }
 
-            while let Some((victim_id, damage)) = self.pending_hits.pop() {
+            while let Some((victim_id, damage, is_backstab)) = self.pending_hits.pop() {
                 let mut msg = vec![MSG_HIT];
                 msg.extend_from_slice(&victim_id.to_be_bytes());
                 msg.extend_from_slice(&damage.to_be_bytes());
@@ -47,6 +47,7 @@ impl PlayingState {
                 let weapon_name = self.weapons.active().stats().name.as_bytes();
                 msg.push(weapon_name.len() as u8);
                 msg.extend_from_slice(weapon_name);
+                msg.push(if is_backstab { 1 } else { 0 });
                 let _ = s.send_to(&msg, server_addr);
             }
 
