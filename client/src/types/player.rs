@@ -192,6 +192,7 @@ pub struct OtherPlayer {
     pub is_sprinting: bool,
     pub is_crouching: bool,
     pub is_prone: bool,
+    pub is_sliding: bool,
     pub is_ads: bool,
     pub is_airborne: bool,
     pub evt_jump_start: bool,
@@ -256,6 +257,7 @@ impl OtherPlayer {
             is_sprinting: false,
             is_crouching: false,
             is_prone: false,
+            is_sliding: false,
             is_ads: false,
             is_airborne: false,
             evt_jump_start: false,
@@ -393,7 +395,7 @@ impl CombatEntity for OtherPlayer {
                     self.is_ads,
                     self.is_crouching,
                     self.is_prone,
-                    false,
+                    self.is_sliding,
                     false,
                 );
                 self.skin_type = AnimState::skin_from_state(anim, None);

@@ -70,6 +70,7 @@ pub fn sync_world(
                         || incoming.is_ads != current.is_ads
                         || incoming.is_crouching != current.is_crouching
                         || incoming.is_prone != current.is_prone
+                        || incoming.is_sliding != current.is_sliding
                         || incoming.evt_jump_start;
 
                     if pos_changed || state_changed {
@@ -86,7 +87,7 @@ pub fn sync_world(
                             incoming.is_ads,
                             incoming.is_crouching,
                             incoming.is_prone,
-                            false,
+                            incoming.is_sliding,
                             incoming.evt_jump_start,
                         );
 
@@ -110,6 +111,7 @@ pub fn sync_world(
                     current.is_ads = incoming.is_ads;
                     current.is_crouching = incoming.is_crouching;
                     current.is_prone = incoming.is_prone;
+                    current.is_sliding = incoming.is_sliding;
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     current.kills = incoming.kills;
                     current.team = incoming.team;
@@ -130,7 +132,7 @@ pub fn sync_world(
                         incoming.is_ads,
                         incoming.is_crouching,
                         incoming.is_prone,
-                        false,
+                        incoming.is_sliding,
                         incoming.evt_jump_start,
                     );
                     incoming.skin_type = AnimState::skin_from_state(anim_state, None);

@@ -35,6 +35,11 @@ pub struct DevModeState {
     pub force_ads: bool, // simulate ADS being held for viewmodel preview
     pub viewport_drag_active: bool, // viewmodel: drag on viewport to adjust pos/rot
     pub viewport_drag_prev_mouse: (f32, f32), // last frame mouse pos for delta calc
+    pub ruler_active: bool,
+    pub ruler_start: Option<Vec3>,
+    pub ruler_end: Option<Vec3>,
+    pub ruler_set_start_requested: bool,
+    pub ruler_set_end_requested: bool,
 }
 
 impl DevModeState {
@@ -56,6 +61,11 @@ impl DevModeState {
             force_ads: false,
             viewport_drag_active: false,
             viewport_drag_prev_mouse: (0.0, 0.0),
+            ruler_active: false,
+            ruler_start: None,
+            ruler_end: None,
+            ruler_set_start_requested: false,
+            ruler_set_end_requested: false,
         }
     }
 

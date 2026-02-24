@@ -34,7 +34,9 @@ impl PlayingState {
     }
 
     pub(super) fn update_crouch_height(&mut self, config: &GameConfig, delta: f32) {
-        let target = if self.movement_state.is_prone {
+        let target = if self.movement_state.is_sliding {
+            self.movement_config.slide_height
+        } else if self.movement_state.is_prone {
             self.movement_config.prone_height
         } else if self.movement_state.is_crouching {
             config.crouch_height
@@ -59,6 +61,23 @@ impl PlayingState {
     }
 
     pub(super) fn apply_movement(&mut self, delta: f32) {
+        if self.movement_state.is_sliding {
+            self.movement_state.slide_speed_current = (self.movement_state.slide_speed_current
+                - self.movement_config.slide_friction * delta)
+                .max(0.0);
+
+            let slide_vel =
+                self.movement_state.slide_direction * self.movement_state.slide_speed_current;
+            let saved_vy = self.movement_state.velocity.y;
+            self.movement_state.velocity = slide_vel;
+            self.movement_state.velocity.y = saved_vy;
+
+            self.position.x += self.movement_state.velocity.x * delta;
+            self.position.z += self.movement_state.velocity.z * delta;
+            self.movement_state.slide_timer -= delta;
+            return;
+        }
+
         let speed = if self.movement_state.is_prone {
             self.movement_config.prone_speed
         } else if self.movement_state.is_sprinting {

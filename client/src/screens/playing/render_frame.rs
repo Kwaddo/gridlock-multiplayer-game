@@ -49,11 +49,43 @@ impl PlayingState {
         self.draw_player_hitboxes();
         self.draw_tracers(camera.position);
         self.draw_bullet_holes();
+        if self.dev_mode.ruler_active {
+            if let (Some(mut start), Some(mut end)) = (self.dev_mode.ruler_start, self.dev_mode.ruler_end) {
+                start.y = 0.02;
+                end.y = 0.02;
+                draw_line_3d(start, end, GREEN);
+
+                let delta = end - start;
+                let dist = delta.length();
+                if dist > 0.001 {
+                    let dir = delta / dist;
+                    let tick_count = dist.floor() as i32;
+                    for i in 0..=tick_count {
+                        let p = start + dir * (i as f32);
+                        let color = if i % 5 == 0 { YELLOW } else { ORANGE };
+                        draw_line_3d(p, p + vec3(0.0, 0.20, 0.0), color);
+                    }
+                }
+            }
+        }
 
         set_default_camera();
 
         if self.current_world == WorldId::Lobby {
             self.draw_target_dummy_hud(&camera);
+        }
+
+        if self.dev_mode.ruler_active {
+            if let (Some(start), Some(end)) = (self.dev_mode.ruler_start, self.dev_mode.ruler_end) {
+                let dist = (end - start).length();
+                let txt = format!("Ruler Distance: {:.2}", dist);
+                draw_text_ex(
+                    &txt,
+                    16.0,
+                    24.0,
+                    crate::ui::fonts::text_params(18, Color::from_rgba(160, 240, 160, 255)),
+                );
+            }
         }
 
         self.draw_player_overhead(&camera, maze);

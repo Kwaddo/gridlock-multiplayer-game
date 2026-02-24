@@ -68,7 +68,7 @@ impl PlayingState {
             if self.movement_state.is_prone {
                 state_flags |= FLAG_PRONE;
             }
-            if false {
+            if self.movement_state.is_sliding {
                 state_flags |= FLAG_SLIDING;
             }
 
@@ -80,11 +80,10 @@ impl PlayingState {
             if self.just_landed {
                 event_flags |= EVT_LANDED;
             }
-            // Placeholders for future events
-            if false {
+            if self.movement_state.is_sliding && !self.prev_was_sliding {
                 event_flags |= EVT_SLIDE_START;
             }
-            if false {
+            if !self.movement_state.is_sliding && self.prev_was_sliding {
                 event_flags |= EVT_SLIDE_END;
             }
 
@@ -106,6 +105,7 @@ impl PlayingState {
             buf[p] = event_flags;
             p += 1;
             let _ = s.send_to(&buf[..p], server_addr);
+            self.prev_was_sliding = self.movement_state.is_sliding;
         }
     }
 }
