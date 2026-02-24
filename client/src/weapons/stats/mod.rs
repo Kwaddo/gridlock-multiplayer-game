@@ -220,6 +220,21 @@ impl WeaponId {
         self.stats().name
     }
 
+    /// Look up a `WeaponId` by its display name (case-insensitive).
+    pub fn from_name(name: &str) -> Option<WeaponId> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|w| w.stats().name.eq_ignore_ascii_case(name))
+            .or_else(|| {
+                if name.eq_ignore_ascii_case("Knife") {
+                    Some(WeaponId::Knife)
+                } else {
+                    None
+                }
+            })
+    }
+
     /// All weapon IDs belonging to a given category.
     pub fn all_in(cat: WeaponCategory) -> Vec<WeaponId> {
         Self::ALL.iter().copied().filter(|w| w.category() == cat).collect()

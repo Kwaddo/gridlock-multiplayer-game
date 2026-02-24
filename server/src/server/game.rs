@@ -198,10 +198,19 @@ pub fn process_auto_respawns(
         respawn_msg.extend_from_slice(&sz.to_be_bytes());
         // extra byte: 0 = random spawn, 1 = teleporter fallback
         respawn_msg.push(if used_fallback { 1u8 } else { 0u8 });
-        // choose and assign a team weapon for the respawned player (avoid
-        // duplicating teammates' primaries when possible)
+        // choose weapon for the respawned player based on mode
         let chosen_weapon = if let Some(pref) = players.get(&socket_addr) {
-            choose_team_weapon_for_player(players, pref)
+            let gl = pref.gun_level as usize;
+            if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
+                // Gun Game: weapon from progression
+                GUN_GAME_PROGRESSION[gl - 1].to_string()
+            } else if gl > GUN_GAME_PROGRESSION.len() {
+                "Knife".to_string()
+            } else if pref.team != Team::Spectator {
+                choose_team_weapon_for_player(players, pref)
+            } else {
+                "Knife".to_string()
+            }
         } else {
             "Knife".to_string()
         };

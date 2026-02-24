@@ -160,19 +160,12 @@ pub fn sync_world(
             playing_state.match_mode = Some(mode);
         }
 
-        // Sync authoritative Gun Game weapon slot for local player — only enforce when the
+        // Sync authoritative Gun Game weapon for local player — only enforce when the
         // authoritative/current mode is Gun Game (prefer mode included in the same update).
-        // IMPORTANT: apply the forced slot *after* the player actually teleports into Maze.
+        // IMPORTANT: apply the forced weapon *after* the player actually teleports into Maze.
         if let Some(gl) = updates.self_gun_level {
-            // determine the authoritative mode for this update: prefer updates.match_mode if present
             let current_mode = updates.match_mode.or(playing_state.match_mode);
             if current_mode == Some(MODE_GUN_GAME) {
-                // server sends 1 = first slot; convert to zero-based slot index
-                let slot = (gl as usize).saturating_sub(1);
-
-                // If we're already in the Maze, apply immediately. If the update also contains a
-                // pending world_change to Maze (same poll), apply immediately as well. Otherwise
-                // defer application until the client receives the world change / teleport.
                 let will_be_in_maze = updates
                     .world_change
                     .as_ref()
@@ -180,23 +173,37 @@ pub fn sync_world(
                     .unwrap_or(false);
 
                 if playing_state.current_world == WorldId::Maze || will_be_in_maze {
-                    // Only force a switch to the server-selected gun slot when the
-                    // local player is not currently holding the knife. We still
-                    // apply the lock so the server restricts which gun can be
-                    // selected, but allow the local knife toggle to remain
-                    // active for UX (knife hits are handled server-side).
-                    if !playing_state.weapons.knife_active {
-                        let _ = playing_state.weapons.switch_to(slot);
+                    // Gun Game: replace the weapon in slot 0 with the progression weapon
+                    let level = gl as usize;
+                    let is_knife_level = level > client::weapons::GUN_GAME_PROGRESSION.len();
+                    if is_knife_level {
+                        // Final level: knife only — force knife active
+                        if !playing_state.weapons.knife_active {
+                            playing_state.weapons.toggle_knife();
+                        }
+                        // Lock to slot 0 but keep knife active
+                        playing_state.weapons.set_locked_slot(Some(0));
+                    } else if level >= 1 {
+                        let weapon_id = client::weapons::GUN_GAME_PROGRESSION[level - 1];
+                        // Only replace if the weapon actually changed
+                        if playing_state.weapons.weapons[0].id != weapon_id {
+                            playing_state.weapons.replace_weapon(0, weapon_id);
+                        }
+                        // Ensure we're on slot 0 (not knife) unless player toggled knife
+                        if playing_state.weapons.knife_active {
+                            // Let player keep knife out; lock still applies
+                        } else {
+                            playing_state.weapons.active_slot = 0;
+                        }
+                        playing_state.weapons.set_locked_slot(Some(0));
                     }
-                    playing_state.weapons.set_locked_slot(Some(slot));
                     playing_state.pending_forced_weapon_slot = None;
                 } else {
-                    // store and wait until teleport completes
-                    playing_state.pending_forced_weapon_slot = Some(slot);
+                    // Store gun_level and apply when teleport completes
+                    playing_state.pending_forced_weapon_slot = Some(gl as usize);
                 }
             } else {
-                // do NOT force weapon changes from the server when not in Gun Game
-                // just clear any previous lock so the player can freely switch in the lobby
+                // Not Gun Game: clear any lock so player can freely switch
                 playing_state.weapons.set_locked_slot(None);
                 playing_state.pending_forced_weapon_slot = None;
             }
@@ -240,11 +247,21 @@ pub fn sync_world(
                 playing_state.player_index.clear();
                 playing_state.seen_player_ids.clear();
 
-                // if a forced slot was received earlier while we were still in the lobby,
+                // if a forced gun_level was received earlier while we were still in the lobby,
                 // apply it now that the teleport is complete
-                if let Some(forced) = playing_state.pending_forced_weapon_slot.take() {
-                    let _ = playing_state.weapons.switch_to(forced);
-                    playing_state.weapons.set_locked_slot(Some(forced));
+                if let Some(level) = playing_state.pending_forced_weapon_slot.take() {
+                    let is_knife_level = level > client::weapons::GUN_GAME_PROGRESSION.len();
+                    if is_knife_level {
+                        if !playing_state.weapons.knife_active {
+                            playing_state.weapons.toggle_knife();
+                        }
+                        playing_state.weapons.set_locked_slot(Some(0));
+                    } else if level >= 1 {
+                        let weapon_id = client::weapons::GUN_GAME_PROGRESSION[level - 1];
+                        playing_state.weapons.replace_weapon(0, weapon_id);
+                        playing_state.weapons.active_slot = 0;
+                        playing_state.weapons.set_locked_slot(Some(0));
+                    }
                 }
             } else {
                 // returning to lobby: clear match-end state and maze
@@ -521,16 +538,13 @@ pub fn sync_world(
 
         }
 
-        // ── Always apply team-based colors after all updates ────────────
-        // Team colors must be reapplied every sync, not just when
-        // MSG_PLAYER_LIST arrives. MSG_STATE creates/updates OtherPlayer
-        // objects with default colors, so without this they would lose
-        // their team tint until the next (infrequent) player list packet.
+        // ── Always apply colors after all updates ────────────
+        // Team colors for TDM/S&D, normal ID-based colors for Gun Game and lobby.
         let is_team_mode = matches!(
             playing_state.match_mode,
             Some(m) if m == MODE_TEAM_DEATHMATCH || m == MODE_SEARCH_AND_DESTROY
         );
-        if playing_state.current_world == WorldId::Maze || is_team_mode {
+        if is_team_mode {
             for p in playing_state.other_players.iter_mut() {
                 let team = p.team;
                 let (br, bg, bb) = match team {
