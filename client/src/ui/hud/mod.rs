@@ -40,6 +40,7 @@ pub fn draw_hud(
     last_damage_attacker: Option<&str>,
     maze: Option<&Maze>,
     current_world: WorldId,
+    local_team: u8,
     config: &GameConfig,
 ) {
     let cy = screen_height() / 2.0;
@@ -111,5 +112,13 @@ pub fn draw_hud(
         username,
     );
 
-    minimap::draw_minimap(maze, position, yaw, other_players, current_world, config);
+    minimap::draw_minimap(
+        maze,
+        position,
+        yaw,
+        other_players,
+        current_world,
+        local_team,
+        config,
+    );
 }

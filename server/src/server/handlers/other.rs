@@ -6,6 +6,7 @@ use crate::maze::MazeData;
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
 
+use crate::player::Team;
 use crate::server::{broadcast, game};
 
 /// Called when a client reports that they broke a wall at (x,y).
@@ -137,6 +138,18 @@ pub fn handle_hit(
         // fatal blow: mutate victim in a short scope and send death message
         let wbytes = weapon_name.as_bytes();
 
+        // pick a new primary for the victim so they will have a different
+        // weapon on their next spawn (try to avoid teammates' primaries)
+        let chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
+            if vref.team != Team::Spectator {
+                game::choose_team_weapon_for_player(players, vref)
+            } else {
+                "Knife".to_string()
+            }
+        } else {
+            "Knife".to_string()
+        };
+
         {
             if let Some(vmut) = players.get_mut(&victim_addr) {
                 vmut.is_alive = false;
@@ -215,6 +228,8 @@ pub fn handle_hit(
         if victim_reset_required {
             if let Some(vmut) = players.get_mut(&victim_addr) {
                 vmut.gun_level = 1;
+                // assign chosen primary for upcoming respawn
+                vmut.current_weapon = chosen_weapon_for_victim.clone();
             }
         }
 
@@ -263,17 +278,33 @@ pub fn handle_respawn_request(
         player.health = player.max_health;
         player.is_alive = true;
 
-        // choose a spawn position based on current world. the maze argument
-        // is provided so we can pick a random safe location instead of always
-        // teleporting to the same corner.
+        // choose a spawn position based on current world. For team modes we
+        // assign deterministic team spawns (opposing corners) so players
+        // don't get randomized spawns that break team placement.
         let spawn = if player.world == WorldId::Maze {
-            let (sx, sy, sz, _fallback) = maze.random_spawn_world(game::MAZE_CELL_SIZE);
-            (sx, sy, sz)
+            match player.team {
+                Team::Red => {
+                    let (red, _blue) = maze.team_spawn_positions(game::MAZE_CELL_SIZE);
+                    red
+                }
+                Team::Blue => {
+                    let (_red, blue) = maze.team_spawn_positions(game::MAZE_CELL_SIZE);
+                    blue
+                }
+                _ => {
+                    let (sx, sy, sz, _fallback) = maze.random_spawn_world(game::MAZE_CELL_SIZE);
+                    (sx, sy, sz)
+                }
+            }
         } else {
             // lobby players respawn at a fixed lobby coordinate
             (0.0_f32, 0.5_f32, 0.0_f32)
         };
         player.position = spawn;
+
+        // NOTE: we avoid calling into `choose_team_weapon_for_player` while
+        // holding a mutable borrow of `players`. Compute the chosen weapon
+        // after dropping this mutable borrow below.
 
         let mut resp = Vec::with_capacity(16);
         resp.push(MSG_RESPAWN);
@@ -281,5 +312,43 @@ pub fn handle_respawn_request(
         resp.extend_from_slice(&spawn.1.to_be_bytes());
         resp.extend_from_slice(&spawn.2.to_be_bytes());
         let _ = socket.send_to(&resp, src_addr);
+    }
+
+    // Determine and assign a team primary without holding overlapping borrows.
+    let chosen = if let Some(pref) = players.get(&src_addr) {
+        if pref.team != Team::Spectator {
+            game::choose_team_weapon_for_player(players, pref)
+        } else {
+            "Knife".to_string()
+        }
+    } else {
+        "Knife".to_string()
+    };
+
+    if let Some(player) = players.get_mut(&src_addr) {
+        player.current_weapon = chosen;
+    }
+}
+
+/// Handle a client-request to set their preferred team while in the lobby.
+pub fn handle_set_team(
+    socket: &UdpSocket,
+    players: &mut HashMap<SocketAddr, Player>,
+    src_addr: SocketAddr,
+    payload: &[u8],
+) {
+    if payload.len() < 1 {
+        return;
+    }
+    let team_byte = payload[0];
+    let team = Team::from_u8(team_byte).unwrap_or(Team::Spectator);
+
+    if let Some(player) = players.get_mut(&src_addr) {
+        // only allow changing teams from the lobby
+        if player.world == WorldId::Lobby {
+            player.team = team;
+            // notify all clients of the updated player list so the lobby HUD updates
+            broadcast::broadcast_player_list(socket, players);
+        }
     }
 }

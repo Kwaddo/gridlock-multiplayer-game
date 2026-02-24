@@ -223,9 +223,12 @@ impl PlayingState {
 
         // Sort players by kills (descending)
         let mut sorted_players = self.connected_players.clone();
+        // connected_players: (id, name, kills, deaths, gun_level, team, weapon)
         sorted_players.sort_by(|a, b| b.2.cmp(&a.2));
 
-        for (i, (pid, name, kills, _deaths, _gun_level)) in sorted_players.iter().take(12).enumerate() {
+        for (i, (pid, name, kills, _deaths, _gun_level, _team, _weapon)) in
+            sorted_players.iter().take(12).enumerate()
+        {
             let is_local = *pid == local_player_id;
             let is_winner = name == winner_name;
             let row_y = cy - 13.0;
@@ -239,13 +242,24 @@ impl PlayingState {
             let rank_color = if i == 0 { gold } else { text_dim };
             draw_text_ex(&rank, col_rank_x, cy, text_params(14, rank_color));
 
-            // Player name
+            // Player name: prefer winner/local emphasis, otherwise color by team
             let name_color = if is_winner {
                 accent
             } else if is_local {
                 text_bright
             } else {
-                text_label
+                // Try to color by team when available via connected_players
+                if let Some((_id, pname, _kills, _deaths, _gl, team, _wep)) =
+                    self.connected_players.iter().find(|(pid, n, ..)| n == name)
+                {
+                    match *team {
+                        1 => Color::from_rgba(230, 120, 120, 255),
+                        2 => Color::from_rgba(120, 170, 230, 255),
+                        _ => text_label,
+                    }
+                } else {
+                    text_label
+                }
             };
             draw_text_ex(name, col_name_x, cy, text_params(14, name_color));
 

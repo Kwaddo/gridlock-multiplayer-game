@@ -83,6 +83,139 @@ impl MazeData {
         )
     }
 
+    /// Determine two deterministic team spawn positions (world coords).
+    /// Picks two room centers (if rooms available) that are farthest apart.
+    /// Falls back to opposite maze corners if rooms are absent.
+    pub fn team_spawn_positions(&self, cell_size: f32) -> ((f32, f32, f32), (f32, f32, f32)) {
+        // Collect candidate centers from rooms
+        let mut centers: Vec<(f32, f32)> = Vec::new();
+        for r in &self.rooms {
+            // center cell of the room (may be fractional when width/height even)
+            let cx = r.x as f32 + (r.w as f32) / 2.0;
+            let cy = r.y as f32 + (r.h as f32) / 2.0;
+            centers.push((cx, cy));
+        }
+
+        // Helper: check 3x3 clearance around a cell and ensure no props occupy that area
+        let width_usize = self.width as usize;
+        let height_usize = self.height as usize;
+        let has_clearance = |cx: usize, cy: usize| -> bool {
+            if cx == 0 || cy == 0 || cx + 1 >= width_usize || cy + 1 >= height_usize {
+                return false;
+            }
+            // cell walkability check
+            for dy in (cy - 1)..=(cy + 1) {
+                for dx in (cx - 1)..=(cx + 1) {
+                    let idx = dy * width_usize + dx;
+                    if self.cells.get(idx).copied().unwrap_or(0) == 0 {
+                        return false;
+                    }
+                }
+            }
+            // ensure no prop sits inside the 3x3 area (avoid spawning on/next to props)
+            for prop in &self.props {
+                let px = prop.x as usize;
+                let py = prop.y as usize;
+                if (px >= cx.saturating_sub(1) && px <= cx + 1)
+                    && (py >= cy.saturating_sub(1) && py <= cy + 1)
+                {
+                    return false;
+                }
+                // also check a small world-space distance to avoid edge collisions
+                let cand_x = (cx as f32 + 0.5) * cell_size;
+                let cand_z = (cy as f32 + 0.5) * cell_size;
+                let prop_x = (prop.x as f32 + 0.5) * cell_size;
+                let prop_z = (prop.y as f32 + 0.5) * cell_size;
+                let dx = prop_x - cand_x;
+                let dz = prop_z - cand_z;
+                let min_dist = cell_size * 0.9; // slightly less than a cell
+                if dx * dx + dz * dz <= min_dist * min_dist {
+                    return false;
+                }
+            }
+            true
+        };
+
+        // If we have at least two room centers, pick the pair with max distance
+        if centers.len() >= 2 {
+            let mut best: Option<(usize, usize, f32)> = None;
+            for i in 0..centers.len() {
+                for j in (i + 1)..centers.len() {
+                    let dx = centers[i].0 - centers[j].0;
+                    let dy = centers[i].1 - centers[j].1;
+                    let d2 = dx * dx + dy * dy;
+                    if best.as_ref().map_or(true, |b| d2 > b.2) {
+                        best = Some((i, j, d2));
+                    }
+                }
+            }
+            if let Some((i, j, _)) = best {
+                let a = centers[i];
+                let b = centers[j];
+                // Try to find a nearby clear spawn cell inside each room near the center.
+                let find_spawn_near = |cx: f32, cy: f32| -> (f32, f32, f32) {
+                    let rcx = cx.floor() as isize;
+                    let rcy = cy.floor() as isize;
+                    // search a small radius around the room center for a clear cell
+                    for r in 0..=((self.width.max(self.height)) as isize) {
+                        for oy in -r..=r {
+                            for ox in -r..=r {
+                                let sx = rcx + ox;
+                                let sy = rcy + oy;
+                                if sx < 1 || sy < 1 {
+                                    continue;
+                                }
+                                let ux = sx as usize;
+                                let uy = sy as usize;
+                                if ux + 1 >= width_usize || uy + 1 >= height_usize {
+                                    continue;
+                                }
+                                if has_clearance(ux, uy) {
+                                    return (
+                                        (ux as f32 + 0.5) * cell_size,
+                                        0.0_f32,
+                                        (uy as f32 + 0.5) * cell_size,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    // fallback to center cell world coords
+                    ((cx + 0.5) * cell_size, 0.0_f32, (cy + 0.5) * cell_size)
+                };
+
+                let a_world = find_spawn_near(a.0, a.1);
+                let b_world = find_spawn_near(b.0, b.1);
+                return (a_world, b_world);
+            }
+        }
+
+        // Fallback: choose corners but ensure they have clearance; prefer scanning inward
+        let try_corner = |cx: usize, cy: usize| -> (f32, f32, f32) {
+            // search inward from corner for any cell with clearance
+            for ry in 1..(height_usize - 1) {
+                for rx in 1..(width_usize - 1) {
+                    let sx = if cx == 0 { rx } else { width_usize - 1 - rx };
+                    let sy = if cy == 0 { ry } else { height_usize - 1 - ry };
+                    if has_clearance(sx, sy) {
+                        return (
+                            (sx as f32 + 0.5) * cell_size,
+                            0.0_f32,
+                            (sy as f32 + 0.5) * cell_size,
+                        );
+                    }
+                }
+            }
+            // final fallback: teleporter
+            let (tx, ty, tz) = self.teleporter_world(cell_size);
+            (tx, ty, tz)
+        };
+
+        let a_world = try_corner(0, 0);
+        let b_world = try_corner(1, 1);
+        (a_world, b_world)
+    }
+
     /// Pick a random walkable cell that has a 3x3 clearance and convert to world coords.
     /// Falls back to the teleporter position if no suitable spot is found.
     /// Returns (x, y, z, used_fallback)
@@ -110,7 +243,20 @@ impl MazeData {
             for prop in &self.props {
                 let px = prop.x as usize;
                 let py = prop.y as usize;
-                if (px >= cx.saturating_sub(1) && px <= cx + 1) && (py >= cy.saturating_sub(1) && py <= cy + 1) {
+                if (px >= cx.saturating_sub(1) && px <= cx + 1)
+                    && (py >= cy.saturating_sub(1) && py <= cy + 1)
+                {
+                    return false;
+                }
+                // also check a small world-space distance to avoid edge collisions
+                let cand_x = (cx as f32 + 0.5) * cell_size;
+                let cand_z = (cy as f32 + 0.5) * cell_size;
+                let prop_x = (prop.x as f32 + 0.5) * cell_size;
+                let prop_z = (prop.y as f32 + 0.5) * cell_size;
+                let dx = prop_x - cand_x;
+                let dz = prop_z - cand_z;
+                let min_dist = cell_size * 0.9; // slightly less than a cell
+                if dx * dx + dz * dz <= min_dist * min_dist {
                     return false;
                 }
             }
@@ -123,7 +269,12 @@ impl MazeData {
             let ry = rng.gen_range(1..(self.height.saturating_sub(1)) as u8) as usize;
             let idx = ry * width_usize + rx;
             if idx < self.cells.len() && self.cells[idx] == 1 && has_clearance(rx, ry) {
-                return ((rx as f32 + 0.5) * cell_size, 0.0, (ry as f32 + 0.5) * cell_size, false);
+                return (
+                    (rx as f32 + 0.5) * cell_size,
+                    0.0,
+                    (ry as f32 + 0.5) * cell_size,
+                    false,
+                );
             }
         }
 
@@ -132,7 +283,12 @@ impl MazeData {
             for rx in 1..(width_usize - 1) {
                 let idx = ry * width_usize + rx;
                 if self.cells[idx] == 1 && has_clearance(rx, ry) {
-                    return ((rx as f32 + 0.5) * cell_size, 0.0, (ry as f32 + 0.5) * cell_size, false);
+                    return (
+                        (rx as f32 + 0.5) * cell_size,
+                        0.0,
+                        (ry as f32 + 0.5) * cell_size,
+                        false,
+                    );
                 }
             }
         }
