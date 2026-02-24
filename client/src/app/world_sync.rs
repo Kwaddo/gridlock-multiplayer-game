@@ -463,6 +463,23 @@ pub fn sync_world(
             // teleport back to the lobby (MSG_WORLD_CHANGE will arrive later).
         }
 
+        // S&D round state
+        if let Some(snd) = updates.snd_round_state {
+            playing_state.snd_round = snd.round;
+            playing_state.snd_max_rounds = snd.max_rounds;
+            playing_state.snd_red_wins = snd.red_wins;
+            playing_state.snd_blue_wins = snd.blue_wins;
+            playing_state.snd_phase = snd.phase;
+            playing_state.snd_attacking_team = snd.attacking_team;
+            playing_state.snd_bomb_carrier_id = snd.bomb_carrier_id;
+            playing_state.snd_bomb_dropped = snd.bomb_dropped;
+            playing_state.snd_bomb_site = snd.bomb_site;
+            playing_state.snd_bomb_planted = snd.bomb_planted;
+            playing_state.snd_plant_progress = snd.plant_progress;
+            playing_state.snd_defuse_progress = snd.defuse_progress;
+            playing_state.snd_phase_timer = snd.phase_timer;
+        }
+
         // Global connected player list (for Tab / scoreboard)
         if let Some(list) = updates.player_list {
             // detect whether the server still knows about *us* — if not, server removed us (timed out)

@@ -28,6 +28,12 @@ pub const MSG_PLAYER_LIST: u8 = 23; // server -> client: full connected player l
 pub const MSG_MATCH_COUNTDOWN: u8 = 24; // server -> all: match start countdown (seconds)
 pub const MSG_MATCH_TIMER: u8 = 25; // server -> all: authoritative match time remaining (seconds)
 pub const MSG_SET_TEAM: u8 = 26; // client -> server: set preferred team (team:u8)
+pub const MSG_SND_ROUND_STATE: u8 = 27; // server -> all: S&D round state
+pub const MSG_SND_BOMB_PICKUP: u8 = 28; // client -> server: request to pick up dropped bomb
+pub const MSG_SND_PLANT_START: u8 = 29; // client -> server: start planting bomb
+pub const MSG_SND_PLANT_STOP: u8 = 30; // client -> server: stop planting bomb
+pub const MSG_SND_DEFUSE_START: u8 = 31; // client -> server: start defusing bomb
+pub const MSG_SND_DEFUSE_STOP: u8 = 32; // client -> server: stop defusing bomb
 
 // State flags for player movement and actions, sent in the position message
 pub const FLAG_SPRINTING: u8 = 1 << 0;

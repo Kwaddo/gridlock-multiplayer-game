@@ -173,6 +173,7 @@ pub fn maybe_start_match(
     last_match_time_sent: &mut Option<u8>,
     match_total_maze_entries: &mut usize,
     match_mode: u8,
+    snd_state: &mut Option<crate::server::snd::SndState>,
 ) {
     if let Some(end) = *match_warmup_end {
         if Instant::now() >= end {
@@ -221,13 +222,22 @@ pub fn maybe_start_match(
             let mut red_assigned: Vec<String> = Vec::new();
             let mut blue_assigned: Vec<String> = Vec::new();
 
-            // For Team Deathmatch compute two deterministic spawn positions
+            // For team-based modes compute two deterministic spawn positions
             // (red, blue) that are farthest apart in the generated maze.
-            let team_spawns = if match_mode == crate::protocols::MODE_TEAM_DEATHMATCH {
+            let team_spawns = if match_mode == crate::protocols::MODE_TEAM_DEATHMATCH
+                || match_mode == crate::protocols::MODE_SEARCH_AND_DESTROY
+            {
                 Some(current_maze.team_spawn_positions(MAZE_CELL_SIZE))
             } else {
                 None
             };
+
+            // For S&D, compute bomb site and initialize round state
+            if match_mode == crate::protocols::MODE_SEARCH_AND_DESTROY {
+                let bomb_site = current_maze.bomb_site_position(MAZE_CELL_SIZE);
+                let (red_spawn, blue_spawn) = team_spawns.unwrap_or(((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)));
+                *snd_state = Some(crate::server::snd::SndState::new(bomb_site, red_spawn, blue_spawn));
+            }
 
             for (i, addr) in joiners.iter().enumerate() {
                 if let Some(player) = players.get_mut(addr) {
@@ -323,6 +333,13 @@ pub fn maybe_start_match(
             // broadcast updated player list/state so clients update immediately
             broadcast::broadcast_state(socket, players);
             broadcast::broadcast_player_list(socket, players);
+
+            // For S&D, start the first round now that all players are in the maze
+            if match_mode == crate::protocols::MODE_SEARCH_AND_DESTROY {
+                if let Some(ref mut snd) = snd_state {
+                    snd.start_round(socket, players);
+                }
+            }
         }
     }
 }
@@ -529,6 +546,7 @@ pub fn execute_scheduled_match_end(
     last_match_time_sent: &mut Option<u8>,
     match_total_maze_entries: &mut usize,
     winner_name: String,
+    snd_state: &mut Option<crate::server::snd::SndState>,
 ) {
     println!(
         "Match end countdown expired — returning players to Lobby (winner {})",
@@ -547,4 +565,6 @@ pub fn execute_scheduled_match_end(
     *match_end_pending = None;
     *last_match_time_sent = None;
     *match_total_maze_entries = 0;
+    // clear S&D state
+    *snd_state = None;
 }
