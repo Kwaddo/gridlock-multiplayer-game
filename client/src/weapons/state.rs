@@ -21,6 +21,7 @@ pub struct WeaponState {
     // -- ADS
     pub is_aiming: bool,
     pub ads_progress: f32,        // 0.0 = hip, 1.0 = fully aimed
+    pub ads_time_multiplier: f32, // movement modifiers (e.g. sliding) scale ADS in/out time
     pub jump_cancelled_ads: bool, // true when jump cancelled ADS, prevents re-aim until button released
 
     // -- Recoil accumulation (applied to camera)
@@ -78,6 +79,7 @@ impl WeaponState {
             is_reloading: false,
             is_aiming: false,
             ads_progress: 0.0,
+            ads_time_multiplier: 1.0,
             jump_cancelled_ads: false,
             recoil_pitch: 0.0,
             recoil_yaw: 0.0,
@@ -158,7 +160,7 @@ impl WeaponState {
         }
 
         // ADS interpolation
-        let ads_time = self.stats_data.ads_time;
+        let ads_time = (self.stats_data.ads_time * self.ads_time_multiplier).max(0.0001);
         if self.is_aiming {
             self.ads_progress = (self.ads_progress + delta / ads_time).min(1.0);
         } else {

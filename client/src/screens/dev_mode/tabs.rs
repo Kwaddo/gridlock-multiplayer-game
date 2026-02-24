@@ -843,4 +843,44 @@ pub(super) fn draw_debug_tab(
             w.crosshair = CrosshairConfig::for_category(w.id.category());
         }
     }
+
+    y += 20.0;
+    y += draw_section_header("Distance Ruler", x, y);
+    y += draw_toggle("Ruler Active", &mut dev.ruler_active, x, y, mouse, clicked);
+
+    let (h, set_start) = draw_action_button("Set Start", x, y, 120.0, mouse, clicked);
+    y += h;
+    if set_start {
+        dev.ruler_set_start_requested = true;
+    }
+
+    let (h, set_end) = draw_action_button("Set End", x, y, 120.0, mouse, clicked);
+    y += h;
+    if set_end {
+        dev.ruler_set_end_requested = true;
+    }
+
+    let (h, clear) = draw_action_button("Clear Ruler", x, y, 120.0, mouse, clicked);
+    y += h;
+    if clear {
+        dev.ruler_start = None;
+        dev.ruler_end = None;
+    }
+
+    if let (Some(start), Some(end)) = (dev.ruler_start, dev.ruler_end) {
+        let dist = (end - start).length();
+        draw_text_ex(
+            &format!("Distance: {:.2}", dist),
+            x,
+            y + 14.0,
+            text_params(14, Color::from_rgba(180, 230, 180, 255)),
+        );
+    } else {
+        draw_text_ex(
+            "Set both points to measure distance",
+            x,
+            y + 14.0,
+            text_params(14, GRAY),
+        );
+    }
 }

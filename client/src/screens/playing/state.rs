@@ -142,6 +142,8 @@ pub struct PlayingState {
     pub hands_anim_initialized: bool,
     pub prev_hands_key: Option<String>, // tracks active hands rig key across swaps
     pub prev_was_reloading: bool, // edge detection for reload anim trigger
+    pub prev_was_sliding: bool, // edge detection for slide start/end network events
+    pub prev_any_slide_anim_active: bool, // edge detect for shared world slide clip playback
 
     pub knife_swing_index: u8, // cycles 0..2 for light slashes (swings 1-3)
     pub knife_swing_requested: bool, // set by input_processing when knife fires
@@ -268,6 +270,8 @@ impl PlayingState {
             hands_anim_initialized: false,
             prev_hands_key: None,
             prev_was_reloading: false,
+            prev_was_sliding: false,
+            prev_any_slide_anim_active: false,
             knife_swing_index: 0,
             knife_swing_requested: false,
             knife_heavy_swing_requested: false,

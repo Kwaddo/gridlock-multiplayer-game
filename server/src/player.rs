@@ -70,6 +70,7 @@ pub struct Player {
     pub is_crouched: bool,
     pub is_airborne: bool,
     pub is_prone: bool,
+    pub is_sliding: bool,
 
     pub evt_jump_start: bool, // for precise jump animation timing
     pub evt_landed: bool,     // for precise landing animation timing
@@ -106,6 +107,7 @@ impl Player {
             is_crouched: false,
             is_airborne: false,
             is_prone: false,
+            is_sliding: false,
             evt_jump_start: false,
             evt_landed: false,
             team: Team::Spectator,
