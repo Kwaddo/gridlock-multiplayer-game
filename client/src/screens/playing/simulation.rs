@@ -243,8 +243,10 @@ impl PlayingState {
                             }
                         }
                         HandsAnimRequest::ReloadOnce => {
-                            hands.play_segment(reload_start, reload_end, false);
-                            self.hands_playback_mode = HandsPlaybackMode::ReloadOnce;
+                            if active_weapon_id.category() != WeaponCategory::Pistol {
+                                hands.play_segment(reload_start, reload_end, false);
+                                self.hands_playback_mode = HandsPlaybackMode::ReloadOnce;
+                            }
                         }
                         HandsAnimRequest::Stop => {
                             hands.stop_at_start();
@@ -253,7 +255,7 @@ impl PlayingState {
                     }
                 }
 
-                if reloading_started {
+                if reloading_started && active_weapon_id.category() != WeaponCategory::Pistol {
                     hands.play_segment(reload_start, reload_end, false);
                     self.hands_playback_mode = HandsPlaybackMode::ReloadOnce;
                 }
