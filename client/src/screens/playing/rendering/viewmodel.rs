@@ -8,15 +8,6 @@ use super::super::state::HandsPlaybackMode;
 use super::super::PlayingState;
 
 const HANDS_BASE_SCALE: f32 = 0.35;
-const INSPECT_START_SEC: f32 = 0.35;
-const INSPECT_SWEEP_SEC: f32 = 0.6;
-const INSPECT_HOLD_SEC: f32 = 0.85;
-const INSPECT_RETURN_SEC: f32 = 0.45;
-const INSPECT_LOOK_DOWN_Y: f32 = -0.26;
-const INSPECT_POS_A: Vec3 = Vec3::from_array([0.02, -0.03, -0.04]);
-const INSPECT_ROT_A: Vec3 = Vec3::from_array([-0.22, 0.45, 0.16]);
-const INSPECT_POS_B: Vec3 = Vec3::from_array([-0.03, -0.02, -0.06]);
-const INSPECT_ROT_B: Vec3 = Vec3::from_array([-0.18, -0.6, -0.18]);
 
 impl PlayingState {
     fn preferred_hands_key_for_viewmodel(id: WeaponId) -> &'static str {
@@ -144,42 +135,13 @@ impl PlayingState {
 
         let (base_x, base_y, base_z) = stats.viewmodel_position;
         let (rot_pitch, rot_yaw, rot_roll) = stats.viewmodel_rotation;
-        let (inspect_pos, inspect_rot, inspect_look_alpha) = match self.inspect_phase {
-            super::super::state::InspectPhase::None => (Vec3::ZERO, Vec3::ZERO, 0.0),
-            super::super::state::InspectPhase::Start => {
-                let t = (self.inspect_timer / INSPECT_START_SEC).clamp(0.0, 1.0);
-                (
-                    Vec3::ZERO.lerp(INSPECT_POS_A, t),
-                    Vec3::ZERO.lerp(INSPECT_ROT_A, t),
-                    t,
-                )
-            }
-            super::super::state::InspectPhase::Sweep => {
-                let t = (self.inspect_timer / INSPECT_SWEEP_SEC).clamp(0.0, 1.0);
-                (
-                    INSPECT_POS_A.lerp(INSPECT_POS_B, t),
-                    INSPECT_ROT_A.lerp(INSPECT_ROT_B, t),
-                    1.0,
-                )
-            }
-            super::super::state::InspectPhase::Hold => {
-                let _ = INSPECT_HOLD_SEC;
-                (INSPECT_POS_B, INSPECT_ROT_B, 1.0)
-            }
-            super::super::state::InspectPhase::Return => {
-                let t = (self.inspect_timer / INSPECT_RETURN_SEC).clamp(0.0, 1.0);
-                (
-                    INSPECT_POS_B.lerp(Vec3::ZERO, t),
-                    INSPECT_ROT_B.lerp(Vec3::ZERO, t),
-                    1.0 - t,
-                )
-            }
-        };
+        let inspect_pos = Vec3::ZERO;
+        let inspect_rot = Vec3::ZERO;
         // camera and projection setup
         let vm_fov = (60.0f32).to_radians();
         let vm_camera = Camera3D {
-            position: vec3(0.0, 0.04 * inspect_look_alpha, 0.0),
-            target: vec3(0.0, INSPECT_LOOK_DOWN_Y * inspect_look_alpha, 1.0),
+            position: vec3(0.0, 0.0, 0.0),
+            target: vec3(0.0, 0.0, 1.0),
             up: vec3(0.0, 1.0, 0.0),
             fovy: vm_fov,
             z_far: 10.0,
