@@ -5,7 +5,7 @@ use client::ui::OtherPlayer;
 use macroquad::prelude::*;
 
 use client::net::poll_updates;
-use client::net::protocols::{MODE_GUN_GAME, MODE_TEAM_DEATHMATCH};
+use client::net::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH};
 use client::screens::PlayingState;
 use client::types::animation_state::{AnimState, MoveDir};
 use client::types::maze::Maze;
@@ -518,6 +518,7 @@ pub fn sync_world(
             // packets but we still want team tinting during TDM.
             if playing_state.current_world == WorldId::Maze
                 || playing_state.match_mode == Some(MODE_TEAM_DEATHMATCH)
+                || playing_state.match_mode == Some(MODE_SEARCH_AND_DESTROY)
             {
                 for p in playing_state.other_players.iter_mut() {
                     if let Some(team) = team_map.get(&p.id) {
