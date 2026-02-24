@@ -1,17 +1,17 @@
 use crate::net::protocols::MODE_TEAM_DEATHMATCH;
-use crate::physics::movement::{MovementConfig, MovementState};
+use crate::physics::movement::{ MovementConfig, MovementState };
 use crate::screens::target_dummy::TargetDummy;
 use crate::types::ai::simulated_player::SimulatedPlayer;
 use crate::types::animated_model::AnimatedModel;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
-use crate::weapons::effects::{BulletHole, BulletTracer, DamageNumber};
+use crate::weapons::effects::{ BulletHole, BulletTracer, DamageNumber };
 use crate::weapons::WeaponInventory;
 
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
-use rodio::{OutputStream, OutputStreamHandle};
-use std::collections::{HashMap, HashSet};
+use rodio::{ OutputStream, OutputStreamHandle };
+use std::collections::{ HashMap, HashSet };
 use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
@@ -28,16 +28,16 @@ pub enum HandsPlaybackMode {
     KnifeEquip, // raising animation when switching to knife
     // Sawnoff-specific states (sawnoff_animated.glb includes hands)
     SawnoffIdle,
-    SawnoffShot,   // playing shot animation, returns to SawnoffIdle when done
+    SawnoffShot, // playing shot animation, returns to SawnoffIdle when done
     SawnoffReload, // playing reload animation, returns to SawnoffIdle when done
-    SawnoffEquip,  // equip animation when switching to sawnoff
-    SawnoffLower,  // lowering animation when switching away from sawnoff
+    SawnoffEquip, // equip animation when switching to sawnoff
+    SawnoffLower, // lowering animation when switching away from sawnoff
     // Minigun-specific states (minigun_animated.glb includes hands)
     MinigunIdle,
     MinigunShooting, // playing shoot loop
-    MinigunReload,   // playing reload animation
-    MinigunEquip,    // equip animation when switching to minigun
-    MinigunLower,    // lowering animation when switching away
+    MinigunReload, // playing reload animation
+    MinigunEquip, // equip animation when switching to minigun
+    MinigunLower, // lowering animation when switching away
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,7 +86,7 @@ pub struct PlayingState {
     pub lobby_console_open: bool,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
-    pub pending_hits: Vec<(u32, f32)>,
+    pub pending_hits: Vec<(u32, f32, bool)>, // victim_id, damage, backstab attempt?
 
     pub weapons: WeaponInventory,
 
@@ -94,7 +94,7 @@ pub struct PlayingState {
     pub match_start_countdown_timer: f32,
     pub match_end_countdown_timer: f32,
     pub post_teleport_freeze_timer: f32, // seconds players cannot move immediately after teleport into Maze
-    pub match_time_left: f32,            // client-side remaining match time (seconds)
+    pub match_time_left: f32, // client-side remaining match time (seconds)
     pub match_end_winner: Option<String>,
 
     // authoritative/current match mode (None when not in a match)
@@ -107,7 +107,6 @@ pub struct PlayingState {
     pub damage_flash_timer: f32, // short red flash when we take damage
     pub last_damage_attacker: Option<String>,
     pub stamina_depleted_vignette_alpha: f32,
-
 
     pub target_dummy: TargetDummy,
     pub hit_marker_timer: f32,
@@ -151,15 +150,21 @@ pub struct PlayingState {
     pub hands_playback_mode: HandsPlaybackMode,
     pub hands_anim_initialized: bool,
     pub prev_hands_key: Option<String>, // tracks active hands rig key across swaps
-    pub prev_was_reloading: bool,       // edge detection for reload anim trigger
-    pub knife_swing_index: u8,          // cycles 0..2 for light slashes (swings 1-3)
-    pub knife_swing_requested: bool,    // set by input_processing when knife fires
+    pub prev_was_reloading: bool, // edge detection for reload anim trigger
+
+    pub knife_swing_index: u8, // cycles 0..2 for light slashes (swings 1-3)
+    pub knife_swing_requested: bool, // set by input_processing when knife fires
     pub knife_heavy_swing_requested: bool, // set by input_processing for right-click heavy slash
-    pub knife_anim_initialized: bool,   // whether fp_hands_knife has been set up
-    pub prev_weapon_was_knife: bool,    // track weapon switches to/from knife
-    pub sawnoff_shot_requested: bool,   // set by input_processing when sawnoff fires
+    pub knife_anim_initialized: bool, // whether fp_hands_knife has been set up
+    pub knife_attack_locked: bool, // true during swing
+    pub knife_attack_lock_timer: f32, // seconds remaining in lock
+    pub knife_miss_slow_timer: f32, // movement slow after miss
+    pub knife_last_attack_was_heavy: bool, // for backstab tracking
+    pub prev_weapon_was_knife: bool, // track weapon switches to/from knife
+
+    pub sawnoff_shot_requested: bool, // set by input_processing when sawnoff fires
     pub sawnoff_anim_initialized: bool, // whether fp_hands_sawnoff has been set up
-    pub prev_weapon_was_sawnoff: bool,  // track weapon switches to/from sawnoff
+    pub prev_weapon_was_sawnoff: bool, // track weapon switches to/from sawnoff
     pub minigun_anim_initialized: bool,
     pub prev_weapon_was_minigun: bool,
     pub minigun_was_firing: bool, // tracks whether minigun was firing last frame
@@ -278,6 +283,10 @@ impl PlayingState {
             knife_swing_requested: false,
             knife_heavy_swing_requested: false,
             knife_anim_initialized: false,
+            knife_attack_locked: false,
+            knife_attack_lock_timer: 0.0,
+            knife_miss_slow_timer: 0.0,
+            knife_last_attack_was_heavy: false,
             prev_weapon_was_knife: false,
             sawnoff_shot_requested: false,
             sawnoff_anim_initialized: false,

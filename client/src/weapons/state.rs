@@ -310,12 +310,12 @@ impl WeaponInventory {
         if self.knife_active {
             // put knife away, go back to gun
             self.knife_active = false;
-            self.switch_cooldown = 0.3;
+            self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_FROM_TIME;
             true
         } else {
-            // put gun away, pull out knife
+            // put gun away, pull out knife (faster than pulling gun from knife)
             self.knife_active = true;
-            self.switch_cooldown = 0.3;
+            self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_TO_TIME;
             true
         }
     }
@@ -334,7 +334,8 @@ impl WeaponInventory {
             if slot < self.weapons.len() && self.switch_cooldown <= 0.0 {
                 self.knife_active = false;
                 self.active_slot = slot;
-                self.switch_cooldown = 0.3;
+                self.switch_cooldown = 
+                crate::weapons::stats::melee::KNIFE_SWITCH_FROM_TIME;
                 return true;
             }
             return false;
@@ -364,7 +365,7 @@ impl WeaponInventory {
         if self.knife_active {
             if self.switch_cooldown <= 0.0 {
                 self.knife_active = false;
-                self.switch_cooldown = 0.3;
+                self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_FROM_TIME;
             }
             return;
         }
