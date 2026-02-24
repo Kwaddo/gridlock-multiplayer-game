@@ -58,6 +58,7 @@ pub const M16_STATS: WeaponStats = WeaponStats {
     viewmodel_asset_key: None,
 
     viewmodel_scale: 0.003,
+    viewmodel_ads_scale: 0.003,
     viewmodel_position: (0.22, 0.08, -0.31),
     viewmodel_rotation: (0.05, -1.75, 0.0),
     viewmodel_muzzle_offset: (-1.0, 0.02, -0.25),

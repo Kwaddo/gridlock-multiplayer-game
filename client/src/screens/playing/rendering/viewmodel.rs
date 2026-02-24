@@ -247,6 +247,8 @@ impl PlayingState {
         let hands_anchor = hands_base_anchor + motion_offset + inspect_pos;
         let weapon_anchor = weapon_base_anchor + motion_offset + inspect_pos;
         let pos = weapon_anchor + weapon_local_offset;
+        let vm_scale = stats.viewmodel_scale
+            + (stats.viewmodel_ads_scale - stats.viewmodel_scale) * ads_p;
         
         /*
             Normalize and transform weapon mesh to world position. We apply normalization first so that
@@ -255,9 +257,9 @@ impl PlayingState {
         let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
             * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
         let scale_mat = Mat4::from_scale(vec3(
-            stats.viewmodel_scale * 28.0,
-            stats.viewmodel_scale * 28.0,
-            stats.viewmodel_scale * 28.0,
+            vm_scale * 28.0,
+            vm_scale * 28.0,
+            vm_scale * 28.0,
         ));
         let weapon_rot_mat = Mat4::from_euler(
             EulerRot::XYZ,
@@ -349,7 +351,7 @@ impl PlayingState {
             if let Some((fx, fy)) = Self::project_to_screen(&vm_camera, muzzle_world) {
                 let t = (weapon.muzzle_flash_timer / 0.08).min(1.0);
                 let alpha = (220.0 * t) as u8;
-                let radius = 18.0 * stats.viewmodel_scale * 28.0 * (0.4 + 0.6 * t);
+                let radius = 18.0 * vm_scale * 28.0 * (0.4 + 0.6 * t);
 
                 draw_circle(
                     fx,
@@ -396,7 +398,9 @@ impl PlayingState {
 
         let target_h =
             (screen_h * (0.46 - weapon.ads_progress * 0.08)).clamp(160.0, screen_h * 0.8);
-        let scale = (target_h / tex.height()).max(0.2) * stats.viewmodel_scale;
+        let vm_scale = stats.viewmodel_scale
+            + (stats.viewmodel_ads_scale - stats.viewmodel_scale) * weapon.ads_progress;
+        let scale = (target_h / tex.height()).max(0.2) * vm_scale;
         let size = vec2(tex.width() * scale, tex.height() * scale);
 
         let hip_pos = vec2(screen_w * 0.68, screen_h * 0.88);

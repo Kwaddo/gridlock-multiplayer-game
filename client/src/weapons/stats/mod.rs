@@ -316,6 +316,7 @@ pub struct WeaponStats {
     pub viewmodel_model: Option<&'static str>, // .obj model path
     pub viewmodel_asset_key: Option<&'static str>, // 2D sprite fallback
     pub viewmodel_scale: f32,                  // multiplier for model size
+    pub viewmodel_ads_scale: f32,              // multiplier for model size at full ADS
     pub viewmodel_position: (f32, f32, f32),   // position offset (right, up, forward)
     pub viewmodel_rotation: (f32, f32, f32),   // rotation (pitch, yaw, roll) in radians
     pub viewmodel_muzzle_offset: (f32, f32, f32), // muzzle in normalized model space

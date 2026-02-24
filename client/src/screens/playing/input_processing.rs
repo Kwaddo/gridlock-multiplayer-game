@@ -87,7 +87,16 @@ impl PlayingState {
             self.movement_state.is_crouching = false;
             self.jump_requested = false;
         }
+        let prev_switch_cooldown = self.weapons.switch_cooldown;
         input::process_weapon_input(&mut self.weapons, config);
+        if self.movement_state.is_stamina_depleted
+            && prev_switch_cooldown <= 0.0
+            && self.weapons.switch_cooldown > 0.0
+            && self.movement_config.stamina_depleted_speed_mult > 0.0
+        {
+            // Depleted stamina penalty: slower weapon switching.
+            self.weapons.switch_cooldown /= self.movement_config.stamina_depleted_speed_mult;
+        }
 
         let delta = raw_delta.min(0.05);
         let vel = self.movement_state.velocity;

@@ -103,6 +103,30 @@ impl PlayingState {
                 local_team,
                 config,
             );
+
+            let dt = get_frame_time();
+            if self.movement_state.is_stamina_depleted {
+                self.stamina_depleted_vignette_alpha =
+                    (self.stamina_depleted_vignette_alpha + dt * 2.0).min(1.0);
+            } else {
+                self.stamina_depleted_vignette_alpha =
+                    (self.stamina_depleted_vignette_alpha - dt * 2.0).max(0.0);
+            }
+
+            if self.stamina_depleted_vignette_alpha > 0.0 {
+                let pulse = ((get_time() as f32 * 4.0).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+                let alpha =
+                    (self.stamina_depleted_vignette_alpha * (0.10 + 0.10 * pulse) * 255.0) as u8;
+                let w = screen_width();
+                let h = screen_height();
+                let edge = (w.min(h) * 0.08).max(28.0);
+                let col = Color::from_rgba(120, 20, 20, alpha);
+
+                draw_rectangle(0.0, 0.0, w, edge, col);
+                draw_rectangle(0.0, h - edge, w, edge, col);
+                draw_rectangle(0.0, 0.0, edge, h, col);
+                draw_rectangle(w - edge, 0.0, edge, h, col);
+            }
         }
 
         // Show player list / scoreboard while holding Tab

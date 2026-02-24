@@ -106,6 +106,8 @@ pub struct PlayingState {
     // damage / hit feedback (client-side)
     pub damage_flash_timer: f32, // short red flash when we take damage
     pub last_damage_attacker: Option<String>,
+    pub stamina_depleted_vignette_alpha: f32,
+
 
     pub target_dummy: TargetDummy,
     pub hit_marker_timer: f32,
@@ -260,6 +262,7 @@ impl PlayingState {
             // damage / hit feedback (client-side)
             damage_flash_timer: 0.0,
             last_damage_attacker: None,
+            stamina_depleted_vignette_alpha: 0.0,
 
             spawn_feedback_message: None,
             spawn_feedback_timer: 0.0,
