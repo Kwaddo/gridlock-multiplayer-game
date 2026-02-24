@@ -70,6 +70,11 @@ pub fn process_crouch(config: &GameConfig, is_crouching: bool) -> bool {
     }
 }
 
+// process slow-walk input (cannot be active while sprinting)
+pub fn process_slow_walk(config: &GameConfig, is_sprinting: bool) -> bool {
+    config.bind_slow_walk.is_down() && !is_sprinting
+}
+
 // process jump input
 pub fn process_jump(config: &GameConfig, is_grounded: bool, _weapons: &mut WeaponInventory) -> bool {
     config.bind_jump.is_down() && is_grounded

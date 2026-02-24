@@ -76,6 +76,8 @@ impl PlayingState {
         self.move_dir = input::process_movement_keys(self.yaw, config);
         self.movement_state.is_sprinting =
             input::process_sprint(config, &self.movement_state, self.move_dir);
+        self.movement_state.is_slow_walking =
+            input::process_slow_walk(config, self.movement_state.is_sprinting);
         self.movement_state.is_crouching =
             input::process_crouch(config, self.movement_state.is_crouching);
         self.jump_requested =
@@ -84,6 +86,7 @@ impl PlayingState {
         if self.post_teleport_freeze_timer > 0.0 && self.current_world == WorldId::Maze {
             self.move_dir = Vec3::ZERO;
             self.movement_state.is_sprinting = false;
+            self.movement_state.is_slow_walking = false;
             self.movement_state.is_crouching = false;
             self.jump_requested = false;
         }
