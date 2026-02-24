@@ -82,6 +82,30 @@ impl PlayingState {
             input::process_crouch(config, self.movement_state.is_crouching);
         self.jump_requested =
             input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons);
+
+        let wants_prone = input::process_prone(config, self.movement_state.is_prone);
+        if wants_prone != self.movement_state.is_prone {
+            self.movement_state.is_prone = wants_prone;
+            self.movement_state.prone_transition_timer = self.movement_config.prone_transition_time;
+            if wants_prone {
+                self.movement_state.is_sprinting = false;
+                self.movement_state.is_crouching = false;
+                self.movement_state.is_slow_walking = false;
+            }
+        }
+
+        // cancel prone on jump
+        if self.jump_requested && self.movement_state.is_prone {
+            self.movement_state.is_prone = false;
+            self.movement_state.prone_transition_timer = self.movement_config.prone_transition_time;
+            self.jump_requested = false;
+        }
+
+        if self.movement_state.is_prone {
+            self.movement_state.is_sprinting = false;
+            self.movement_state.is_crouching = false;
+            self.movement_state.is_slow_walking = false;
+        }
         // If we are in the Maze and the post-teleport freeze is active, block movement input
         if self.post_teleport_freeze_timer > 0.0 && self.current_world == WorldId::Maze {
             self.move_dir = Vec3::ZERO;

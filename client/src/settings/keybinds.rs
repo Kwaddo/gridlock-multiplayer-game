@@ -23,6 +23,7 @@ const BIND_ACTIONS: &[(&str, &str)] = &[
     ("Toggle Knife", "toggle_knife"),
     ("Knife Heavy", "knife_heavy"),
     ("Slow Walk", "slow_walk"),
+    ("Prone", "prone"),
     ("Fullscreen", "fullscreen"),
 ];
 
@@ -47,6 +48,7 @@ fn get_binding(config: &GameConfig, action: &str) -> InputBinding {
         "toggle_knife" => config.bind_toggle_knife,
         "knife_heavy" => config.bind_knife_heavy,
         "slow_walk" => config.bind_slow_walk,
+        "prone" => config.bind_prone,
         "fullscreen" => config.bind_fullscreen,
         _ => InputBinding::Key(KeyCode::Unknown),
     }
@@ -73,6 +75,7 @@ fn set_binding(config: &mut GameConfig, action: &str, binding: InputBinding) {
         "toggle_knife" => config.bind_toggle_knife = binding,
         "knife_heavy" => config.bind_knife_heavy = binding,
         "slow_walk" => config.bind_slow_walk = binding,
+        "prone" => config.bind_prone = binding,
         "fullscreen" => config.bind_fullscreen = binding,
         _ => {}
     }

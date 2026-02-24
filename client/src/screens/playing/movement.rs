@@ -34,7 +34,9 @@ impl PlayingState {
     }
 
     pub(super) fn update_crouch_height(&mut self, config: &GameConfig, delta: f32) {
-        let target = if self.movement_state.is_crouching {
+        let target = if self.movement_state.is_prone {
+            self.movement_config.prone_height
+        } else if self.movement_state.is_crouching {
             config.crouch_height
         } else {
             config.standing_height
@@ -57,7 +59,9 @@ impl PlayingState {
     }
 
     pub(super) fn apply_movement(&mut self, delta: f32) {
-        let speed = if self.movement_state.is_sprinting {
+        let speed = if self.movement_state.is_prone {
+            self.movement_config.prone_speed
+        } else if self.movement_state.is_sprinting {
             self.movement_config.sprint_speed
         } else if self.movement_state.is_crouching {
             self.movement_config.crouch_speed
