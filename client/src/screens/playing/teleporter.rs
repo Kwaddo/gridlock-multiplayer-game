@@ -22,9 +22,9 @@ impl PlayingState {
             Color::from_rgba(0, 0, 0, 150),
         );
 
-        // make the console panel larger so longer messages fit comfortably
-        let panel_w = 640.0;
-        let panel_h = 380.0;
+        // make the console panel cover most of the screen similar to the pause menu
+        let panel_w = screen_width() * 0.9;
+        let panel_h = screen_height() * 0.8;
         let panel_x = (screen_width() - panel_w) / 2.0;
         let panel_y = (screen_height() - panel_h) / 2.0;
 
@@ -112,6 +112,28 @@ impl PlayingState {
             };
             if is_button_clicked(x, panel_y + 140.0, mode_w, mode_h, label, bg, hover) {
                 self.pending_start_gamemode = *val;
+                // Auto-assign a team immediately for team-based modes so a team is
+                // always selected when the mode is chosen.
+                if *val != MODE_GUN_GAME {
+                    let mut red_count = 0usize;
+                    let mut blue_count = 0usize;
+                    for (_id, _name, _k, _d, _gl, team, _wep) in self.connected_players.iter() {
+                        match *team {
+                            1 => red_count += 1,
+                            2 => blue_count += 1,
+                            _ => {}
+                        }
+                    }
+                    let chosen = if red_count <= blue_count { 1u8 } else { 2u8 };
+                    self.pending_set_team = Some(chosen);
+                    let msg = if chosen == 1 {
+                        "Requested team: Red"
+                    } else {
+                        "Requested team: Blue"
+                    };
+                    self.lobby_console_message = Some(msg.to_string());
+                    self.lobby_console_message_timer = 3.0;
+                }
             }
             if selected {
                 draw_rectangle_lines(
@@ -175,6 +197,164 @@ impl PlayingState {
                     }
                     _ => {}
                 }
+            }
+        }
+
+        // Team selection / roster (Lobby only)
+        // Hide team HUD entirely for Gun Game; show richer team HUD for TDM and S&D.
+        if self.pending_start_gamemode != MODE_GUN_GAME {
+            // layout two team columns
+            let roster_w = (panel_w - 64.0) / 2.0;
+            let roster_h = 120.0;
+            let roster_x_left = panel_x + 32.0;
+            let roster_x_right = panel_x + 32.0 + roster_w + 16.0;
+            let roster_y = panel_y + 232.0;
+
+            // background boxes
+            draw_rectangle(
+                roster_x_left,
+                roster_y,
+                roster_w,
+                roster_h,
+                Color::from_rgba(40, 20, 20, 200),
+            );
+            draw_rectangle_lines(
+                roster_x_left,
+                roster_y,
+                roster_w,
+                roster_h,
+                2.0,
+                Color::from_rgba(200, 200, 200, 60),
+            );
+            draw_rectangle(
+                roster_x_right,
+                roster_y,
+                roster_w,
+                roster_h,
+                Color::from_rgba(20, 20, 40, 200),
+            );
+            draw_rectangle_lines(
+                roster_x_right,
+                roster_y,
+                roster_w,
+                roster_h,
+                2.0,
+                Color::from_rgba(200, 200, 200, 60),
+            );
+
+            // titles (with player counts) — counts are computed after
+            // preview_red/preview_blue are populated below, so we defer drawing.
+            // (moved after team split below)
+
+            // Use the server-authoritative team assignments from the
+            // broadcast player list (teams are auto-assigned on the server).
+            let mut preview_red: Vec<&(u32, String, u32, u32, u8, u8, String)> = Vec::new();
+            let mut preview_blue: Vec<&(u32, String, u32, u32, u8, u8, String)> = Vec::new();
+            for entry in self.connected_players.iter() {
+                match entry.5 {
+                    1 => preview_red.push(entry),
+                    2 => preview_blue.push(entry),
+                    _ => {
+                        // unassigned — fall back to alternating by count
+                        if preview_red.len() <= preview_blue.len() {
+                            preview_red.push(entry);
+                        } else {
+                            preview_blue.push(entry);
+                        }
+                    }
+                }
+            }
+
+            // draw subtitle indicating auto-assignment
+            let auto_label = "Auto-Assigned (Balanced)";
+            let auto_w = measure_text(auto_label, None, 14, 1.0);
+            draw_text(
+                auto_label,
+                panel_x + (panel_w - auto_w.width) / 2.0,
+                roster_y - 6.0,
+                14.0,
+                Color::from_rgba(120, 220, 120, 220),
+            );
+
+            // team titles with player counts
+            let red_title = format!("Red Team ({})", preview_red.len());
+            draw_text(
+                &red_title,
+                roster_x_left + 12.0,
+                roster_y + 24.0,
+                20.0,
+                Color::from_rgba(230, 120, 120, 255),
+            );
+            let blue_title = format!("Blue Team ({})", preview_blue.len());
+            draw_text(
+                &blue_title,
+                roster_x_right + 12.0,
+                roster_y + 24.0,
+                20.0,
+                Color::from_rgba(120, 170, 230, 255),
+            );
+
+            // draw names with K/D and preview team color (clip if too many)
+            let name_start_y = roster_y + 44.0;
+            let line_h = 18.0;
+            for (i, (_id, name, kills, deaths, _gl, _team, _wep)) in preview_red
+                .iter()
+                .enumerate()
+                .take(((roster_h - 40.0) / line_h) as usize)
+            {
+                let display = format!("{}  {}/{}", name, kills, deaths);
+                draw_text(
+                    &display,
+                    roster_x_left + 12.0,
+                    name_start_y + i as f32 * line_h,
+                    16.0,
+                    Color::from_rgba(230, 120, 120, 255),
+                );
+            }
+            for (i, (_id, name, kills, deaths, _gl, _team, _wep)) in preview_blue
+                .iter()
+                .enumerate()
+                .take(((roster_h - 40.0) / line_h) as usize)
+            {
+                let display = format!("{}  {}/{}", name, kills, deaths);
+                draw_text(
+                    &display,
+                    roster_x_right + 12.0,
+                    name_start_y + i as f32 * line_h,
+                    16.0,
+                    Color::from_rgba(120, 170, 230, 255),
+                );
+            }
+
+            // join buttons below each roster
+            let btn_w = roster_w - 28.0;
+            let btn_h = 28.0;
+            let btn_y = roster_y + roster_h - btn_h - 10.0;
+            if is_button_clicked(
+                roster_x_left + 14.0,
+                btn_y,
+                btn_w,
+                btn_h,
+                "Join Red",
+                Color::from_rgba(180, 60, 60, 255),
+                DARKGRAY,
+            ) {
+                self.pending_set_team = Some(1u8);
+                self.lobby_console_message = Some("Requested team: Red".to_string());
+                self.lobby_console_message_timer = 3.0;
+            }
+            if is_button_clicked(
+                roster_x_right + 14.0,
+                btn_y,
+                btn_w,
+                btn_h,
+                "Join Blue",
+                Color::from_rgba(60, 100, 200, 255),
+                DARKGRAY,
+            ) {
+                self.pending_set_team = Some(2u8);
+                self.lobby_console_message = Some("Requested team: Blue".to_string());
+                self.lobby_console_message_timer = 3.0;
             }
         }
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 
-use crate::server::broadcast;
+use crate::server::{broadcast, game};
 use crate::player::Player;
 
 /// Handler for MSG_DISCONNECT: remove player and inform others.
@@ -16,6 +16,8 @@ pub fn handle_disconnect(
             p.username,
             players.len()
         );
+        // re-balance lobby teams after player left
+        game::auto_assign_lobby_teams(players);
         // broadcast state so other clients remove the character immediately
         broadcast::broadcast_state(socket, players);
         broadcast::broadcast_player_list(socket, players);
