@@ -6,7 +6,7 @@ use crate::maze::MazeData;
 use crate::player::Player;
 use crate::protocols::*;
 
-use crate::server::{broadcast, utils};
+use crate::server::{broadcast, game, utils};
 
 /// Handler for an incoming MSG_JOIN packet.
 pub fn handle_join(
@@ -55,6 +55,8 @@ pub fn handle_join(
         }
         utils::send_assets(socket, src_addr, asset_manifest);
 
+        // auto-assign balanced teams for all lobby players
+        game::auto_assign_lobby_teams(players);
         // broadcast updated connected-player list to everyone
         broadcast::broadcast_player_list(socket, players);
     }

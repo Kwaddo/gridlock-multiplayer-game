@@ -62,13 +62,21 @@ impl PlayingState {
         // Lobby console (Start Game) overlay
         self.draw_lobby_console(config);
 
-        // Don't draw viewmodel or gameplay HUD while dead
-        if !self.is_dead {
+        // Don't draw viewmodel while dead or when lobby console is open
+        if !self.is_dead && !self.lobby_console_open {
             self.draw_viewmodel();
         }
 
         // When lobby console is open, suppress regular HUD (crosshair, minimap, status panels, etc.)
         if !self.lobby_console_open && !self.is_dead {
+            // compute local team from connected_players (default spectator 0)
+            let local_team = self
+                .connected_players
+                .iter()
+                .find(|(id, ..)| *id == player_id)
+                .map(|(_, _name, _kills, _deaths, _gl, team, _wep)| *team)
+                .unwrap_or(0u8);
+
             draw_hud(
                 username,
                 player_id,
@@ -92,6 +100,7 @@ impl PlayingState {
                 self.last_damage_attacker.as_deref(),
                 maze,
                 self.current_world,
+                local_team,
                 config,
             );
         }
@@ -105,6 +114,7 @@ impl PlayingState {
                 self.local_deaths,
                 (self.weapons.active_slot + 1) as u8,
                 self.current_world == WorldId::Maze,
+                self.match_mode,
             );
         }
 

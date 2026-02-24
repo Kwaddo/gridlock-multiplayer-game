@@ -31,14 +31,14 @@ pub struct NetUpdate {
     pub match_time_left: Option<u8>,
     pub match_end_winner: Option<String>,
     pub match_end_countdown: Option<u8>,
-    pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8)>>, // (id, name, kills, deaths, world, alive, gun_level)
+    pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8, u8, String)>>, // (id, name, kills, deaths, world, alive, gun_level, team, weapon)
     pub self_kills: Option<u32>,
     pub self_gun_level: Option<u8>,
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
-    pub death: bool,                          // You died
-    pub death_killer_id: Option<u32>,          // who killed us (from MSG_DEATH)
-    pub death_weapon: Option<String>,          // weapon used to kill us (from MSG_DEATH)
+    pub death: bool,                  // You died
+    pub death_killer_id: Option<u32>, // who killed us (from MSG_DEATH)
+    pub death_weapon: Option<String>, // weapon used to kill us (from MSG_DEATH)
 
     // true if poll_updates read at least one packet from the socket during this call
     pub received_any: bool,
@@ -279,6 +279,31 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 1;
                     }
 
+                    // NOTE: server now appends `team:1` + `weapon_len:1` + `weapon bytes`
+                    // to each MSG_STATE entry. Older client parsers didn't consume
+                    // these bytes which caused subsequent reads to become
+                    // misaligned (weapon strings appearing as player names).
+                    // Consume them here to keep the message offsets in sync.
+                    let mut _team: u8 = 0;
+                    if offset < size {
+                        _team = recv_buf[offset];
+                        offset += 1;
+                        // weapon length + bytes
+                        if offset < size {
+                            let wlen = recv_buf[offset] as usize;
+                            offset += 1;
+                            if offset + wlen <= size {
+                                // discard weapon bytes for now (we keep weapon info
+                                // in MSG_PLAYER_LIST which the UI uses). If desired
+                                // later, we could store this on OtherPlayer.
+                                offset += wlen;
+                            } else {
+                                // malformed/partial packet: clamp to available
+                                offset = size;
+                            }
+                        }
+                    }
+
                     if id != player_id {
                         let mut other_player = OtherPlayer::new(id, name, world);
                         other_player.x = x;
@@ -301,6 +326,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         // reliably propagated.
                         if alive {
                             new_players.push(other_player);
+                        }
+                        // store team for minimap filtering
+                        if let Some(lp) = new_players.last_mut() {
+                            lp.team = _team;
                         }
                     } else {
                         // update own-kills value for local UI/scoreboard
@@ -437,8 +466,26 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 1;
                         let gun_level = recv_buf[offset];
                         offset += 1;
+                        // server now appends `team:1` + `weapon_len:1` + `weapon bytes` to each entry;
+                        if offset + 2 > size {
+                            break;
+                        }
+                        let team = recv_buf[offset];
+                        offset += 1;
+                        let weapon_len = recv_buf[offset] as usize;
+                        offset += 1;
+                        if offset + weapon_len > size {
+                            break;
+                        }
+                        let weapon =
+                            String::from_utf8_lossy(&recv_buf[offset..offset + weapon_len])
+                                .to_string();
+                        offset += weapon_len;
+
                         let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
-                        list.push((id, name, kills, deaths, world, alive, gun_level));
+                        list.push((
+                            id, name, kills, deaths, world, alive, gun_level, team, weapon,
+                        ));
                     }
                     update.player_list = Some(list);
                 }
@@ -523,9 +570,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 update.death = true;
                 // format: [MSG_DEATH][killer_id:4][weapon_len:1][weapon bytes]
                 if size >= 5 {
-                    let killer_id = u32::from_be_bytes([
-                        recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4],
-                    ]);
+                    let killer_id =
+                        u32::from_be_bytes([recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4]]);
                     update.death_killer_id = Some(killer_id);
                     if size >= 6 {
                         let weapon_len = recv_buf[5] as usize;

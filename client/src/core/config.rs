@@ -92,6 +92,7 @@ pub struct GameConfig {
     pub match_time_override_secs: Option<u32>,
     // If true, hide the match timer (treat as infinite locally)
     pub hide_match_timer: bool,
+    // Audio
 }
 
 impl GameConfig {

@@ -217,6 +217,7 @@ pub struct OtherPlayer {
 
     // Gun Game progression: 1 = first weapon slot
     pub gun_level: u8,
+    pub team: u8,
 }
 
 impl OtherPlayer {
@@ -259,6 +260,7 @@ impl OtherPlayer {
             evt_landed: false,
             color: Self::color_for_id(id),
             world,
+            team: 0,
             hp: 100.0,
             max_hp: 100.0,
             hit_timer: 0.0,
