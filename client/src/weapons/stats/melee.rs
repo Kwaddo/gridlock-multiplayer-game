@@ -74,7 +74,7 @@ pub const KNIFE: WeaponStats = WeaponStats {
     viewmodel_asset_key: None,
 
     // draw_3d_viewmodel multiplies by 28.0; this keeps knife close to previous size.
-    viewmodel_scale: 0.0025,
+    viewmodel_scale: 0.0035,
     viewmodel_position: (0.345, 0.1, -0.37),
     viewmodel_rotation: (-0.15, 0.0, 0.0),
     viewmodel_muzzle_offset: (0.0, 0.0, 0.0),

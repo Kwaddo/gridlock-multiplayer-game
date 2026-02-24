@@ -200,12 +200,12 @@ impl PlayingState {
 
         // Pair offset only applies during hip-fire — fades to zero as ADS comes in
         let pair_scale = 1.0 - ads_p;
-        let pair_pos = vec3(
+        let mut pair_pos = vec3(
             weapon.pair_offset_pos.0 * pair_scale,
             weapon.pair_offset_pos.1 * pair_scale,
             weapon.pair_offset_pos.2 * pair_scale,
         );
-        let pair_rot = (
+        let mut pair_rot = (
             weapon.pair_offset_rot.0 * pair_scale,
             weapon.pair_offset_rot.1 * pair_scale,
             weapon.pair_offset_rot.2 * pair_scale,
@@ -217,7 +217,6 @@ impl PlayingState {
             weapon.ads_hands_pos_offset.1 * ads_p,
             weapon.ads_hands_pos_offset.2 * ads_p,
         );
-
         let hands_weapon_offset = vec3(
             stats.viewmodel_hands_offset.0,
             stats.viewmodel_hands_offset.1,
@@ -234,6 +233,13 @@ impl PlayingState {
         ) + pair_pos;
 
         let mut motion_offset = Vec3::ZERO;
+        if weapon.id.category() == WeaponCategory::Pistol
+            && weapon.is_reloading
+            && stats.reload_time > 0.0
+        {
+            let reload_fraction = (weapon.reload_timer / stats.reload_time).clamp(0.0, 1.0);
+            motion_offset.y -= (reload_fraction * std::f32::consts::PI).sin() * 0.08;
+        }
 
         let kick = weapon.muzzle_flash_timer / 0.08;
         motion_offset.z += kick * 0.02;
