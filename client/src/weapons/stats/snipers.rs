@@ -57,6 +57,7 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
     viewmodel_model: Some("bolt_action_model"),
     viewmodel_asset_key: None,
     viewmodel_scale: VM_BASE_SCALE,
+    viewmodel_ads_scale: VM_BASE_SCALE,
     viewmodel_position: VM_BASE_POS,
     viewmodel_rotation: VM_BASE_ROT,
     viewmodel_muzzle_offset: (-1.20, 0.02, -0.28),

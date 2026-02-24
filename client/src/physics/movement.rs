@@ -14,6 +14,7 @@ pub struct MovementState {
     pub is_sprinting: bool,
     pub stamina: f32,
     pub height: f32, // eye height
+    pub is_stamina_depleted: bool,
 }
 
 impl MovementState {
@@ -25,6 +26,7 @@ impl MovementState {
             is_sprinting: false,
             stamina: 100.0,
             height: 1.6, // default eye height
+            is_stamina_depleted: false,
         }
     }
     pub fn is_moving(&self) -> bool {
@@ -50,6 +52,9 @@ pub struct MovementConfig {
     pub jump_strength: f32,
     pub stamina_drain: f32,   // per second
     pub stamina_recover: f32, // per second
+    pub stamina_depleted_threshold: f32,
+    pub stamina_depleted_recover: f32,
+    pub stamina_depleted_speed_mult: f32,
 }
 
 impl MovementConfig {
@@ -64,6 +69,9 @@ impl MovementConfig {
             jump_strength: 6.0,
             stamina_drain: 35.0,
             stamina_recover: 15.0,
+            stamina_depleted_threshold: 10.0,
+            stamina_depleted_recover: 7.5,
+            stamina_depleted_speed_mult: 0.5,
         }
     }
 }

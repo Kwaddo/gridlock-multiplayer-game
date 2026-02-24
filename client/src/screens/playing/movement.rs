@@ -8,16 +8,29 @@ impl PlayingState {
     pub(super) fn update_stamina(&mut self, config: &GameConfig, delta: f32) {
         // if stamina runs out while holding sprinting, no stamina will be regained until player releases sprint key, so you have to tap it again to start regaining stamina.
         //this prevents the player from just holding sprint and waiting for stamina to regen, which would be a bit too easy to abuse.
+        let recover_rate = if
+            self.movement_state.stamina <= self.movement_config.stamina_depleted_threshold
+        {
+            self.movement_config.stamina_depleted_recover
+        } else {
+            self.movement_config.stamina_recover
+        };
 
         if self.movement_state.is_sprinting {
             self.movement_state.stamina -= self.movement_config.stamina_drain * delta;
         } else {
             if !config.bind_sprint.is_down() {
-                self.movement_state.stamina = (self.movement_state.stamina
-                    + self.movement_config.stamina_recover * delta)
-                    .min(100.0);
+                self.movement_state.stamina = (
+                    self.movement_state.stamina +
+                    recover_rate * delta
+                ).min(100.0);
             }
         }
+        // stamina rework
+        self.movement_state.stamina = self.movement_state.stamina.max(0.0);
+
+        self.movement_state.is_stamina_depleted =
+            self.movement_state.stamina <= self.movement_config.stamina_depleted_threshold;
     }
 
     pub(super) fn update_crouch_height(&mut self, config: &GameConfig, delta: f32) {
@@ -52,6 +65,12 @@ impl PlayingState {
             self.movement_config.walk_speed
         };
 
+        let speed = if self.movement_state.is_stamina_depleted {
+            speed * self.movement_config.stamina_depleted_speed_mult
+        } else {
+            speed
+        };
+
         let target_velocity = self.move_dir * speed;
         let rate = if !self.movement_state.is_grounded {
             2.0 // Low air control
@@ -62,10 +81,10 @@ impl PlayingState {
         };
 
         let saved_vy = self.movement_state.velocity.y;
-        self.movement_state.velocity = self
-            .movement_state
-            .velocity
-            .lerp(target_velocity, rate * delta);
+        self.movement_state.velocity = self.movement_state.velocity.lerp(
+            target_velocity,
+            rate * delta
+        );
         self.movement_state.velocity.y = saved_vy;
 
         self.position.x += self.movement_state.velocity.x * delta;
