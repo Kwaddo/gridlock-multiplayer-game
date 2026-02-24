@@ -61,6 +61,8 @@ impl PlayingState {
             self.movement_config.sprint_speed
         } else if self.movement_state.is_crouching {
             self.movement_config.crouch_speed
+        } else if self.movement_state.is_slow_walking {
+            self.movement_config.slow_walk_speed
         } else {
             self.movement_config.walk_speed
         };

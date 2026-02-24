@@ -12,6 +12,7 @@ pub struct MovementState {
     pub is_grounded: bool,
     pub is_crouching: bool,
     pub is_sprinting: bool,
+    pub is_slow_walking: bool,
     pub stamina: f32,
     pub height: f32, // eye height
     pub is_stamina_depleted: bool,
@@ -24,6 +25,7 @@ impl MovementState {
             is_grounded: true,
             is_crouching: false,
             is_sprinting: false,
+            is_slow_walking: false,
             stamina: 100.0,
             height: 1.6, // default eye height
             is_stamina_depleted: false,
@@ -46,6 +48,7 @@ pub struct MovementConfig {
     pub walk_speed: f32,
     pub sprint_speed: f32,
     pub crouch_speed: f32,
+    pub slow_walk_speed: f32,
     pub acceleration: f32,
     pub friction: f32,
     pub gravity: f32,
@@ -63,6 +66,7 @@ impl MovementConfig {
             walk_speed: 5.0,
             sprint_speed: 8.0,
             crouch_speed: 2.5,
+            slow_walk_speed: 3.5,
             acceleration: 10.0,
             friction: 8.0,
             gravity: 20.0,
