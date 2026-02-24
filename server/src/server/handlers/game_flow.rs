@@ -104,12 +104,16 @@ pub fn handle_start_game(
                             return;
                         }
                     };
-                    // assign team by balancing current maze teams
-                    req_player.team = if red_count <= blue_count {
-                        Team::Red
+                    // assign team by balancing current maze teams (skip for Gun Game)
+                    if match_mode != MODE_GUN_GAME {
+                        req_player.team = if red_count <= blue_count {
+                            Team::Red
+                        } else {
+                            Team::Blue
+                        };
                     } else {
-                        Team::Blue
-                    };
+                        req_player.team = Team::Spectator;
+                    }
 
                     let (sx, sy, sz, _used_fallback) =
                         current_maze.random_spawn_world(MAZE_CELL_SIZE);
@@ -263,13 +267,7 @@ pub fn maybe_start_match(
                     player.post_teleport_freeze_until =
                         Some(Instant::now() + Duration::from_secs(MATCH_POST_TELEPORT_FREEZE_SECS));
 
-                    // reset per-match player state. For Gun Game we reset
-                    // gun progression and assign team primaries; for other
-                    // modes (e.g. TDM) we preserve the player's current
-                    // weapon/gun level unless they lack one.
-                    if match_mode == MODE_GUN_GAME {
-                        player.gun_level = 1;
-                    }
+                    // reset per-match player state
                     player.health = player.max_health;
                     player.shield = 0;
                     player.is_alive = true;
@@ -277,41 +275,45 @@ pub fn maybe_start_match(
                     player.deaths = 0;
                     player.death_time = None;
 
-                    // assign team by alternating to balance teams
-                    let team = if i % 2 == 0 { Team::Red } else { Team::Blue };
-                    player.team = team;
-
-                    // pick a primary for this player avoiding duplicates when possible
-                    let pool = match team {
-                        Team::Red => &TEAM_LOADOUT_RED,
-                        Team::Blue => &TEAM_LOADOUT_BLUE,
-                        Team::Spectator => &TEAM_LOADOUT_RED,
-                    };
-                    let assigned = if team == Team::Red {
-                        &mut red_assigned
+                    if match_mode == MODE_GUN_GAME {
+                        // Gun Game is free-for-all: no teams, reset gun progression
+                        player.gun_level = 1;
+                        player.team = Team::Spectator;
+                        // assign the first weapon from Gun Game progression
+                        player.current_weapon =
+                            crate::server::game::GUN_GAME_PROGRESSION[0].to_string();
                     } else {
-                        &mut blue_assigned
-                    };
+                        // Team modes (TDM, S&D): assign balanced teams
+                        let team = if i % 2 == 0 { Team::Red } else { Team::Blue };
+                        player.team = team;
 
-                    // Assign a team primary only if we're in Gun Game (we use
-                    // team loadouts for Gun Game players) or if the player
-                    // has no current weapon assigned yet. This avoids
-                    // forcibly changing a player's weapon on TDM match start
-                    // unless they don't have one.
-                    if match_mode == MODE_GUN_GAME || player.current_weapon.is_empty() {
-                        let mut chosen = None;
-                        for &w in pool.iter() {
-                            if !assigned.iter().any(|a| a == w) {
-                                chosen = Some(w.to_string());
-                                break;
+                        // pick a primary for this player avoiding duplicates
+                        let pool = match team {
+                            Team::Red => &TEAM_LOADOUT_RED,
+                            Team::Blue => &TEAM_LOADOUT_BLUE,
+                            Team::Spectator => &TEAM_LOADOUT_RED,
+                        };
+                        let assigned = if team == Team::Red {
+                            &mut red_assigned
+                        } else {
+                            &mut blue_assigned
+                        };
+
+                        if player.current_weapon.is_empty() {
+                            let mut chosen = None;
+                            for &w in pool.iter() {
+                                if !assigned.iter().any(|a| a == w) {
+                                    chosen = Some(w.to_string());
+                                    break;
+                                }
                             }
+                            if chosen.is_none() {
+                                chosen = pool.get(0).map(|s| s.to_string());
+                            }
+                            let weapon = chosen.unwrap_or_else(|| "Knife".to_string());
+                            assigned.push(weapon.clone());
+                            player.current_weapon = weapon.clone();
                         }
-                        if chosen.is_none() {
-                            chosen = pool.get(0).map(|s| s.to_string());
-                        }
-                        let weapon = chosen.unwrap_or_else(|| "Knife".to_string());
-                        assigned.push(weapon.clone());
-                        player.current_weapon = weapon.clone();
                     }
 
                     let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];

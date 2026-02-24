@@ -139,9 +139,8 @@ pub fn handle_hit(
         // fatal blow: mutate victim in a short scope and send death message
         let wbytes = weapon_name.as_bytes();
 
-        // pick a new primary for the victim so they will have a different
-        // weapon on their next spawn (try to avoid teammates' primaries)
-        let chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
+        // pick a new primary for the victim (team modes) — unused in Gun Game
+        let _chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
             if vref.team != Team::Spectator {
                 game::choose_team_weapon_for_player(players, vref)
             } else {
@@ -190,13 +189,11 @@ pub fn handle_hit(
 
             if match_mode == MODE_GUN_GAME {
                 let is_knife = weapon_name.eq_ignore_ascii_case("knife");
-                // Define the special knife level as one past the gun progression.
+                // gun_level 1..19 = guns from GUN_GAME_PROGRESSION, 20 = knife-only level
                 let final_knife_level = (game::GUN_GAME_PROGRESSION.len() + 1) as u32;
                 if is_knife {
-                    // Knife only triggers an immediate win when the killer is on the
-                    // dedicated knife level (final_knife_level). Otherwise a knife
-                    // kill simply sets the victim back to the first gun.
                     if killer.gun_level == final_knife_level {
+                        // Knife kill on final level = win the game
                         let winner_id = killer.id;
                         let winner_name = killer.username.clone();
                         println!("Gun Game winner (knife final): {}", winner_name);
@@ -218,15 +215,22 @@ pub fn handle_hit(
                             winner_name,
                         ));
                     } else {
-                        // non-final knife: mark victim to be reset after we drop this mutable borrow
+                        // Non-final knife kill: reset victim to first weapon
                         victim_reset_required = true;
                     }
                 } else {
-                    // Non-knife kills advance the killer along the progression.
-                    // Allow progression to reach the special knife level (one past
-                    // the last gun) so the player becomes 'knife-only'.
+                    // Non-knife kill: advance killer along the progression
                     if (killer.gun_level as usize) < game::GUN_GAME_PROGRESSION.len() + 1 {
                         killer.gun_level = killer.gun_level.saturating_add(1);
+                        // Update the killer's current_weapon to match new gun_level
+                        let new_level = killer.gun_level as usize;
+                        if new_level <= game::GUN_GAME_PROGRESSION.len() {
+                            killer.current_weapon =
+                                game::GUN_GAME_PROGRESSION[new_level - 1].to_string();
+                        } else {
+                            // Reached knife-only level
+                            killer.current_weapon = "Knife".to_string();
+                        }
                     }
                 }
             }
@@ -243,8 +247,9 @@ pub fn handle_hit(
         if victim_reset_required {
             if let Some(vmut) = players.get_mut(&victim_addr) {
                 vmut.gun_level = 1;
-                // assign chosen primary for upcoming respawn
-                vmut.current_weapon = chosen_weapon_for_victim.clone();
+                // Reset to the first Gun Game weapon
+                vmut.current_weapon =
+                    game::GUN_GAME_PROGRESSION[0].to_string();
             }
         }
 
@@ -329,9 +334,16 @@ pub fn handle_respawn_request(
         let _ = socket.send_to(&resp, src_addr);
     }
 
-    // Determine and assign a team primary without holding overlapping borrows.
+    // Determine and assign a weapon without holding overlapping borrows.
+    // In Gun Game, the weapon is determined by gun_level, not by team loadout.
     let chosen = if let Some(pref) = players.get(&src_addr) {
-        if pref.team != Team::Spectator {
+        let gl = pref.gun_level as usize;
+        if gl >= 1 && gl <= game::GUN_GAME_PROGRESSION.len() {
+            // Gun Game: assign weapon matching current progression level
+            game::GUN_GAME_PROGRESSION[gl - 1].to_string()
+        } else if gl > game::GUN_GAME_PROGRESSION.len() {
+            "Knife".to_string()
+        } else if pref.team != Team::Spectator {
             game::choose_team_weapon_for_player(players, pref)
         } else {
             "Knife".to_string()

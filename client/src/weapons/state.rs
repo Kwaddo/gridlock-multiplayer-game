@@ -288,6 +288,13 @@ impl WeaponInventory {
         }
     }
 
+    /// Replace the weapon in a given slot with a new WeaponId (used by Gun Game progression).
+    pub fn replace_weapon(&mut self, slot: usize, new_id: WeaponId) {
+        if slot < self.weapons.len() {
+            self.weapons[slot] = WeaponState::new(new_id);
+        }
+    }
+
     /// Enforce allowed weapon slot for game modes like Gun Game. Pass `None` to clear the lock.
     pub fn set_locked_slot(&mut self, slot: Option<usize>) {
         self.locked_slot = slot;
