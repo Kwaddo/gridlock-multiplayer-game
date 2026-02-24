@@ -713,6 +713,10 @@ impl PlayingState {
         });
 
         self.update_stamina(config, delta);
+        if self.movement_state.prone_transition_timer > 0.0 {
+            self.movement_state.prone_transition_timer =
+                (self.movement_state.prone_transition_timer - delta).max(0.0);
+        }
         self.update_crouch_height(config, delta);
         let was_grounded = self.movement_state.is_grounded;
         // Only allow jumping when not frozen after teleport

@@ -75,6 +75,15 @@ pub fn process_slow_walk(config: &GameConfig, is_sprinting: bool) -> bool {
     config.bind_slow_walk.is_down() && !is_sprinting
 }
 
+// process prone input (toggle on press)
+pub fn process_prone(config: &GameConfig, is_prone: bool) -> bool {
+    if config.bind_prone.is_pressed() {
+        !is_prone
+    } else {
+        is_prone
+    }
+}
+
 // process jump input
 pub fn process_jump(config: &GameConfig, is_grounded: bool, _weapons: &mut WeaponInventory) -> bool {
     config.bind_jump.is_down() && is_grounded

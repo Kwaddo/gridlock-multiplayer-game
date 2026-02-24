@@ -64,8 +64,7 @@ impl PlayingState {
             if !self.movement_state.is_grounded {
                 state_flags |= FLAG_AIRBORNE;
             }
-            // Placeholders for future states (currently not implemented)
-            if false {
+            if self.movement_state.is_prone {
                 state_flags |= FLAG_PRONE;
             }
             if false {

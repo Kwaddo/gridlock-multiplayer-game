@@ -3,7 +3,8 @@ use std::net::UdpSocket;
 use macroquad::prelude::*;
 
 use crate::net::protocols::{
-    EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_SPRINTING,
+    EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE,
+    FLAG_SPRINTING,
     MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN, MSG_MATCH_END,
     MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN,
     MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
@@ -312,6 +313,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.yaw = yaw;
                         other_player.is_sprinting = (state_flags & FLAG_SPRINTING) != 0;
                         other_player.is_crouching = (state_flags & FLAG_CROUCHING) != 0;
+                        other_player.is_prone = (state_flags & FLAG_PRONE) != 0;
                         other_player.is_ads = (state_flags & FLAG_ADS) != 0;
                         other_player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
                         other_player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
