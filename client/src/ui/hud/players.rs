@@ -150,21 +150,43 @@ pub fn draw_player_list(
         }
 
         // Color player names by team when available (shades of red/blue).
-        let name_color = if *is_self {
+        let is_team_mode = matches!(
+            match_mode,
+            Some(m) if m == crate::net::protocols::MODE_TEAM_DEATHMATCH
+                    || m == crate::net::protocols::MODE_SEARCH_AND_DESTROY
+        );
+        let name_color = if is_team_mode {
+            match *team {
+                1 => {
+                    if *is_self {
+                        Color::from_rgba(255, 150, 150, 255) // brighter red for self
+                    } else {
+                        Color::from_rgba(230, 120, 120, 255)
+                    }
+                }
+                2 => {
+                    if *is_self {
+                        Color::from_rgba(150, 200, 255, 255) // brighter blue for self
+                    } else {
+                        Color::from_rgba(120, 170, 230, 255)
+                    }
+                }
+                _ => {
+                    if *is_self {
+                        Color::from_rgba(180, 220, 255, 255)
+                    } else {
+                        WHITE
+                    }
+                }
+            }
+        } else if *is_self {
             Color::from_rgba(180, 220, 255, 255)
         } else {
-            match *team {
-                1 => Color::from_rgba(230, 120, 120, 255),
-                2 => Color::from_rgba(120, 170, 230, 255),
-                _ => WHITE,
-            }
+            WHITE
         };
 
-        // team badge (only show for Team Deathmatch)
-        let show_team = match match_mode {
-            Some(m) => m == crate::net::protocols::MODE_TEAM_DEATHMATCH,
-            None => false,
-        };
+        // team badge (show for team-based modes)
+        let show_team = is_team_mode;
         if show_team {
             let badge_x = col_name_x - 28.0;
             let badge_w = 18.0;
