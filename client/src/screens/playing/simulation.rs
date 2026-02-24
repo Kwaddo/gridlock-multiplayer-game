@@ -82,11 +82,6 @@ const KNIFE_LOWER_END: f32 = 4.50;
 const KNIFE_EQUIP_START: f32 = 4.51;
 const KNIFE_EQUIP_END: f32 = 4.83;
 
-const INSPECT_START_SEC: f32 = 0.35;
-const INSPECT_SWEEP_SEC: f32 = 0.60;
-const INSPECT_HOLD_SEC: f32 = 0.85;
-const INSPECT_RETURN_SEC: f32 = 0.45;
-
 impl PlayingState {
     fn preferred_hands_key_for_weapon(id: WeaponId) -> &'static str {
         if id == WeaponId::Minigun {
@@ -138,43 +133,6 @@ impl PlayingState {
         let delta: f32 = raw_delta.min(0.05);
         self.just_jumped = false;
         self.just_landed = false;
-
-        if is_key_pressed(KeyCode::V) {
-            self.inspect_phase = super::state::InspectPhase::Start;
-            self.inspect_timer = 0.0;
-        }
-
-        match self.inspect_phase {
-            super::state::InspectPhase::None => {}
-            super::state::InspectPhase::Start => {
-                self.inspect_timer += delta;
-                if self.inspect_timer >= INSPECT_START_SEC {
-                    self.inspect_phase = super::state::InspectPhase::Sweep;
-                    self.inspect_timer = 0.0;
-                }
-            }
-            super::state::InspectPhase::Sweep => {
-                self.inspect_timer += delta;
-                if self.inspect_timer >= INSPECT_SWEEP_SEC {
-                    self.inspect_phase = super::state::InspectPhase::Hold;
-                    self.inspect_timer = 0.0;
-                }
-            }
-            super::state::InspectPhase::Hold => {
-                self.inspect_timer += delta;
-                if self.inspect_timer >= INSPECT_HOLD_SEC {
-                    self.inspect_phase = super::state::InspectPhase::Return;
-                    self.inspect_timer = 0.0;
-                }
-            }
-            super::state::InspectPhase::Return => {
-                self.inspect_timer += delta;
-                if self.inspect_timer >= INSPECT_RETURN_SEC {
-                    self.inspect_phase = super::state::InspectPhase::None;
-                    self.inspect_timer = 0.0;
-                }
-            }
-        }
 
         // update kill feed timers and drop expired entries in a single pass
         self.kill_feed.retain_mut(|entry| {

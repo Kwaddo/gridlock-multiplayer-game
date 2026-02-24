@@ -40,15 +40,6 @@ pub enum HandsPlaybackMode {
     MinigunLower, // lowering animation when switching away
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InspectPhase {
-    None,
-    Start,
-    Sweep,
-    Hold,
-    Return,
-}
-
 pub struct PlayingState {
     // ---- pre‑allocated container hints to reduce reallocation spikes ----
     // typical counts observed in-game; tuning these avoids repeated grows
@@ -168,8 +159,6 @@ pub struct PlayingState {
     pub minigun_anim_initialized: bool,
     pub prev_weapon_was_minigun: bool,
     pub minigun_was_firing: bool, // tracks whether minigun was firing last frame
-    pub inspect_phase: InspectPhase,
-    pub inspect_timer: f32,
 
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
@@ -294,8 +283,6 @@ impl PlayingState {
             minigun_anim_initialized: false,
             prev_weapon_was_minigun: false,
             minigun_was_firing: false,
-            inspect_phase: InspectPhase::None,
-            inspect_timer: 0.0,
 
             // match mode unknown until server indicates otherwise
             match_mode: None,
