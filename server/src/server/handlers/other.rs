@@ -61,6 +61,7 @@ pub fn handle_hit(
     _match_start_time: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
+    snd_state: &mut Option<crate::server::snd::SndState>,
 ) {
     if payload.len() < 8 {
         return;
@@ -154,6 +155,20 @@ pub fn handle_hit(
             if let Some(vmut) = players.get_mut(&victim_addr) {
                 vmut.is_alive = false;
                 vmut.deaths += 1;
+            }
+        }
+
+        // S&D: notify the round state that a player died (drops bomb if they had it)
+        if match_mode == MODE_SEARCH_AND_DESTROY {
+            if let Some(ref mut snd) = snd_state {
+                // Get victim position for bomb drop
+                let victim_pos = players.get(&victim_addr)
+                    .map(|v| v.position)
+                    .unwrap_or((0.0, 0.0, 0.0));
+                snd.on_player_death(victim_id, victim_pos);
+                // Also cancel any defuse/plant if the dead player was doing it
+                snd.stop_plant(victim_addr);
+                snd.stop_defuse(victim_addr);
             }
         }
 

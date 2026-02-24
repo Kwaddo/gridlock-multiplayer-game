@@ -41,6 +41,91 @@ impl PlayingState {
 
         // in-world teleporter removed
 
+        // S&D: render bomb site marker and dropped/planted bomb in 3D
+        if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
+            && self.current_world == WorldId::Maze
+            && self.snd_round > 0
+        {
+            let cam_pos = self.position;
+            let (site_x, _site_y, site_z) = self.snd_bomb_site;
+            let site_dist =
+                ((cam_pos.x - site_x).powi(2) + (cam_pos.z - site_z).powi(2)).sqrt();
+
+            // Bomb site marker - only visible within range
+            if site_dist <= 8.0 {
+                let alpha = if site_dist <= 5.0 {
+                    1.0
+                } else {
+                    1.0 - ((site_dist - 5.0) / 3.0).clamp(0.0, 1.0)
+                };
+                let site_color = if self.snd_bomb_planted {
+                    Color::from_rgba(255, 50, 50, (180.0 * alpha) as u8)
+                } else {
+                    Color::from_rgba(255, 200, 50, (120.0 * alpha) as u8)
+                };
+                // Draw bomb site as flat markers on the ground
+                let r = 1.5;
+                let steps = 24;
+                for i in 0..steps {
+                    let a1 = (i as f32 / steps as f32) * std::f32::consts::TAU;
+                    let a2 = ((i + 1) as f32 / steps as f32) * std::f32::consts::TAU;
+                    draw_line_3d(
+                        vec3(site_x + a1.cos() * r, 0.02, site_z + a1.sin() * r),
+                        vec3(site_x + a2.cos() * r, 0.02, site_z + a2.sin() * r),
+                        site_color,
+                    );
+                }
+            }
+
+            // Dropped bomb - small glowing cube, visible only when close
+            if let Some((bx, _by, bz)) = self.snd_bomb_dropped {
+                let bomb_dist =
+                    ((cam_pos.x - bx).powi(2) + (cam_pos.z - bz).powi(2)).sqrt();
+                if bomb_dist <= 10.0 {
+                    let bomb_alpha = if bomb_dist <= 6.0 {
+                        1.0
+                    } else {
+                        1.0 - ((bomb_dist - 6.0) / 4.0).clamp(0.0, 1.0)
+                    };
+                    let bob = (get_time() as f32 * 2.0).sin() * 0.1;
+                    draw_cube(
+                        vec3(bx, 0.3 + bob, bz),
+                        vec3(0.3, 0.3, 0.3),
+                        None,
+                        Color::from_rgba(255, 180, 50, (255.0 * bomb_alpha) as u8),
+                    );
+                    draw_cube_wires(
+                        vec3(bx, 0.3 + bob, bz),
+                        vec3(0.35, 0.35, 0.35),
+                        Color::from_rgba(255, 100, 0, (200.0 * bomb_alpha) as u8),
+                    );
+                }
+            }
+
+            // Planted bomb at site
+            if self.snd_bomb_planted && site_dist <= 10.0 {
+                let bomb_alpha = if site_dist <= 6.0 {
+                    1.0
+                } else {
+                    1.0 - ((site_dist - 6.0) / 4.0).clamp(0.0, 1.0)
+                };
+                let pulse =
+                    ((get_time() as f32 * 4.0).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+                let r = (200.0 + 55.0 * pulse) as u8;
+                draw_cube(
+                    vec3(site_x, 0.15, site_z),
+                    vec3(0.35, 0.25, 0.35),
+                    None,
+                    Color::from_rgba(r, 50, 50, (255.0 * bomb_alpha) as u8),
+                );
+                draw_cube_wires(
+                    vec3(site_x, 0.15, site_z),
+                    vec3(0.40, 0.30, 0.40),
+                    Color::from_rgba(255, 0, 0, (180.0 * bomb_alpha) as u8),
+                );
+            }
+        }
+
         if self.current_world == WorldId::Lobby {
             self.draw_target_dummy();
         }
@@ -199,6 +284,14 @@ impl PlayingState {
 
         if self.is_dead && self.match_end_countdown_timer <= 0.0 {
             self.draw_death_screen();
+        }
+
+        // S&D HUD overlay
+        if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
+            && self.current_world == WorldId::Maze
+            && self.snd_round > 0
+        {
+            self.draw_snd_hud(player_id);
         }
     }
 }

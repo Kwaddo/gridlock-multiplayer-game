@@ -164,6 +164,23 @@ pub struct PlayingState {
     pub inspect_phase: InspectPhase,
     pub inspect_timer: f32,
 
+    // ── Search & Destroy state ──
+    pub snd_round: u8,
+    pub snd_max_rounds: u8,
+    pub snd_red_wins: u8,
+    pub snd_blue_wins: u8,
+    pub snd_phase: u8,            // 0=freeze, 1=active, 2=bomb_planted, 3=round_over
+    pub snd_attacking_team: u8,   // 1=Red, 2=Blue
+    pub snd_bomb_carrier_id: u32, // 0 = no carrier
+    pub snd_bomb_dropped: Option<(f32, f32, f32)>, // world pos if bomb on ground
+    pub snd_bomb_site: (f32, f32, f32),
+    pub snd_bomb_planted: bool,
+    pub snd_plant_progress: f32,
+    pub snd_defuse_progress: f32,
+    pub snd_phase_timer: f32,
+    pub snd_is_planting: bool,    // client is currently holding plant
+    pub snd_is_defusing: bool,    // client is currently holding defuse
+
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
 
@@ -290,6 +307,24 @@ impl PlayingState {
 
             // pending forced weapon slot (applied after teleport into Maze)
             pending_forced_weapon_slot: None,
+
+            // S&D state
+            snd_round: 0,
+            snd_max_rounds: 7,
+            snd_red_wins: 0,
+            snd_blue_wins: 0,
+            snd_phase: 0,
+            snd_attacking_team: 0,
+            snd_bomb_carrier_id: 0,
+            snd_bomb_dropped: None,
+            snd_bomb_site: (0.0, 0.0, 0.0),
+            snd_bomb_planted: false,
+            snd_plant_progress: 0.0,
+            snd_defuse_progress: 0.0,
+            snd_phase_timer: 0.0,
+            snd_is_planting: false,
+            snd_is_defusing: false,
+
             destroyed_lights: HashSet::new(),
 
             match_start_cached_secs: -1,

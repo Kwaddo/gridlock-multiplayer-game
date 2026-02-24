@@ -298,6 +298,45 @@ impl MazeData {
         (tx, ty, tz, true)
     }
 
+    /// Find the bomb site position for Search & Destroy mode.
+    /// Picks the room closest to the center of the map and returns its center in world coords.
+    pub fn bomb_site_position(&self, cell_size: f32) -> (f32, f32, f32) {
+        let map_cx = self.width as f32 / 2.0;
+        let map_cy = self.height as f32 / 2.0;
+
+        if !self.rooms.is_empty() {
+            // Find room whose center is closest to the map center
+            let mut best_room_idx = 0;
+            let mut best_dist = f32::MAX;
+            for (i, r) in self.rooms.iter().enumerate() {
+                let rx = r.x as f32 + r.w as f32 / 2.0;
+                let ry = r.y as f32 + r.h as f32 / 2.0;
+                let dx = rx - map_cx;
+                let dy = ry - map_cy;
+                let d = dx * dx + dy * dy;
+                if d < best_dist {
+                    best_dist = d;
+                    best_room_idx = i;
+                }
+            }
+            let r = &self.rooms[best_room_idx];
+            let cx = r.x as f32 + r.w as f32 / 2.0;
+            let cy = r.y as f32 + r.h as f32 / 2.0;
+            (
+                (cx + 0.5) * cell_size,
+                0.0,
+                (cy + 0.5) * cell_size,
+            )
+        } else {
+            // Fallback: center of the map
+            (
+                (map_cx + 0.5) * cell_size,
+                0.0,
+                (map_cy + 0.5) * cell_size,
+            )
+        }
+    }
+
     pub fn break_wall(&mut self, x: u8, y: u8) -> bool {
         let idx = y as usize * self.width as usize + x as usize;
         if idx >= self.cells.len() {

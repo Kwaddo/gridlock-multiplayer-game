@@ -1,7 +1,8 @@
 use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS, FLAG_AIRBORNE,
     FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MSG_HIT, MSG_POSITION,
-    MSG_START_GAME, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    MSG_SND_BOMB_PICKUP, MSG_SND_DEFUSE_START, MSG_SND_DEFUSE_STOP, MSG_SND_PLANT_START,
+    MSG_SND_PLANT_STOP, MSG_START_GAME, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
 use std::net::UdpSocket;
 
@@ -48,6 +49,54 @@ impl PlayingState {
                 msg.push(weapon_name.len() as u8);
                 msg.extend_from_slice(weapon_name);
                 let _ = s.send_to(&msg, server_addr);
+            }
+
+            // S&D interactions: bomb pickup, plant, defuse
+            if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY) {
+                // Auto bomb pickup: if bomb is dropped and we're close, try to pick it up
+                if let Some((bx, _by, bz)) = self.snd_bomb_dropped {
+                    let dx = self.position.x - bx;
+                    let dz = self.position.z - bz;
+                    if (dx * dx + dz * dz).sqrt() <= 2.5 {
+                        let _ = s.send_to(&[MSG_SND_BOMB_PICKUP], server_addr);
+                    }
+                }
+
+                // Plant/defuse: hold E key near bomb site
+                let near_site = {
+                    let dx = self.position.x - self.snd_bomb_site.0;
+                    let dz = self.position.z - self.snd_bomb_site.2;
+                    (dx * dx + dz * dz).sqrt() <= 3.5
+                };
+
+                let e_held = macroquad::prelude::is_key_down(macroquad::prelude::KeyCode::E);
+
+                // Planting: we have the bomb, near site, hold E
+                if self.snd_bomb_carrier_id != 0
+                    && !self.snd_bomb_planted
+                    && near_site
+                    && e_held
+                    && !self.is_dead
+                {
+                    if !self.snd_is_planting {
+                        let _ = s.send_to(&[MSG_SND_PLANT_START], server_addr);
+                        self.snd_is_planting = true;
+                    }
+                } else if self.snd_is_planting {
+                    let _ = s.send_to(&[MSG_SND_PLANT_STOP], server_addr);
+                    self.snd_is_planting = false;
+                }
+
+                // Defusing: bomb is planted, near site, hold E
+                if self.snd_bomb_planted && near_site && e_held && !self.is_dead {
+                    if !self.snd_is_defusing {
+                        let _ = s.send_to(&[MSG_SND_DEFUSE_START], server_addr);
+                        self.snd_is_defusing = true;
+                    }
+                } else if self.snd_is_defusing {
+                    let _ = s.send_to(&[MSG_SND_DEFUSE_STOP], server_addr);
+                    self.snd_is_defusing = false;
+                }
             }
 
             // Continuous state flags

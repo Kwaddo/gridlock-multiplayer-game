@@ -6,7 +6,7 @@ use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_SPRINTING,
     MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN, MSG_MATCH_END,
     MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN,
-    MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    MSG_SND_ROUND_STATE, MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
@@ -40,8 +40,28 @@ pub struct NetUpdate {
     pub death_killer_id: Option<u32>, // who killed us (from MSG_DEATH)
     pub death_weapon: Option<String>, // weapon used to kill us (from MSG_DEATH)
 
+    // S&D round state
+    pub snd_round_state: Option<SndRoundState>,
+
     // true if poll_updates read at least one packet from the socket during this call
     pub received_any: bool,
+}
+
+/// Parsed S&D round state from the server
+pub struct SndRoundState {
+    pub round: u8,
+    pub max_rounds: u8,
+    pub red_wins: u8,
+    pub blue_wins: u8,
+    pub phase: u8,
+    pub attacking_team: u8,
+    pub bomb_carrier_id: u32,
+    pub bomb_dropped: Option<(f32, f32, f32)>,
+    pub bomb_site: (f32, f32, f32),
+    pub bomb_planted: bool,
+    pub plant_progress: f32,
+    pub defuse_progress: f32,
+    pub phase_timer: f32,
 }
 
 pub fn send_position(socket: &UdpSocket, server_addr: &str, position: Vec3, yaw: f32) {
@@ -77,6 +97,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         death: false,
         death_killer_id: None,
         death_weapon: None,
+        snd_round_state: None,
         received_any: false,
         self_freeze_secs: None,
     };
@@ -596,6 +617,72 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         let kind = recv_buf[13];
                         update.respawn_fallback = Some(kind == 1);
                     }
+                }
+            }
+            MSG_SND_ROUND_STATE => {
+                // format: [msg:1][round:1][max_rounds:1][red_wins:1][blue_wins:1][phase:1][attacking_team:1]
+                //         [carrier_id:4][bomb_x:4][bomb_y:4][bomb_z:4]
+                //         [site_x:4][site_y:4][site_z:4][planted:1][plant_progress:4][defuse_progress:4][phase_timer:4]
+                if size >= 48 {
+                    let round = recv_buf[1];
+                    let max_rounds = recv_buf[2];
+                    let red_wins = recv_buf[3];
+                    let blue_wins = recv_buf[4];
+                    let phase = recv_buf[5];
+                    let attacking_team = recv_buf[6];
+                    let carrier_id = u32::from_be_bytes([
+                        recv_buf[7], recv_buf[8], recv_buf[9], recv_buf[10],
+                    ]);
+                    let bx = f32::from_be_bytes([
+                        recv_buf[11], recv_buf[12], recv_buf[13], recv_buf[14],
+                    ]);
+                    let by = f32::from_be_bytes([
+                        recv_buf[15], recv_buf[16], recv_buf[17], recv_buf[18],
+                    ]);
+                    let bz = f32::from_be_bytes([
+                        recv_buf[19], recv_buf[20], recv_buf[21], recv_buf[22],
+                    ]);
+                    let site_x = f32::from_be_bytes([
+                        recv_buf[23], recv_buf[24], recv_buf[25], recv_buf[26],
+                    ]);
+                    let site_y = f32::from_be_bytes([
+                        recv_buf[27], recv_buf[28], recv_buf[29], recv_buf[30],
+                    ]);
+                    let site_z = f32::from_be_bytes([
+                        recv_buf[31], recv_buf[32], recv_buf[33], recv_buf[34],
+                    ]);
+                    let planted = recv_buf[35] != 0;
+                    let plant_progress = f32::from_be_bytes([
+                        recv_buf[36], recv_buf[37], recv_buf[38], recv_buf[39],
+                    ]);
+                    let defuse_progress = f32::from_be_bytes([
+                        recv_buf[40], recv_buf[41], recv_buf[42], recv_buf[43],
+                    ]);
+                    let phase_timer = f32::from_be_bytes([
+                        recv_buf[44], recv_buf[45], recv_buf[46], recv_buf[47],
+                    ]);
+
+                    let bomb_dropped = if carrier_id == 0 && !planted && (bx != 0.0 || bz != 0.0) {
+                        Some((bx, by, bz))
+                    } else {
+                        None
+                    };
+
+                    update.snd_round_state = Some(SndRoundState {
+                        round,
+                        max_rounds,
+                        red_wins,
+                        blue_wins,
+                        phase,
+                        attacking_team,
+                        bomb_carrier_id: carrier_id,
+                        bomb_dropped,
+                        bomb_site: (site_x, site_y, site_z),
+                        bomb_planted: planted,
+                        plant_progress,
+                        defuse_progress,
+                        phase_timer,
+                    });
                 }
             }
             _ => {}

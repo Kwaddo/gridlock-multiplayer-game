@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 pub mod broadcast;
 pub mod game;
 pub mod handlers;
+pub mod snd;
 pub mod utils;
 
 use crate::maze::MazeData;
@@ -48,8 +49,15 @@ pub fn run() -> std::io::Result<()> {
     let mut match_mode: u8 = MODE_TEAM_DEATHMATCH;
     // how many players entered the maze during this match (for last-man-standing detection)
     let mut match_total_maze_entries: usize = 0;
+    // Search & Destroy state (only Some when S&D mode is active)
+    let mut snd_state: Option<snd::SndState> = None;
+    // Track last tick time for delta-time calculation
+    let mut last_tick = Instant::now();
 
     loop {
+        let now_tick = Instant::now();
+        let dt = now_tick.duration_since(last_tick).as_secs_f32();
+        last_tick = now_tick;
         match socket.recv_from(&mut buffer) {
             Ok((bytes_rcv, src_addr)) => {
                 let msg_type = buffer[0];
@@ -122,6 +130,7 @@ pub fn run() -> std::io::Result<()> {
                         &mut match_start_time,
                         &mut match_end_pending,
                         match_mode,
+                        &mut snd_state,
                     ),
                     MSG_RESPAWN_REQUEST => {
                         if let Some(ref m) = maze {
@@ -130,6 +139,31 @@ pub fn run() -> std::io::Result<()> {
                     }
                     MSG_SET_TEAM => {
                         handlers::handle_set_team(&socket, &mut players, src_addr, payload)
+                    }
+                    MSG_SND_BOMB_PICKUP => {
+                        if let Some(ref mut snd) = snd_state {
+                            snd.try_pickup_bomb(src_addr, &players);
+                        }
+                    }
+                    MSG_SND_PLANT_START => {
+                        if let Some(ref mut snd) = snd_state {
+                            snd.try_start_plant(src_addr, &players);
+                        }
+                    }
+                    MSG_SND_PLANT_STOP => {
+                        if let Some(ref mut snd) = snd_state {
+                            snd.stop_plant(src_addr);
+                        }
+                    }
+                    MSG_SND_DEFUSE_START => {
+                        if let Some(ref mut snd) = snd_state {
+                            snd.try_start_defuse(src_addr, &players);
+                        }
+                    }
+                    MSG_SND_DEFUSE_STOP => {
+                        if let Some(ref mut snd) = snd_state {
+                            snd.stop_defuse(src_addr);
+                        }
                     }
                     _ => println!("Unknown message type: {}", msg_type),
                 }
@@ -140,9 +174,36 @@ pub fn run() -> std::io::Result<()> {
             Err(err) => return Err(err),
         }
 
-        // Always attempt to auto-respawn dead players; maze may be None if no
-        // match is currently generated but players still need respawn handling.
-        game::process_auto_respawns(&socket, maze.as_ref(), &mut players);
+        // Auto-respawn dead players EXCEPT in Search & Destroy mode (one life per round)
+        if match_mode != MODE_SEARCH_AND_DESTROY {
+            game::process_auto_respawns(&socket, maze.as_ref(), &mut players);
+        }
+
+        // S&D tick: advance round state
+        if match_running && match_mode == MODE_SEARCH_AND_DESTROY {
+            if let Some(ref mut snd) = snd_state {
+                if let Some((winner_name, winner_id)) = snd.tick(dt, &socket, &mut players) {
+                    // S&D match is over
+                    println!("S&D match over: {} wins", winner_name);
+                    let mut end_msg = vec![MSG_MATCH_END];
+                    end_msg.extend_from_slice(&winner_id.to_be_bytes());
+                    let name_bytes = winner_name.as_bytes();
+                    end_msg.push(name_bytes.len() as u8);
+                    end_msg.extend_from_slice(name_bytes);
+                    end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
+                    for p in players.values() {
+                        let _ = socket.send_to(&end_msg, p.socket_addr);
+                    }
+                    match_end_pending = Some((
+                        Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
+                        winner_id,
+                        winner_name,
+                    ));
+                    match_running = false;
+                    snd_state = None;
+                }
+            }
+        }
         if game::cleanup_inactive_players(&mut players) {
             // players were removed — broadcast so other clients drop their characters
             broadcast::broadcast_state(&socket, &players);
@@ -176,6 +237,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut last_match_time_sent,
                 &mut match_total_maze_entries,
                 match_mode,
+                &mut snd_state,
             );
         }
 
@@ -200,8 +262,8 @@ pub fn run() -> std::io::Result<()> {
             last_warmup_sent = None;
         }
 
-        // If a match is running, check player counts for early end conditions
-        if match_running && match_end_pending.is_none() {
+        // If a match is running, check player counts for early end conditions (skip for S&D, it handles its own)
+        if match_running && match_end_pending.is_none() && match_mode != MODE_SEARCH_AND_DESTROY {
             handlers::check_early_end_conditions(
                 &socket,
                 &mut players,
@@ -214,8 +276,8 @@ pub fn run() -> std::io::Result<()> {
             );
         }
 
-        // Basic match timer: end match after MATCH_DURATION and send periodic authoritative timer updates
-        if match_running {
+        // Basic match timer: end match after MATCH_DURATION (skip for S&D, rounds handle timing)
+        if match_running && match_mode != MODE_SEARCH_AND_DESTROY {
             handlers::update_match_timer(
                 &socket,
                 &mut players,
@@ -242,6 +304,7 @@ pub fn run() -> std::io::Result<()> {
                     &mut last_match_time_sent,
                     &mut match_total_maze_entries,
                     winner_name,
+                    &mut snd_state,
                 );
             }
         }
