@@ -14,6 +14,7 @@ pub fn send_player_list(
 ) {
     // format: [MSG_PLAYER_LIST][count:1][entries...]
     // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1]
+    // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1][team:1][weapon_len:1][weapon bytes]
     let count = players.len().min(255) as u8;
     let mut msg = vec![MSG_PLAYER_LIST, count];
     for p in players.values() {
@@ -26,6 +27,10 @@ pub fn send_player_list(
         msg.push(p.world.as_u8());
         msg.push(if p.is_alive { 1u8 } else { 0u8 });
         msg.push(p.gun_level as u8);
+        msg.push(p.team.as_u8());
+        let wbytes = p.current_weapon.as_bytes();
+        msg.push(wbytes.len() as u8);
+        msg.extend_from_slice(wbytes);
     }
     let _ = socket.send_to(&msg, dest);
 }
@@ -51,6 +56,10 @@ pub fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<std::net::Soc
             msg.push(player.world.as_u8());
             msg.push(if player.is_alive { 1u8 } else { 0u8 });
             msg.push(player.gun_level as u8);
+            msg.push(player.team.as_u8());
+            let wbytes = player.current_weapon.as_bytes();
+            msg.push(wbytes.len() as u8);
+            msg.extend_from_slice(wbytes);
         }
         let _ = socket.send_to(&msg, p.socket_addr);
     }
@@ -98,6 +107,8 @@ pub fn move_all_players_to_lobby(
         let _ = socket.send_to(&wc, p.socket_addr);
     }
 
+    // re-balance lobby teams now that all players are back in lobby
+    crate::server::game::auto_assign_lobby_teams(players);
     // broadcast final state and player-list so clients update immediately
     broadcast_state(socket, players);
     broadcast_player_list(socket, players);
@@ -114,12 +125,13 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
 
         // first pass: count matching players to write header
         // include players in the same world even if they're dead so clients
-        // receive "alive" status updates for offscreen deaths
+        // receive "alive" status updates for offscreen deaths.
         let mut count: u32 = 0;
         for p in players.values() {
-            if p.world == receiver.world {
-                count += 1;
+            if p.world != receiver.world {
+                continue;
             }
+            count += 1;
         }
         state_msg.extend_from_slice(&count.to_be_bytes());
 
@@ -183,6 +195,12 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
                 _ => 0u8,
             };
             state_msg.push(freeze_secs);
+
+            // include team and current primary weapon
+            state_msg.push(player.team.as_u8());
+            let wbytes = player.current_weapon.as_bytes();
+            state_msg.push(wbytes.len() as u8);
+            state_msg.extend_from_slice(wbytes);
         }
 
         let _ = socket.send_to(&state_msg, receiver.socket_addr);

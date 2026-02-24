@@ -18,7 +18,7 @@ pub const MATCH_DURATION: Duration = Duration::from_secs(120); // match length (
 pub const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
 pub const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
 #[allow(dead_code)]
-pub const MATCH_SCORE_TO_WIN: u32 = 20; // kills required to win the match (unused for Gun Game)
+pub const MATCH_SCORE_TO_WIN: u32 = 100; // kills required to win the match (used for TDM)
 
 pub const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts // seconds shown to players before a match actually starts
 pub const MATCH_END_COUNTDOWN_SECS: u8 = 6; // seconds to wait after a win before returning players to lobby
@@ -29,7 +29,6 @@ pub const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 10; // seconds players cannot m
 // Names must match client-side `WeaponStats.name` values. Keep this in
 // sync with the client `WeaponStats.name` strings (see
 // client/src/weapons/stats/*).
-#[allow(dead_code)]
 pub const GUN_GAME_PROGRESSION: [&str; 19] = [
     // Pistols
     "M1911",
@@ -57,6 +56,73 @@ pub const GUN_GAME_PROGRESSION: [&str; 19] = [
     // Other
     "Minigun",
 ];
+
+// Team loadouts: list of primary weapons available per team. Knife is always
+// implicitly available as a melee weapon.
+pub const TEAM_LOADOUT_RED: [&str; 5] = ["M4A1", "MP5", "Benelli", "Desert Eagle", "Bolt Action"];
+
+pub const TEAM_LOADOUT_BLUE: [&str; 5] =
+    ["AK-47", "P90", "SPAS-12", "Revolver", "Semi-Auto Sniper"];
+
+use crate::player::Team;
+
+/// Auto-assign balanced teams (Red/Blue) to all players currently in the lobby.
+/// Uses a deterministic ordering (player ID ascending) and alternates assignments
+/// so all clients can predict the same result.
+pub fn auto_assign_lobby_teams(players: &mut HashMap<SocketAddr, Player>) {
+    let mut lobby_pairs: Vec<(SocketAddr, u32)> = players
+        .iter()
+        .filter_map(|(addr, p)| {
+            if p.world == WorldId::Lobby {
+                Some((*addr, p.id))
+            } else {
+                None
+            }
+        })
+        .collect();
+    lobby_pairs.sort_by_key(|(_, id)| *id);
+
+    for (i, (addr, _)) in lobby_pairs.iter().enumerate() {
+        if let Some(p) = players.get_mut(addr) {
+            p.team = if i % 2 == 0 { Team::Red } else { Team::Blue };
+        }
+    }
+}
+
+/// Choose a weapon for `player` from their team's loadout attempting to avoid
+/// duplicates currently assigned to teammates when possible.
+pub fn choose_team_weapon_for_player(
+    players: &std::collections::HashMap<std::net::SocketAddr, crate::player::Player>,
+    player: &crate::player::Player,
+) -> String {
+    let pool: &[&str] = match player.team {
+        Team::Red => &TEAM_LOADOUT_RED,
+        Team::Blue => &TEAM_LOADOUT_BLUE,
+        Team::Spectator => return "Knife".to_string(),
+    };
+
+    // collect weapons already used by teammates
+    let mut used = std::collections::HashSet::new();
+    for p in players.values() {
+        if p.team == player.team {
+            if !p.current_weapon.is_empty() {
+                used.insert(p.current_weapon.clone());
+            }
+        }
+    }
+
+    // pick the first unused weapon from pool
+    for &w in pool.iter() {
+        if !used.contains(w) {
+            return w.to_string();
+        }
+    }
+
+    // all weapons used by teammates (or pool empty) — fall back to first
+    pool.get(0)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "Knife".to_string())
+}
 
 /// iterate over all alive/dead players and automatically respawn as needed
 pub fn process_auto_respawns(
@@ -92,7 +158,20 @@ pub fn process_auto_respawns(
             // were in the Maze and a MazeData is available, pick a random maze
             // spawn; otherwise fall back to the lobby spawn location.
             let (sx, sy, sz, used_fallback) = match (player.world, maze) {
-                (WorldId::Maze, Some(m)) => m.random_spawn_world(MAZE_CELL_SIZE),
+                (WorldId::Maze, Some(m)) => {
+                    // If player is on a team, use deterministic team spawn positions
+                    match player.team {
+                        crate::player::Team::Red => {
+                            let (red, _blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
+                            (red.0, red.1, red.2, false)
+                        }
+                        crate::player::Team::Blue => {
+                            let (_red, blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
+                            (blue.0, blue.1, blue.2, false)
+                        }
+                        _ => m.random_spawn_world(MAZE_CELL_SIZE),
+                    }
+                }
                 _ => (0.0_f32, 0.5_f32, 0.0_f32, false),
             };
             player.position = (sx, sy, sz);
@@ -119,6 +198,17 @@ pub fn process_auto_respawns(
         respawn_msg.extend_from_slice(&sz.to_be_bytes());
         // extra byte: 0 = random spawn, 1 = teleporter fallback
         respawn_msg.push(if used_fallback { 1u8 } else { 0u8 });
+        // choose and assign a team weapon for the respawned player (avoid
+        // duplicating teammates' primaries when possible)
+        let chosen_weapon = if let Some(pref) = players.get(&socket_addr) {
+            choose_team_weapon_for_player(players, pref)
+        } else {
+            "Knife".to_string()
+        };
+        if let Some(pmut) = players.get_mut(&socket_addr) {
+            pmut.current_weapon = chosen_weapon;
+        }
+
         let _ = socket.send_to(&respawn_msg, socket_addr);
     }
 }

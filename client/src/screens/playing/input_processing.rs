@@ -38,8 +38,13 @@ impl PlayingState {
         // instead of opening the pause menu while the console is visible.
         self.check_lobby_console();
         if self.lobby_console_open {
-            // keep UI responsive (mouse) but prevent movement/weapon input
+            // keep UI responsive (mouse) but prevent movement/weapon input and stop movement
             self.last_mouse_pos = mouse_position();
+            self.move_dir = Vec3::ZERO;
+            self.jump_requested = false;
+            self.movement_state.velocity = Vec3::ZERO;
+            self.movement_state.is_sprinting = false;
+            self.movement_state.is_crouching = false;
             return None;
         }
 
@@ -105,9 +110,8 @@ impl PlayingState {
 
         // Firing: blocked while in post-teleport freeze inside the Maze
         if self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze {
-            let knife_heavy_attack =
-                weapon.id == crate::weapons::stats::WeaponId::Knife
-                    && config.bind_knife_heavy.is_pressed();
+            let knife_heavy_attack = weapon.id == crate::weapons::stats::WeaponId::Knife
+                && config.bind_knife_heavy.is_pressed();
             // Burst weapons keep firing remaining shots even after trigger release
             let wants_to_fire =
                 config.bind_fire.is_down() || weapon.burst_remaining > 0 || knife_heavy_attack;
@@ -400,9 +404,7 @@ impl PlayingState {
                                     EntityKind::Dummy => self.target_dummy.hp + 1.0,
                                     // Shield is not yet synced on OtherPlayer, so we currently use known HP.
                                     EntityKind::Player => self.other_players[idx].hp.max(1.0),
-                                    EntityKind::Bot => {
-                                        self.practice_bots[idx].player.hp.max(1.0)
-                                    }
+                                    EntityKind::Bot => self.practice_bots[idx].player.hp.max(1.0),
                                     _ => damage * mult * falloff,
                                 }
                             } else {

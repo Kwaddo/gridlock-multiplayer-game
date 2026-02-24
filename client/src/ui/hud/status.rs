@@ -12,35 +12,19 @@ pub(super) fn draw_status_panels(
     match_time_left: f32,
     config: &crate::core::GameConfig,
 ) {
-    // Match timer (top-center)
-    // If user explicitly hides the timer, don't draw it.
-    if !config.hide_match_timer {
-        // If user provided an override, use it instead of the server value.
-        if let Some(override_secs) = config.match_time_override_secs {
-            let secs = override_secs;
-            let mins = secs / 60;
-            let s = secs % 60;
-            let time_text = format!("{:02}:{:02}", mins, s);
-            let tw = crate::ui::fonts::measure_game_text(&time_text, 20);
-            draw_text_ex(
-                &time_text,
-                (screen_width() - tw) / 2.0,
-                32.0,
-                text_params(20, Color::from_rgba(220, 220, 220, 220)),
-            );
-        } else if match_time_left > 0.0 {
-            let secs = match_time_left.ceil() as u32;
-            let mins = secs / 60;
-            let s = secs % 60;
-            let time_text = format!("{:02}:{:02}", mins, s);
-            let tw = crate::ui::fonts::measure_game_text(&time_text, 20);
-            draw_text_ex(
-                &time_text,
-                (screen_width() - tw) / 2.0,
-                32.0,
-                text_params(20, Color::from_rgba(220, 220, 220, 220)),
-            );
-        }
+    // Match timer (top-center) — only display server-provided time when present.
+    if match_time_left > 0.0 {
+        let secs = match_time_left.ceil() as u32;
+        let mins = secs / 60;
+        let s = secs % 60;
+        let time_text = format!("{:02}:{:02}", mins, s);
+        let tw = crate::ui::fonts::measure_game_text(&time_text, 20);
+        draw_text_ex(
+            &time_text,
+            (screen_width() - tw) / 2.0,
+            32.0,
+            text_params(20, Color::from_rgba(220, 220, 220, 220)),
+        );
     }
 
     let hp_bar_x = 20.0;

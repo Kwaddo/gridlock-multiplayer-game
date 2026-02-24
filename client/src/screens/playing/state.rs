@@ -1,4 +1,4 @@
-use crate::net::protocols::MODE_GUN_GAME;
+use crate::net::protocols::MODE_TEAM_DEATHMATCH;
 use crate::physics::movement::{MovementConfig, MovementState};
 use crate::screens::target_dummy::TargetDummy;
 use crate::types::ai::simulated_player::SimulatedPlayer;
@@ -23,9 +23,9 @@ pub enum HandsPlaybackMode {
     Stopped,
     // Knife-specific states (knife_animated.glb replaces hands entirely)
     KnifeIdle,
-    KnifeSwing,   // playing one of the swing segments, returns to KnifeIdle when done
-    KnifeLower,   // lowering animation when switching away from knife
-    KnifeEquip,   // raising animation when switching to knife
+    KnifeSwing, // playing one of the swing segments, returns to KnifeIdle when done
+    KnifeLower, // lowering animation when switching away from knife
+    KnifeEquip, // raising animation when switching to knife
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +70,7 @@ pub struct PlayingState {
     pub pending_world_change: Option<WorldId>,
     pub pending_start_request: bool,
     pub pending_start_gamemode: u8,
+    pub pending_set_team: Option<u8>,
     pub lobby_console_open: bool,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
@@ -123,7 +124,7 @@ pub struct PlayingState {
     pub kill_feed: Vec<KillFeedEntry>,
     pub local_kills: u32,
     pub local_deaths: u32,
-    pub connected_players: Vec<(u32, String, u32, u32, u8)>, // (id, name, kills, deaths, gun_level)
+    pub connected_players: Vec<(u32, String, u32, u32, u8, u8, String)>, // (id, name, kills, deaths, gun_level, team, weapon)
 
     // death screen: who killed us and with what weapon
     pub death_killer_name: Option<String>,
@@ -135,11 +136,11 @@ pub struct PlayingState {
     pub lobby_console_message_timer: f32,
     pub hands_playback_mode: HandsPlaybackMode,
     pub hands_anim_initialized: bool,
-    pub knife_swing_index: u8,     // cycles 0..2 for light slashes (swings 1-3)
+    pub knife_swing_index: u8, // cycles 0..2 for light slashes (swings 1-3)
     pub knife_swing_requested: bool, // set by input_processing when knife fires
     pub knife_heavy_swing_requested: bool, // set by input_processing for right-click heavy slash
     pub knife_anim_initialized: bool, // whether fp_hands_knife has been set up
-    pub prev_weapon_was_knife: bool,  // track weapon switches to/from knife
+    pub prev_weapon_was_knife: bool, // track weapon switches to/from knife
     pub inspect_phase: InspectPhase,
     pub inspect_timer: f32,
 
@@ -200,7 +201,8 @@ impl PlayingState {
             current_world: WorldId::Lobby,
             pending_world_change: None,
             pending_start_request: false,
-            pending_start_gamemode: MODE_GUN_GAME,
+            pending_start_gamemode: MODE_TEAM_DEATHMATCH,
+            pending_set_team: None,
             lobby_console_open: false,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,

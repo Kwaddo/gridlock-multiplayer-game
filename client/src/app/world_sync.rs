@@ -5,7 +5,7 @@ use client::ui::OtherPlayer;
 use macroquad::prelude::*;
 
 use client::net::poll_updates;
-use client::net::protocols::MODE_GUN_GAME;
+use client::net::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH};
 use client::screens::PlayingState;
 use client::types::animation_state::{AnimState, MoveDir};
 use client::types::maze::Maze;
@@ -106,6 +106,7 @@ pub fn sync_world(
                     current.is_crouching = incoming.is_crouching;
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     current.kills = incoming.kills;
+                    current.team = incoming.team;
                     current.hp = incoming.hp;
                     current.max_hp = incoming.max_hp;
                 } else {
@@ -332,23 +333,35 @@ pub fn sync_world(
                 let killer_name = if killer_id == player_id {
                     username.to_string()
                 } else {
-                    playing_state.connected_players.iter()
+                    playing_state
+                        .connected_players
+                        .iter()
                         .find(|(id, ..)| *id == killer_id)
                         .map(|(_, name, ..)| name.clone())
-                        .or_else(|| playing_state.other_players.iter()
-                            .find(|p| p.id == killer_id)
-                            .map(|p| p.username.clone()))
+                        .or_else(|| {
+                            playing_state
+                                .other_players
+                                .iter()
+                                .find(|p| p.id == killer_id)
+                                .map(|p| p.username.clone())
+                        })
                         .unwrap_or_else(|| "Player".to_string())
                 };
                 let victim_name = if victim_id == player_id {
                     username.to_string()
                 } else {
-                    playing_state.connected_players.iter()
+                    playing_state
+                        .connected_players
+                        .iter()
                         .find(|(id, ..)| *id == victim_id)
                         .map(|(_, name, ..)| name.clone())
-                        .or_else(|| playing_state.other_players.iter()
-                            .find(|p| p.id == victim_id)
-                            .map(|p| p.username.clone()))
+                        .or_else(|| {
+                            playing_state
+                                .other_players
+                                .iter()
+                                .find(|p| p.id == victim_id)
+                                .map(|p| p.username.clone())
+                        })
                         .unwrap_or_else(|| "Player".to_string())
                 };
 
@@ -453,9 +466,11 @@ pub fn sync_world(
         // Global connected player list (for Tab / scoreboard)
         if let Some(list) = updates.player_list {
             // detect whether the server still knows about *us* — if not, server removed us (timed out)
-            let still_present = list
-                .iter()
-                .any(|(id, _name, _kills, _deaths, _world, _alive, _gl)| *id == player_id);
+            let still_present = list.iter().any(
+                |(id, _name, _kills, _deaths, _world, _alive, _gl, _team, _weapon)| {
+                    *id == player_id
+                },
+            );
             if !still_present {
                 result.removed_by_server = true;
             }
@@ -467,17 +482,62 @@ pub fn sync_world(
 
             // remove 3D models of players who are no longer in the server's player list
             // (disconnected or timed out) — this ensures their model disappears instantly
-            let server_ids: std::collections::HashSet<u32> = list.iter().map(|(id, ..)| *id).collect();
+            let server_ids: std::collections::HashSet<u32> =
+                list.iter().map(|(id, ..)| *id).collect();
             let before = playing_state.other_players.len();
-            playing_state.other_players.retain(|p| server_ids.contains(&p.id));
+            playing_state
+                .other_players
+                .retain(|p| server_ids.contains(&p.id));
             if playing_state.other_players.len() != before {
                 playing_state.rebuild_player_index();
             }
 
+            // `list` now has entries: (id, name, kills, deaths, world, alive, gun_level, team, weapon)
             playing_state.connected_players = list
                 .into_iter()
-                .map(|(id, name, kills, deaths, _world, _alive, gun_level)| (id, name, kills, deaths, gun_level))
+                .map(
+                    |(id, name, kills, deaths, _world, _alive, gun_level, team, weapon)| {
+                        (id, name, kills, deaths, gun_level, team, weapon)
+                    },
+                )
                 .collect();
+
+        }
+
+        // ── Always apply team-based colors after all updates ────────────
+        // Team colors must be reapplied every sync, not just when
+        // MSG_PLAYER_LIST arrives. MSG_STATE creates/updates OtherPlayer
+        // objects with default colors, so without this they would lose
+        // their team tint until the next (infrequent) player list packet.
+        let is_team_mode = matches!(
+            playing_state.match_mode,
+            Some(m) if m == MODE_TEAM_DEATHMATCH || m == MODE_SEARCH_AND_DESTROY
+        );
+        if playing_state.current_world == WorldId::Maze || is_team_mode {
+            for p in playing_state.other_players.iter_mut() {
+                let team = p.team;
+                let (br, bg, bb) = match team {
+                    1 => (200u8, 60u8, 60u8),   // Red team
+                    2 => (60u8, 120u8, 200u8),  // Blue team
+                    _ => (120u8, 120u8, 120u8), // default/neutral
+                };
+                let hue_variation =
+                    ((p.id.wrapping_mul(97)).wrapping_add(53) % 32) as i32 - 16;
+                let adjust = |c: u8| -> u8 {
+                    let v = c as i32 + hue_variation;
+                    v.clamp(0, 255) as u8
+                };
+                p.color = macroquad::prelude::Color::from_rgba(
+                    adjust(br),
+                    adjust(bg),
+                    adjust(bb),
+                    255,
+                );
+            }
+        } else {
+            for p in playing_state.other_players.iter_mut() {
+                p.color = client::types::player::OtherPlayer::color_for_id(p.id);
+            }
         }
 
         result.assets = updates.assets;
