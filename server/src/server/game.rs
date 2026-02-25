@@ -15,7 +15,7 @@ pub const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 
 // Match / game loop settings (basic foundation)
 // match length; `None` = infinite, `Some(d)` = end matches after `d` elapses
-pub const MATCH_DURATION: Option<Duration> = Some(Duration::from_secs(120)); // default 2 minutes
+pub const MATCH_DURATION: Option<Duration> = Some(Duration::from_secs(900)); // TDM default: 15 minutes
 pub const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
 pub const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
 #[allow(dead_code)]
