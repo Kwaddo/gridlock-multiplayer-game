@@ -108,23 +108,12 @@ pub fn run() -> std::io::Result<()> {
                                 match_mode = requested;
                             }
                         }
-                        // parse optional duration override from payload
-                        let mut requested_duration: Option<Duration> = game::MATCH_DURATION;
-                        if !payload.is_empty() {
-                            // payload[0] is mode, additional two bytes (big-endian u16)
-                            if payload.len() >= 3 {
-                                let code = u16::from_be_bytes([payload[1], payload[2]]);
-                                requested_duration = if code == 0 {
-                                    // zero means use server default
-                                    game::MATCH_DURATION
-                                } else if code == u16::MAX {
-                                    // sentinel for infinite
-                                    None
-                                } else {
-                                    Some(Duration::from_secs(code as u64))
-                                };
-                            }
-                        }
+                        // Duration is fixed per mode: TDM = 15 min, S&D = None (round-based), Gun Game = default
+                        let requested_duration: Option<Duration> = match match_mode {
+                            MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
+                            MODE_SEARCH_AND_DESTROY => None,
+                            _ => game::MATCH_DURATION,
+                        };
                         handlers::handle_start_game(
                             &socket,
                             &mut players,
