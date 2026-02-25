@@ -60,6 +60,7 @@ impl PlayingState {
 
         // Lobby console UI takes input precedence. Check it first so ESC closes the console
         // instead of opening the pause menu while the console is visible.
+        self.check_shooting_range_start();
         self.check_lobby_console();
         if self.lobby_console_open {
             // keep UI responsive (mouse) but prevent movement/weapon input and stop movement
@@ -80,6 +81,12 @@ impl PlayingState {
         }
 
         if self.is_dead {
+            if self.current_world == WorldId::Lobby
+                && self.death_timer <= 0.0
+                && is_key_pressed(KeyCode::Space)
+            {
+                self.pending_respawn = true;
+            }
             self.clear_input();
             return None;
         }
@@ -622,14 +629,12 @@ impl PlayingState {
                         });
                     }
 
-                    // Only send hit reports outside the lobby
-                    if self.current_world != WorldId::Lobby {
-                        for (victim_id, damage) in player_damage_by_id {
-                            if damage > 0.0 {
-                                let is_backstab =
-                                    player_backstab_by_id.get(&victim_id).copied().unwrap_or(false);
-                                self.pending_hits.push((victim_id, damage, is_backstab));
-                            }
+                    // Send hit reports in all worlds; server enforces lobby combat rules.
+                    for (victim_id, damage) in player_damage_by_id {
+                        if damage > 0.0 {
+                            let is_backstab =
+                                player_backstab_by_id.get(&victim_id).copied().unwrap_or(false);
+                            self.pending_hits.push((victim_id, damage, is_backstab));
                         }
                     }
 

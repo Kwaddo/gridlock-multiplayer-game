@@ -8,7 +8,7 @@ pub mod game;
 pub mod handlers;
 pub mod utils;
 
-use crate::bot::ai::{ BotBehavior, BotState };
+use crate::bot::ai::BotState;
 use crate::maze::MazeData;
 use crate::player::Player;
 use crate::player::WorldId;
@@ -132,9 +132,12 @@ pub fn run() -> std::io::Result<()> {
                             match_mode
                         ),
                     MSG_RESPAWN_REQUEST => {
-                        if let Some(ref m) = maze {
-                            handlers::handle_respawn_request(&socket, m, &mut players, src_addr);
-                        }
+                        handlers::handle_respawn_request(
+                            &socket,
+                            maze.as_ref(),
+                            &mut players,
+                            src_addr,
+                        );
                     }
                     MSG_SET_TEAM => {
                         handlers::handle_set_team(&socket, &mut players, src_addr, payload);
@@ -143,120 +146,82 @@ pub fn run() -> std::io::Result<()> {
                         if payload.len() >= 2 {
                             let behavior_code = payload[0];
                             let level = payload[1];
+                            let behavior_override = if behavior_code <= 2 {
+                                Some(behavior_code)
+                            } else {
+                                None
+                            };
+                            let preset = crate::bot::shooting_range::level_config(
+                                level,
+                                behavior_override,
+                            );
+                            let range_deadline = preset
+                                .time_limit_secs
+                                .map(|secs| Instant::now() + Duration::from_secs(secs));
+                            bot_manager.set_range_challenge_deadline(range_deadline);
+                            let base_bot_count = players.values().filter(|p| p.is_bot).count();
+                            for (i, bot_cfg) in preset.bots.iter().enumerate() {
+                                let bot_index = base_bot_count + i;
+                                let bot_id = 9000u32 + (bot_index as u32);
+                                let bot_name = format!("Bot{}", bot_index + 1);
+                                let shooting_cfg = bot_cfg.shooting.unwrap_or(preset.default_shooting);
+                                let weapon = bot_cfg.weapon.unwrap_or(preset.default_weapon);
+                                let hp = bot_cfg.health.unwrap_or(preset.default_health);
+                                let can_shoot = bot_cfg.can_shoot.unwrap_or(preset.default_can_shoot);
+                                let bot_player = Player {
+                                    id: bot_id,
+                                    username: bot_name,
+                                    position: bot_cfg.position,
+                                    yaw: std::f32::consts::PI,
+                                    pitch: 0.0,
+                                    health: hp,
+                                    shield: 0,
+                                    max_health: hp,
+                                    max_shield: 100,
+                                    is_alive: true,
+                                    kills: 0,
+                                    deaths: 0,
+                                    gun_level: 1,
+                                    socket_addr: BotManager::virtual_addr(0), // manager will replace with generated addr
+                                    last_activity: Instant::now(),
+                                    death_time: None,
+                                    world: WorldId::Lobby,
+                                    post_teleport_freeze_until: None,
+                                    is_sprinting: false,
+                                    is_ads: false,
+                                    is_crouched: false,
+                                    is_airborne: false,
+                                    is_prone: false,
+                                    is_sliding: false,
+                                    evt_jump_start: false,
+                                    evt_landed: false,
+                                    team: bot_cfg.team,
+                                    current_weapon: weapon.to_string(),
+                                    is_bot: true,
+                                    auto_respawn: false,
+                                    lobby_regen_resume_at: None,
+                                };
 
-                            let behavior: BotBehavior = match behavior_code {
-                                0 => BotBehavior::Static,
-                                1 =>
-                                    BotBehavior::Patrol {
-                                        waypoints: vec![
-                                            (5.0, 0.0, 5.0),
-                                            (5.0, 0.0, -5.0),
-                                            (-5.0, 0.0, -5.0),
-                                            (-5.0, 0.0, 5.0)
-                                        ],
-                                        current: 0,
-                                        arrival_threshold: 1.0,
+                                let bot_state = BotState {
+                                    movement: crate::physics::BotMovementState {
+                                        velocity: glam::Vec3::ZERO,
+                                        is_grounded: true,
+                                        height: 1.6,
                                     },
-                                2 =>
-                                    BotBehavior::PatrolJump {
-                                        waypoints: vec![
-                                            (5.0, 0.0, 5.0),
-                                            (5.0, 0.0, -5.0),
-                                            (-5.0, 0.0, -5.0),
-                                            (-5.0, 0.0, 5.0)
-                                        ],
-                                        current: 0,
-                                        jump_interval: 2.0,
-                                        jump_timer: 2.0,
-                                        arrival_threshold: 1.0,
+                                    behavior: bot_cfg.behavior.clone(),
+                                    can_shoot,
+                                    shooting: crate::bot::shooting::BotShootingState {
+                                        fire_rate: shooting_cfg.fire_rate,
+                                        has_target: false,
+                                        reaction_remaining: shooting_cfg.reaction_time,
                                     },
-                                _ => BotBehavior::Static,
-                            };
+                                    shooting_config: shooting_cfg,
+                                    target_id: None,
+                                    reaction_timer: 0.0,
+                                };
 
-                            let bot_count = players
-                                .values()
-                                .filter(|p| p.is_bot)
-                                .count();
-                            let spawn_points = [
-                                (5.0_f32, 0.0_f32, 5.0_f32),
-                                (5.0_f32, 0.0_f32, -5.0_f32),
-                                (-5.0_f32, 0.0_f32, 5.0_f32),
-                                (-5.0_f32, 0.0_f32, -5.0_f32),
-                            ];
-                            let spawn = spawn_points[bot_count % spawn_points.len()];
-
-                            let bot_id = 9000u32 + (bot_count as u32);
-                            let bot_name = format!("Bot{}", bot_count + 1);
-
-                            let bot_player = Player {
-                                id: bot_id,
-                                username: bot_name,
-                                position: spawn,
-                                yaw: 0.0,
-                                pitch: 0.0,
-                                health: 100,
-                                shield: 0,
-                                max_health: 100,
-                                max_shield: 100,
-                                is_alive: true,
-                                kills: 0,
-                                deaths: 0,
-                                gun_level: 1,
-                                socket_addr: BotManager::virtual_addr(0), // manager will replace with generated addr
-                                last_activity: Instant::now(),
-                                death_time: None,
-                                world: WorldId::Lobby,
-                                post_teleport_freeze_until: None,
-                                is_sprinting: false,
-                                is_ads: false,
-                                is_crouched: false,
-                                is_airborne: false,
-                                is_prone: false,
-                                is_sliding: false,
-                                evt_jump_start: false,
-                                evt_landed: false,
-                                team: crate::player::Team::Red,
-                                current_weapon: "MP5".to_string(),
-                                is_bot: true,
-                            };
-
-                            let (fire_rate, reaction_remaining) = match level {
-                                1 => (2.0, 1.5),
-                                2 => (1.0, 1.0),
-                                3 => (0.5, 0.5),
-                                _ => (2.0, 1.5),
-                            };
-
-                            let bot_state = BotState {
-                                movement: crate::physics::BotMovementState {
-                                    velocity: glam::Vec3::ZERO,
-                                    is_grounded: true,
-                                    height: 1.6,
-                                },
-                                behavior,
-                                shooting: crate::bot::shooting::BotShootingState {
-                                    fire_rate,
-                                    has_target: false,
-                                    reaction_remaining,
-                                },
-                                shooting_config: crate::bot::shooting::BotShootingConfig {
-                                    fire_rate, 
-                                    angular_offset: 0.15,
-                                    damage: match level {
-                                        1 => 8.0,
-                                        2 => 12.0,
-                                        3 => 18.0,
-                                        _ => 8.0,
-                                    },
-                                    range: 25.0,
-                                    reaction_time: reaction_remaining,
-                                },
-
-                                target_id: None,
-                                reaction_timer: 0.0,
-                            };
-
-                            bot_manager.spawn_bot(&mut players, bot_player, bot_state);
+                                bot_manager.spawn_bot(&mut players, bot_player, bot_state);
+                            }
                             broadcast::broadcast_state(&socket, &players);
                             broadcast::broadcast_player_list(&socket, &players);
                         }
@@ -283,6 +248,11 @@ pub fn run() -> std::io::Result<()> {
 
         // tick bots
         bot_manager.tick(&socket, &mut players, &mut match_end_pending, match_mode);
+        if bot_manager.handle_range_challenge_timeout(&mut players) {
+            broadcast::broadcast_state(&socket, &players);
+            broadcast::broadcast_player_list(&socket, &players);
+        }
+        game::process_lobby_regen(&mut players);
         broadcast::broadcast_state(&socket, &players);
 
         // Always attempt to auto-respawn dead players; maze may be None if no

@@ -107,7 +107,7 @@ pub fn handle_hit(
 /// returning their new coordinates.
 pub fn handle_respawn_request(
     socket: &UdpSocket,
-    maze: &MazeData,
+    maze: Option<&MazeData>,
     players: &mut HashMap<SocketAddr, Player>,
     src_addr: SocketAddr,
 ) {
@@ -116,6 +116,7 @@ pub fn handle_respawn_request(
         player.is_alive = true;
 
         let spawn = if player.world == WorldId::Maze {
+            if let Some(maze) = maze {
             match player.team {
                 Team::Red => {
                     let (red, _blue) = maze.team_spawn_positions(game::MAZE_CELL_SIZE);
@@ -129,6 +130,9 @@ pub fn handle_respawn_request(
                     let (sx, sy, sz, _fallback) = maze.random_spawn_world(game::MAZE_CELL_SIZE);
                     (sx, sy, sz)
                 }
+            }
+            } else {
+                (0.0_f32, 0.5_f32, 0.0_f32)
             }
         } else {
             (0.0_f32, 0.5_f32, 0.0_f32)
@@ -190,17 +194,14 @@ pub fn apply_damage(
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
 ) {
-    let attacker = match players.get(&attacker_addr) {
+    let (attacker, attacker_world, attacker_is_bot) = match players.get(&attacker_addr) {
         Some(a) => {
-            if a.world == WorldId::Lobby {
-                return;
-            }
             if a.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
                 && a.world == WorldId::Maze
             {
                 return;
             }
-            a.socket_addr
+            (a.socket_addr, a.world, a.is_bot)
         }
         None => return,
     };
@@ -219,6 +220,13 @@ pub fn apply_damage(
             Some(v) => v,
             None => return,
         };
+        if victim_ref.world != attacker_world {
+            return;
+        }
+        // In lobby, allow only player<->bot combat (no player<->player).
+        if attacker_world == WorldId::Lobby && !(attacker_is_bot || victim_ref.is_bot) {
+            return;
+        }
         if victim_ref
             .post_teleport_freeze_until
             .map_or(false, |t| t > Instant::now())
@@ -242,7 +250,7 @@ pub fn apply_damage(
         false
     };
 
-    let damage = if backstab_verified {
+    let mut damage = if backstab_verified {
         players
             .get(&victim_addr)
             .map(|v| v.health.saturating_add(1))
@@ -250,6 +258,17 @@ pub fn apply_damage(
     } else {
         damage
     };
+
+    // Lobby rule: players are invincible to death in lobby; clamp at 1 HP.
+    if let Some(victim_ref) = players.get(&victim_addr) {
+        if attacker_world == WorldId::Lobby && !victim_ref.is_bot {
+            damage = damage.min(victim_ref.health.saturating_sub(1));
+        }
+    }
+
+    if damage == 0 {
+        return;
+    }
 
     if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
         let wbytes = weapon_name.as_bytes();
@@ -267,6 +286,7 @@ pub fn apply_damage(
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.is_alive = false;
             vmut.deaths += 1;
+            vmut.death_time = Some(Instant::now());
         }
 
         let mut death_msg = vec![MSG_DEATH];
@@ -363,6 +383,9 @@ pub fn apply_damage(
     } else {
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.health -= damage;
+            if vmut.world == WorldId::Lobby && !vmut.is_bot {
+                vmut.lobby_regen_resume_at = Some(Instant::now() + Duration::from_millis(1500));
+            }
         }
 
         let mut dmg_msg = vec![MSG_DAMAGE];

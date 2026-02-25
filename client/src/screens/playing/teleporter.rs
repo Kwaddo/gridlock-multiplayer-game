@@ -450,6 +450,27 @@ impl PlayingState {
         }
     }
 
+    pub(super) fn draw_shooting_range_prompt(&self) {
+        use crate::world::shooting_range::RANGE_START_BUTTON_POS;
+        if self.current_world != WorldId::Lobby || self.lobby_console_open {
+            return;
+        }
+
+        let pos = RANGE_START_BUTTON_POS;
+        let dist = vec3(self.position.x - pos.x, 0.0, self.position.z - pos.z).length();
+        if dist < 2.4 {
+            let text = "[E] START RANGE";
+            let measure = measure_text(text, None, 20, 1.0);
+            draw_text(
+                text,
+                screen_width() / 2.0 - measure.width / 2.0,
+                screen_height() / 2.0 + 88.0,
+                20.0,
+                Color::from_rgba(255, 170, 120, 255),
+            );
+        }
+    }
+
     /// Handles press-to-open / press-to-close behavior for the in-world lobby console.
     pub(super) fn check_lobby_console(&mut self) {
         use crate::world::lobby::LOBBY_CONSOLE_POS;
@@ -481,6 +502,18 @@ impl PlayingState {
                 show_mouse(false);
                 self.last_mouse_pos = mouse_position();
             }
+        }
+    }
+
+    pub(super) fn check_shooting_range_start(&mut self) {
+        use crate::world::shooting_range::RANGE_START_BUTTON_POS;
+        if self.current_world != WorldId::Lobby {
+            return;
+        }
+        let pos = RANGE_START_BUTTON_POS;
+        let dist = vec3(self.position.x - pos.x, 0.0, self.position.z - pos.z).length();
+        if dist < 2.0 && is_key_pressed(KeyCode::E) {
+            self.pending_range_start = true;
         }
     }
 }

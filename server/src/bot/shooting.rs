@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use crate::player::{Player, Team};
+use crate::player::{Player, Team, WorldId};
 use crate::bot::ai::BotState;
+use crate::weapons_stats::get_weapon_stats;
 
 
+#[derive(Clone, Copy)]
 pub struct BotShootingConfig {
-    pub fire_rate: f32, // shots per second
+    pub fire_rate: f32, // seconds between bot-triggered shots
     pub angular_offset: f32, // max angle offset in degrees for inaccuracy
-    pub damage: f32,
-    pub range: f32,
     pub reaction_time: f32, // time in seconds before bot starts shooting after seeing target
 }
 
@@ -40,6 +40,7 @@ pub fn try_shoot(
         Some(p) => p,
         None => return None, // bot player not found (shouldn't happen)
     };
+    let weapon_stats = get_weapon_stats(&bot.current_weapon);
 
     // find target
     
@@ -47,9 +48,15 @@ pub fn try_shoot(
         .filter(|p| {
             p.id != bot.id 
             && p.is_alive 
-            && p.team != bot.team 
             && p.world == bot.world 
-            && p.team != Team::Spectator
+            && distance(bot.position, p.position) <= weapon_stats.range
+            && (
+                if bot.world == WorldId::Lobby {
+                    !p.is_bot
+                } else {
+                    p.team != bot.team && p.team != Team::Spectator
+                }
+            )
         }).min_by(|a, b| {
             let da = distance(bot.position, a.position);
             let db = distance(bot.position, b.position);
@@ -81,8 +88,14 @@ pub fn try_shoot(
             return None; // still cooling down, can't shoot
         }
         
-        bot_state.shooting.fire_rate = 1.0 / bot_state.shooting_config.fire_rate;
-        let dmg = bot_state.shooting_config.damage.round().max(0.0) as u32;
+        let weapon_min_interval = if weapon_stats.shots_per_sec > 0.0 {
+            1.0 / weapon_stats.shots_per_sec
+        } else {
+            bot_state.shooting_config.fire_rate
+        };
+        let interval = bot_state.shooting_config.fire_rate.max(weapon_min_interval);
+        bot_state.shooting.fire_rate = interval;
+        let dmg = weapon_stats.damage;
         Some((new_target, dmg))
 }
 

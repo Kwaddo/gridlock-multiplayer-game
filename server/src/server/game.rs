@@ -140,6 +140,9 @@ pub fn process_auto_respawns(
         // whether their `world` field currently indicates `Maze`. Some clients
         // can be 'offscreen' and temporarily report different world states;
         // we should still auto-respawn players who are dead.
+        if !player.auto_respawn {
+            continue;
+        }
         if player.is_alive {
             continue;
         }
@@ -209,7 +212,36 @@ pub fn process_auto_respawns(
             pmut.current_weapon = chosen_weapon;
         }
 
-        let _ = socket.send_to(&respawn_msg, socket_addr);
+        if let Some(p) = players.get(&socket_addr) {
+            if !p.is_bot {
+                let _ = socket.send_to(&respawn_msg, socket_addr);
+            }
+        }
+    }
+}
+
+/// Regenerate lobby player health after a short delay.
+pub fn process_lobby_regen(players: &mut HashMap<SocketAddr, Player>) {
+    let now = Instant::now();
+    for player in players.values_mut() {
+        if player.world != WorldId::Lobby || player.is_bot || !player.is_alive {
+            if player.world == WorldId::Lobby && !player.is_bot && !player.is_alive {
+                player.is_alive = true;
+            }
+            continue;
+        }
+        if player.health == 0 {
+            player.health = 1;
+        }
+        if player.health >= player.max_health {
+            continue;
+        }
+        if let Some(resume_at) = player.lobby_regen_resume_at {
+            if now < resume_at {
+                continue;
+            }
+        }
+        player.health = (player.health + 1).min(player.max_health);
     }
 }
 

@@ -162,6 +162,12 @@ pub fn sync_world(
         if let Some(k) = updates.self_kills {
             playing_state.local_kills = k;
         }
+        if let Some(hp) = updates.self_hp {
+            playing_state.hp = hp;
+        }
+        if let Some(max_hp) = updates.self_max_hp {
+            playing_state.max_hp = max_hp;
+        }
 
         // If server indicates match mode (sent with countdown or world change), store it locally
         if let Some(mode) = updates.match_mode {
@@ -333,6 +339,20 @@ pub fn sync_world(
             };
             playing_state.announcements.push((ann, 2.0));
         }
+        if let Some(bot_shots) = updates.bot_shots {
+            for (start, end) in bot_shots {
+                playing_state.tracers.push(client::weapons::effects::BulletTracer {
+                    start,
+                    end,
+                    lifetime: 0.09,
+                    speed: 120.0,
+                    progress: 0.0,
+                    tracer_length: 0.5,
+                    tracer_color: [255, 170, 90, 255],
+                    tracer_thickness: 0.03,
+                });
+            }
+        }
         if let Some(kills) = updates.kill_feed {
             for (killer_id, victim_id, weapon) in kills {
                 // resolve names now so they persist even after player models are removed
@@ -390,6 +410,11 @@ pub fn sync_world(
             }
         }
         if updates.death {
+            if playing_state.current_world == WorldId::Lobby {
+                // Lobby safety: never enter death state in lobby; server-side also clamps.
+                playing_state.is_dead = false;
+                playing_state.hp = playing_state.hp.max(1.0);
+            } else {
             // Only trigger death logic when transitioning from alive -> dead.
             // Servers send periodic MSG_STATE entries marking a player as
             // dead until they respawn; calling `die()` every poll would keep
@@ -406,6 +431,7 @@ pub fn sync_world(
                 }
                 playing_state.death_weapon_name = updates.death_weapon.clone();
                 playing_state.die(None);
+            }
             }
         }
         if let Some(spawn_pos) = updates.respawn_pos {

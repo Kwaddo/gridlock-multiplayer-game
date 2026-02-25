@@ -35,6 +35,7 @@ pub const MSG_SET_TEAM: u8 = 26; // client -> server: set preferred team (team:u
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;
 pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
+pub const MSG_BOT_SHOT: u8 = 52; // server -> client: bot fired (shooter_id, victim_id)
 
 pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
 
