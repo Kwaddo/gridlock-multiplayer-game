@@ -67,6 +67,8 @@ pub struct GameConfig {
     pub bind_weapon6: InputBinding,
     pub bind_toggle_knife: InputBinding,
     pub bind_knife_heavy: InputBinding,
+    pub bind_slow_walk: InputBinding,
+    pub bind_prone: InputBinding,
     pub bind_fullscreen: InputBinding,
 
     // Camera (UI value 40-120, default 90)
@@ -128,6 +130,8 @@ impl GameConfig {
             bind_weapon6: InputBinding::Key(KeyCode::Key6),
             bind_toggle_knife: InputBinding::Key(KeyCode::X),
             bind_knife_heavy: InputBinding::Mouse(MouseButton::Right),
+            bind_slow_walk: InputBinding::Key(KeyCode::LeftAlt),
+            bind_prone: InputBinding::Key(KeyCode::Z),
             bind_fullscreen: InputBinding::Key(KeyCode::F11),
 
             // Camera - UI value, converted to internal with raw_fov()
@@ -231,6 +235,8 @@ impl GameConfig {
             ("Weapon 6", self.bind_weapon6),
             ("Toggle Knife", self.bind_toggle_knife),
             ("Knife Heavy", self.bind_knife_heavy),
+            ("Slow Walk", self.bind_slow_walk),
+            ("Prone", self.bind_prone),
             ("Fullscreen", self.bind_fullscreen),
         ]
     }

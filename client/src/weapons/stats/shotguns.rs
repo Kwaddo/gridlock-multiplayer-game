@@ -71,6 +71,7 @@ pub const SPAS: WeaponStats = WeaponStats {
     viewmodel_asset_key: Some("weapon_fp_shotgun"),
 
     viewmodel_scale: 0.002,
+    viewmodel_ads_scale: 0.002,
     viewmodel_position: (0.22, 0.13, -0.44),
     viewmodel_rotation: (-0.1, -1.45, 0.0),
     viewmodel_muzzle_offset: (-1.1, 0.02, -0.25),
@@ -102,13 +103,13 @@ pub const BENELLI: WeaponStats = WeaponStats {
     pellet_count: 8,
     pellet_spread: Some(
         &[
-            (0.0, 0.0),       // center
-            (0.0, 0.85),      // ring
+            (0.0, 0.0), // center
+            (0.0, 0.85), // ring
             (0.8976, 0.85),
             (1.7952, 0.85),
             (2.6928, 0.85),
             (3.5904, 0.85),
-            (4.4880, 0.85),
+            (4.488, 0.85),
             (5.3856, 0.85),
         ]
     ),
@@ -164,13 +165,13 @@ pub const SAWNOFF: WeaponStats = WeaponStats {
     name: "Sawnoff",
     fire_mode: FireMode::SemiAuto,
 
-    damage: 72.0,
-    headshot_mult: 2.0,
+    damage: 10.0,
+    headshot_mult: 1.8,
     pellet_count: 10,
     pellet_spread: Some(
         &[
-            (0.0, 0.0),       // center
-            (0.3927, 1.0),    // wide ring — sawnoff has big spread
+            (0.0, 0.0), // center
+            (0.3927, 1.0), // wide ring — sawnoff has big spread
             (1.1781, 1.0),
             (1.9635, 1.0),
             (2.7489, 1.0),
@@ -178,14 +179,14 @@ pub const SAWNOFF: WeaponStats = WeaponStats {
             (4.3197, 1.0),
             (5.1051, 1.0),
             (5.8905, 1.0),
-            (0.7854, 0.5),    // inner ring for density
+            (0.7854, 0.5), // inner ring for density
         ]
     ),
 
     fire_rate: 5.0, // instant
     magazine_size: 2,
     max_reserve: 20,
-    reload_time: 3.10,
+    reload_time: 3.1,
 
     recoil_vertical: 0.12,
     recoil_horizontal: 0.05,
@@ -232,20 +233,23 @@ pub const SAWNOFF: WeaponStats = WeaponStats {
     viewmodel_model: Some("fp_hands_sawnoff"),
     viewmodel_asset_key: None,
 
+    // Sawnoff viewmodel
     viewmodel_scale: 0.0025,
-    viewmodel_position: (0.345, 0.1, -0.37),
-    viewmodel_rotation: (-0.15, 0.0, 0.0),
+    viewmodel_ads_scale: 0.0025,
+    viewmodel_position: (0.211, 0.108, -0.37),
+    viewmodel_rotation: (-0.165, 0.09, 0.0),
     viewmodel_muzzle_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_scale: 1.0,
     viewmodel_hands_offset: (0.0, 0.0, 0.0),
     viewmodel_hands_rotation: (0.0, 0.0, 0.0),
     viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
     viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
-    viewmodel_ads_pos_offset: (0.0, 0.0, 0.0),
-    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.14, 0.02, -0.1),
+    viewmodel_ads_rot_offset: (0.01, -0.095, 0.0),
     viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
-    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.005, 0.0),
 
+    // fall off: 
     falloff_start: 3.0,
     falloff_end: 10.0,
     falloff_min_mult: 0.15,

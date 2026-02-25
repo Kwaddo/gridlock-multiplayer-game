@@ -21,6 +21,7 @@ pub struct WeaponState {
     // -- ADS
     pub is_aiming: bool,
     pub ads_progress: f32,        // 0.0 = hip, 1.0 = fully aimed
+    pub ads_time_multiplier: f32, // movement modifiers (e.g. sliding) scale ADS in/out time
     pub jump_cancelled_ads: bool, // true when jump cancelled ADS, prevents re-aim until button released
 
     // -- Recoil accumulation (applied to camera)
@@ -78,6 +79,7 @@ impl WeaponState {
             is_reloading: false,
             is_aiming: false,
             ads_progress: 0.0,
+            ads_time_multiplier: 1.0,
             jump_cancelled_ads: false,
             recoil_pitch: 0.0,
             recoil_yaw: 0.0,
@@ -158,7 +160,7 @@ impl WeaponState {
         }
 
         // ADS interpolation
-        let ads_time = self.stats_data.ads_time;
+        let ads_time = (self.stats_data.ads_time * self.ads_time_multiplier).max(0.0001);
         if self.is_aiming {
             self.ads_progress = (self.ads_progress + delta / ads_time).min(1.0);
         } else {
@@ -317,12 +319,12 @@ impl WeaponInventory {
         if self.knife_active {
             // put knife away, go back to gun
             self.knife_active = false;
-            self.switch_cooldown = 0.3;
+            self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_FROM_TIME;
             true
         } else {
-            // put gun away, pull out knife
+            // put gun away, pull out knife (faster than pulling gun from knife)
             self.knife_active = true;
-            self.switch_cooldown = 0.3;
+            self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_TO_TIME;
             true
         }
     }
@@ -341,7 +343,8 @@ impl WeaponInventory {
             if slot < self.weapons.len() && self.switch_cooldown <= 0.0 {
                 self.knife_active = false;
                 self.active_slot = slot;
-                self.switch_cooldown = 0.3;
+                self.switch_cooldown = 
+                crate::weapons::stats::melee::KNIFE_SWITCH_FROM_TIME;
                 return true;
             }
             return false;
@@ -371,7 +374,7 @@ impl WeaponInventory {
         if self.knife_active {
             if self.switch_cooldown <= 0.0 {
                 self.knife_active = false;
-                self.switch_cooldown = 0.3;
+                self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_FROM_TIME;
             }
             return;
         }

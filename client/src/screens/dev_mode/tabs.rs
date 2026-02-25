@@ -605,6 +605,7 @@ pub(super) fn draw_viewmodel_tab(
 
     y += draw_section_header("ADS Viewmodel", x, y);
     y += draw_toggle("Lock Gun + Hands (ADS)", &mut weapon.ads_pair_locked, x, y, mouse, clicked);
+    y += draw_slider_nudge("viewmodel_ads_scale", &mut weapon.stats_data.viewmodel_ads_scale, 0.001, 0.1, 0.001 * sm, x, y, w, mouse, clicked, held);
 
     if weapon.ads_pair_locked {
         // Locked: one set of sliders drives both gun and hands together
@@ -658,6 +659,7 @@ pub(super) fn draw_viewmodel_tab(
     y += h;
     if ads_reset {
         let defaults = weapon.id.stats();
+        weapon.stats_data.viewmodel_ads_scale = defaults.viewmodel_ads_scale;
         weapon.ads_pos_offset = defaults.viewmodel_ads_pos_offset;
         weapon.ads_rot_offset = defaults.viewmodel_ads_rot_offset;
         weapon.ads_hands_pos_offset = defaults.viewmodel_ads_hands_pos_offset;
@@ -689,6 +691,7 @@ pub(super) fn draw_viewmodel_tab(
         println!(
             "// {} viewmodel \n\
              viewmodel_scale: {:.4},\n\
+             viewmodel_ads_scale: {:.4},\n\
              viewmodel_position: ({:.3}, {:.3}, {:.3}),\n\
              viewmodel_rotation: ({:.3}, {:.3}, {:.3}),\n\
              viewmodel_muzzle_offset: ({:.3}, {:.3}, {:.3}),\n\
@@ -703,6 +706,7 @@ pub(super) fn draw_viewmodel_tab(
              viewmodel_ads_hands_rot_offset: ({:.3}, {:.3}, {:.3}),",
             s.name,
             s.viewmodel_scale,
+            s.viewmodel_ads_scale,
             s.viewmodel_position.0, s.viewmodel_position.1, s.viewmodel_position.2,
             s.viewmodel_rotation.0, s.viewmodel_rotation.1, s.viewmodel_rotation.2,
             s.viewmodel_muzzle_offset.0, s.viewmodel_muzzle_offset.1, s.viewmodel_muzzle_offset.2,
@@ -723,6 +727,7 @@ pub(super) fn draw_viewmodel_tab(
     if pressed {
         let defaults = weapon.id.stats();
         weapon.stats_data.viewmodel_scale = defaults.viewmodel_scale;
+        weapon.stats_data.viewmodel_ads_scale = defaults.viewmodel_ads_scale;
         weapon.stats_data.viewmodel_position = defaults.viewmodel_position;
         weapon.stats_data.viewmodel_rotation = defaults.viewmodel_rotation;
         weapon.stats_data.viewmodel_muzzle_offset = defaults.viewmodel_muzzle_offset;
@@ -785,9 +790,10 @@ pub(super) fn draw_viewmodel_tab(
         dst.pair_offset_rot = pr;
     }
     if let Some(src) = copy_ads_from_slot {
-        let (ap, ar, ahp, ahr) = {
+        let (ads_scale, ap, ar, ahp, ahr) = {
             let sw = &inv.weapons[src];
             (
+                sw.stats_data.viewmodel_ads_scale,
                 sw.ads_pos_offset,
                 sw.ads_rot_offset,
                 sw.ads_hands_pos_offset,
@@ -795,6 +801,7 @@ pub(super) fn draw_viewmodel_tab(
             )
         };
         let dst = inv.active_mut();
+        dst.stats_data.viewmodel_ads_scale = ads_scale;
         dst.ads_pos_offset = ap;
         dst.ads_rot_offset = ar;
         dst.ads_hands_pos_offset = ahp;
@@ -835,5 +842,45 @@ pub(super) fn draw_debug_tab(
             w.reset_stats();
             w.crosshair = CrosshairConfig::for_category(w.id.category());
         }
+    }
+
+    y += 20.0;
+    y += draw_section_header("Distance Ruler", x, y);
+    y += draw_toggle("Ruler Active", &mut dev.ruler_active, x, y, mouse, clicked);
+
+    let (h, set_start) = draw_action_button("Set Start", x, y, 120.0, mouse, clicked);
+    y += h;
+    if set_start {
+        dev.ruler_set_start_requested = true;
+    }
+
+    let (h, set_end) = draw_action_button("Set End", x, y, 120.0, mouse, clicked);
+    y += h;
+    if set_end {
+        dev.ruler_set_end_requested = true;
+    }
+
+    let (h, clear) = draw_action_button("Clear Ruler", x, y, 120.0, mouse, clicked);
+    y += h;
+    if clear {
+        dev.ruler_start = None;
+        dev.ruler_end = None;
+    }
+
+    if let (Some(start), Some(end)) = (dev.ruler_start, dev.ruler_end) {
+        let dist = (end - start).length();
+        draw_text_ex(
+            &format!("Distance: {:.2}", dist),
+            x,
+            y + 14.0,
+            text_params(14, Color::from_rgba(180, 230, 180, 255)),
+        );
+    } else {
+        draw_text_ex(
+            "Set both points to measure distance",
+            x,
+            y + 14.0,
+            text_params(14, GRAY),
+        );
     }
 }

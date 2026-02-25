@@ -8,15 +8,6 @@ use super::super::state::HandsPlaybackMode;
 use super::super::PlayingState;
 
 const HANDS_BASE_SCALE: f32 = 0.35;
-const INSPECT_START_SEC: f32 = 0.35;
-const INSPECT_SWEEP_SEC: f32 = 0.6;
-const INSPECT_HOLD_SEC: f32 = 0.85;
-const INSPECT_RETURN_SEC: f32 = 0.45;
-const INSPECT_LOOK_DOWN_Y: f32 = -0.26;
-const INSPECT_POS_A: Vec3 = Vec3::from_array([0.02, -0.03, -0.04]);
-const INSPECT_ROT_A: Vec3 = Vec3::from_array([-0.22, 0.45, 0.16]);
-const INSPECT_POS_B: Vec3 = Vec3::from_array([-0.03, -0.02, -0.06]);
-const INSPECT_ROT_B: Vec3 = Vec3::from_array([-0.18, -0.6, -0.18]);
 
 impl PlayingState {
     fn preferred_hands_key_for_viewmodel(id: WeaponId) -> &'static str {
@@ -144,42 +135,13 @@ impl PlayingState {
 
         let (base_x, base_y, base_z) = stats.viewmodel_position;
         let (rot_pitch, rot_yaw, rot_roll) = stats.viewmodel_rotation;
-        let (inspect_pos, inspect_rot, inspect_look_alpha) = match self.inspect_phase {
-            super::super::state::InspectPhase::None => (Vec3::ZERO, Vec3::ZERO, 0.0),
-            super::super::state::InspectPhase::Start => {
-                let t = (self.inspect_timer / INSPECT_START_SEC).clamp(0.0, 1.0);
-                (
-                    Vec3::ZERO.lerp(INSPECT_POS_A, t),
-                    Vec3::ZERO.lerp(INSPECT_ROT_A, t),
-                    t,
-                )
-            }
-            super::super::state::InspectPhase::Sweep => {
-                let t = (self.inspect_timer / INSPECT_SWEEP_SEC).clamp(0.0, 1.0);
-                (
-                    INSPECT_POS_A.lerp(INSPECT_POS_B, t),
-                    INSPECT_ROT_A.lerp(INSPECT_ROT_B, t),
-                    1.0,
-                )
-            }
-            super::super::state::InspectPhase::Hold => {
-                let _ = INSPECT_HOLD_SEC;
-                (INSPECT_POS_B, INSPECT_ROT_B, 1.0)
-            }
-            super::super::state::InspectPhase::Return => {
-                let t = (self.inspect_timer / INSPECT_RETURN_SEC).clamp(0.0, 1.0);
-                (
-                    INSPECT_POS_B.lerp(Vec3::ZERO, t),
-                    INSPECT_ROT_B.lerp(Vec3::ZERO, t),
-                    1.0 - t,
-                )
-            }
-        };
+        let inspect_pos = Vec3::ZERO;
+        let inspect_rot = Vec3::ZERO;
         // camera and projection setup
         let vm_fov = (60.0f32).to_radians();
         let vm_camera = Camera3D {
-            position: vec3(0.0, 0.04 * inspect_look_alpha, 0.0),
-            target: vec3(0.0, INSPECT_LOOK_DOWN_Y * inspect_look_alpha, 1.0),
+            position: vec3(0.0, 0.0, 0.0),
+            target: vec3(0.0, 0.0, 1.0),
             up: vec3(0.0, 1.0, 0.0),
             fovy: vm_fov,
             z_far: 10.0,
@@ -247,6 +209,8 @@ impl PlayingState {
         let hands_anchor = hands_base_anchor + motion_offset + inspect_pos;
         let weapon_anchor = weapon_base_anchor + motion_offset + inspect_pos;
         let pos = weapon_anchor + weapon_local_offset;
+        let vm_scale = stats.viewmodel_scale
+            + (stats.viewmodel_ads_scale - stats.viewmodel_scale) * ads_p;
         
         /*
             Normalize and transform weapon mesh to world position. We apply normalization first so that
@@ -255,9 +219,9 @@ impl PlayingState {
         let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
             * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
         let scale_mat = Mat4::from_scale(vec3(
-            stats.viewmodel_scale * 28.0,
-            stats.viewmodel_scale * 28.0,
-            stats.viewmodel_scale * 28.0,
+            vm_scale * 28.0,
+            vm_scale * 28.0,
+            vm_scale * 28.0,
         ));
         let weapon_rot_mat = Mat4::from_euler(
             EulerRot::XYZ,
@@ -349,7 +313,7 @@ impl PlayingState {
             if let Some((fx, fy)) = Self::project_to_screen(&vm_camera, muzzle_world) {
                 let t = (weapon.muzzle_flash_timer / 0.08).min(1.0);
                 let alpha = (220.0 * t) as u8;
-                let radius = 18.0 * stats.viewmodel_scale * 28.0 * (0.4 + 0.6 * t);
+                let radius = 18.0 * vm_scale * 28.0 * (0.4 + 0.6 * t);
 
                 draw_circle(
                     fx,
@@ -396,7 +360,9 @@ impl PlayingState {
 
         let target_h =
             (screen_h * (0.46 - weapon.ads_progress * 0.08)).clamp(160.0, screen_h * 0.8);
-        let scale = (target_h / tex.height()).max(0.2) * stats.viewmodel_scale;
+        let vm_scale = stats.viewmodel_scale
+            + (stats.viewmodel_ads_scale - stats.viewmodel_scale) * weapon.ads_progress;
+        let scale = (target_h / tex.height()).max(0.2) * vm_scale;
         let size = vec2(tex.width() * scale, tex.height() * scale);
 
         let hip_pos = vec2(screen_w * 0.68, screen_h * 0.88);

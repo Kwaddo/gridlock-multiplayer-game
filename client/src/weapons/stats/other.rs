@@ -60,6 +60,7 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     viewmodel_model: Some("fp_hands_minigun"),
     viewmodel_asset_key: None,
     viewmodel_scale: 0.0300,
+    viewmodel_ads_scale: 0.0300,
     viewmodel_position: (0.349, -0.446, -0.460),
     viewmodel_rotation: (-0.15, 0.0, 0.0),
     viewmodel_muzzle_offset: (0.0, 0.0, 0.0),

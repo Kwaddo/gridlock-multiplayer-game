@@ -134,11 +134,43 @@ impl PlayingState {
         self.draw_player_hitboxes();
         self.draw_tracers(camera.position);
         self.draw_bullet_holes();
+        if self.dev_mode.ruler_active {
+            if let (Some(mut start), Some(mut end)) = (self.dev_mode.ruler_start, self.dev_mode.ruler_end) {
+                start.y = 0.02;
+                end.y = 0.02;
+                draw_line_3d(start, end, GREEN);
+
+                let delta = end - start;
+                let dist = delta.length();
+                if dist > 0.001 {
+                    let dir = delta / dist;
+                    let tick_count = dist.floor() as i32;
+                    for i in 0..=tick_count {
+                        let p = start + dir * (i as f32);
+                        let color = if i % 5 == 0 { YELLOW } else { ORANGE };
+                        draw_line_3d(p, p + vec3(0.0, 0.20, 0.0), color);
+                    }
+                }
+            }
+        }
 
         set_default_camera();
 
         if self.current_world == WorldId::Lobby {
             self.draw_target_dummy_hud(&camera);
+        }
+
+        if self.dev_mode.ruler_active {
+            if let (Some(start), Some(end)) = (self.dev_mode.ruler_start, self.dev_mode.ruler_end) {
+                let dist = (end - start).length();
+                let txt = format!("Ruler Distance: {:.2}", dist);
+                draw_text_ex(
+                    &txt,
+                    16.0,
+                    24.0,
+                    crate::ui::fonts::text_params(18, Color::from_rgba(160, 240, 160, 255)),
+                );
+            }
         }
 
         self.draw_player_overhead(&camera, maze);
@@ -188,6 +220,30 @@ impl PlayingState {
                 local_team,
                 config,
             );
+
+            let dt = get_frame_time();
+            if self.movement_state.is_stamina_depleted {
+                self.stamina_depleted_vignette_alpha =
+                    (self.stamina_depleted_vignette_alpha + dt * 2.0).min(1.0);
+            } else {
+                self.stamina_depleted_vignette_alpha =
+                    (self.stamina_depleted_vignette_alpha - dt * 2.0).max(0.0);
+            }
+
+            if self.stamina_depleted_vignette_alpha > 0.0 {
+                let pulse = ((get_time() as f32 * 4.0).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+                let alpha =
+                    (self.stamina_depleted_vignette_alpha * (0.10 + 0.10 * pulse) * 255.0) as u8;
+                let w = screen_width();
+                let h = screen_height();
+                let edge = (w.min(h) * 0.08).max(28.0);
+                let col = Color::from_rgba(120, 20, 20, alpha);
+
+                draw_rectangle(0.0, 0.0, w, edge, col);
+                draw_rectangle(0.0, h - edge, w, edge, col);
+                draw_rectangle(0.0, 0.0, edge, h, col);
+                draw_rectangle(w - edge, 0.0, edge, h, col);
+            }
         }
 
         // Show player list / scoreboard while holding Tab
