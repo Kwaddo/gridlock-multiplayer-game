@@ -58,18 +58,6 @@ impl PlayingState {
             crate::ui::fonts::text_params(16, phase_color),
         );
 
-        // ── Phase timer ──
-        if self.snd_phase_timer > 0.0 && self.snd_phase != 3 {
-            let timer_text = format!("{:.0}s", self.snd_phase_timer.ceil());
-            let tw = crate::ui::fonts::measure_game_text(&timer_text, 28);
-            draw_text_ex(
-                &timer_text,
-                (sw - tw) / 2.0,
-                80.0,
-                crate::ui::fonts::text_params(28, Color::from_rgba(255, 255, 255, 230)),
-            );
-        }
-
         // ── Bomb status indicator (bottom center) ──
         let local_team = self
             .connected_players

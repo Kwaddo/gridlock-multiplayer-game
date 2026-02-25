@@ -154,8 +154,10 @@ impl PlayingState {
         if self.is_dead {
             if self.death_timer > 0.0 {
                 self.death_timer -= delta;
-            } else if self.current_world == WorldId::Maze {
-                // Auto-respawn once the death timer expires
+            } else if self.current_world == WorldId::Maze
+                && self.match_mode != Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
+            {
+                // Auto-respawn once the death timer expires (not in S&D — round start handles it)
                 self.pending_respawn = true;
             }
             return;
