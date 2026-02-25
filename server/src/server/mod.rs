@@ -164,6 +164,8 @@ pub fn run() -> std::io::Result<()> {
                             maze.as_ref(),
                             &mut players,
                             src_addr,
+                            match_mode,
+                            &snd_state,
                         );
                     }
                     MSG_SET_TEAM => {

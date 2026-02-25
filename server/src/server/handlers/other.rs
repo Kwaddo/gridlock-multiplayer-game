@@ -318,7 +318,18 @@ pub fn handle_respawn_request(
     maze: Option<&MazeData>,
     players: &mut HashMap<SocketAddr, Player>,
     src_addr: SocketAddr,
+    match_mode: u8,
+    snd_state: &Option<crate::server::snd::SndState>,
 ) {
+    // in Search & Destroy mode, disallow manual respawn until a new round begins
+    if match_mode == MODE_SEARCH_AND_DESTROY {
+        if let Some(snd) = snd_state {
+            if snd.phase != crate::server::snd::SndPhase::FreezeTime {
+                // either active or round over, ignore request
+                return;
+            }
+        }
+    }
     // compute spawn first using only immutable access to `players`
     let spawn = if let Some(pref) = players.get(&src_addr) {
         if pref.world == WorldId::Maze {
