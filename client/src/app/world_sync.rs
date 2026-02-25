@@ -65,7 +65,7 @@ pub fn sync_world(
                     // the position genuinely changed.
                     let dx = incoming.x - current.x;
                     let dz = incoming.z - current.z;
-                    let pos_changed = (dx * dx + dz * dz) > 1.0e-4;
+                    let pos_changed = dx * dx + dz * dz > 1.0e-4;
                     let state_changed = incoming.is_sprinting != current.is_sprinting
                         || incoming.is_ads != current.is_ads
                         || incoming.is_crouching != current.is_crouching
@@ -162,6 +162,12 @@ pub fn sync_world(
         if let Some(k) = updates.self_kills {
             playing_state.local_kills = k;
         }
+        if let Some(hp) = updates.self_hp {
+            playing_state.hp = hp;
+        }
+        if let Some(max_hp) = updates.self_max_hp {
+            playing_state.max_hp = max_hp;
+        }
 
         // If server indicates match mode (sent with countdown or world change), store it locally
         if let Some(mode) = updates.match_mode {
@@ -174,6 +180,12 @@ pub fn sync_world(
         if let Some(gl) = updates.self_gun_level {
             let current_mode = updates.match_mode.or(playing_state.match_mode);
             if current_mode == Some(MODE_GUN_GAME) {
+                // server sends 1 = first slot; convert to zero-based slot index
+                let slot = (gl as usize).saturating_sub(1);
+
+                // If we're already in the Maze, apply immediately. If the update also contains a
+                // pending world_change to Maze (same poll), apply immediately as well. Otherwise
+                // defer application until the client receives the world change / teleport.
                 let will_be_in_maze = updates
                     .world_change
                     .as_ref()
@@ -363,6 +375,28 @@ pub fn sync_world(
             };
             playing_state.announcements.push((ann, 2.0));
         }
+        if let Some(bot_shots) = updates.bot_shots {
+            for (start, end) in bot_shots {
+                playing_state
+                    .tracers
+                    .push(client::weapons::effects::BulletTracer {
+                        start,
+                        end,
+                        lifetime: 0.09,
+                        speed: 120.0,
+                        progress: 0.0,
+                        tracer_length: 0.5,
+                        tracer_color: [255, 170, 90, 255],
+                        tracer_thickness: 0.03,
+                    });
+                playing_state.world_muzzle_flashes.push(
+                    client::weapons::effects::WorldMuzzleFlash {
+                        position: start,
+                        lifetime: client::weapons::effects::WorldMuzzleFlash::DURATION,
+                    },
+                );
+            }
+        }
         if let Some(kills) = updates.kill_feed {
             for (killer_id, victim_id, weapon) in kills {
                 // resolve names now so they persist even after player models are removed
@@ -426,23 +460,29 @@ pub fn sync_world(
             }
         }
         if updates.death {
-            // Only trigger death logic when transitioning from alive -> dead.
-            // Servers send periodic MSG_STATE entries marking a player as
-            // dead until they respawn; calling `die()` every poll would keep
-            // resetting the death timer and prevent auto-respawn.
-            if !playing_state.is_dead {
-                // resolve killer name from the connected_players list
-                if let Some(killer_id) = updates.death_killer_id {
-                    playing_state.death_killer_name = playing_state
-                        .connected_players
-                        .iter()
-                        .find(|(id, ..)| *id == killer_id)
-                        .map(|(_, name, ..)| name.clone());
-                } else {
-                    playing_state.death_killer_name = None;
+            if playing_state.current_world == WorldId::Lobby {
+                // Lobby safety: never enter death state in lobby; server-side also clamps.
+                playing_state.is_dead = false;
+                playing_state.hp = playing_state.hp.max(1.0);
+            } else {
+                // Only trigger death logic when transitioning from alive -> dead.
+                // Servers send periodic MSG_STATE entries marking a player as
+                // dead until they respawn; calling `die()` every poll would keep
+                // resetting the death timer and prevent auto-respawn.
+                if !playing_state.is_dead {
+                    // resolve killer name from the connected_players list
+                    if let Some(killer_id) = updates.death_killer_id {
+                        playing_state.death_killer_name = playing_state
+                            .connected_players
+                            .iter()
+                            .find(|(id, ..)| *id == killer_id)
+                            .map(|(_, name, ..)| name.clone());
+                    } else {
+                        playing_state.death_killer_name = None;
+                    }
+                    playing_state.death_weapon_name = updates.death_weapon.clone();
+                    playing_state.die(None);
                 }
-                playing_state.death_weapon_name = updates.death_weapon.clone();
-                playing_state.die(None);
             }
         }
         if let Some(spawn_pos) = updates.respawn_pos {
@@ -550,14 +590,23 @@ pub fn sync_world(
                 .into_iter()
                 .map(
                     |(id, name, kills, deaths, _world, _alive, gun_level, team, weapon)| {
-                        (id, name, kills, deaths, gun_level, team, weapon)
+                        let is_bot = playing_state
+                            .other_players
+                            .iter()
+                            .find(|p| p.id == id)
+                            .map(|p| p.is_bot)
+                            .unwrap_or(false);
+                        (id, name, kills, deaths, gun_level, team, weapon, is_bot)
                     },
                 )
                 .collect();
         }
 
-        // ── Always apply colors after all updates ────────────
-        // Team colors for TDM/S&D, normal ID-based colors for Gun Game and lobby.
+        // ── Always apply team-based colors after all updates ────────────
+        // Team colors must be reapplied every sync, not just when
+        // MSG_PLAYER_LIST arrives. MSG_STATE creates/updates OtherPlayer
+        // objects with default colors, so without this they would lose
+        // their team tint until the next (infrequent) player list packet.
         let is_team_mode = matches!(
             playing_state.match_mode,
             Some(m) if m == MODE_TEAM_DEATHMATCH || m == MODE_SEARCH_AND_DESTROY
@@ -570,9 +619,9 @@ pub fn sync_world(
                     2 => (60u8, 120u8, 200u8),  // Blue team
                     _ => (120u8, 120u8, 120u8), // default/neutral
                 };
-                let hue_variation = ((p.id.wrapping_mul(97)).wrapping_add(53) % 32) as i32 - 16;
+                let hue_variation = ((p.id.wrapping_mul(97).wrapping_add(53) % 32) as i32) - 16;
                 let adjust = |c: u8| -> u8 {
-                    let v = c as i32 + hue_variation;
+                    let v = (c as i32) + hue_variation;
                     v.clamp(0, 255) as u8
                 };
                 p.color =

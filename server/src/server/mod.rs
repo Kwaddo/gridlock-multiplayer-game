@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::collections::HashMap;
 use std::fs;
 use std::net::{SocketAddr, UdpSocket};
@@ -9,6 +10,8 @@ pub mod handlers;
 pub mod snd;
 pub mod utils;
 
+use crate::bot::ai::BotState;
+use crate::bot::manager::BotManager;
 use crate::maze::MazeData;
 use crate::player::Player;
 use crate::player::WorldId;
@@ -23,6 +26,8 @@ pub fn run() -> std::io::Result<()> {
 
     let mut buffer: [u8; 512] = [0; 512];
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
+
+    let mut bot_manager = BotManager::new();
 
     // cache assets manifest to avoid hitting the filesystem on every join
     let asset_manifest: Option<serde_json::Value> = fs::read_to_string("assets/manifest.json")
@@ -77,7 +82,7 @@ pub fn run() -> std::io::Result<()> {
                     ),
                     MSG_DISCONNECT => handlers::handle_disconnect(&socket, &mut players, src_addr),
                     MSG_POSITION => {
-                        handlers::handle_position(&socket, &mut players, src_addr, payload)
+                        handlers::handle_position(&socket, &mut players, src_addr, payload);
                     }
 
                     // client-requested world change (teleporter)
@@ -137,7 +142,7 @@ pub fn run() -> std::io::Result<()> {
                     }
                     MSG_WALL_BROKEN => {
                         if let Some(ref mut m) = maze {
-                            handlers::handle_wall_broken(&socket, m, &players, src_addr, payload)
+                            handlers::handle_wall_broken(&socket, m, &players, src_addr, payload);
                         }
                     }
                     MSG_DISCOVER => handlers::handle_discover(&socket, &players, src_addr),
@@ -154,12 +159,15 @@ pub fn run() -> std::io::Result<()> {
                         &mut snd_state,
                     ),
                     MSG_RESPAWN_REQUEST => {
-                        if let Some(ref m) = maze {
-                            handlers::handle_respawn_request(&socket, m, &mut players, src_addr)
-                        }
+                        handlers::handle_respawn_request(
+                            &socket,
+                            maze.as_ref(),
+                            &mut players,
+                            src_addr,
+                        );
                     }
                     MSG_SET_TEAM => {
-                        handlers::handle_set_team(&socket, &mut players, src_addr, payload)
+                        handlers::handle_set_team(&socket, &mut players, src_addr, payload);
                     }
                     MSG_SND_BOMB_PICKUP => {
                         if let Some(ref mut snd) = snd_state {
@@ -186,13 +194,111 @@ pub fn run() -> std::io::Result<()> {
                             snd.stop_defuse(src_addr);
                         }
                     }
+                    MSG_BOT_SPAWN => {
+                        if payload.len() >= 2 {
+                            let mut rng = rand::thread_rng();
+                            let behavior_code = payload[0];
+                            let level = payload[1];
+                            let behavior_override = if behavior_code <= 2 {
+                                Some(behavior_code)
+                            } else {
+                                None
+                            };
+                            let preset =
+                                crate::bot::shooting_range::level_config(level, behavior_override);
+                            let range_deadline = preset
+                                .time_limit_secs
+                                .map(|secs| Instant::now() + Duration::from_secs(secs));
+                            bot_manager.set_range_challenge_deadline(range_deadline);
+                            let base_bot_count = players.values().filter(|p| p.is_bot).count();
+                            for (i, bot_cfg) in preset.bots.iter().enumerate() {
+                                let bot_index = base_bot_count + i;
+                                let bot_id = 9000u32 + (bot_index as u32);
+                                let bot_name = format!("Bot{}", bot_index + 1);
+                                let shooting_cfg =
+                                    bot_cfg.shooting.unwrap_or(preset.default_shooting);
+                                let weapon = bot_cfg.weapon.unwrap_or(preset.default_weapon);
+                                let hp = bot_cfg.health.unwrap_or(preset.default_health);
+                                let can_shoot =
+                                    bot_cfg.can_shoot.unwrap_or(preset.default_can_shoot);
+                                let bot_player = Player {
+                                    id: bot_id,
+                                    username: bot_name,
+                                    position: bot_cfg.position,
+                                    yaw: std::f32::consts::PI,
+                                    pitch: 0.0,
+                                    health: hp,
+                                    shield: 0,
+                                    max_health: hp,
+                                    max_shield: 100,
+                                    is_alive: true,
+                                    kills: 0,
+                                    deaths: 0,
+                                    gun_level: 1,
+                                    socket_addr: BotManager::virtual_addr(0), // manager will replace with generated addr
+                                    last_activity: Instant::now(),
+                                    death_time: None,
+                                    world: WorldId::Lobby,
+                                    post_teleport_freeze_until: None,
+                                    is_sprinting: false,
+                                    is_ads: false,
+                                    is_crouched: false,
+                                    is_airborne: false,
+                                    is_prone: false,
+                                    is_sliding: false,
+                                    evt_jump_start: false,
+                                    evt_landed: false,
+                                    team: bot_cfg.team,
+                                    current_weapon: weapon.to_string(),
+                                    is_bot: true,
+                                    auto_respawn: false,
+                                    lobby_regen_resume_at: None,
+                                };
+
+                                let bot_state = BotState {
+                                    movement: crate::physics::BotMovementState {
+                                        velocity: glam::Vec3::ZERO,
+                                        is_grounded: true,
+                                        height: 1.6,
+                                    },
+                                    behavior: bot_cfg.behavior.clone(),
+                                    can_shoot,
+                                    shooting: crate::bot::shooting::BotShootingState {
+                                        // Start each bot with slight offset so they don't sync-fire.
+                                        fire_rate: rng
+                                            .gen_range(0.0f32..shooting_cfg.fire_rate.max(0.01)),
+                                        has_target: false,
+                                        reaction_remaining: shooting_cfg.reaction_time
+                                            + rng.gen_range(0.0f32..0.35),
+                                    },
+                                    shooting_config: shooting_cfg,
+                                    target_id: None,
+                                    reaction_timer: 0.0,
+                                };
+
+                                bot_manager.spawn_bot(&mut players, bot_player, bot_state);
+                            }
+                            broadcast::broadcast_state(&socket, &players);
+                            broadcast::broadcast_player_list(&socket, &players);
+                        }
+                    }
+
+                    MSG_BOT_DESPAWN_ALL => {
+                        bot_manager.despawn_all(&mut players);
+                        broadcast::broadcast_state(&socket, &players);
+                        broadcast::broadcast_player_list(&socket, &players);
+                    }
+
                     _ => println!("Unknown message type: {}", msg_type),
                 }
             }
             Err(err)
                 if err.kind() == std::io::ErrorKind::WouldBlock
-                    || err.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(err) => return Err(err),
+                    || err.kind() == std::io::ErrorKind::TimedOut
+                    || err.kind() == std::io::ErrorKind::ConnectionReset => {}
+            Err(err) => {
+                return Err(err);
+            }
         }
 
         // Auto-respawn dead players EXCEPT in Search & Destroy mode (one life per round)
@@ -225,6 +331,18 @@ pub fn run() -> std::io::Result<()> {
                 }
             }
         }
+        // tick bots
+        bot_manager.tick(&socket, &mut players, &mut match_end_pending, match_mode);
+        if bot_manager.handle_range_challenge_timeout(&mut players) {
+            broadcast::broadcast_state(&socket, &players);
+            broadcast::broadcast_player_list(&socket, &players);
+        }
+        game::process_lobby_regen(&mut players);
+        broadcast::broadcast_state(&socket, &players);
+
+        // Always attempt to auto-respawn dead players; maze may be None if no
+        // match is currently generated but players still need respawn handling.
+        game::process_auto_respawns(&socket, maze.as_ref(), &mut players);
         if game::cleanup_inactive_players(&mut players) {
             // players were removed — broadcast so other clients drop their characters
             broadcast::broadcast_state(&socket, &players);

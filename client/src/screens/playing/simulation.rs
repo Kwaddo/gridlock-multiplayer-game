@@ -677,6 +677,11 @@ impl PlayingState {
             t.lifetime > 0.0
         });
 
+        self.world_muzzle_flashes.retain_mut(|f| {
+            f.lifetime -= delta;
+            f.lifetime > 0.0
+        });
+
         // bullet hole lifetime decay + remove holes on broken walls
         self.bullet_holes.retain_mut(|h| {
             h.lifetime -= delta;

@@ -81,9 +81,11 @@ fn set_binding(config: &mut GameConfig, action: &str, binding: InputBinding) {
     }
 }
 
+const MODE_TOGGLE_ROWS: f32 = 3.0;
+
 /// Calculate row dimensions that fit within the panel, preventing overflow
 fn calc_row_dims(panel_h: f32, s: f32) -> (f32, f32) {
-    let total_rows = BIND_ACTIONS.len() as f32 + 1.5; // +1 for toggle, +0.5 for gap
+    let total_rows = BIND_ACTIONS.len() as f32 + MODE_TOGGLE_ROWS + 0.5;
     let title_overhead = 50.0 * s;
     let available = panel_h - title_overhead;
     let base_row_h = 30.0 * s;
@@ -157,11 +159,29 @@ pub fn update_keybinds(
         }
     }
 
-    // crouch toggle button
+    // movement mode toggle buttons
     let toggle_y =
         panel_top + 50.0 * s + (BIND_ACTIONS.len() as f32) * (row_h + row_gap) + 10.0 * s;
     if mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= toggle_y && mouse.1 <= toggle_y + row_h {
         config.crouch_toggle = !config.crouch_toggle;
+        return;
+    }
+    let slow_walk_toggle_y = toggle_y + row_h + row_gap;
+    if mouse.0 >= bx
+        && mouse.0 <= bx + bw
+        && mouse.1 >= slow_walk_toggle_y
+        && mouse.1 <= slow_walk_toggle_y + row_h
+    {
+        config.slow_walk_toggle = !config.slow_walk_toggle;
+        return;
+    }
+    let prone_toggle_y = slow_walk_toggle_y + row_h + row_gap;
+    if mouse.0 >= bx
+        && mouse.0 <= bx + bw
+        && mouse.1 >= prone_toggle_y
+        && mouse.1 <= prone_toggle_y + row_h
+    {
+        config.prone_toggle = !config.prone_toggle;
     }
 }
 
@@ -236,55 +256,53 @@ pub fn draw_keybinds(
         );
     }
 
-    // Crouch mode toggle button
+    // Crouch/Slow-Walk/Prone mode toggle buttons
     let toggle_y =
         panel_top + 50.0 * s + (BIND_ACTIONS.len() as f32) * (row_h + row_gap) + 10.0 * s;
 
     let mouse = mouse_position();
-    let hover =
-        mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= toggle_y && mouse.1 <= toggle_y + row_h;
-
-    let bg = if hover {
-        Color::from_rgba(65, 65, 85, 255)
-    } else {
-        Color::from_rgba(55, 55, 75, 255)
-    };
-    draw_rectangle(bx, toggle_y, bw, row_h, bg);
-    draw_rectangle_lines(bx, toggle_y, bw, row_h, 1.0, GRAY);
-    draw_text_ex(
-        "Crouch Mode",
-        bx + 10.0 * s,
-        toggle_y + row_h * 0.67,
-        text_params(row_fs, WHITE),
-    );
-
-    let mode_text = if config.crouch_toggle {
-        "Toggle"
-    } else {
-        "Hold"
-    };
-    let mode_tw = measure_game_text(mode_text, row_fs);
     let mode_btn_w = 80.0 * s;
     let mode_btn_x = bx + bw - mode_btn_w - 5.0 * s;
-    let mode_btn_y = toggle_y + 3.0 * s;
     let mode_btn_h = row_h - 6.0 * s;
-    let mode_btn_color = if config.crouch_toggle {
-        Color::from_rgba(30, 100, 30, 255)
-    } else {
-        Color::from_rgba(100, 60, 20, 255)
+
+    let draw_mode_row = |label: &str, is_toggle: bool, y: f32| {
+        let hover = mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= y && mouse.1 <= y + row_h;
+        let bg = if hover {
+            Color::from_rgba(65, 65, 85, 255)
+        } else {
+            Color::from_rgba(55, 55, 75, 255)
+        };
+        draw_rectangle(bx, y, bw, row_h, bg);
+        draw_rectangle_lines(bx, y, bw, row_h, 1.0, GRAY);
+        draw_text_ex(label, bx + 10.0 * s, y + row_h * 0.67, text_params(row_fs, WHITE));
+
+        let mode_text = if is_toggle { "Toggle" } else { "Hold" };
+        let mode_tw = measure_game_text(mode_text, row_fs);
+        let mode_btn_y = y + 3.0 * s;
+        let mode_btn_color = if is_toggle {
+            Color::from_rgba(30, 100, 30, 255)
+        } else {
+            Color::from_rgba(100, 60, 20, 255)
+        };
+        draw_rectangle(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, mode_btn_color);
+        draw_rectangle_lines(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, 1.0, WHITE);
+        draw_text_ex(
+            mode_text,
+            mode_btn_x + (mode_btn_w - mode_tw) / 2.0,
+            y + row_h * 0.63,
+            text_params(row_fs, WHITE),
+        );
     };
-    draw_rectangle(
-        mode_btn_x,
-        mode_btn_y,
-        mode_btn_w,
-        mode_btn_h,
-        mode_btn_color,
+
+    draw_mode_row("Crouch Mode", config.crouch_toggle, toggle_y);
+    draw_mode_row(
+        "Slow Walk Mode",
+        config.slow_walk_toggle,
+        toggle_y + row_h + row_gap,
     );
-    draw_rectangle_lines(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, 1.0, WHITE);
-    draw_text_ex(
-        mode_text,
-        mode_btn_x + (mode_btn_w - mode_tw) / 2.0,
-        toggle_y + row_h * 0.63,
-        text_params(row_fs, WHITE),
+    draw_mode_row(
+        "Prone Mode",
+        config.prone_toggle,
+        toggle_y + (row_h + row_gap) * 2.0,
     );
 }

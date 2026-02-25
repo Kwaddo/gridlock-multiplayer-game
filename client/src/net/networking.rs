@@ -3,10 +3,10 @@ use std::net::UdpSocket;
 use macroquad::prelude::*;
 
 use crate::net::protocols::{
-    EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING,
-    FLAG_SPRINTING, MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN,
-    MSG_MATCH_END, MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION,
-    MSG_RESPAWN, MSG_SND_ROUND_STATE, MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN,
+    EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_IS_BOT, FLAG_PRONE,
+    FLAG_SLIDING, FLAG_SPRINTING, MSG_ASSETS, MSG_BOT_SHOT, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED,
+    MSG_MATCH_COUNTDOWN, MSG_MATCH_END, MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE,
+    MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN, MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN,
     MSG_WORLD_CHANGE,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
@@ -38,11 +38,14 @@ pub struct NetUpdate {
     pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8, u8, String)>>, // (id, name, kills, deaths, world, alive, gun_level, team, weapon)
     pub self_kills: Option<u32>,
     pub self_gun_level: Option<u8>,
+    pub self_hp: Option<f32>,
+    pub self_max_hp: Option<f32>,
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
-    pub death: bool,                  // You died
-    pub death_killer_id: Option<u32>, // who killed us (from MSG_DEATH)
-    pub death_weapon: Option<String>, // weapon used to kill us (from MSG_DEATH)
+    pub bot_shots: Option<Vec<(Vec3, Vec3)>>, // (start, end)
+    pub death: bool,                          // You died
+    pub death_killer_id: Option<u32>,         // who killed us (from MSG_DEATH)
+    pub death_weapon: Option<String>,         // weapon used to kill us (from MSG_DEATH)
 
     // S&D round state
     pub snd_round_state: Option<SndRoundState>,
@@ -97,6 +100,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         player_list: None,
         self_kills: None,
         self_gun_level: None,
+        self_hp: None,
+        self_max_hp: None,
         match_mode: None,
         death: false,
         death_killer_id: None,
@@ -104,6 +109,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         snd_round_state: None,
         received_any: false,
         self_freeze_secs: None,
+        bot_shots: None,
     };
 
     let mut recv_buf: [u8; 8192] = [0; 8192];
@@ -341,6 +347,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.is_sliding = (state_flags & FLAG_SLIDING) != 0;
                         other_player.is_ads = (state_flags & FLAG_ADS) != 0;
                         other_player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
+                        other_player.is_bot = (state_flags & FLAG_IS_BOT) != 0;
                         other_player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
                         other_player.evt_landed = (event_flags & EVT_LANDED) != 0;
                         other_player.kills = kills;
@@ -362,6 +369,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         // update own-kills value for local UI/scoreboard
                         update.self_kills = Some(kills);
                         update.self_gun_level = Some(gun_level);
+                        update.self_hp = Some(hp);
+                        update.self_max_hp = Some(max_hp);
                         // If the server reports we are dead in the state packet,
                         // mark death so UI/state paths handle it even if MSG_DEATH
                         // was missed.
@@ -727,6 +736,50 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         defuse_progress,
                         phase_timer,
                     });
+                }
+            }
+            MSG_BOT_SHOT => {
+                // format: [MSG_BOT_SHOT][shooter_id:4][victim_id:4][sx:4][sy:4][sz:4][ex:4][ey:4][ez:4]
+                if size >= 33 {
+                    let sx =
+                        f32::from_be_bytes([recv_buf[9], recv_buf[10], recv_buf[11], recv_buf[12]]);
+                    let sy = f32::from_be_bytes([
+                        recv_buf[13],
+                        recv_buf[14],
+                        recv_buf[15],
+                        recv_buf[16],
+                    ]);
+                    let sz = f32::from_be_bytes([
+                        recv_buf[17],
+                        recv_buf[18],
+                        recv_buf[19],
+                        recv_buf[20],
+                    ]);
+                    let ex = f32::from_be_bytes([
+                        recv_buf[21],
+                        recv_buf[22],
+                        recv_buf[23],
+                        recv_buf[24],
+                    ]);
+                    let ey = f32::from_be_bytes([
+                        recv_buf[25],
+                        recv_buf[26],
+                        recv_buf[27],
+                        recv_buf[28],
+                    ]);
+                    let ez = f32::from_be_bytes([
+                        recv_buf[29],
+                        recv_buf[30],
+                        recv_buf[31],
+                        recv_buf[32],
+                    ]);
+                    let start = vec3(sx, sy, sz);
+                    let end = vec3(ex, ey, ez);
+                    if let Some(ref mut shots) = update.bot_shots {
+                        shots.push((start, end));
+                    } else {
+                        update.bot_shots = Some(vec![(start, end)]);
+                    }
                 }
             }
             _ => {}

@@ -78,6 +78,13 @@ pub struct Player {
     pub team: Team,
     // player's currently assigned primary weapon (knife is implicitly available)
     pub current_weapon: String,
+
+    // bot shit
+    pub is_bot: bool,
+    // whether server auto-respawn loop should revive this player after death
+    pub auto_respawn: bool,
+    // Lobby-only regen delay anchor for human players.
+    pub lobby_regen_resume_at: Option<Instant>,
 }
 
 impl Player {
@@ -112,6 +119,9 @@ impl Player {
             evt_landed: false,
             team: Team::Spectator,
             current_weapon: "Knife".to_string(),
+            is_bot: false,
+            auto_respawn: true,
+            lobby_regen_resume_at: None,
         }
     }
 }

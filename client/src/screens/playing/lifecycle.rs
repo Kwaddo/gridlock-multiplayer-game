@@ -8,6 +8,8 @@ impl PlayingState {
     pub fn clear_input(&mut self) {
         self.move_dir = Vec3::ZERO;
         self.movement_state.is_sprinting = false;
+        self.movement_state.is_slow_walking = false;
+        self.movement_state.is_sliding = false;
         self.jump_requested = false;
     }
 
@@ -36,6 +38,13 @@ impl PlayingState {
                 .find(|(id, ..)| *id == aid)
                 .map(|(_, name, ..)| name.clone())
         });
+
+        if self.current_world == WorldId::Lobby {
+            self.hp = self.hp.max(1.0);
+            self.is_dead = false;
+            self.death_timer = 0.0;
+            return;
+        }
 
         if self.hp <= 0.0 {
             self.die(attacker_id)
@@ -147,6 +156,11 @@ impl PlayingState {
         self.death_timer = 0.0;
         self.position = spawn_pos;
         self.movement_state.velocity = Vec3::ZERO;
+        self.movement_state.is_sprinting = false;
+        self.movement_state.is_slow_walking = false;
+        self.movement_state.is_crouching = false;
+        self.movement_state.is_prone = false;
+        self.movement_state.is_sliding = false;
         self.death_killer_name = None;
         self.death_weapon_name = None;
     }
@@ -223,10 +237,10 @@ impl PlayingState {
 
         // Sort players by kills (descending)
         let mut sorted_players = self.connected_players.clone();
-        // connected_players: (id, name, kills, deaths, gun_level, team, weapon)
+        // connected_players: (id, name, kills, deaths, gun_level, team, weapon, is_bot)
         sorted_players.sort_by(|a, b| b.2.cmp(&a.2));
 
-        for (i, (pid, name, kills, _deaths, _gun_level, _team, _weapon)) in
+        for (i, (pid, name, kills, _deaths, _gun_level, _team, _weapon, _is_bot)) in
             sorted_players.iter().take(12).enumerate()
         {
             let is_local = *pid == local_player_id;
@@ -249,7 +263,7 @@ impl PlayingState {
                 text_bright
             } else {
                 // Try to color by team when available via connected_players
-                if let Some((_id, pname, _kills, _deaths, _gl, team, _wep)) =
+                if let Some((_id, pname, _kills, _deaths, _gl, team, _wep, _is_bot)) =
                     self.connected_players.iter().find(|(pid, n, ..)| n == name)
                 {
                     match *team {

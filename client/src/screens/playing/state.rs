@@ -5,7 +5,7 @@ use crate::types::ai::simulated_player::SimulatedPlayer;
 use crate::types::animated_model::AnimatedModel;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
-use crate::weapons::effects::{ BulletHole, BulletTracer, DamageNumber };
+use crate::weapons::effects::{ BulletHole, BulletTracer, DamageNumber, WorldMuzzleFlash };
 use crate::weapons::WeaponInventory;
 
 use macroquad::models::Mesh;
@@ -74,6 +74,7 @@ pub struct PlayingState {
     pub pending_start_request: bool,
     pub pending_start_gamemode: u8,
     pub pending_set_team: Option<u8>,
+    pub pending_range_start: bool,
     pub lobby_console_open: bool,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
@@ -104,6 +105,7 @@ pub struct PlayingState {
     pub hit_marker_headshot: bool,
     pub damage_numbers: Vec<DamageNumber>,
     pub tracers: Vec<BulletTracer>,
+    pub world_muzzle_flashes: Vec<WorldMuzzleFlash>,
     pub bullet_holes: Vec<BulletHole>,
 
     pub hit_marker_pellet_mask: u16,
@@ -128,7 +130,7 @@ pub struct PlayingState {
     pub kill_feed: Vec<KillFeedEntry>,
     pub local_kills: u32,
     pub local_deaths: u32,
-    pub connected_players: Vec<(u32, String, u32, u32, u8, u8, String)>, // (id, name, kills, deaths, gun_level, team, weapon)
+    pub connected_players: Vec<(u32, String, u32, u32, u8, u8, String, bool)>, // (id, name, kills, deaths, gun_level, team, weapon, is_bot)
 
     // death screen: who killed us and with what weapon
     pub death_killer_name: Option<String>,
@@ -138,6 +140,7 @@ pub struct PlayingState {
     pub announcements: Vec<(String, f32)>,
     pub lobby_console_message: Option<String>,
     pub lobby_console_message_timer: f32,
+    pub range_phase: u8,
     pub hands_playback_mode: HandsPlaybackMode,
     pub hands_anim_initialized: bool,
     pub prev_hands_key: Option<String>, // tracks active hands rig key across swaps
@@ -238,6 +241,7 @@ impl PlayingState {
             pending_start_request: false,
             pending_start_gamemode: MODE_TEAM_DEATHMATCH,
             pending_set_team: None,
+            pending_range_start: false,
             lobby_console_open: false,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
@@ -248,6 +252,7 @@ impl PlayingState {
             hit_marker_headshot: false,
             damage_numbers: Vec::with_capacity(Self::INIT_DAMAGE_NUMBERS),
             tracers: Vec::with_capacity(Self::INIT_TRACERS),
+            world_muzzle_flashes: Vec::new(),
             bullet_holes: Vec::with_capacity(Self::INIT_BULLET_HOLES),
             hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
@@ -281,6 +286,7 @@ impl PlayingState {
             spawn_feedback_timer: 0.0,
             lobby_console_message: None,
             lobby_console_message_timer: 0.0,
+            range_phase: 1,
             announcements: Vec::with_capacity(Self::INIT_ANNOUNCEMENTS),
             connected_players: Vec::new(),
             hands_playback_mode: HandsPlaybackMode::IdleLoop,

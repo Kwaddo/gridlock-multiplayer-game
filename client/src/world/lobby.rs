@@ -1,5 +1,6 @@
 use crate::weapons::combat::ray_hit_aabb_with_normal;
 use macroquad::prelude::*;
+use super::shooting_range;
 
 /// Each cube: (center position, size)
 /// Landmark cubes + parkour platforms
@@ -52,6 +53,7 @@ pub fn draw_lobby(floor_texture: Option<&Texture2D>) {
         floor_texture,
         DARKGRAY,
     );
+    shooting_range::draw_shooting_range(floor_texture);
 
     // Grid lines on the ground
     for i in -25..=25 {
@@ -158,6 +160,12 @@ pub fn ray_test_lobby_with_normal(origin: Vec3, dir: Vec3, max_dist: f32) -> Opt
     // ground plane
     let ground_half = GROUND_SIZE * 0.5;
     if let Some((d, n)) = ray_hit_aabb_with_normal(origin, dir, GROUND_CENTER, ground_half, max_dist) {
+        if best.map_or(true, |(b, _)| d < b) {
+            best = Some((d, n));
+        }
+    }
+
+    if let Some((d, n)) = shooting_range::ray_test_shooting_range_with_normal(origin, dir, max_dist) {
         if best.map_or(true, |(b, _)| d < b) {
             best = Some((d, n));
         }

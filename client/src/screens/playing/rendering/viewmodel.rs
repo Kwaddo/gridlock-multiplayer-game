@@ -323,7 +323,7 @@ impl PlayingState {
                 );
                 draw_circle(fx, fy, radius, Color::from_rgba(255, 240, 180, alpha));
             }
-        }
+    }
     }
     fn project_to_screen(cam: &Camera3D, world_pos: Vec3) -> Option<(f32, f32)> {
         let rel = world_pos - cam.position;
