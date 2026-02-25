@@ -43,6 +43,7 @@ impl BotManager {
         self.next_bot_idx += 1;
 
         player.is_bot = true;
+        player.socket_addr = addr;
         players.insert(addr, player);
 
         self.bot_states.insert(addr, bot_state);
@@ -92,31 +93,49 @@ impl BotManager {
         let dt = self.tick_interval.as_secs_f32();
 
         for addr in &self.bot_addrs {
+            if !players.get(addr).map_or(false, |p| p.is_alive) {
+                continue;
+            }
+            let target_pos = self
+                .bot_states
+                .get(addr)
+                .and_then(|s| s.target_id)
+                .and_then(|target_id| players.values().find(|p| p.id == target_id).map(|p| p.position));
             if let Some(bot) = players.get_mut(addr) {
                 if let Some(state) = self.bot_states.get_mut(addr) {
                     ai::tick_bot(bot, state, dt, &PhysicsConfig::default());
+                    if let Some(target_pos) = target_pos {
+                        let dx = target_pos.0 - bot.position.0;
+                        let dz = target_pos.2 - bot.position.2;
+                        if dx * dx + dz * dz > 0.0001 {
+                            bot.yaw = dz.atan2(dx);
+                        }
+                    }
                 }
             }
         }
 
         // Run shooting logic after movement updates; collect first to avoid borrow conflicts.
-        let mut pending_hits: Vec<(SocketAddr, u32, u32, String)> = Vec::new();
+        let mut pending_shots: Vec<(SocketAddr, u32, Option<u32>, String)> = Vec::new();
         for addr in &self.bot_addrs {
+            if !players.get(addr).map_or(false, |p| p.is_alive) {
+                continue;
+            }
             if let Some(state) = self.bot_states.get_mut(addr) {
                 if !state.can_shoot {
                     continue;
                 }
-                if let Some((victim_id, damage)) = shooting::try_shoot(*addr, players, state, dt) {
+                if let Some(decision) = shooting::try_shoot(*addr, players, state, dt) {
                     let weapon = players
                         .get(addr)
                         .map(|p| p.current_weapon.clone())
                         .unwrap_or_else(|| "Unknown".to_string());
-                    pending_hits.push((*addr, victim_id, damage, weapon));
+                    pending_shots.push((*addr, decision.target_id, decision.damage, weapon));
                 }
             }
         }
 
-        for (attacker_addr, victim_id, damage, weapon) in pending_hits {
+        for (attacker_addr, victim_id, damage_opt, weapon) in pending_shots {
             let shooter_id = players.get(&attacker_addr).map(|p| p.id).unwrap_or(0);
             let shooter_pos = players
                 .get(&attacker_addr)
@@ -143,17 +162,19 @@ impl BotManager {
                 let _ = socket.send_to(&shot_msg, p.socket_addr);
             }
 
-            other::apply_damage(
-                socket,
-                players,
-                attacker_addr,
-                victim_id,
-                damage,
-                &weapon,
-                false,
-                match_end_pending,
-                match_mode,
-            );
+            if let Some(damage) = damage_opt {
+                other::apply_damage(
+                    socket,
+                    players,
+                    attacker_addr,
+                    victim_id,
+                    damage,
+                    &weapon,
+                    false,
+                    match_end_pending,
+                    match_mode,
+                );
+            }
         }
     }
     

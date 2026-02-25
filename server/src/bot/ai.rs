@@ -87,4 +87,19 @@ pub fn tick_bot(bot: &mut Player, state: &mut BotState, dt: f32, physics: &Physi
         dt,
         physics
     );
+
+    // update replicated movement flags for client animation state
+    bot.is_airborne = !state.movement.is_grounded;
+    bot.evt_jump_start = evt_jump_start;
+    bot.evt_landed = evt_jump_land;
+    bot.is_sprinting = false;
+    bot.is_crouched = false;
+    bot.is_prone = false;
+    bot.is_sliding = false;
+    bot.is_ads = state.target_id.is_some();
+
+    // Face movement direction by default.
+    if desired_dir.length_squared() > 0.0001 {
+        bot.yaw = desired_dir.z.atan2(desired_dir.x);
+    }
 }
