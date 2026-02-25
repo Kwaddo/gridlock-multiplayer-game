@@ -42,11 +42,13 @@ impl PlayingState {
                 // Always reset range bots before loading the next phase.
                 let _ = s.send_to(&[MSG_BOT_DESPAWN_ALL], server_addr);
 
+                // Public range button should use server preset paths/behaviors.
+                // 255 means "no override" (server maps >2 => None).
                 let (behavior, level) = match started_phase {
-                    1 => (0u8, 1u8), // static
-                    2 => (1u8, 2u8), // patrol
-                    3 => (2u8, 3u8), // patrol + jump
-                    _ => (0u8, 1u8),
+                    1 => (255u8, 1u8),
+                    2 => (255u8, 2u8),
+                    3 => (255u8, 3u8),
+                    _ => (255u8, 1u8),
                 };
                 let _ = s.send_to(&[MSG_BOT_SPAWN, behavior, level], server_addr);
 

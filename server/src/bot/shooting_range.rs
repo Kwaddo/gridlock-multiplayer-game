@@ -2,7 +2,7 @@ use crate::bot::ai::BotBehavior;
 use crate::bot::shooting::BotShootingConfig;
 use crate::player::Team;
 
-pub const LEVEL_3_TIME_LIMIT_SECS: u64 = 10;
+pub const LEVEL_3_TIME_LIMIT_SECS: u64 = 6;
 
 #[derive(Clone)]
 pub struct ShootingRangeBotConfig {
@@ -174,19 +174,44 @@ fn level_2_config(behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
         current: 0,
         arrival_threshold: 0.5,
     };
-    // Moves forward/back across lanes (fixed x, varying z).
-    let forward_back_across_lanes = |base_z: f32| BotBehavior::Patrol {
-        waypoints: vec![(38.0, 0.0, base_z - 1.2), (38.0, 0.0, base_z + 1.2)],
+    // Moves across lanes (z changes with fixed x).
+    let across_lanes = |z_min: f32, z_max: f32| BotBehavior::Patrol {
+        waypoints: vec![(38.0, 0.0, z_min), (38.0, 0.0, z_max)],
         current: 0,
-        arrival_threshold: 0.5,
+        arrival_threshold: 0.45,
+    };
+    // Obvious non-linear paths.
+    let square_path = |cx: f32, cz: f32, half: f32| BotBehavior::Patrol {
+        waypoints: vec![
+            (cx - half, 0.0, cz - half),
+            (cx + half, 0.0, cz - half),
+            (cx + half, 0.0, cz + half),
+            (cx - half, 0.0, cz + half),
+        ],
+        current: 0,
+        arrival_threshold: 0.4,
+    };
+    let circle_path = |cx: f32, cz: f32, r: f32| BotBehavior::Patrol {
+        waypoints: vec![
+            (cx + r, 0.0, cz + 0.0),
+            (cx + 0.7 * r, 0.0, cz + 0.7 * r),
+            (cx + 0.0, 0.0, cz + r),
+            (cx - 0.7 * r, 0.0, cz + 0.7 * r),
+            (cx - r, 0.0, cz + 0.0),
+            (cx - 0.7 * r, 0.0, cz - 0.7 * r),
+            (cx + 0.0, 0.0, cz - r),
+            (cx + 0.7 * r, 0.0, cz - 0.7 * r),
+        ],
+        current: 0,
+        arrival_threshold: 0.4,
     };
 
     let forced_behavior = behavior_override.map(behavior_from_code);
-    let behavior_0 = forced_behavior.clone().unwrap_or_else(|| forward_back_across_lanes(p[0].2));
+    let behavior_0 = forced_behavior.clone().unwrap_or_else(|| across_lanes(-6.8, -1.2));
     let behavior_1 = forced_behavior.clone().unwrap_or_else(|| side_to_side_same_lane(p[1].2));
-    let behavior_2 = forced_behavior.clone().unwrap_or_else(|| forward_back_across_lanes(p[2].2));
-    let behavior_3 = forced_behavior.clone().unwrap_or_else(|| side_to_side_same_lane(p[3].2));
-    let behavior_4 = forced_behavior.clone().unwrap_or_else(|| forward_back_across_lanes(p[4].2));
+    let behavior_2 = forced_behavior.clone().unwrap_or_else(|| across_lanes(-2.0, 3.6));
+    let behavior_3 = forced_behavior.clone().unwrap_or_else(|| square_path(38.0, p[3].2, 1.1));
+    let behavior_4 = forced_behavior.clone().unwrap_or_else(|| circle_path(38.0, p[4].2, 1.3));
     let behavior_5 = forced_behavior.unwrap_or_else(|| side_to_side_same_lane(p[5].2));
 
     let bots = vec![
