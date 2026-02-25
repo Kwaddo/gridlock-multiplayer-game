@@ -106,7 +106,7 @@ impl PlayingState {
                 .connected_players
                 .iter()
                 .find(|(id, ..)| *id == player_id)
-                .map(|(_, _name, _kills, _deaths, _gl, team, _wep)| *team)
+                .map(|(_, _name, _kills, _deaths, _gl, team, _wep, _is_bot)| *team)
                 .unwrap_or(0u8);
 
             draw_hud(

@@ -35,7 +35,7 @@ pub(super) fn draw_players_overlay(
 /// rendered only when the caller explicitly invokes `draw_player_list`.
 
 pub fn draw_player_list(
-    connected_players: &[(u32, String, u32, u32, u8, u8, String)], // (id, name, kills, deaths, gun_level, team, weapon)
+    connected_players: &[(u32, String, u32, u32, u8, u8, String, bool)], // (id, name, kills, deaths, gun_level, team, weapon, is_bot)
     self_id: u32,
     self_kills: u32,
     self_deaths: u32,
@@ -48,13 +48,18 @@ pub fn draw_player_list(
     // (name, kills, deaths, gun_level, is_self, team, weapon)
     let mut rows: Vec<(String, u32, u32, u8, bool, u8, String)> = Vec::new();
     let mut seen_self = false;
-    for (id, name, kills, deaths, gun_level, team, weapon) in connected_players.iter() {
+    for (id, name, kills, deaths, gun_level, team, weapon, is_bot) in connected_players.iter() {
         let is_self = *id == self_id;
         if is_self {
             seen_self = true;
         }
+        let display_name = if *is_bot {
+            format!("[BOT] {}", name)
+        } else {
+            name.clone()
+        };
         rows.push((
-            name.clone(),
+            display_name,
             *kills,
             *deaths,
             *gun_level,

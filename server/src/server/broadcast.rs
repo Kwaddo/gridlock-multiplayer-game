@@ -42,6 +42,9 @@ pub fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<std::net::Soc
     let mut msg: Vec<u8> = Vec::with_capacity(1024);
 
     for p in players.values() {
+        if p.is_bot {
+            continue; // bots don't need player list updates
+        }
         msg.clear();
         let count = players.len().min(255) as u8;
         msg.push(MSG_PLAYER_LIST);
@@ -74,6 +77,9 @@ pub fn broadcast_match_timer(
     // fixed-size array avoids allocation
     let msg: [u8; 2] = [MSG_MATCH_TIMER, secs];
     for p in players.values() {
+        if p.is_bot {
+            continue; // bots don't need timer updates
+        }
         let _ = socket.send_to(&msg, p.socket_addr);
     }
 }
@@ -85,6 +91,9 @@ pub fn move_all_players_to_lobby(
     reset_scores: bool,
 ) {
     for p in players.values_mut() {
+        if p.is_bot {
+            continue; // bots don't need to be moved to lobby or have scores reset
+        }
         p.world = WorldId::Lobby;
         p.position = (0.0_f32, 0.0_f32, 0.0_f32);
         if reset_scores {
@@ -120,6 +129,9 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
     // build a single reusable buffer to reduce heap churn
     let mut state_msg: Vec<u8> = Vec::with_capacity(1024);
     for receiver in players.values() {
+        if receiver.is_bot {
+            continue; // bots don't need state updates
+        }
         state_msg.clear();
         state_msg.push(MSG_STATE);
 
@@ -166,6 +178,9 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
             }
             if player.is_sliding {
                 state_flags |= FLAG_SLIDING;
+            }
+            if player.is_bot {
+                state_flags |= FLAG_IS_BOT;
             }
             state_msg.push(state_flags);
 

@@ -1,4 +1,4 @@
-
+use crate::server::handlers::other::handle_hit;
 
 pub struct BotShootingConfig {
     pub fire_rate: f32, // shots per second

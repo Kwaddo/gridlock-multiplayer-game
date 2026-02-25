@@ -220,6 +220,9 @@ pub struct OtherPlayer {
     // Gun Game progression: 1 = first weapon slot
     pub gun_level: u8,
     pub team: u8,
+
+    // bot
+    pub is_bot: bool,
 }
 
 impl OtherPlayer {
@@ -279,6 +282,7 @@ impl OtherPlayer {
             move_anim_grace: 0.0,
             last_move_time: 0.0,
             gun_level: 1,
+            is_bot: false,
         }
     }
 

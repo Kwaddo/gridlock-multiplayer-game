@@ -230,10 +230,10 @@ impl PlayingState {
 
         // Sort players by kills (descending)
         let mut sorted_players = self.connected_players.clone();
-        // connected_players: (id, name, kills, deaths, gun_level, team, weapon)
+        // connected_players: (id, name, kills, deaths, gun_level, team, weapon, is_bot)
         sorted_players.sort_by(|a, b| b.2.cmp(&a.2));
 
-        for (i, (pid, name, kills, _deaths, _gun_level, _team, _weapon)) in
+        for (i, (pid, name, kills, _deaths, _gun_level, _team, _weapon, _is_bot)) in
             sorted_players.iter().take(12).enumerate()
         {
             let is_local = *pid == local_player_id;
@@ -256,7 +256,7 @@ impl PlayingState {
                 text_bright
             } else {
                 // Try to color by team when available via connected_players
-                if let Some((_id, pname, _kills, _deaths, _gl, team, _wep)) =
+                if let Some((_id, pname, _kills, _deaths, _gl, team, _wep, _is_bot)) =
                     self.connected_players.iter().find(|(pid, n, ..)| n == name)
                 {
                     match *team {

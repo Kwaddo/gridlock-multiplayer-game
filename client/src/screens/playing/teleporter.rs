@@ -117,7 +117,7 @@ impl PlayingState {
                 if *val != MODE_GUN_GAME {
                     let mut red_count = 0usize;
                     let mut blue_count = 0usize;
-                    for (_id, _name, _k, _d, _gl, team, _wep) in self.connected_players.iter() {
+                    for (_id, _name, _k, _d, _gl, team, _wep, _is_bot) in self.connected_players.iter() {
                         match *team {
                             1 => red_count += 1,
                             2 => blue_count += 1,
@@ -248,8 +248,8 @@ impl PlayingState {
 
             // Use the server-authoritative team assignments from the
             // broadcast player list (teams are auto-assigned on the server).
-            let mut preview_red: Vec<&(u32, String, u32, u32, u8, u8, String)> = Vec::new();
-            let mut preview_blue: Vec<&(u32, String, u32, u32, u8, u8, String)> = Vec::new();
+            let mut preview_red: Vec<&(u32, String, u32, u32, u8, u8, String, bool)> = Vec::new();
+            let mut preview_blue: Vec<&(u32, String, u32, u32, u8, u8, String, bool)> = Vec::new();
             for entry in self.connected_players.iter() {
                 match entry.5 {
                     1 => preview_red.push(entry),
@@ -297,7 +297,7 @@ impl PlayingState {
             // draw names with K/D and preview team color (clip if too many)
             let name_start_y = roster_y + 44.0;
             let line_h = 18.0;
-            for (i, (_id, name, kills, deaths, _gl, _team, _wep)) in preview_red
+            for (i, (_id, name, kills, deaths, _gl, _team, _wep, _is_bot)) in preview_red
                 .iter()
                 .enumerate()
                 .take(((roster_h - 40.0) / line_h) as usize)
@@ -311,7 +311,7 @@ impl PlayingState {
                     Color::from_rgba(230, 120, 120, 255),
                 );
             }
-            for (i, (_id, name, kills, deaths, _gl, _team, _wep)) in preview_blue
+            for (i, (_id, name, kills, deaths, _gl, _team, _wep, _is_bot)) in preview_blue
                 .iter()
                 .enumerate()
                 .take(((roster_h - 40.0) / line_h) as usize)

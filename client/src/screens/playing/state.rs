@@ -128,7 +128,7 @@ pub struct PlayingState {
     pub kill_feed: Vec<KillFeedEntry>,
     pub local_kills: u32,
     pub local_deaths: u32,
-    pub connected_players: Vec<(u32, String, u32, u32, u8, u8, String)>, // (id, name, kills, deaths, gun_level, team, weapon)
+    pub connected_players: Vec<(u32, String, u32, u32, u8, u8, String, bool)>, // (id, name, kills, deaths, gun_level, team, weapon, is_bot)
 
     // death screen: who killed us and with what weapon
     pub death_killer_name: Option<String>,

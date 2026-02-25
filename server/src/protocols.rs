@@ -32,6 +32,12 @@ pub const MSG_MATCH_COUNTDOWN: u8 = 24; // server -> all: match start countdown 
 pub const MSG_MATCH_TIMER: u8 = 25; // server -> all: authoritative match time remaining (seconds)
 pub const MSG_SET_TEAM: u8 = 26; // client -> server: set preferred team (team:u8)
 
+// bot bulshit
+pub const MSG_BOT_SPAWN: u8 = 50;
+pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
+
+pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
+
 // State flags for player movement and actions, sent in the position message
 pub const FLAG_SPRINTING: u8 = 1 << 0;
 pub const FLAG_CROUCHING: u8 = 1 << 1;
