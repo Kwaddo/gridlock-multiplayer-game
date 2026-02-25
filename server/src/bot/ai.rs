@@ -1,5 +1,5 @@
 use crate::physics::{ BotMovementState, PhysicsConfig, simulate_bot_physics };
-use crate::bot::shooting::BotShootingState;
+use crate::bot::shooting::{BotShootingConfig, BotShootingState};
 use crate::player::{ Player, Team };
 use glam::Vec3;
 
@@ -7,6 +7,7 @@ pub struct BotState {
     pub movement: BotMovementState,
     pub behavior: BotBehavior,
     pub shooting: BotShootingState,
+    pub shooting_config: BotShootingConfig,
     pub target_id: Option<u32>,
     pub reaction_timer: f32,
 }

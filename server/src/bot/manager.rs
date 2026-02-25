@@ -1,7 +1,9 @@
-use std::{collections::HashMap, hash::Hash, net::SocketAddr, time::{Duration, Instant}};
-use crate::{bot::ai::{self, BotState}, physics::PhysicsConfig};
+use std::{ collections::HashMap, net::{SocketAddr, UdpSocket}, time::{ Duration, Instant } };
+use crate::{ bot::ai::{ self, BotState }, physics::PhysicsConfig };
 use crate::player::Player;
-pub struct BotManager{
+use crate::bot::shooting;
+use crate::server::handlers::other;
+pub struct BotManager {
     bot_addrs: Vec<SocketAddr>,
     bot_states: HashMap<SocketAddr, BotState>,
     last_tick: Instant,
@@ -29,36 +31,29 @@ impl BotManager {
         self.bot_states.contains_key(addr) || self.bot_addrs.contains(addr)
     }
     pub fn spawn_bot(
-        &mut self, 
+        &mut self,
         players: &mut HashMap<SocketAddr, Player>,
         mut player: Player,
-        bot_state: BotState,
+        bot_state: BotState
     ) -> SocketAddr {
         let addr = Self::virtual_addr(self.next_bot_idx);
         self.next_bot_idx += 1;
 
         player.is_bot = true;
         players.insert(addr, player);
-        
+
         self.bot_states.insert(addr, bot_state);
         self.bot_addrs.push(addr);
 
         addr
     }
 
-    pub fn despawn_bot(
-        &mut self,
-        players: &mut HashMap<SocketAddr, Player>,
-        addr: SocketAddr,
-    ) {
+    pub fn despawn_bot(&mut self, players: &mut HashMap<SocketAddr, Player>, addr: SocketAddr) {
         players.remove(&addr);
         self.bot_states.remove(&addr);
         self.bot_addrs.retain(|&a| a != addr);
     }
-    pub fn despawn_all(
-        &mut self,
-        players: &mut HashMap<SocketAddr, Player>,
-    ) {
+    pub fn despawn_all(&mut self, players: &mut HashMap<SocketAddr, Player>) {
         for addr in &self.bot_addrs {
             players.remove(addr);
         }
@@ -67,7 +62,10 @@ impl BotManager {
     }
     pub fn tick(
         &mut self,
+        socket: &UdpSocket,
         players: &mut HashMap<SocketAddr, Player>,
+        match_end_pending: &mut Option<(Instant, u32, String)>,
+        match_mode: u8
     ) {
         if self.last_tick.elapsed() < self.tick_interval {
             return;
@@ -83,5 +81,30 @@ impl BotManager {
                 }
             }
         }
+
+        // Run shooting logic after movement updates; collect first to avoid borrow conflicts.
+        let mut pending_hits: Vec<(SocketAddr, u32, u32)> = Vec::new();
+        for addr in &self.bot_addrs {
+            if let Some(state) = self.bot_states.get_mut(addr) {
+                if let Some((victim_id, damage)) = shooting::try_shoot(*addr, players, state, dt) {
+                    pending_hits.push((*addr, victim_id, damage));
+                }
+            }
+        }
+
+        for (attacker_addr, victim_id, damage) in pending_hits {
+            other::apply_damage(
+                socket,
+                players,
+                attacker_addr,
+                victim_id,
+                damage,
+                "BOT",
+                false,
+                match_end_pending,
+                match_mode,
+            );
+        }
     }
+    
 }

@@ -27,7 +27,6 @@ pub fn run() -> std::io::Result<()> {
 
     let mut bot_manager = BotManager::new();
 
-
     // cache assets manifest to avoid hitting the filesystem on every join
     let asset_manifest: Option<serde_json::Value> = fs
         ::read_to_string("assets/manifest.json")
@@ -221,7 +220,7 @@ pub fn run() -> std::io::Result<()> {
                                 is_bot: true,
                             };
 
-                            let (fire_cooldown, reaction_remaining) = match level {
+                            let (fire_rate, reaction_remaining) = match level {
                                 1 => (2.0, 1.5),
                                 2 => (1.0, 1.0),
                                 3 => (0.5, 0.5),
@@ -236,10 +235,23 @@ pub fn run() -> std::io::Result<()> {
                                 },
                                 behavior,
                                 shooting: crate::bot::shooting::BotShootingState {
-                                    fire_cooldown,
+                                    fire_rate,
                                     has_target: false,
                                     reaction_remaining,
                                 },
+                                shooting_config: crate::bot::shooting::BotShootingConfig {
+                                    fire_rate, 
+                                    angular_offset: 0.15,
+                                    damage: match level {
+                                        1 => 8.0,
+                                        2 => 12.0,
+                                        3 => 18.0,
+                                        _ => 8.0,
+                                    },
+                                    range: 25.0,
+                                    reaction_time: reaction_remaining,
+                                },
+
                                 target_id: None,
                                 reaction_timer: 0.0,
                             };
@@ -270,7 +282,7 @@ pub fn run() -> std::io::Result<()> {
         }
 
         // tick bots
-        bot_manager.tick(&mut players);
+        bot_manager.tick(&socket, &mut players, &mut match_end_pending, match_mode);
         broadcast::broadcast_state(&socket, &players);
 
         // Always attempt to auto-respawn dead players; maze may be None if no
