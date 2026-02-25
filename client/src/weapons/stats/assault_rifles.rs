@@ -47,7 +47,7 @@ pub const M16_STATS: WeaponStats = WeaponStats {
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.35),
-    fsa_suppresses_kick: false, 
+    fsa_suppresses_kick: false,
     fire_sound_asset_key: "ar_shot",
     icon_asset_key: "ar_icon",
     icon_width: 100.0,
@@ -147,8 +147,8 @@ pub const M4A1: WeaponStats = WeaponStats {
         (0.008, 0.0),
         (0.009, 0.05),
         (0.009, 0.1),
-        (0.010, 0.15),
-        (0.010, 0.1),
+        (0.01, 0.15),
+        (0.01, 0.1),
         (0.009, -0.05),
         (0.008, -0.15),
         (0.008, -0.1),
@@ -212,13 +212,13 @@ pub const AK: WeaponStats = WeaponStats {
 
     // Wild pattern — heavy vertical climb with unpredictable horizontal sway
     recoil_pattern: &[
-        (0.020, 0.0),
+        (0.02, 0.0),
         (0.022, 0.0),
         (0.025, 0.15),
         (0.025, 0.3),
         (0.024, 0.2),
         (0.022, -0.1),
-        (0.020, -0.35),
+        (0.02, -0.35),
         (0.018, -0.5),
         (0.016, -0.3),
         (0.015, 0.1),
@@ -248,7 +248,7 @@ pub const FAMAS: WeaponStats = WeaponStats {
     hip_spread: 0.032,
     ads_spread: 0.006,
     spread_per_shot: 0.005, // low bloom within burst
-    spread_recovery: 8.0,  // resets fast between bursts
+    spread_recovery: 8.0, // resets fast between bursts
     move_spread_mult: 1.4,
     sprint_spread_mult: 2.0,
     crouch_spread_mult: 0.75,
@@ -282,16 +282,16 @@ pub const FAMAS: WeaponStats = WeaponStats {
 
     // Tight 3-shot climb — predictable within each burst
     recoil_pattern: &[
-        (0.010, 0.0),
+        (0.01, 0.0),
         (0.012, 0.05),
         (0.014, 0.1),
-        (0.010, -0.05),
+        (0.01, -0.05),
         (0.012, -0.1),
         (0.014, 0.0),
-        (0.010, 0.1),
+        (0.01, 0.1),
         (0.012, -0.05),
         (0.014, -0.1),
-        (0.010, 0.0),
+        (0.01, 0.0),
     ],
     pattern_randomness: 0.06,
     randomness_growth: 0.03,
@@ -343,6 +343,21 @@ pub const SCAR: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("scar_model"),
     viewmodel_asset_key: None,
+
+    viewmodel_scale: 0.003,
+    viewmodel_ads_scale: 0.003,
+    viewmodel_position: (0.22, 0.08, -0.31),
+    viewmodel_rotation: (0.08, -1.75, 0.0),
+    viewmodel_muzzle_offset: (-1.0, 0.02, -0.25),
+    viewmodel_hands_scale: 1.93,
+    viewmodel_hands_offset: (0.16, -0.16, -0.28),
+    viewmodel_hands_rotation: (-0.15, 0.45, -0.05),
+    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.134, 0.026, -0.157),
+    viewmodel_ads_rot_offset: (0.015, 0.18, -0.02),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, -0.704),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 30.0,
     falloff_end: 80.0,
@@ -421,8 +436,8 @@ pub const AS_VAL: WeaponStats = WeaponStats {
     recoil_pattern: &[
         (0.009, 0.0),
         (0.009, 0.0),
-        (0.010, 0.05),
-        (0.010, 0.1),
+        (0.01, 0.05),
+        (0.01, 0.1),
         (0.009, 0.05),
         (0.008, -0.05),
         (0.008, -0.1),
