@@ -6,12 +6,14 @@ use glam::Vec3;
 pub struct BotState {
     pub movement: BotMovementState,
     pub behavior: BotBehavior,
+    pub can_shoot: bool,
     pub shooting: BotShootingState,
     pub shooting_config: BotShootingConfig,
     pub target_id: Option<u32>,
     pub reaction_timer: f32,
 }
 
+#[derive(Clone)]
 pub enum BotBehavior {
     Static,
     Patrol {

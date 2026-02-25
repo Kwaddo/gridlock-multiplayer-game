@@ -7,6 +7,7 @@ mod math;
 mod server;
 mod physics;
 mod bot;
+mod weapons_stats;
 
 fn main() -> std::io::Result<()> {
     server::run()

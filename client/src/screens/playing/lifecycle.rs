@@ -39,6 +39,13 @@ impl PlayingState {
                 .map(|(_, name, ..)| name.clone())
         });
 
+        if self.current_world == WorldId::Lobby {
+            self.hp = self.hp.max(1.0);
+            self.is_dead = false;
+            self.death_timer = 0.0;
+            return;
+        }
+
         if self.hp <= 0.0 {
             self.die(attacker_id)
         }

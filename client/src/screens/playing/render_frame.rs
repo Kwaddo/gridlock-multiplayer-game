@@ -90,6 +90,7 @@ impl PlayingState {
 
         self.draw_player_overhead(&camera, maze);
         self.draw_lobby_console_prompt();
+        self.draw_shooting_range_prompt();
 
         // Lobby console (Start Game) overlay
         self.draw_lobby_console(config);
