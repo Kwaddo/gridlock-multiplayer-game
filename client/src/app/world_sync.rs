@@ -5,9 +5,9 @@ use client::ui::OtherPlayer;
 use macroquad::prelude::*;
 
 use client::net::poll_updates;
-use client::net::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH};
+use client::net::protocols::{ MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH };
 use client::screens::PlayingState;
-use client::types::animation_state::{AnimState, MoveDir};
+use client::types::animation_state::{ AnimState, MoveDir };
 use client::types::maze::Maze;
 
 pub struct SyncResult {
@@ -22,7 +22,7 @@ pub fn sync_world(
     player_id: u32,
     username: &str,
     playing_state: &mut PlayingState,
-    maze: &mut Option<Maze>,
+    maze: &mut Option<Maze>
 ) -> SyncResult {
     let mut result = SyncResult {
         assets: None,
@@ -65,18 +65,20 @@ pub fn sync_world(
                     // the position genuinely changed.
                     let dx = incoming.x - current.x;
                     let dz = incoming.z - current.z;
-                    let pos_changed = (dx * dx + dz * dz) > 1.0e-4;
-                    let state_changed = incoming.is_sprinting != current.is_sprinting
-                        || incoming.is_ads != current.is_ads
-                        || incoming.is_crouching != current.is_crouching
-                        || incoming.is_prone != current.is_prone
-                        || incoming.is_sliding != current.is_sliding
-                        || incoming.evt_jump_start;
+                    let pos_changed = dx * dx + dz * dz > 1.0e-4;
+                    let state_changed =
+                        incoming.is_sprinting != current.is_sprinting ||
+                        incoming.is_ads != current.is_ads ||
+                        incoming.is_crouching != current.is_crouching ||
+                        incoming.is_prone != current.is_prone ||
+                        incoming.is_sliding != current.is_sliding ||
+                        incoming.evt_jump_start;
 
                     if pos_changed || state_changed {
-                        let effective_sprinting = incoming.is_sprinting
-                            || current.is_sprinting
-                            || current.sprint_grace > 0.0;
+                        let effective_sprinting =
+                            incoming.is_sprinting ||
+                            current.is_sprinting ||
+                            current.sprint_grace > 0.0;
                         let anim_state = AnimState::from_movement(
                             current.x,
                             current.z,
@@ -88,7 +90,7 @@ pub fn sync_world(
                             incoming.is_crouching,
                             incoming.is_prone,
                             incoming.is_sliding,
-                            incoming.evt_jump_start,
+                            incoming.evt_jump_start
                         );
 
                         let candidate_dir = anim_state.move_dir;
@@ -133,7 +135,7 @@ pub fn sync_world(
                         incoming.is_crouching,
                         incoming.is_prone,
                         incoming.is_sliding,
-                        incoming.evt_jump_start,
+                        incoming.evt_jump_start
                     );
                     incoming.skin_type = AnimState::skin_from_state(anim_state, None);
                     incoming.last_move_dir = anim_state.move_dir;
@@ -142,17 +144,15 @@ pub fn sync_world(
                     incoming.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     let idx = playing_state.other_players.len();
                     playing_state.other_players.push(incoming);
-                    playing_state
-                        .player_index
-                        .insert(playing_state.other_players[idx].id, idx);
+                    playing_state.player_index.insert(playing_state.other_players[idx].id, idx);
                 }
             }
 
             // remove any players the server no longer reports
             if !playing_state.seen_player_ids.is_empty() {
-                playing_state
-                    .other_players
-                    .retain(|p| playing_state.seen_player_ids.contains(&p.id));
+                playing_state.other_players.retain(|p|
+                    playing_state.seen_player_ids.contains(&p.id)
+                );
                 // rebuild index after potential removals/shifts
                 playing_state.rebuild_player_index();
             }
@@ -181,8 +181,7 @@ pub fn sync_world(
                 // If we're already in the Maze, apply immediately. If the update also contains a
                 // pending world_change to Maze (same poll), apply immediately as well. Otherwise
                 // defer application until the client receives the world change / teleport.
-                let will_be_in_maze = updates
-                    .world_change
+                let will_be_in_maze = updates.world_change
                     .as_ref()
                     .map(|(w, _, _)| *w == WorldId::Maze)
                     .unwrap_or(false);
@@ -324,8 +323,7 @@ pub fn sync_world(
             playing_state.take_damage(damage, attacker_id);
             // also show a short announcement so hits appear in the feed
             let ann = if let Some(aid) = attacker_id {
-                playing_state
-                    .connected_players
+                playing_state.connected_players
                     .iter()
                     .find(|(id, ..)| *id == aid)
                     .map(|(_, name, ..)| format!("Hit by {}", name))
@@ -341,14 +339,12 @@ pub fn sync_world(
                 let killer_name = if killer_id == player_id {
                     username.to_string()
                 } else {
-                    playing_state
-                        .connected_players
+                    playing_state.connected_players
                         .iter()
                         .find(|(id, ..)| *id == killer_id)
                         .map(|(_, name, ..)| name.clone())
                         .or_else(|| {
-                            playing_state
-                                .other_players
+                            playing_state.other_players
                                 .iter()
                                 .find(|p| p.id == killer_id)
                                 .map(|p| p.username.clone())
@@ -358,14 +354,12 @@ pub fn sync_world(
                 let victim_name = if victim_id == player_id {
                     username.to_string()
                 } else {
-                    playing_state
-                        .connected_players
+                    playing_state.connected_players
                         .iter()
                         .find(|(id, ..)| *id == victim_id)
                         .map(|(_, name, ..)| name.clone())
                         .or_else(|| {
-                            playing_state
-                                .other_players
+                            playing_state.other_players
                                 .iter()
                                 .find(|p| p.id == victim_id)
                                 .map(|p| p.username.clone())
@@ -374,16 +368,14 @@ pub fn sync_world(
                 };
 
                 // push a kill-feed entry for UI
-                playing_state
-                    .kill_feed
-                    .push(client::screens::playing::KillFeedEntry {
-                        killer_id,
-                        victim_id,
-                        killer_name,
-                        victim_name,
-                        weapon,
-                        timer: 5.0,
-                    });
+                playing_state.kill_feed.push(client::screens::playing::KillFeedEntry {
+                    killer_id,
+                    victim_id,
+                    killer_name,
+                    victim_name,
+                    weapon,
+                    timer: 5.0,
+                });
 
                 // if the victim is another player, remove them immediately so no
                 // corpse lingers. the server will eventually stop sending a state
@@ -405,8 +397,7 @@ pub fn sync_world(
             if !playing_state.is_dead {
                 // resolve killer name from the connected_players list
                 if let Some(killer_id) = updates.death_killer_id {
-                    playing_state.death_killer_name = playing_state
-                        .connected_players
+                    playing_state.death_killer_name = playing_state.connected_players
                         .iter()
                         .find(|(id, ..)| *id == killer_id)
                         .map(|(_, name, ..)| name.clone());
@@ -421,8 +412,9 @@ pub fn sync_world(
             playing_state.respawn(spawn_pos);
             if let Some(fallback) = updates.respawn_fallback {
                 if fallback {
-                    playing_state.spawn_feedback_message =
-                        Some("Respawned at teleporter (fallback)".to_string());
+                    playing_state.spawn_feedback_message = Some(
+                        "Respawned at teleporter (fallback)".to_string()
+                    );
                     playing_state.spawn_feedback_timer = 3.0;
                 }
             }
@@ -474,11 +466,11 @@ pub fn sync_world(
         // Global connected player list (for Tab / scoreboard)
         if let Some(list) = updates.player_list {
             // detect whether the server still knows about *us* — if not, server removed us (timed out)
-            let still_present = list.iter().any(
-                |(id, _name, _kills, _deaths, _world, _alive, _gl, _team, _weapon)| {
+            let still_present = list
+                .iter()
+                .any(|(id, _name, _kills, _deaths, _world, _alive, _gl, _team, _weapon)| {
                     *id == player_id
-                },
-            );
+                });
             if !still_present {
                 result.removed_by_server = true;
             }
@@ -490,12 +482,12 @@ pub fn sync_world(
 
             // remove 3D models of players who are no longer in the server's player list
             // (disconnected or timed out) — this ensures their model disappears instantly
-            let server_ids: std::collections::HashSet<u32> =
-                list.iter().map(|(id, ..)| *id).collect();
+            let server_ids: std::collections::HashSet<u32> = list
+                .iter()
+                .map(|(id, ..)| *id)
+                .collect();
             let before = playing_state.other_players.len();
-            playing_state
-                .other_players
-                .retain(|p| server_ids.contains(&p.id));
+            playing_state.other_players.retain(|p| server_ids.contains(&p.id));
             if playing_state.other_players.len() != before {
                 playing_state.rebuild_player_index();
             }
@@ -503,13 +495,15 @@ pub fn sync_world(
             // `list` now has entries: (id, name, kills, deaths, world, alive, gun_level, team, weapon)
             playing_state.connected_players = list
                 .into_iter()
-                .map(
-                    |(id, name, kills, deaths, _world, _alive, gun_level, team, weapon)| {
-                        (id, name, kills, deaths, gun_level, team, weapon)
-                    },
-                )
+                .map(|(id, name, kills, deaths, _world, _alive, gun_level, team, weapon)| {
+                    let is_bot = playing_state.other_players
+                        .iter()
+                        .find(|p| p.id == id)
+                        .map(|p| p.is_bot)
+                        .unwrap_or(false);
+                    (id, name, kills, deaths, gun_level, team, weapon, is_bot)
+                })
                 .collect();
-
         }
 
         // ── Always apply team-based colors after all updates ────────────
@@ -517,7 +511,8 @@ pub fn sync_world(
         // MSG_PLAYER_LIST arrives. MSG_STATE creates/updates OtherPlayer
         // objects with default colors, so without this they would lose
         // their team tint until the next (infrequent) player list packet.
-        let is_team_mode = matches!(
+        let is_team_mode =
+            matches!(
             playing_state.match_mode,
             Some(m) if m == MODE_TEAM_DEATHMATCH || m == MODE_SEARCH_AND_DESTROY
         );
@@ -525,21 +520,20 @@ pub fn sync_world(
             for p in playing_state.other_players.iter_mut() {
                 let team = p.team;
                 let (br, bg, bb) = match team {
-                    1 => (200u8, 60u8, 60u8),   // Red team
-                    2 => (60u8, 120u8, 200u8),  // Blue team
+                    1 => (200u8, 60u8, 60u8), // Red team
+                    2 => (60u8, 120u8, 200u8), // Blue team
                     _ => (120u8, 120u8, 120u8), // default/neutral
                 };
-                let hue_variation =
-                    ((p.id.wrapping_mul(97)).wrapping_add(53) % 32) as i32 - 16;
+                let hue_variation = ((p.id.wrapping_mul(97).wrapping_add(53) % 32) as i32) - 16;
                 let adjust = |c: u8| -> u8 {
-                    let v = c as i32 + hue_variation;
+                    let v = (c as i32) + hue_variation;
                     v.clamp(0, 255) as u8
                 };
                 p.color = macroquad::prelude::Color::from_rgba(
                     adjust(br),
                     adjust(bg),
                     adjust(bb),
-                    255,
+                    255
                 );
             }
         } else {

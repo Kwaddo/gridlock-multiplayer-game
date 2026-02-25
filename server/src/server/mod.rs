@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::fs;
-use std::net::{SocketAddr, UdpSocket};
-use std::time::{Duration, Instant};
+use std::net::{ SocketAddr, UdpSocket };
+use std::time::{ Duration, Instant };
 
 pub mod broadcast;
 pub mod game;
 pub mod handlers;
 pub mod utils;
 
-use crate::bot::ai::BotState;
+use crate::bot::ai::{ BotBehavior, BotState };
 use crate::maze::MazeData;
 use crate::player::Player;
 use crate::player::WorldId;
@@ -26,64 +26,11 @@ pub fn run() -> std::io::Result<()> {
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
 
     let mut bot_manager = BotManager::new();
-    
-    // hardcoded player for testing bot behavior without a client
-    let test_bot = Player {
-        id: 9999,
-        username: "TestBot".to_string(),
-        position: (0.0, 0.0, 0.0),
-        yaw: 0.0,
-        pitch: 0.0,
-        health: 100,
-        shield: 50,
-        max_health: 100,
-        max_shield: 50,
-        is_alive: true,
-        kills: 0,
-        deaths: 0,
-        gun_level: 1,
-        socket_addr: BotManager::virtual_addr(0),
-        last_activity: Instant::now(),
-        world: WorldId::Lobby,
-        is_bot: true,
-        death_time: None,
-        post_teleport_freeze_until: None,
-        is_sprinting: false,
-        is_ads: false,
-        is_crouched: false,
-        is_airborne: false,
-        is_prone: false,
-        is_sliding: false,
-        evt_jump_start: false,
-        evt_landed: false,
-        team: crate::player::Team::Red,
-        current_weapon: "MP5".to_string(),
-    };
 
-    let bot_state = BotState {
-        movement: crate::physics::BotMovementState {
-            velocity: glam::Vec3::ZERO,
-            is_grounded: true,
-            height: 1.6,
-        },
-        behavior: crate::bot::ai::BotBehavior::Patrol {
-            waypoints: vec![(5.0, 0.0, 5.0), (5.0, 0.0, -5.0), (-5.0, 0.0, -5.0), (-5.0, 0.0, 5.0)],
-            current: 0,
-            arrival_threshold: 1.0,
-        },
-        shooting: crate::bot::shooting::BotShootingState {
-            fire_cooldown: 0.0,
-            has_target: false,
-            reaction_remaining: 0.0,
-        },
-        target_id: None,
-        reaction_timer: 0.0,
-    };
-
-    bot_manager.spawn_bot(&mut players, test_bot, bot_state);
 
     // cache assets manifest to avoid hitting the filesystem on every join
-    let asset_manifest: Option<serde_json::Value> = fs::read_to_string("assets/manifest.json")
+    let asset_manifest: Option<serde_json::Value> = fs
+        ::read_to_string("assets/manifest.json")
         .ok()
         .and_then(|data| serde_json::from_str(&data).ok());
 
@@ -115,18 +62,19 @@ pub fn run() -> std::io::Result<()> {
                 let payload = &buffer[1..bytes_rcv];
 
                 match msg_type {
-                    MSG_JOIN => handlers::handle_join(
-                        &socket,
-                        &mut players,
-                        maze.as_ref(),
-                        match_running,
-                        src_addr,
-                        payload,
-                        asset_manifest.as_ref(),
-                    ),
+                    MSG_JOIN =>
+                        handlers::handle_join(
+                            &socket,
+                            &mut players,
+                            maze.as_ref(),
+                            match_running,
+                            src_addr,
+                            payload,
+                            asset_manifest.as_ref()
+                        ),
                     MSG_DISCONNECT => handlers::handle_disconnect(&socket, &mut players, src_addr),
                     MSG_POSITION => {
-                        handlers::handle_position(&socket, &mut players, src_addr, payload)
+                        handlers::handle_position(&socket, &mut players, src_addr, payload);
                     }
 
                     // client-requested world change (teleporter)
@@ -136,7 +84,7 @@ pub fn run() -> std::io::Result<()> {
                             maze.as_ref(),
                             &mut players,
                             src_addr,
-                            payload,
+                            payload
                         );
                     }
 
@@ -145,9 +93,10 @@ pub fn run() -> std::io::Result<()> {
                         // read the requested game mode from the payload
                         if !payload.is_empty() {
                             let requested = payload[0];
-                            if requested == MODE_GUN_GAME
-                                || requested == MODE_TEAM_DEATHMATCH
-                                || requested == MODE_SEARCH_AND_DESTROY
+                            if
+                                requested == MODE_GUN_GAME ||
+                                requested == MODE_TEAM_DEATHMATCH ||
+                                requested == MODE_SEARCH_AND_DESTROY
                             {
                                 match_mode = requested;
                             }
@@ -162,42 +111,162 @@ pub fn run() -> std::io::Result<()> {
                             &mut match_end_pending,
                             &mut match_total_maze_entries,
                             match_mode,
-                            src_addr,
+                            src_addr
                         );
                     }
                     MSG_WALL_BROKEN => {
                         if let Some(ref mut m) = maze {
-                            handlers::handle_wall_broken(&socket, m, &players, src_addr, payload)
+                            handlers::handle_wall_broken(&socket, m, &players, src_addr, payload);
                         }
                     }
                     MSG_DISCOVER => handlers::handle_discover(&socket, &players, src_addr),
-                    MSG_HIT => handlers::handle_hit(
-                        &socket,
-                        &mut players,
-                        src_addr,
-                        payload,
-                        &mut maze,
-                        &mut match_running,
-                        &mut match_start_time,
-                        &mut match_end_pending,
-                        match_mode,
-                    ),
+                    MSG_HIT =>
+                        handlers::handle_hit(
+                            &socket,
+                            &mut players,
+                            src_addr,
+                            payload,
+                            &mut maze,
+                            &mut match_running,
+                            &mut match_start_time,
+                            &mut match_end_pending,
+                            match_mode
+                        ),
                     MSG_RESPAWN_REQUEST => {
                         if let Some(ref m) = maze {
-                            handlers::handle_respawn_request(&socket, m, &mut players, src_addr)
+                            handlers::handle_respawn_request(&socket, m, &mut players, src_addr);
                         }
                     }
                     MSG_SET_TEAM => {
-                        handlers::handle_set_team(&socket, &mut players, src_addr, payload)
+                        handlers::handle_set_team(&socket, &mut players, src_addr, payload);
                     }
+                    MSG_BOT_SPAWN => {
+                        if payload.len() >= 2 {
+                            let behavior_code = payload[0];
+                            let level = payload[1];
+
+                            let behavior: BotBehavior = match behavior_code {
+                                0 => BotBehavior::Static,
+                                1 =>
+                                    BotBehavior::Patrol {
+                                        waypoints: vec![
+                                            (5.0, 0.0, 5.0),
+                                            (5.0, 0.0, -5.0),
+                                            (-5.0, 0.0, -5.0),
+                                            (-5.0, 0.0, 5.0)
+                                        ],
+                                        current: 0,
+                                        arrival_threshold: 1.0,
+                                    },
+                                2 =>
+                                    BotBehavior::PatrolJump {
+                                        waypoints: vec![
+                                            (5.0, 0.0, 5.0),
+                                            (5.0, 0.0, -5.0),
+                                            (-5.0, 0.0, -5.0),
+                                            (-5.0, 0.0, 5.0)
+                                        ],
+                                        current: 0,
+                                        jump_interval: 2.0,
+                                        jump_timer: 2.0,
+                                        arrival_threshold: 1.0,
+                                    },
+                                _ => BotBehavior::Static,
+                            };
+
+                            let bot_count = players
+                                .values()
+                                .filter(|p| p.is_bot)
+                                .count();
+                            let spawn_points = [
+                                (5.0_f32, 0.0_f32, 5.0_f32),
+                                (5.0_f32, 0.0_f32, -5.0_f32),
+                                (-5.0_f32, 0.0_f32, 5.0_f32),
+                                (-5.0_f32, 0.0_f32, -5.0_f32),
+                            ];
+                            let spawn = spawn_points[bot_count % spawn_points.len()];
+
+                            let bot_id = 9000u32 + (bot_count as u32);
+                            let bot_name = format!("Bot{}", bot_count + 1);
+
+                            let bot_player = Player {
+                                id: bot_id,
+                                username: bot_name,
+                                position: spawn,
+                                yaw: 0.0,
+                                pitch: 0.0,
+                                health: 100,
+                                shield: 0,
+                                max_health: 100,
+                                max_shield: 100,
+                                is_alive: true,
+                                kills: 0,
+                                deaths: 0,
+                                gun_level: 1,
+                                socket_addr: BotManager::virtual_addr(0), // manager will replace with generated addr
+                                last_activity: Instant::now(),
+                                death_time: None,
+                                world: WorldId::Lobby,
+                                post_teleport_freeze_until: None,
+                                is_sprinting: false,
+                                is_ads: false,
+                                is_crouched: false,
+                                is_airborne: false,
+                                is_prone: false,
+                                is_sliding: false,
+                                evt_jump_start: false,
+                                evt_landed: false,
+                                team: crate::player::Team::Red,
+                                current_weapon: "MP5".to_string(),
+                                is_bot: true,
+                            };
+
+                            let (fire_cooldown, reaction_remaining) = match level {
+                                1 => (2.0, 1.5),
+                                2 => (1.0, 1.0),
+                                3 => (0.5, 0.5),
+                                _ => (2.0, 1.5),
+                            };
+
+                            let bot_state = BotState {
+                                movement: crate::physics::BotMovementState {
+                                    velocity: glam::Vec3::ZERO,
+                                    is_grounded: true,
+                                    height: 1.6,
+                                },
+                                behavior,
+                                shooting: crate::bot::shooting::BotShootingState {
+                                    fire_cooldown,
+                                    has_target: false,
+                                    reaction_remaining,
+                                },
+                                target_id: None,
+                                reaction_timer: 0.0,
+                            };
+
+                            bot_manager.spawn_bot(&mut players, bot_player, bot_state);
+                            broadcast::broadcast_state(&socket, &players);
+                            broadcast::broadcast_player_list(&socket, &players);
+                        }
+                    }
+
+                    MSG_BOT_DESPAWN_ALL => {
+                        bot_manager.despawn_all(&mut players);
+                        broadcast::broadcast_state(&socket, &players);
+                        broadcast::broadcast_player_list(&socket, &players);
+                    }
+
                     _ => println!("Unknown message type: {}", msg_type),
                 }
             }
-            Err(err)
-                if err.kind() == std::io::ErrorKind::WouldBlock
-                    || err.kind() == std::io::ErrorKind::TimedOut
-                    || err.kind() == std::io::ErrorKind::ConnectionReset => {}
-            Err(err) => return Err(err),
+            Err(err) if
+                err.kind() == std::io::ErrorKind::WouldBlock ||
+                err.kind() == std::io::ErrorKind::TimedOut ||
+                err.kind() == std::io::ErrorKind::ConnectionReset
+            => {}
+            Err(err) => {
+                return Err(err);
+            }
         }
 
         // tick bots
@@ -239,7 +308,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut match_warmup_end,
                 &mut last_match_time_sent,
                 &mut match_total_maze_entries,
-                match_mode,
+                match_mode
             );
         }
 
@@ -249,9 +318,7 @@ pub fn run() -> std::io::Result<()> {
             let secs = if Instant::now() >= end {
                 0u8
             } else {
-                end.saturating_duration_since(Instant::now())
-                    .as_secs()
-                    .min(255) as u8
+                end.saturating_duration_since(Instant::now()).as_secs().min(255) as u8
             };
             if last_warmup_sent != Some(secs) {
                 let cd: [u8; 3] = [MSG_MATCH_COUNTDOWN, secs, match_mode];
@@ -274,7 +341,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut match_end_pending,
                 &mut match_total_maze_entries,
                 &mut match_start_time,
-                match_mode,
+                match_mode
             );
         }
 
@@ -289,7 +356,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut last_match_time_sent,
                 &mut match_total_maze_entries,
                 &mut match_end_pending,
-                match_mode,
+                match_mode
             );
         }
 
@@ -305,7 +372,7 @@ pub fn run() -> std::io::Result<()> {
                     &mut match_end_pending,
                     &mut last_match_time_sent,
                     &mut match_total_maze_entries,
-                    winner_name,
+                    winner_name
                 );
             }
         }
@@ -317,9 +384,7 @@ pub fn run() -> std::io::Result<()> {
             let secs = if Instant::now() >= when {
                 0u8
             } else {
-                when.saturating_duration_since(Instant::now())
-                    .as_secs()
-                    .min(255) as u8
+                when.saturating_duration_since(Instant::now()).as_secs().min(255) as u8
             };
             if last_end_countdown_sent != Some(secs) {
                 let mut end_msg = vec![MSG_MATCH_END];

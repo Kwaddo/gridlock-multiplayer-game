@@ -28,13 +28,7 @@ impl PlayingState {
         let bar_h = 6.0;
         let hp_frac = d.hp / d.max_hp;
 
-        draw_rectangle(
-            sx - bar_w / 2.0,
-            sy,
-            bar_w,
-            bar_h,
-            Color::from_rgba(40, 40, 40, 200),
-        );
+        draw_rectangle(sx - bar_w / 2.0, sy, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
         let hp_color = if hp_frac > 0.5 {
             Color::from_rgba(80, 200, 80, 255)
         } else if hp_frac > 0.25 {
@@ -100,13 +94,20 @@ impl PlayingState {
                     sy,
                     self.target_dummy.hp,
                     self.target_dummy.max_hp,
-                    "Target Dummy",
+                    "Target Dummy"
                 );
             }
         }
 
         // Other players
         for p in &self.other_players {
+            
+            let display_name = if p.is_bot {
+                format!("[BOT] {}", p.username)
+            } else {
+                p.username.clone()
+            };
+
             // Position the tag just above the player model head
             let player_pos = p.render_position();
             let tag_pos = player_pos + vec3(0.0, 1.7, 0.0);
@@ -118,9 +119,9 @@ impl PlayingState {
 
             if let Some((sx, sy)) = project(tag_pos) {
                 if show_hp {
-                    Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
+                    Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
                 } else {
-                    Self::draw_nametag(sx, sy, &p.username, p.color);
+                    Self::draw_nametag(sx, sy, &display_name, p.color);
                 }
             }
         }
@@ -136,35 +137,34 @@ impl PlayingState {
             }
 
             if let Some((sx, sy)) = project(tag_pos) {
-                if show_hp {
-                    Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &p.username);
+                let display_name = if p.is_bot {
+                    format!("[BOT] {}", p.username)
                 } else {
-                    Self::draw_nametag(sx, sy, &p.username, p.color);
+                    p.username.clone()
+                };
+                if show_hp {
+                    Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
+                } else {
+                    Self::draw_nametag(sx, sy, &display_name, p.color);
                 }
             }
         }
     }
 
     fn draw_nametag(sx: f32, sy: f32, label: &str, color: Color) {
-        use crate::ui::fonts::{measure_game_text, text_params};
+        use crate::ui::fonts::{ measure_game_text, text_params };
         let label_w = measure_game_text(label, 14);
         draw_text_ex(label, sx - label_w / 2.0, sy, text_params(14, color));
     }
 
     fn draw_health_bar(sx: f32, sy: f32, hp: f32, max_hp: f32, label: &str) {
-        use crate::ui::fonts::{measure_game_text, text_params};
+        use crate::ui::fonts::{ measure_game_text, text_params };
 
         let bar_w = 60.0;
         let bar_h = 6.0;
         let hp_frac = (hp / max_hp).clamp(0.0, 1.0);
 
-        draw_rectangle(
-            sx - bar_w / 2.0,
-            sy,
-            bar_w,
-            bar_h,
-            Color::from_rgba(40, 40, 40, 200),
-        );
+        draw_rectangle(sx - bar_w / 2.0, sy, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
 
         let hp_color = if hp_frac > 0.5 {
             Color::from_rgba(80, 200, 80, 255)

@@ -7,7 +7,7 @@ use crate::net::protocols::{
     FLAG_SLIDING, FLAG_SPRINTING,
     MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN, MSG_MATCH_END,
     MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN,
-    MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE, FLAG_IS_BOT,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
@@ -317,6 +317,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.is_sliding = (state_flags & FLAG_SLIDING) != 0;
                         other_player.is_ads = (state_flags & FLAG_ADS) != 0;
                         other_player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
+                        other_player.is_bot = (state_flags & FLAG_IS_BOT) != 0;
                         other_player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
                         other_player.evt_landed = (event_flags & EVT_LANDED) != 0;
                         other_player.kills = kills;
