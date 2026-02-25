@@ -9,7 +9,7 @@ use std::net::UdpSocket;
 use super::PlayingState;
 
 impl PlayingState {
-    pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str) {
+    pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str, config: &crate::core::GameConfig) {
         if let Some(ref s) = socket {
             if self.pending_respawn {
                 self.pending_respawn = false;
@@ -25,7 +25,23 @@ impl PlayingState {
             if self.pending_start_request {
                 self.pending_start_request = false;
                 let mode = self.pending_start_gamemode;
-                let msg = vec![MSG_START_GAME, mode];
+                // compute duration code: 0=default, 1..=65534=seconds, 65535=infinite
+                let dur_code: u16 = if config.hide_match_timer {
+                    u16::MAX
+                } else if let Some(secs) = config.match_time_override_secs {
+                    // if user picked a value explicitly; treat 0 as default
+                    if secs == 0 {
+                        0
+                    } else {
+                        secs.min(u16::MAX as u32) as u16
+                    }
+                } else {
+                    0
+                };
+                let mut msg = vec![MSG_START_GAME, mode];
+                // always append two bytes for the duration code so server can parse easily
+                msg.push((dur_code >> 8) as u8);
+                msg.push((dur_code & 0xFF) as u8);
                 let _ = s.send_to(&msg, server_addr);
             }
 

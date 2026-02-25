@@ -14,7 +14,8 @@ pub const MAZE_HEIGHT: u8 = 35;
 pub const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 
 // Match / game loop settings (basic foundation)
-pub const MATCH_DURATION: Duration = Duration::from_secs(120); // match length (seconds)
+// match length; `None` = infinite, `Some(d)` = end matches after `d` elapses
+pub const MATCH_DURATION: Option<Duration> = Some(Duration::from_secs(120)); // default 2 minutes
 pub const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
 pub const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
 #[allow(dead_code)]
@@ -125,6 +126,34 @@ pub fn choose_team_weapon_for_player(
 }
 
 /// iterate over all alive/dead players and automatically respawn as needed
+/// Choose a spawn point in the maze that is at least `min_dist` away
+/// from every other player.  Falls back to a normal random spawn if no
+/// suitable spot is found after a few tries.
+pub fn random_spawn_far(
+    maze: &MazeData,
+    players: &HashMap<SocketAddr, Player>,
+    min_dist: f32,
+) -> (f32, f32, f32, bool) {
+    // repeatedly sample candidate locations and test distance
+    let mut best = maze.random_spawn_world(MAZE_CELL_SIZE);
+    let min2 = min_dist * min_dist;
+    for _ in 0..8 {
+        let cand = maze.random_spawn_world(MAZE_CELL_SIZE);
+        let (cx, _cy, cz, used) = cand;
+        // check squared distance to every live player
+        let ok = players.values().all(|p| {
+            let dx = p.position.0 - cx;
+            let dz = p.position.2 - cz;
+            dx * dx + dz * dz >= min2
+        });
+        if ok {
+            best = cand;
+            break;
+        }
+    }
+    best
+}
+
 pub fn process_auto_respawns(
     socket: &UdpSocket,
     maze: Option<&MazeData>,
@@ -135,45 +164,43 @@ pub fn process_auto_respawns(
     let mut to_respawn: Vec<(SocketAddr, f32, f32, f32, bool, String)> =
         Vec::with_capacity(players.len());
 
-    for player in players.values_mut() {
-        // Auto-respawn any dead player after the configured delay, regardless of
-        // whether their `world` field currently indicates `Maze`. Some clients
-        // can be 'offscreen' and temporarily report different world states;
-        // we should still auto-respawn players who are dead.
+    // first pass: identify which players should respawn and compute their
+    // spawn locations using only immutable borrows of `players`.
+    let mut spawn_info: Vec<(SocketAddr, (f32, f32, f32, bool))> = Vec::new();
+    for (addr, player) in players.iter() {
         if player.is_alive {
             continue;
         }
-
         let Some(death_time) = player.death_time else {
             continue;
         };
-
         if now.duration_since(death_time) >= MAZE_AUTO_RESPAWN_DELAY {
+            let spawn = match (player.world, maze) {
+                (WorldId::Maze, Some(m)) => match player.team {
+                    crate::player::Team::Red => {
+                        let (red, _blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
+                        (red.0, red.1, red.2, false)
+                    }
+                    crate::player::Team::Blue => {
+                        let (_red, blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
+                        (blue.0, blue.1, blue.2, false)
+                    }
+                    _ => random_spawn_far(m, players, MAZE_CELL_SIZE * 3.0),
+                },
+                _ => (0.0_f32, 0.5_f32, 0.0_f32, false),
+            };
+            spawn_info.push((*addr, spawn));
+        }
+    }
+
+    // second pass: perform the actual mutations now that we no longer hold
+    // immutable borrows of `players`.
+    for (addr, (sx, sy, sz, used_fallback)) in spawn_info {
+        if let Some(player) = players.get_mut(&addr) {
             player.is_alive = true;
             player.health = player.max_health;
             player.shield = 0;
             player.death_time = None;
-
-            // choose spawn position based on player's current world. If they
-            // were in the Maze and a MazeData is available, pick a random maze
-            // spawn; otherwise fall back to the lobby spawn location.
-            let (sx, sy, sz, used_fallback) = match (player.world, maze) {
-                (WorldId::Maze, Some(m)) => {
-                    // If player is on a team, use deterministic team spawn positions
-                    match player.team {
-                        crate::player::Team::Red => {
-                            let (red, _blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
-                            (red.0, red.1, red.2, false)
-                        }
-                        crate::player::Team::Blue => {
-                            let (_red, blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
-                            (blue.0, blue.1, blue.2, false)
-                        }
-                        _ => m.random_spawn_world(MAZE_CELL_SIZE),
-                    }
-                }
-                _ => (0.0_f32, 0.5_f32, 0.0_f32, false),
-            };
             player.position = (sx, sy, sz);
             to_respawn.push((
                 player.socket_addr,

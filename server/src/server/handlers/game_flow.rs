@@ -8,7 +8,7 @@ use crate::player::{Player, WorldId};
 use crate::protocols::*;
 
 use crate::server::{
-    broadcast,
+    broadcast, game,
     game::{
         MATCH_DURATION, MATCH_END_COUNTDOWN_SECS, MATCH_MAX_PLAYERS,
         MATCH_POST_TELEPORT_FREEZE_SECS, MATCH_SCORE_TO_WIN, MATCH_START_COUNTDOWN_SECS,
@@ -29,6 +29,10 @@ pub fn handle_start_game(
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_total_maze_entries: &mut usize,
     match_mode: u8,
+    // pointer to variable that will hold the duration for the upcoming match
+    match_duration: &mut Option<Duration>,
+    // value requested by the client (may be None = default)
+    requested_duration: Option<Duration>,
     src_addr: SocketAddr,
 ) {
     // If a match is marked running but there are no players in the Maze,
@@ -42,11 +46,14 @@ pub fn handle_start_game(
             println!("Stale match detected (no players) — clearing match state");
             // caller will clear flags; we just early return
             *match_start_time = None;
+            *match_duration = game::MATCH_DURATION;
         }
     }
 
     // only accept start requests when not already running or scheduled
     if !match_running && match_warmup_end.is_none() && match_end_pending.is_none() {
+        // honour requested duration when scheduling new match
+        *match_duration = requested_duration;
         // require minimal number of players in lobby
         let lobby_count = players
             .values()
@@ -64,9 +71,16 @@ pub fn handle_start_game(
                 let _ = socket.send_to(&cd, p.socket_addr);
             }
 
+            let dur_desc = if requested_duration == game::MATCH_DURATION {
+                "default".to_string()
+            } else if requested_duration.is_none() {
+                "infinite".to_string()
+            } else {
+                format!("{}s", requested_duration.unwrap().as_secs())
+            };
             println!(
-                "Match start requested by {} — mode {} — countdown {}s",
-                src_addr, match_mode, MATCH_START_COUNTDOWN_SECS
+                "Match start requested by {} — mode {} — duration {} — countdown {}s",
+                src_addr, match_mode, dur_desc, MATCH_START_COUNTDOWN_SECS
             );
         } else {
             println!(
@@ -123,6 +137,10 @@ pub fn handle_start_game(
                     req_player.post_teleport_freeze_until =
                         Some(Instant::now() + Duration::from_secs(MATCH_POST_TELEPORT_FREEZE_SECS));
 
+                    // include authoritative timer so clients don't get stuck on the
+                    // default 120s value if packets reorder.  if we don't have a
+                    // start time (shouldn't happen while match_running is true) just
+                    // send the nominal duration.
                     let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
                     let (sx, sy, sz) = req_player.position;
                     response.extend_from_slice(&sx.to_be_bytes());
@@ -130,6 +148,28 @@ pub fn handle_start_game(
                     response.extend_from_slice(&sz.to_be_bytes());
                     response.push(match_mode);
                     response.push(MATCH_POST_TELEPORT_FREEZE_SECS as u8);
+                    // determine remaining seconds clamped to 255
+                    // compute remaining timer, using u16::MAX as a stand-in for “infinite”
+                    let timer_secs: u16 = if let Some(start) = *match_start_time {
+                        let elapsed = Instant::now().duration_since(start);
+                        match *match_duration {
+                            Some(dur) => {
+                                if elapsed >= dur {
+                                    0u16
+                                } else {
+                                    (dur - elapsed).as_secs().min(u16::MAX as u64) as u16
+                                }
+                            }
+                            None => u16::MAX,
+                        }
+                    } else {
+                        match *match_duration {
+                            Some(dur) => dur.as_secs().min(u16::MAX as u64) as u16,
+                            None => u16::MAX,
+                        }
+                    };
+                    response.push((timer_secs >> 8) as u8);
+                    response.push((timer_secs & 0xFF) as u8);
                     let _ = socket.send_to(&response, req_player.socket_addr);
 
                     // send maze data to the joining client
@@ -174,10 +214,11 @@ pub fn maybe_start_match(
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
     match_warmup_end: &mut Option<Instant>,
-    last_match_time_sent: &mut Option<u8>,
+    last_match_time_sent: &mut Option<u16>,
     match_total_maze_entries: &mut usize,
     match_mode: u8,
     snd_state: &mut Option<crate::server::snd::SndState>,
+    match_duration: Option<Duration>,
 ) {
     if let Some(end) = *match_warmup_end {
         if Instant::now() >= end {
@@ -188,9 +229,13 @@ pub fn maybe_start_match(
                 .values()
                 .filter(|p| p.world == WorldId::Lobby)
                 .count();
+            let dur_desc = match match_duration {
+                Some(d) => format!("{}s", d.as_secs()),
+                None => "infinite".to_string(),
+            };
             println!(
-                "Match warmup complete — starting match with seed {} (moving {} players)",
-                current_maze.seed, lobby_count
+                "Match warmup complete — starting {} match with seed {} (moving {} players)",
+                dur_desc, current_maze.seed, lobby_count
             );
 
             *match_running = true;
@@ -198,7 +243,10 @@ pub fn maybe_start_match(
             *match_warmup_end = None;
             *match_total_maze_entries = lobby_count;
             // send initial authoritative match timer to all clients
-            let initial_secs = MATCH_DURATION.as_secs().min(255) as u8;
+            let initial_secs: u16 = match match_duration {
+                Some(dur) => dur.as_secs().min(u16::MAX as u64) as u16,
+                None => u16::MAX,
+            };
             broadcast::broadcast_match_timer(socket, players, initial_secs);
             *last_match_time_sent = Some(initial_secs);
             // set per-player post-teleport freeze for each player moved into the Maze
@@ -239,8 +287,11 @@ pub fn maybe_start_match(
             // For S&D, compute bomb site and initialize round state
             if match_mode == crate::protocols::MODE_SEARCH_AND_DESTROY {
                 let bomb_site = current_maze.bomb_site_position(MAZE_CELL_SIZE);
-                let (red_spawn, blue_spawn) = team_spawns.unwrap_or(((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)));
-                *snd_state = Some(crate::server::snd::SndState::new(bomb_site, red_spawn, blue_spawn));
+                let (red_spawn, blue_spawn) =
+                    team_spawns.unwrap_or(((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)));
+                *snd_state = Some(crate::server::snd::SndState::new(
+                    bomb_site, red_spawn, blue_spawn,
+                ));
             }
 
             for (i, addr) in joiners.iter().enumerate() {
@@ -326,6 +377,13 @@ pub fn maybe_start_match(
                     response.push(match_mode);
                     // attach freeze duration so all clients use the same value
                     response.push(MATCH_POST_TELEPORT_FREEZE_SECS as u8);
+                    // attach initial timer (same value already broadcast earlier)
+                    let initial_secs: u16 = match match_duration {
+                        Some(dur) => dur.as_secs().min(u16::MAX as u64) as u16,
+                        None => u16::MAX,
+                    };
+                    response.push((initial_secs >> 8) as u8);
+                    response.push((initial_secs & 0xFF) as u8);
                     let _ = socket.send_to(&response, player.socket_addr);
 
                     current_maze.send(&socket, player.socket_addr);
@@ -356,6 +414,7 @@ pub fn check_early_end_conditions(
     match_total_maze_entries: &mut usize,
     match_start_time: &mut Option<Instant>,
     match_mode: u8,
+    match_duration: &mut Option<Duration>,
 ) {
     // gun game should never end just because someone died;
     // kills are handled separately in hit logic
@@ -381,7 +440,11 @@ pub fn check_early_end_conditions(
         *match_running = false;
         *match_start_time = None;
         *maze = None;
-    } else if match_mode != MODE_TEAM_DEATHMATCH && alive_count == 1 && *match_total_maze_entries >= 2 {
+        *match_duration = game::MATCH_DURATION;
+    } else if match_mode != MODE_TEAM_DEATHMATCH
+        && alive_count == 1
+        && *match_total_maze_entries >= 2
+    {
         // Last player standing wins — only trigger when at least 2 players
         // entered the maze during this match (not just a solo player). For
         // team-based modes (TDM, S&D) we don't end the match on a single
@@ -461,27 +524,36 @@ pub fn update_match_timer(
     _maze: &mut Option<MazeData>,
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
-    last_match_time_sent: &mut Option<u8>,
+    last_match_time_sent: &mut Option<u16>,
     _match_total_maze_entries: &mut usize,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
+    match_duration: Option<Duration>,
 ) {
     if let Some(start) = match_start_time {
         let elapsed = Instant::now().duration_since(*start);
 
         // send authoritative remaining-time to clients (only when value changes)
-        let remaining_secs = if elapsed >= MATCH_DURATION {
-            0u8
-        } else {
-            (MATCH_DURATION - elapsed).as_secs().min(255) as u8
+        let remaining_secs: u16 = match match_duration {
+            Some(dur) => {
+                if elapsed >= dur {
+                    0u16
+                } else {
+                    (dur - elapsed).as_secs().min(u16::MAX as u64) as u16
+                }
+            }
+            None => u16::MAX,
         };
-        if *last_match_time_sent != Some(remaining_secs) {
+        // if the match is infinite we still need to send periodic
+        // heartbeat packets so clients don't time out; finite matches are
+        // already guaranteed to send every second as the value changes.
+        if match_duration.is_none() || *last_match_time_sent != Some(remaining_secs) {
             let _ = broadcast::broadcast_match_timer(socket, players, remaining_secs);
             *last_match_time_sent = Some(remaining_secs);
         }
 
         // timeout -> show match-end screen then return to lobby after countdown
-        if elapsed >= MATCH_DURATION && match_end_pending.is_none() {
+        if match_end_pending.is_none() && match_duration.map_or(false, |dur| elapsed >= dur) {
             println!("Match duration elapsed — showing end screen");
             *match_running = false;
 
@@ -545,8 +617,10 @@ pub fn execute_scheduled_match_end(
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
-    last_match_time_sent: &mut Option<u8>,
+    last_match_time_sent: &mut Option<u16>,
     match_total_maze_entries: &mut usize,
+    // reset duration back to default once the match actually ends
+    match_duration: &mut Option<Duration>,
     winner_name: String,
     snd_state: &mut Option<crate::server::snd::SndState>,
 ) {
@@ -567,6 +641,8 @@ pub fn execute_scheduled_match_end(
     *match_end_pending = None;
     *last_match_time_sent = None;
     *match_total_maze_entries = 0;
+    // restore duration to default
+    *match_duration = game::MATCH_DURATION;
     // clear S&D state
     *snd_state = None;
 }

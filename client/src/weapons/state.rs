@@ -241,6 +241,8 @@ pub struct WeaponInventory {
     /// X toggles between knife and the last active gun slot.
     pub knife: WeaponState,
     pub knife_active: bool,
+    /// when true the knife may not be put away (used during final Gun Game level)
+    pub knife_locked: bool,
 }
 
 impl WeaponInventory {
@@ -258,6 +260,7 @@ impl WeaponInventory {
             locked_slot: None,
             knife: WeaponState::new(WeaponId::Knife),
             knife_active: false,
+            knife_locked: false,
         }
     }
 
@@ -317,6 +320,10 @@ impl WeaponInventory {
             return false;
         }
         if self.knife_active {
+            // if locked we cannot put it away
+            if self.knife_locked {
+                return false;
+            }
             // put knife away, go back to gun
             self.knife_active = false;
             self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_FROM_TIME;
@@ -340,6 +347,9 @@ impl WeaponInventory {
 
         // If knife is active, switching to a gun slot puts the knife away
         if self.knife_active {
+            if self.knife_locked {
+                return false;
+            }
             if slot < self.weapons.len() && self.switch_cooldown <= 0.0 {
                 self.knife_active = false;
                 self.active_slot = slot;
@@ -370,8 +380,12 @@ impl WeaponInventory {
         if self.locked_slot.is_some() {
             return;
         }
-        // If knife is out, scroll puts it away and returns to current gun slot
+        // If knife is out, scrolling normally puts it away and returns to current gun slot
         if self.knife_active {
+            if self.knife_locked {
+                // knife locked, do nothing
+                return;
+            }
             if self.switch_cooldown <= 0.0 {
                 self.knife_active = false;
                 self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_FROM_TIME;
@@ -392,5 +406,6 @@ impl WeaponInventory {
             w.update(delta);
         }
         self.knife.update(delta);
+        // unlock knife when cooldown is expired if we changed contexts? (not needed)
     }
 }

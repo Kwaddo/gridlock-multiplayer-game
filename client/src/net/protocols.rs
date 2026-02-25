@@ -17,6 +17,11 @@ pub const MSG_DAMAGE: u8 = 16; // server -> client: you took damage (amount, att
 pub const MSG_KILL: u8 = 17; // server -> client: you killed someone (victim_id, weapon)
 pub const MSG_KILL_FEED: u8 = 18; // server -> all: broadcast kill (killer_id, victim_id)
 pub const MSG_START_GAME: u8 = 19; // client -> server: request to start a match
+// format: [MSG_START_GAME][mode:1][duration_hi:1][duration_lo:1]
+// duration is a big-endian u16 representing seconds, where 0=use server default,
+// 65535=infinite.  only the first mode byte is required for backward
+// compatibility; new clients always append two bytes.
+
                                    // Game mode identifiers used with MSG_START_GAME
 pub const MODE_GUN_GAME: u8 = 1;
 pub const MODE_TEAM_DEATHMATCH: u8 = 2;
@@ -27,6 +32,8 @@ pub const MSG_MATCH_END: u8 = 22; // server -> all: announce match end (winner_i
 pub const MSG_PLAYER_LIST: u8 = 23; // server -> client: full connected player list (id,name,kills,world,is_alive)
 pub const MSG_MATCH_COUNTDOWN: u8 = 24; // server -> all: match start countdown (seconds)
 pub const MSG_MATCH_TIMER: u8 = 25; // server -> all: authoritative match time remaining (seconds)
+// format: [MSG_MATCH_TIMER][secs_hi:1][secs_lo:1] (big-endian u16)
+// value 0 means time is up; max representable duration is 65535s (~18h).
 pub const MSG_SET_TEAM: u8 = 26; // client -> server: set preferred team (team:u8)
 pub const MSG_SND_ROUND_STATE: u8 = 27; // server -> all: S&D round state
 pub const MSG_SND_BOMB_PICKUP: u8 = 28; // client -> server: request to pick up dropped bomb

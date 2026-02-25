@@ -12,12 +12,18 @@ pub(super) fn draw_status_panels(
     match_time_left: f32,
     config: &crate::core::GameConfig,
 ) {
-    // Match timer (top-center) — only display server-provided time when present.
-    if match_time_left > 0.0 {
+    // Match timer (top-center) — only display when not hidden by user and
+    // when the server has sent a time.  infinite matches show as “∞”.
+    if !config.hide_match_timer && match_time_left > 0.0 {
         let secs = match_time_left.ceil() as u32;
-        let mins = secs / 60;
-        let s = secs % 60;
-        let time_text = format!("{:02}:{:02}", mins, s);
+        let time_text = if secs == u16::MAX as u32 {
+            // sentinel value used by server to indicate “infinite” duration
+            "∞".to_string()
+        } else {
+            let mins = secs / 60;
+            let s = secs % 60;
+            format!("{:02}:{:02}", mins, s)
+        };
         let tw = crate::ui::fonts::measure_game_text(&time_text, 20);
         draw_text_ex(
             &time_text,

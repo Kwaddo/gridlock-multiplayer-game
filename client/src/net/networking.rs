@@ -3,11 +3,11 @@ use std::net::UdpSocket;
 use macroquad::prelude::*;
 
 use crate::net::protocols::{
-    EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE,
-    FLAG_SLIDING, FLAG_SPRINTING,
-    MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN, MSG_MATCH_END,
-    MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN,
-    MSG_SND_ROUND_STATE, MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING,
+    FLAG_SPRINTING, MSG_ASSETS, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED, MSG_MATCH_COUNTDOWN,
+    MSG_MATCH_END, MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION,
+    MSG_RESPAWN, MSG_SND_ROUND_STATE, MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN,
+    MSG_WORLD_CHANGE,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
@@ -19,8 +19,11 @@ pub const MAZE_WALL_HEIGHT: f32 = 2.4;
 pub struct NetUpdate {
     pub maze: Option<(Maze, Vec3)>,
     pub players: Option<Vec<OtherPlayer>>,
-    pub world_change: Option<(WorldId, Vec3, Option<u8>)>, // (world, spawn, freeze_secs)
-    pub assets: Option<Vec<(String, String)>>,             // (key, path)
+    // world_change: when a player is teleported between worlds. the tuple contains
+    // (world, spawn_coordinates, freeze_secs, optional_authoritative_match_timer)
+    // timer is encoded as big-endian u16 seconds
+    pub world_change: Option<(WorldId, Vec3, Option<u8>, Option<u16>)>,
+    pub assets: Option<Vec<(String, String)>>, // (key, path)
     pub broken_walls: Option<Vec<(u8, u8)>>,
     pub damage_taken: Option<(f32, Option<u32>)>, // (damage amount, attacker_id)
     pub kill_feed: Option<Vec<(u32, u32, String)>>, // (killer_id, victim_id, weapon)
@@ -29,7 +32,7 @@ pub struct NetUpdate {
     pub lobby_console_message: Option<String>,
     pub match_join_announce: Option<String>,
     pub match_start_countdown: Option<u8>,
-    pub match_time_left: Option<u8>,
+    pub match_time_left: Option<u16>,
     pub match_end_winner: Option<String>,
     pub match_end_countdown: Option<u8>,
     pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8, u8, String)>>, // (id, name, kills, deaths, world, alive, gun_level, team, weapon)
@@ -387,15 +390,26 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[12],
                         recv_buf[13],
                     ]);
-                    // optional trailing bytes: [14]=gamemode, [15]=freeze_secs
+                    // optional trailing bytes: [14]=gamemode, [15]=freeze_secs,
+                    // [16]=match timer hi byte, [17]=match timer lo byte (big-endian u16).
+                    // the timer fields only appear when entering the maze; they provide an
+                    // authoritative starting value so the UI is correct even if
+                    // MSG_MATCH_TIMER broadcasts are dropped or reordered.
                     let mut freeze_secs: Option<u8> = None;
+                    let mut timer_secs: Option<u16> = None;
                     if size >= 15 {
                         update.match_mode = Some(recv_buf[14]);
                     }
                     if size >= 16 {
                         freeze_secs = Some(recv_buf[15]);
                     }
-                    update.world_change = Some((world, vec3(x, y, z), freeze_secs));
+                    if size >= 18 {
+                        // two-byte timer field
+                        let hi = recv_buf[16] as u16;
+                        let lo = recv_buf[17] as u16;
+                        timer_secs = Some((hi << 8) | lo);
+                    }
+                    update.world_change = Some((world, vec3(x, y, z), freeze_secs, timer_secs));
                 }
             }
             MSG_START_DENIED => {
@@ -423,10 +437,11 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 }
             }
             MSG_MATCH_TIMER => {
-                // format: [MSG_MATCH_TIMER][seconds:1] -- authoritative remaining match time
-                if size >= 2 {
-                    let secs = recv_buf[1];
-                    update.match_time_left = Some(secs);
+                // format: [MSG_MATCH_TIMER][secs_hi:1][secs_lo:1] -- authoritative remaining match time
+                if size >= 3 {
+                    let hi = recv_buf[1] as u16;
+                    let lo = recv_buf[2] as u16;
+                    update.match_time_left = Some((hi << 8) | lo);
                 }
             }
             MSG_MATCH_END => {
@@ -633,36 +648,62 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     let blue_wins = recv_buf[4];
                     let phase = recv_buf[5];
                     let attacking_team = recv_buf[6];
-                    let carrier_id = u32::from_be_bytes([
-                        recv_buf[7], recv_buf[8], recv_buf[9], recv_buf[10],
-                    ]);
+                    let carrier_id =
+                        u32::from_be_bytes([recv_buf[7], recv_buf[8], recv_buf[9], recv_buf[10]]);
                     let bx = f32::from_be_bytes([
-                        recv_buf[11], recv_buf[12], recv_buf[13], recv_buf[14],
+                        recv_buf[11],
+                        recv_buf[12],
+                        recv_buf[13],
+                        recv_buf[14],
                     ]);
                     let by = f32::from_be_bytes([
-                        recv_buf[15], recv_buf[16], recv_buf[17], recv_buf[18],
+                        recv_buf[15],
+                        recv_buf[16],
+                        recv_buf[17],
+                        recv_buf[18],
                     ]);
                     let bz = f32::from_be_bytes([
-                        recv_buf[19], recv_buf[20], recv_buf[21], recv_buf[22],
+                        recv_buf[19],
+                        recv_buf[20],
+                        recv_buf[21],
+                        recv_buf[22],
                     ]);
                     let site_x = f32::from_be_bytes([
-                        recv_buf[23], recv_buf[24], recv_buf[25], recv_buf[26],
+                        recv_buf[23],
+                        recv_buf[24],
+                        recv_buf[25],
+                        recv_buf[26],
                     ]);
                     let site_y = f32::from_be_bytes([
-                        recv_buf[27], recv_buf[28], recv_buf[29], recv_buf[30],
+                        recv_buf[27],
+                        recv_buf[28],
+                        recv_buf[29],
+                        recv_buf[30],
                     ]);
                     let site_z = f32::from_be_bytes([
-                        recv_buf[31], recv_buf[32], recv_buf[33], recv_buf[34],
+                        recv_buf[31],
+                        recv_buf[32],
+                        recv_buf[33],
+                        recv_buf[34],
                     ]);
                     let planted = recv_buf[35] != 0;
                     let plant_progress = f32::from_be_bytes([
-                        recv_buf[36], recv_buf[37], recv_buf[38], recv_buf[39],
+                        recv_buf[36],
+                        recv_buf[37],
+                        recv_buf[38],
+                        recv_buf[39],
                     ]);
                     let defuse_progress = f32::from_be_bytes([
-                        recv_buf[40], recv_buf[41], recv_buf[42], recv_buf[43],
+                        recv_buf[40],
+                        recv_buf[41],
+                        recv_buf[42],
+                        recv_buf[43],
                     ]);
                     let phase_timer = f32::from_be_bytes([
-                        recv_buf[44], recv_buf[45], recv_buf[46], recv_buf[47],
+                        recv_buf[44],
+                        recv_buf[45],
+                        recv_buf[46],
+                        recv_buf[47],
                     ]);
 
                     let bomb_dropped = if carrier_id == 0 && !planted && (bx != 0.0 || bz != 0.0) {

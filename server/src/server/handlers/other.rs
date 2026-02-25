@@ -189,7 +189,8 @@ pub fn handle_hit(
         if match_mode == MODE_SEARCH_AND_DESTROY {
             if let Some(ref mut snd) = snd_state {
                 // Get victim position for bomb drop
-                let victim_pos = players.get(&victim_addr)
+                let victim_pos = players
+                    .get(&victim_addr)
                     .map(|v| v.position)
                     .unwrap_or((0.0, 0.0, 0.0));
                 snd.on_player_death(victim_id, victim_pos);
@@ -276,8 +277,7 @@ pub fn handle_hit(
             if let Some(vmut) = players.get_mut(&victim_addr) {
                 vmut.gun_level = 1;
                 // Reset to the first Gun Game weapon
-                vmut.current_weapon =
-                    game::GUN_GAME_PROGRESSION[0].to_string();
+                vmut.current_weapon = game::GUN_GAME_PROGRESSION[0].to_string();
             }
         }
 
@@ -322,32 +322,35 @@ pub fn handle_respawn_request(
     players: &mut HashMap<SocketAddr, Player>,
     src_addr: SocketAddr,
 ) {
-    if let Some(player) = players.get_mut(&src_addr) {
-        player.health = player.max_health;
-        player.is_alive = true;
-
-        // choose a spawn position based on current world. For team modes we
-        // assign deterministic team spawns (opposing corners) so players
-        // don't get randomized spawns that break team placement.
-        let spawn = if player.world == WorldId::Maze {
-            match player.team {
+    // compute spawn first using only immutable access to `players`
+    let spawn = if let Some(pref) = players.get(&src_addr) {
+        if pref.world == WorldId::Maze {
+            match pref.team {
                 Team::Red => {
                     let (red, _blue) = maze.team_spawn_positions(game::MAZE_CELL_SIZE);
-                    red
+                    (red.0, red.1, red.2)
                 }
                 Team::Blue => {
                     let (_red, blue) = maze.team_spawn_positions(game::MAZE_CELL_SIZE);
-                    blue
+                    (blue.0, blue.1, blue.2)
                 }
                 _ => {
-                    let (sx, sy, sz, _fallback) = maze.random_spawn_world(game::MAZE_CELL_SIZE);
+                    let (sx, sy, sz, _fallback) =
+                        game::random_spawn_far(maze, players, game::MAZE_CELL_SIZE * 3.0);
                     (sx, sy, sz)
                 }
             }
         } else {
-            // lobby players respawn at a fixed lobby coordinate
             (0.0_f32, 0.5_f32, 0.0_f32)
-        };
+        }
+    } else {
+        // no such player (shouldn't happen)
+        (0.0_f32, 0.5_f32, 0.0_f32)
+    };
+
+    if let Some(player) = players.get_mut(&src_addr) {
+        player.health = player.max_health;
+        player.is_alive = true;
         player.position = spawn;
 
         // NOTE: we avoid calling into `choose_team_weapon_for_player` while
