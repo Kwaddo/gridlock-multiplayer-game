@@ -351,6 +351,12 @@ pub fn sync_world(
                     tracer_color: [255, 170, 90, 255],
                     tracer_thickness: 0.03,
                 });
+                playing_state.world_muzzle_flashes.push(
+                    client::weapons::effects::WorldMuzzleFlash {
+                        position: start,
+                        lifetime: client::weapons::effects::WorldMuzzleFlash::DURATION,
+                    },
+                );
             }
         }
         if let Some(kills) = updates.kill_feed {

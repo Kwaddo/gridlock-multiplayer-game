@@ -48,6 +48,7 @@ impl PlayingState {
         self.draw_other_players();
         self.draw_player_hitboxes();
         self.draw_tracers(camera.position);
+        self.draw_world_muzzle_flashes();
         self.draw_bullet_holes();
         if self.dev_mode.ruler_active {
             if let (Some(mut start), Some(mut end)) = (self.dev_mode.ruler_start, self.dev_mode.ruler_end) {

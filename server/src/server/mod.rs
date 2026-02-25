@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::{ SocketAddr, UdpSocket };
 use std::time::{ Duration, Instant };
+use rand::Rng;
 
 pub mod broadcast;
 pub mod game;
@@ -144,6 +145,7 @@ pub fn run() -> std::io::Result<()> {
                     }
                     MSG_BOT_SPAWN => {
                         if payload.len() >= 2 {
+                            let mut rng = rand::thread_rng();
                             let behavior_code = payload[0];
                             let level = payload[1];
                             let behavior_override = if behavior_code <= 2 {
@@ -211,9 +213,10 @@ pub fn run() -> std::io::Result<()> {
                                     behavior: bot_cfg.behavior.clone(),
                                     can_shoot,
                                     shooting: crate::bot::shooting::BotShootingState {
-                                        fire_rate: shooting_cfg.fire_rate,
+                                        // Start each bot with slight offset so they don't sync-fire.
+                                        fire_rate: rng.gen_range(0.0f32..shooting_cfg.fire_rate.max(0.01)),
                                         has_target: false,
-                                        reaction_remaining: shooting_cfg.reaction_time,
+                                        reaction_remaining: shooting_cfg.reaction_time + rng.gen_range(0.0f32..0.35),
                                     },
                                     shooting_config: shooting_cfg,
                                     target_id: None,

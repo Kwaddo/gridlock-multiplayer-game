@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use rand::Rng;
 use crate::player::{Player, Team, WorldId};
 use crate::bot::ai::BotState;
 use crate::weapons_stats::get_weapon_stats;
@@ -10,6 +11,7 @@ pub struct BotShootingConfig {
     pub fire_rate: f32, // seconds between bot-triggered shots
     pub angular_offset: f32, // max angle offset in degrees for inaccuracy
     pub reaction_time: f32, // time in seconds before bot starts shooting after seeing target
+    pub detection_range: Option<f32>, // override weapon range for target detection (None = use weapon range)
 }
 
 pub struct BotShootingState {
@@ -18,12 +20,17 @@ pub struct BotShootingState {
     pub reaction_remaining: f32, // time remaining before bot will start shooting at target
 }
 
+pub struct ShotDecision {
+    pub target_id: u32,
+    pub damage: Option<u32>,
+}
+
 pub fn try_shoot(
     bot_addr: SocketAddr,
     players: &HashMap<SocketAddr, Player>,
     bot_state: &mut BotState,
     dt: f32,
-) -> Option<(u32, u32)> {
+) -> Option<ShotDecision> {
 
     if bot_state.shooting.fire_rate > 0.0 {
         bot_state.shooting.fire_rate = (bot_state.shooting.fire_rate - dt).max(0.0);
@@ -49,7 +56,7 @@ pub fn try_shoot(
             p.id != bot.id 
             && p.is_alive 
             && p.world == bot.world 
-            && distance(bot.position, p.position) <= weapon_stats.range
+            && distance(bot.position, p.position) <= bot_state.shooting_config.detection_range.unwrap_or(weapon_stats.range)
             && (
                 if bot.world == WorldId::Lobby {
                     !p.is_bot
@@ -93,10 +100,27 @@ pub fn try_shoot(
         } else {
             bot_state.shooting_config.fire_rate
         };
-        let interval = bot_state.shooting_config.fire_rate.max(weapon_min_interval);
+        let mut rng = rand::thread_rng();
+        let jitter = rng.gen_range(0.85f32..1.15f32);
+        let interval = bot_state.shooting_config.fire_rate.max(weapon_min_interval) * jitter;
         bot_state.shooting.fire_rate = interval;
-        let dmg = weapon_stats.damage;
-        Some((new_target, dmg))
+
+        // Simple probabilistic hit check driven by bot accuracy + distance.
+        let target_dist = distance(bot.position, target.position);
+        let max_range = bot_state
+            .shooting_config
+            .detection_range
+            .unwrap_or(weapon_stats.range)
+            .max(0.001);
+        let distance_penalty = (target_dist / max_range).clamp(0.0, 1.0);
+        let accuracy_from_offset = (1.0 - bot_state.shooting_config.angular_offset * 1.8).clamp(0.05, 0.98);
+        let hit_chance = (accuracy_from_offset - 0.35 * distance_penalty).clamp(0.05, 0.98);
+        let hit = rng.gen::<f32>() <= hit_chance;
+
+        Some(ShotDecision {
+            target_id: new_target,
+            damage: if hit { Some(weapon_stats.damage) } else { None },
+        })
 }
 
 
