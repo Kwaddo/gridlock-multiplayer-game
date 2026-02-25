@@ -9,10 +9,7 @@ impl PlayingState {
         let sh = screen_height();
 
         // ── Round counter (top center) ──
-        let round_text = format!(
-            "Round {}/{}",
-            self.snd_round, self.snd_max_rounds
-        );
+        let round_text = format!("Round {}/{}", self.snd_round, self.snd_max_rounds);
         let round_w = crate::ui::fonts::measure_game_text(&round_text, 22);
         draw_text_ex(
             &round_text,
@@ -78,7 +75,7 @@ impl PlayingState {
             .connected_players
             .iter()
             .find(|(id, ..)| *id == player_id)
-            .map(|(_, _name, _kills, _deaths, _gl, team, _wep)| *team)
+            .map(|(_, _name, _kills, _deaths, _gl, team, _wep, _is_bot)| *team)
             .unwrap_or(0u8);
 
         let is_attacker = local_team == self.snd_attacking_team;
@@ -165,7 +162,10 @@ impl PlayingState {
             let dist = (dx * dx + dz * dz).sqrt();
 
             if dist <= 3.5 {
-                if is_attacker && self.snd_bomb_carrier_id == player_id as u32 && !self.snd_bomb_planted {
+                if is_attacker
+                    && self.snd_bomb_carrier_id == player_id as u32
+                    && !self.snd_bomb_planted
+                {
                     let hint = "Hold [E] to plant the bomb";
                     let hw = crate::ui::fonts::measure_game_text(hint, 18);
                     draw_text_ex(
@@ -209,14 +209,27 @@ impl PlayingState {
         let x = center_x - width / 2.0;
 
         // Background
-        draw_rectangle(x - 2.0, y - 2.0, width + 4.0, height + 4.0, Color::from_rgba(0, 0, 0, 180));
+        draw_rectangle(
+            x - 2.0,
+            y - 2.0,
+            width + 4.0,
+            height + 4.0,
+            Color::from_rgba(0, 0, 0, 180),
+        );
 
         // Fill
         let fill_w = width * progress.clamp(0.0, 1.0);
         draw_rectangle(x, y, fill_w, height, color);
 
         // Border
-        draw_rectangle_lines(x, y, width, height, 1.0, Color::from_rgba(200, 200, 200, 150));
+        draw_rectangle_lines(
+            x,
+            y,
+            width,
+            height,
+            1.0,
+            Color::from_rgba(200, 200, 200, 150),
+        );
 
         // Label
         let lw = crate::ui::fonts::measure_game_text(label, 14);
