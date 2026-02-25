@@ -78,6 +78,9 @@ pub struct Player {
     pub team: Team,
     // player's currently assigned primary weapon (knife is implicitly available)
     pub current_weapon: String,
+
+    // bot shit
+    pub is_bot: bool,
 }
 
 impl Player {
@@ -112,6 +115,7 @@ impl Player {
             evt_landed: false,
             team: Team::Spectator,
             current_weapon: "Knife".to_string(),
+            is_bot: false,
         }
     }
 }

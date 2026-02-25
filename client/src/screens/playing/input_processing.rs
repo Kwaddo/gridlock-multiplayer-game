@@ -69,6 +69,9 @@ impl PlayingState {
             self.movement_state.velocity = Vec3::ZERO;
             self.movement_state.is_sprinting = false;
             self.movement_state.is_crouching = false;
+            self.movement_state.is_slow_walking = false;
+            self.movement_state.is_prone = false;
+            self.movement_state.is_sliding = false;
             return None;
         }
 
@@ -108,7 +111,11 @@ impl PlayingState {
         );
         self.movement_state.is_slow_walking = input::process_slow_walk(
             config,
+            self.movement_state.is_slow_walking,
             self.movement_state.is_sprinting
+            ,
+            self.movement_state.is_prone,
+            self.movement_state.is_sliding
         );
         let crouch_just_pressed = config.bind_crouch.is_pressed();
         if crouch_just_pressed &&
@@ -192,6 +199,7 @@ impl PlayingState {
             self.movement_state.is_sprinting = false;
             self.movement_state.is_slow_walking = false;
             self.movement_state.is_crouching = false;
+            self.movement_state.is_sliding = false;
             self.jump_requested = false;
         }
         if weapon_input_locked {
@@ -625,7 +633,10 @@ impl PlayingState {
                         }
                     }
 
-                    if weapon.id == crate::weapons::stats::WeaponId::Knife && total_dmg <= 0.0 {
+                    if weapon.id == crate::weapons::stats::WeaponId::Knife
+                        && self.knife_last_attack_was_heavy
+                        && total_dmg <= 0.0
+                    {
                         self.knife_attack_lock_timer += KNIFE_MISS_PENALTY_SECS;
                         self.knife_miss_slow_timer = KNIFE_MISS_MOVE_SLOW_DURATION;
                     }

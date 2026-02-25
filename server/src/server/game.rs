@@ -218,8 +218,11 @@ pub fn process_auto_respawns(
 pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) -> bool {
     let now = Instant::now();
     let mut to_remove = Vec::new();
-
+    
     for (addr, player) in players.iter() {
+        if player.is_bot {
+           continue;
+        }
         if now.duration_since(player.last_activity) > PLAYER_TIMEOUT {
             to_remove.push(*addr);
         }

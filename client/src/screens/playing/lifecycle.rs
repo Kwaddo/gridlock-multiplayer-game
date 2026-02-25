@@ -8,6 +8,8 @@ impl PlayingState {
     pub fn clear_input(&mut self) {
         self.move_dir = Vec3::ZERO;
         self.movement_state.is_sprinting = false;
+        self.movement_state.is_slow_walking = false;
+        self.movement_state.is_sliding = false;
         self.jump_requested = false;
     }
 
@@ -147,6 +149,11 @@ impl PlayingState {
         self.death_timer = 0.0;
         self.position = spawn_pos;
         self.movement_state.velocity = Vec3::ZERO;
+        self.movement_state.is_sprinting = false;
+        self.movement_state.is_slow_walking = false;
+        self.movement_state.is_crouching = false;
+        self.movement_state.is_prone = false;
+        self.movement_state.is_sliding = false;
         self.death_killer_name = None;
         self.death_weapon_name = None;
     }

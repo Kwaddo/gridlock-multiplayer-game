@@ -70,17 +70,39 @@ pub fn process_crouch(config: &GameConfig, is_crouching: bool) -> bool {
     }
 }
 
-// process slow-walk input (cannot be active while sprinting)
-pub fn process_slow_walk(config: &GameConfig, is_sprinting: bool) -> bool {
-    config.bind_slow_walk.is_down() && !is_sprinting
+// process slow-walk input (cannot be active while sprinting/prone/sliding)
+pub fn process_slow_walk(
+    config: &GameConfig,
+    is_slow_walking: bool,
+    is_sprinting: bool,
+    is_prone: bool,
+    is_sliding: bool,
+) -> bool {
+    if is_sprinting || is_prone || is_sliding {
+        return false;
+    }
+
+    if config.slow_walk_toggle {
+        if config.bind_slow_walk.is_pressed() {
+            !is_slow_walking
+        } else {
+            is_slow_walking
+        }
+    } else {
+        config.bind_slow_walk.is_down()
+    }
 }
 
-// process prone input (toggle on press)
+// process prone input (toggle/hold based on config)
 pub fn process_prone(config: &GameConfig, is_prone: bool) -> bool {
-    if config.bind_prone.is_pressed() {
-        !is_prone
+    if config.prone_toggle {
+        if config.bind_prone.is_pressed() {
+            !is_prone
+        } else {
+            is_prone
+        }
     } else {
-        is_prone
+        config.bind_prone.is_down()
     }
 }
 

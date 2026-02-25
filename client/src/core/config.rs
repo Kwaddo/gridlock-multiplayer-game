@@ -54,6 +54,8 @@ pub struct GameConfig {
     pub bind_sprint: InputBinding,
     pub bind_crouch: InputBinding,
     pub crouch_toggle: bool, // if true, crouch is a toggle instead of hold
+    pub slow_walk_toggle: bool, // if true, slow walk is toggle instead of hold
+    pub prone_toggle: bool, // if true, prone is toggle instead of hold
     pub bind_jump: InputBinding,
     pub bind_settings: InputBinding,
     pub bind_reload: InputBinding,
@@ -117,6 +119,8 @@ impl GameConfig {
             bind_sprint: InputBinding::Key(KeyCode::LeftShift),
             bind_crouch: InputBinding::Key(KeyCode::LeftControl),
             crouch_toggle: false, // default to hold
+            slow_walk_toggle: false, // default to hold
+            prone_toggle: false, // default to hold
             bind_jump: InputBinding::Key(KeyCode::Space),
             bind_settings: InputBinding::Key(KeyCode::Escape),
             bind_reload: InputBinding::Key(KeyCode::R),

@@ -8,10 +8,12 @@ pub mod game;
 pub mod handlers;
 pub mod utils;
 
+use crate::bot::ai::BotState;
 use crate::maze::MazeData;
 use crate::player::Player;
 use crate::player::WorldId;
 use crate::protocols::*;
+use crate::bot::manager::BotManager;
 
 /// Entry point for the server logic; previously lived in `main.rs`.
 /// This function handles socket setup and contains the main loop.
@@ -22,6 +24,63 @@ pub fn run() -> std::io::Result<()> {
 
     let mut buffer: [u8; 512] = [0; 512];
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
+
+    let mut bot_manager = BotManager::new();
+    
+    // hardcoded player for testing bot behavior without a client
+    let test_bot = Player {
+        id: 9999,
+        username: "TestBot".to_string(),
+        position: (0.0, 0.0, 0.0),
+        yaw: 0.0,
+        pitch: 0.0,
+        health: 100,
+        shield: 50,
+        max_health: 100,
+        max_shield: 50,
+        is_alive: true,
+        kills: 0,
+        deaths: 0,
+        gun_level: 1,
+        socket_addr: BotManager::virtual_addr(0),
+        last_activity: Instant::now(),
+        world: WorldId::Lobby,
+        is_bot: true,
+        death_time: None,
+        post_teleport_freeze_until: None,
+        is_sprinting: false,
+        is_ads: false,
+        is_crouched: false,
+        is_airborne: false,
+        is_prone: false,
+        is_sliding: false,
+        evt_jump_start: false,
+        evt_landed: false,
+        team: crate::player::Team::Red,
+        current_weapon: "MP5".to_string(),
+    };
+
+    let bot_state = BotState {
+        movement: crate::physics::BotMovementState {
+            velocity: glam::Vec3::ZERO,
+            is_grounded: true,
+            height: 1.6,
+        },
+        behavior: crate::bot::ai::BotBehavior::Patrol {
+            waypoints: vec![(5.0, 0.0, 5.0), (5.0, 0.0, -5.0), (-5.0, 0.0, -5.0), (-5.0, 0.0, 5.0)],
+            current: 0,
+            arrival_threshold: 1.0,
+        },
+        shooting: crate::bot::shooting::BotShootingState {
+            fire_cooldown: 0.0,
+            has_target: false,
+            reaction_remaining: 0.0,
+        },
+        target_id: None,
+        reaction_timer: 0.0,
+    };
+
+    bot_manager.spawn_bot(&mut players, test_bot, bot_state);
 
     // cache assets manifest to avoid hitting the filesystem on every join
     let asset_manifest: Option<serde_json::Value> = fs::read_to_string("assets/manifest.json")
@@ -136,9 +195,14 @@ pub fn run() -> std::io::Result<()> {
             }
             Err(err)
                 if err.kind() == std::io::ErrorKind::WouldBlock
-                    || err.kind() == std::io::ErrorKind::TimedOut => {}
+                    || err.kind() == std::io::ErrorKind::TimedOut
+                    || err.kind() == std::io::ErrorKind::ConnectionReset => {}
             Err(err) => return Err(err),
         }
+
+        // tick bots
+        bot_manager.tick(&mut players);
+        broadcast::broadcast_state(&socket, &players);
 
         // Always attempt to auto-respawn dead players; maze may be None if no
         // match is currently generated but players still need respawn handling.
