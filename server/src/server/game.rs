@@ -168,108 +168,149 @@ pub fn process_auto_respawns(
     // spawn locations using only immutable borrows of `players`.
     let mut spawn_info: Vec<(SocketAddr, (f32, f32, f32, bool))> = Vec::new();
     for (addr, player) in players.iter() {
-        if player.is_alive {
-            continue;
-        }
-        let Some(death_time) = player.death_time else {
-            continue;
-        };
-        if now.duration_since(death_time) >= MAZE_AUTO_RESPAWN_DELAY {
-            let spawn = match (player.world, maze) {
-                (WorldId::Maze, Some(m)) => match player.team {
-                    crate::player::Team::Red => {
-                        let (red, _blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
-                        (red.0, red.1, red.2, false)
-                    }
-                    crate::player::Team::Blue => {
-                        let (_red, blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
-                        (blue.0, blue.1, blue.2, false)
-                    }
-                    _ => random_spawn_far(m, players, MAZE_CELL_SIZE * 3.0),
-                },
-                _ => (0.0_f32, 0.5_f32, 0.0_f32, false),
+        for player in players.values_mut() {
+            // Auto-respawn any dead player after the configured delay, regardless of
+            // whether their `world` field currently indicates `Maze`. Some clients
+            // can be 'offscreen' and temporarily report different world states;
+            // we should still auto-respawn players who are dead.
+            if !player.auto_respawn {
+                continue;
+            }
+            if player.is_alive {
+                continue;
+            }
+            let Some(death_time) = player.death_time else {
+                continue;
             };
-            spawn_info.push((*addr, spawn));
+            if now.duration_since(death_time) >= MAZE_AUTO_RESPAWN_DELAY {
+                let spawn = match (player.world, maze) {
+                    (WorldId::Maze, Some(m)) => match player.team {
+                        crate::player::Team::Red => {
+                            let (red, _blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
+                            (red.0, red.1, red.2, false)
+                        }
+                        crate::player::Team::Blue => {
+                            let (_red, blue) = m.team_spawn_positions(MAZE_CELL_SIZE);
+                            (blue.0, blue.1, blue.2, false)
+                        }
+                        _ => random_spawn_far(m, players, MAZE_CELL_SIZE * 3.0),
+                    },
+                    _ => (0.0_f32, 0.5_f32, 0.0_f32, false),
+                };
+                spawn_info.push((*addr, spawn));
+            }
         }
-    }
 
-    // second pass: perform the actual mutations now that we no longer hold
-    // immutable borrows of `players`.
-    for (addr, (sx, sy, sz, used_fallback)) in spawn_info {
-        if let Some(player) = players.get_mut(&addr) {
-            player.is_alive = true;
-            player.health = player.max_health;
-            player.shield = 0;
-            player.death_time = None;
-            player.position = (sx, sy, sz);
-            to_respawn.push((
-                player.socket_addr,
-                sx,
-                sy,
-                sz,
-                used_fallback,
-                player.username.clone(),
-            ));
+        // second pass: perform the actual mutations now that we no longer hold
+        // immutable borrows of `players`.
+        for (addr, (sx, sy, sz, used_fallback)) in spawn_info {
+            if let Some(player) = players.get_mut(&addr) {
+                player.is_alive = true;
+                player.health = player.max_health;
+                player.shield = 0;
+                player.death_time = None;
+                player.position = (sx, sy, sz);
+                to_respawn.push((
+                    player.socket_addr,
+                    sx,
+                    sy,
+                    sz,
+                    used_fallback,
+                    player.username.clone(),
+                ));
+            }
         }
-    }
 
-    for (socket_addr, sx, sy, sz, used_fallback, username) in to_respawn {
-        println!(
-            "Player '{}' auto-respawned in {:?}",
-            username,
-            WorldId::Maze
-        );
-        let mut respawn_msg = vec![crate::protocols::MSG_RESPAWN];
-        respawn_msg.extend_from_slice(&sx.to_be_bytes());
-        respawn_msg.extend_from_slice(&sy.to_be_bytes());
-        respawn_msg.extend_from_slice(&sz.to_be_bytes());
-        // extra byte: 0 = random spawn, 1 = teleporter fallback
-        respawn_msg.push(if used_fallback { 1u8 } else { 0u8 });
-        // choose weapon for the respawned player based on mode
-        let chosen_weapon = if let Some(pref) = players.get(&socket_addr) {
-            let gl = pref.gun_level as usize;
-            if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
-                // Gun Game: weapon from progression
-                GUN_GAME_PROGRESSION[gl - 1].to_string()
-            } else if gl > GUN_GAME_PROGRESSION.len() {
-                "Knife".to_string()
-            } else if pref.team != Team::Spectator {
-                choose_team_weapon_for_player(players, pref)
+        for (socket_addr, sx, sy, sz, used_fallback, username) in to_respawn {
+            println!(
+                "Player '{}' auto-respawned in {:?}",
+                username,
+                WorldId::Maze
+            );
+            let mut respawn_msg = vec![crate::protocols::MSG_RESPAWN];
+            respawn_msg.extend_from_slice(&sx.to_be_bytes());
+            respawn_msg.extend_from_slice(&sy.to_be_bytes());
+            respawn_msg.extend_from_slice(&sz.to_be_bytes());
+            // extra byte: 0 = random spawn, 1 = teleporter fallback
+            respawn_msg.push(if used_fallback { 1u8 } else { 0u8 });
+            // choose weapon for the respawned player based on mode
+            let chosen_weapon = if let Some(pref) = players.get(&socket_addr) {
+                let gl = pref.gun_level as usize;
+                if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
+                    // Gun Game: weapon from progression
+                    GUN_GAME_PROGRESSION[gl - 1].to_string()
+                } else if gl > GUN_GAME_PROGRESSION.len() {
+                    "Knife".to_string()
+                } else if pref.team != Team::Spectator {
+                    choose_team_weapon_for_player(players, pref)
+                } else {
+                    "Knife".to_string()
+                }
             } else {
                 "Knife".to_string()
+            };
+            if let Some(pmut) = players.get_mut(&socket_addr) {
+                pmut.current_weapon = chosen_weapon;
             }
-        } else {
-            "Knife".to_string()
-        };
-        if let Some(pmut) = players.get_mut(&socket_addr) {
-            pmut.current_weapon = chosen_weapon;
-        }
 
-        let _ = socket.send_to(&respawn_msg, socket_addr);
-    }
-}
-
-/// Remove players whose last activity timestamp is older than the timeout constant.
-/// Returns true if any players were removed.
-pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) -> bool {
-    let now = Instant::now();
-    let mut to_remove = Vec::new();
-
-    for (addr, player) in players.iter() {
-        if now.duration_since(player.last_activity) > PLAYER_TIMEOUT {
-            to_remove.push(*addr);
+            if let Some(p) = players.get(&socket_addr) {
+                if !p.is_bot {
+                    let _ = socket.send_to(&respawn_msg, socket_addr);
+                }
+            }
         }
     }
 
-    let removed_any = !to_remove.is_empty();
-    for addr in to_remove {
-        if let Some(p) = players.remove(&addr) {
-            println!(
-                "Player '{}' timed out. Total players: {}",
-                p.username,
-                players.len()
-            );
+    /// Regenerate lobby player health after a short delay.
+    pub fn process_lobby_regen(players: &mut HashMap<SocketAddr, Player>) {
+        let now = Instant::now();
+        for player in players.values_mut() {
+            if player.world != WorldId::Lobby || player.is_bot || !player.is_alive {
+                if player.world == WorldId::Lobby && !player.is_bot && !player.is_alive {
+                    player.is_alive = true;
+                }
+                continue;
+            }
+            if player.health == 0 {
+                player.health = 1;
+            }
+            if player.health >= player.max_health {
+                continue;
+            }
+            if let Some(resume_at) = player.lobby_regen_resume_at {
+                if now < resume_at {
+                    continue;
+                }
+            }
+            player.health = (player.health + 1).min(player.max_health);
         }
     }
-    removed_any
+
+    /// Remove players whose last activity timestamp is older than the timeout constant.
+    /// Returns true if any players were removed.
+    pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) -> bool {
+        let now = Instant::now();
+        let mut to_remove = Vec::new();
+
+        for (addr, player) in players.iter() {
+            if player.is_bot {
+                continue;
+            }
+            if now.duration_since(player.last_activity) > PLAYER_TIMEOUT {
+                to_remove.push(*addr);
+            }
+        }
+
+        let removed_any = !to_remove.is_empty();
+        for addr in to_remove {
+            if let Some(p) = players.remove(&addr) {
+                println!(
+                    "Player '{}' timed out. Total players: {}",
+                    p.username,
+                    players.len()
+                );
+            }
+        }
+        removed_any
+    }
 }

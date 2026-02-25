@@ -1,15 +1,20 @@
 use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS, FLAG_AIRBORNE,
-    FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MSG_HIT, MSG_POSITION,
-    MSG_SND_BOMB_PICKUP, MSG_SND_DEFUSE_START, MSG_SND_DEFUSE_STOP, MSG_SND_PLANT_START,
-    MSG_SND_PLANT_STOP, MSG_START_GAME, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MSG_BOT_DESPAWN_ALL, MSG_BOT_SPAWN,
+    MSG_HIT, MSG_POSITION, MSG_SND_BOMB_PICKUP, MSG_SND_DEFUSE_START, MSG_SND_DEFUSE_STOP,
+    MSG_SND_PLANT_START, MSG_SND_PLANT_STOP, MSG_START_GAME, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
 use std::net::UdpSocket;
 
 use super::PlayingState;
 
 impl PlayingState {
-    pub fn send_network(&mut self, socket: &Option<UdpSocket>, server_addr: &str, config: &crate::core::GameConfig) {
+    pub fn send_network(
+        &mut self,
+        socket: &Option<UdpSocket>,
+        server_addr: &str,
+        config: &crate::core::GameConfig,
+    ) {
         if let Some(ref s) = socket {
             if self.pending_respawn {
                 self.pending_respawn = false;
@@ -49,6 +54,34 @@ impl PlayingState {
             if let Some(team) = self.pending_set_team.take() {
                 let msg = vec![crate::net::protocols::MSG_SET_TEAM, team];
                 let _ = s.send_to(&msg, server_addr);
+            }
+
+            // Public shooting-range button: progresses phases with one start action.
+            if self.pending_range_start {
+                self.pending_range_start = false;
+                let started_phase = self.range_phase;
+
+                // Always reset range bots before loading the next phase.
+                let _ = s.send_to(&[MSG_BOT_DESPAWN_ALL], server_addr);
+
+                // Public range button should use server preset paths/behaviors.
+                // 255 means "no override" (server maps >2 => None).
+                let (behavior, level) = match started_phase {
+                    1 => (255u8, 1u8),
+                    2 => (255u8, 2u8),
+                    3 => (255u8, 3u8),
+                    _ => (255u8, 1u8),
+                };
+                let _ = s.send_to(&[MSG_BOT_SPAWN, behavior, level], server_addr);
+
+                self.range_phase = if self.range_phase >= 3 {
+                    1
+                } else {
+                    self.range_phase + 1
+                };
+                self.lobby_console_message =
+                    Some(format!("Shooting Range: Phase {}", started_phase));
+                self.lobby_console_message_timer = 3.0;
             }
 
             while let Some((x, y)) = self.pending_broken_walls.pop() {

@@ -22,6 +22,16 @@ pub struct BulletTracer {
     pub tracer_thickness: f32, // thickness of the tracer line
 }
 
+// 3rd-person muzzle flash (shown at another player/bot's gun position)
+pub struct WorldMuzzleFlash {
+    pub position: Vec3,
+    pub lifetime: f32, // starts at DURATION, counts down
+}
+
+impl WorldMuzzleFlash {
+    pub const DURATION: f32 = 0.07;
+}
+
 // bullet hole / impact mark left on walls/surfaces
 // A global scale factor applied when the hole is spawned; tweaking this value
 // shrinks or enlarges every bullet decal without requiring changes to the

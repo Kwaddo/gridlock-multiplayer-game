@@ -60,6 +60,7 @@ impl PlayingState {
 
         // Lobby console UI takes input precedence. Check it first so ESC closes the console
         // instead of opening the pause menu while the console is visible.
+        self.check_shooting_range_start();
         self.check_lobby_console();
         if self.lobby_console_open {
             // keep UI responsive (mouse) but prevent movement/weapon input and stop movement
@@ -69,6 +70,9 @@ impl PlayingState {
             self.movement_state.velocity = Vec3::ZERO;
             self.movement_state.is_sprinting = false;
             self.movement_state.is_crouching = false;
+            self.movement_state.is_slow_walking = false;
+            self.movement_state.is_prone = false;
+            self.movement_state.is_sliding = false;
             return None;
         }
 
@@ -77,6 +81,12 @@ impl PlayingState {
         }
 
         if self.is_dead {
+            if self.current_world == WorldId::Lobby
+                && self.death_timer <= 0.0
+                && is_key_pressed(KeyCode::Space)
+            {
+                self.pending_respawn = true;
+            }
             self.clear_input();
             return None;
         }
@@ -108,7 +118,11 @@ impl PlayingState {
         );
         self.movement_state.is_slow_walking = input::process_slow_walk(
             config,
+            self.movement_state.is_slow_walking,
             self.movement_state.is_sprinting
+            ,
+            self.movement_state.is_prone,
+            self.movement_state.is_sliding
         );
         let crouch_just_pressed = config.bind_crouch.is_pressed();
         if crouch_just_pressed &&
@@ -192,6 +206,7 @@ impl PlayingState {
             self.movement_state.is_sprinting = false;
             self.movement_state.is_slow_walking = false;
             self.movement_state.is_crouching = false;
+            self.movement_state.is_sliding = false;
             self.jump_requested = false;
         }
         if weapon_input_locked {
@@ -614,18 +629,19 @@ impl PlayingState {
                         });
                     }
 
-                    // Only send hit reports outside the lobby
-                    if self.current_world != WorldId::Lobby {
-                        for (victim_id, damage) in player_damage_by_id {
-                            if damage > 0.0 {
-                                let is_backstab =
-                                    player_backstab_by_id.get(&victim_id).copied().unwrap_or(false);
-                                self.pending_hits.push((victim_id, damage, is_backstab));
-                            }
+                    // Send hit reports in all worlds; server enforces lobby combat rules.
+                    for (victim_id, damage) in player_damage_by_id {
+                        if damage > 0.0 {
+                            let is_backstab =
+                                player_backstab_by_id.get(&victim_id).copied().unwrap_or(false);
+                            self.pending_hits.push((victim_id, damage, is_backstab));
                         }
                     }
 
-                    if weapon.id == crate::weapons::stats::WeaponId::Knife && total_dmg <= 0.0 {
+                    if weapon.id == crate::weapons::stats::WeaponId::Knife
+                        && self.knife_last_attack_was_heavy
+                        && total_dmg <= 0.0
+                    {
                         self.knife_attack_lock_timer += KNIFE_MISS_PENALTY_SECS;
                         self.knife_miss_slow_timer = KNIFE_MISS_MOVE_SLOW_DURATION;
                     }

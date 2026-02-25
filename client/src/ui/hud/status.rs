@@ -117,9 +117,24 @@ pub(super) fn draw_status_panels(
     draw_rectangle(bar_x, bar_y, bar_width * fill, bar_height, bar_color);
     draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, GRAY);
 
+    let mut status_labels: Vec<&str> = Vec::new();
+    if movement_state.is_sliding {
+        status_labels.push("SLIDING");
+    }
+    if movement_state.is_slow_walking {
+        status_labels.push("SLOW WALK");
+    }
+    if movement_state.is_prone {
+        status_labels.push("PRONE");
+    }
     if movement_state.is_crouching {
+        status_labels.push("CROUCHING");
+    }
+
+    if !status_labels.is_empty() {
+        let status_text = status_labels.join(" | ");
         draw_text_ex(
-            "CROUCHING",
+            &status_text,
             20.0,
             screen_height() - 20.0,
             text_params(16, Color::from_rgba(150, 150, 150, 255)),

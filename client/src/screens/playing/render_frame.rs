@@ -133,6 +133,7 @@ impl PlayingState {
         self.draw_other_players();
         self.draw_player_hitboxes();
         self.draw_tracers(camera.position);
+        self.draw_world_muzzle_flashes();
         self.draw_bullet_holes();
         if self.dev_mode.ruler_active {
             if let (Some(mut start), Some(mut end)) = (self.dev_mode.ruler_start, self.dev_mode.ruler_end) {
@@ -175,6 +176,7 @@ impl PlayingState {
 
         self.draw_player_overhead(&camera, maze);
         self.draw_lobby_console_prompt();
+        self.draw_shooting_range_prompt();
 
         // Lobby console (Start Game) overlay
         self.draw_lobby_console(config);
@@ -191,7 +193,7 @@ impl PlayingState {
                 .connected_players
                 .iter()
                 .find(|(id, ..)| *id == player_id)
-                .map(|(_, _name, _kills, _deaths, _gl, team, _wep)| *team)
+                .map(|(_, _name, _kills, _deaths, _gl, team, _wep, _is_bot)| *team)
                 .unwrap_or(0u8);
 
             draw_hud(

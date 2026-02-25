@@ -50,6 +50,13 @@ pub const MSG_SND_PLANT_STOP: u8 = 30; // client -> server: stop planting bomb
 pub const MSG_SND_DEFUSE_START: u8 = 31; // client -> server: start defusing bomb
 pub const MSG_SND_DEFUSE_STOP: u8 = 32; // client -> server: stop defusing bomb
 
+// bot bulshit
+pub const MSG_BOT_SPAWN: u8 = 50;
+pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
+pub const MSG_BOT_SHOT: u8 = 52; // server -> client: bot fired (shooter_id, victim_id)
+
+pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
+
 // State flags for player movement and actions, sent in the position message
 pub const FLAG_SPRINTING: u8 = 1 << 0;
 pub const FLAG_CROUCHING: u8 = 1 << 1;

@@ -1,12 +1,16 @@
 use crate::types::maze::Maze;
 use crate::world::lobby::{LANDMARK_CUBES, PARKOUR_CUBES};
+use crate::world::shooting_range::SHOOTING_RANGE_COLLIDERS;
 use macroquad::prelude::*;
 
 pub const PLAYER_RADIUS: f32 = 0.25;
 
 /// Iterator over all collidable cubes (landmarks + parkour)
 pub fn all_cubes() -> impl Iterator<Item = &'static (Vec3, Vec3)> {
-    LANDMARK_CUBES.iter().chain(PARKOUR_CUBES.iter())
+    LANDMARK_CUBES
+        .iter()
+        .chain(PARKOUR_CUBES.iter())
+        .chain(SHOOTING_RANGE_COLLIDERS.iter())
 }
 
 /// Resolve vertical collision: land on cube tops, bump head on cube bottoms, land on ground.
