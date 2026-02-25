@@ -214,7 +214,12 @@ impl PlayingState {
                 self.shield,
                 self.max_shield,
                 &self.kill_feed,
-                self.match_time_left,
+                // Hide the match timer in S&D — timing is handled per-round
+                if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY) {
+                    0.0
+                } else {
+                    self.match_time_left
+                },
                 self.damage_flash_timer,
                 self.last_damage_attacker.as_deref(),
                 maze,
@@ -340,15 +345,15 @@ impl PlayingState {
             }
         }
 
-        if self.is_dead && self.match_end_countdown_timer <= 0.0 {
+        let is_snd = self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
+            && self.current_world == WorldId::Maze
+            && self.snd_round > 0;
+        if self.is_dead && self.match_end_countdown_timer <= 0.0 && !is_snd {
             self.draw_death_screen();
         }
 
         // S&D HUD overlay
-        if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
-            && self.current_world == WorldId::Maze
-            && self.snd_round > 0
-        {
+        if is_snd {
             self.draw_snd_hud(player_id);
         }
     }
