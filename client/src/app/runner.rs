@@ -322,7 +322,7 @@ pub async fn run() {
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
-                playing_state.send_network(&socket, &server_addr);
+                playing_state.send_network(&socket, &server_addr, &config);
                 playing_state.render(&mut config, &username, player_id, maze.as_ref());
             }
 
@@ -504,7 +504,7 @@ pub async fn run() {
                     .map(|t| Instant::now().duration_since(t) > Duration::from_secs(4))
                     .unwrap_or(true)
             {
-                playing_state.send_network(&socket, &server_addr);
+                playing_state.send_network(&socket, &server_addr, &config);
                 last_keepalive = Some(Instant::now());
             }
         }

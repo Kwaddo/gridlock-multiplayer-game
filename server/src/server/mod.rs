@@ -35,12 +35,14 @@ pub fn run() -> std::io::Result<()> {
     // Basic match state for a future game loop
     let mut match_running: bool = false;
     let mut match_start_time: Option<Instant> = None;
+    // current running match length (None=infinite); initially use the default
+    let mut match_duration: Option<Duration> = game::MATCH_DURATION;
     // warmup / countdown before match actually begins
     let mut match_warmup_end: Option<Instant> = None;
     // scheduled match end (winner, delayed return-to-lobby)
     let mut match_end_pending: Option<(Instant, u32, String)> = None;
     // last sent authoritative match timer (to avoid spamming identical values)
-    let mut last_match_time_sent: Option<u8> = None;
+    let mut last_match_time_sent: Option<u16> = None;
     // last sent warmup countdown (MSG_MATCH_COUNTDOWN)
     let mut last_warmup_sent: Option<u8> = None;
     // last sent match-end countdown (MSG_MATCH_END countdown byte)
@@ -101,6 +103,23 @@ pub fn run() -> std::io::Result<()> {
                                 match_mode = requested;
                             }
                         }
+                        // parse optional duration override from payload
+                        let mut requested_duration: Option<Duration> = game::MATCH_DURATION;
+                        if !payload.is_empty() {
+                            // payload[0] is mode, additional two bytes (big-endian u16)
+                            if payload.len() >= 3 {
+                                let code = u16::from_be_bytes([payload[1], payload[2]]);
+                                requested_duration = if code == 0 {
+                                    // zero means use server default
+                                    game::MATCH_DURATION
+                                } else if code == u16::MAX {
+                                    // sentinel for infinite
+                                    None
+                                } else {
+                                    Some(Duration::from_secs(code as u64))
+                                };
+                            }
+                        }
                         handlers::handle_start_game(
                             &socket,
                             &mut players,
@@ -111,6 +130,8 @@ pub fn run() -> std::io::Result<()> {
                             &mut match_end_pending,
                             &mut match_total_maze_entries,
                             match_mode,
+                            &mut match_duration,
+                            requested_duration,
                             src_addr,
                         );
                     }
@@ -238,6 +259,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut match_total_maze_entries,
                 match_mode,
                 &mut snd_state,
+                match_duration,
             );
         }
 
@@ -273,6 +295,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut match_total_maze_entries,
                 &mut match_start_time,
                 match_mode,
+                &mut match_duration,
             );
         }
 
@@ -288,6 +311,7 @@ pub fn run() -> std::io::Result<()> {
                 &mut match_total_maze_entries,
                 &mut match_end_pending,
                 match_mode,
+                match_duration,
             );
         }
 
@@ -303,6 +327,7 @@ pub fn run() -> std::io::Result<()> {
                     &mut match_end_pending,
                     &mut last_match_time_sent,
                     &mut match_total_maze_entries,
+                    &mut match_duration,
                     winner_name,
                     &mut snd_state,
                 );

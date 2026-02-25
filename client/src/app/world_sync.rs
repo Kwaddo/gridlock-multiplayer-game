@@ -177,7 +177,7 @@ pub fn sync_world(
                 let will_be_in_maze = updates
                     .world_change
                     .as_ref()
-                    .map(|(w, _, _)| *w == WorldId::Maze)
+                    .map(|(w, _, _, _)| *w == WorldId::Maze)
                     .unwrap_or(false);
 
                 if playing_state.current_world == WorldId::Maze || will_be_in_maze {
@@ -191,7 +191,11 @@ pub fn sync_world(
                         }
                         // Lock to slot 0 but keep knife active
                         playing_state.weapons.set_locked_slot(Some(0));
+                        // prevent the player from putting knife away
+                        playing_state.weapons.knife_locked = true;
                     } else if level >= 1 {
+                        // leaving knife-only level: unlock knife
+                        playing_state.weapons.knife_locked = false;
                         let weapon_id = client::weapons::GUN_GAME_PROGRESSION[level - 1];
                         // Only replace if the weapon actually changed
                         if playing_state.weapons.weapons[0].id != weapon_id {
@@ -214,6 +218,7 @@ pub fn sync_world(
                 // Not Gun Game: clear any lock so player can freely switch
                 playing_state.weapons.set_locked_slot(None);
                 playing_state.pending_forced_weapon_slot = None;
+                playing_state.weapons.knife_locked = false;
             }
         }
 
@@ -228,7 +233,7 @@ pub fn sync_world(
         // (no longer doing anything here)
 
         let mut world_change_applied = false;
-        if let Some((world_id, spawn, freeze_secs)) = updates.world_change {
+        if let Some((world_id, spawn, freeze_secs, timer_secs)) = updates.world_change {
             playing_state.current_world = world_id;
             playing_state.position = spawn;
             playing_state.movement_state.velocity = Vec3::ZERO;
@@ -239,7 +244,12 @@ pub fn sync_world(
             if world_id == WorldId::Maze {
                 let freeze = freeze_secs.map(|s| s as f32).unwrap_or(10.0);
                 playing_state.post_teleport_freeze_timer = freeze;
-                playing_state.match_time_left = 120.0; // seconds
+                // if the server included an authoritative timer in the world-change packet
+                // use it; otherwise leave whatever value we already had (it will be updated
+                // by MSG_MATCH_TIMER soon thereafter).
+                if let Some(ts) = timer_secs {
+                    playing_state.match_time_left = ts as f32;
+                }
 
                 // Reset local player state for a fresh match
                 playing_state.is_dead = false;
@@ -277,6 +287,7 @@ pub fn sync_world(
                 // leaving the Maze / returning to Lobby — clear any mode-specific restrictions
                 playing_state.match_mode = None;
                 playing_state.weapons.set_locked_slot(None);
+                playing_state.weapons.knife_locked = false;
                 playing_state.pending_forced_weapon_slot = None;
 
                 // Reset local player state when returning to lobby
@@ -543,7 +554,6 @@ pub fn sync_world(
                     },
                 )
                 .collect();
-
         }
 
         // ── Always apply colors after all updates ────────────
@@ -560,18 +570,13 @@ pub fn sync_world(
                     2 => (60u8, 120u8, 200u8),  // Blue team
                     _ => (120u8, 120u8, 120u8), // default/neutral
                 };
-                let hue_variation =
-                    ((p.id.wrapping_mul(97)).wrapping_add(53) % 32) as i32 - 16;
+                let hue_variation = ((p.id.wrapping_mul(97)).wrapping_add(53) % 32) as i32 - 16;
                 let adjust = |c: u8| -> u8 {
                     let v = c as i32 + hue_variation;
                     v.clamp(0, 255) as u8
                 };
-                p.color = macroquad::prelude::Color::from_rgba(
-                    adjust(br),
-                    adjust(bg),
-                    adjust(bb),
-                    255,
-                );
+                p.color =
+                    macroquad::prelude::Color::from_rgba(adjust(br), adjust(bg), adjust(bb), 255);
             }
         } else {
             for p in playing_state.other_players.iter_mut() {

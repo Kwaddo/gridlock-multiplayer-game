@@ -69,10 +69,12 @@ pub fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<std::net::Soc
 pub fn broadcast_match_timer(
     socket: &UdpSocket,
     players: &HashMap<std::net::SocketAddr, Player>,
-    secs: u8,
+    secs: u16,
 ) {
-    // fixed-size array avoids allocation
-    let msg: [u8; 2] = [MSG_MATCH_TIMER, secs];
+    // message contains MSG_MATCH_TIMER followed by a big-endian u16
+    let hi = (secs >> 8) as u8;
+    let lo = (secs & 0xFF) as u8;
+    let msg: [u8; 3] = [MSG_MATCH_TIMER, hi, lo];
     for p in players.values() {
         let _ = socket.send_to(&msg, p.socket_addr);
     }
