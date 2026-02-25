@@ -3,7 +3,7 @@ use crate::physics::collision;
 use crate::screens::dev_mode::HandsAnimRequest;
 use crate::types::animated_model::AnimatedModel;
 use crate::types::maze::Maze;
-use crate::types::player::OtherPlayer;
+use crate::types::player::{OtherPlayer, PlayerSkin};
 use crate::types::world::WorldId;
 use crate::weapons::combat::{default_player_hitboxes, CombatEntity, HitZone, Hitbox};
 use crate::weapons::stats::{WeaponCategory, WeaponId};
@@ -81,11 +81,8 @@ const KNIFE_LOWER_START: f32 = 4.17;
 const KNIFE_LOWER_END: f32 = 4.50;
 const KNIFE_EQUIP_START: f32 = 4.51;
 const KNIFE_EQUIP_END: f32 = 4.83;
-
-const INSPECT_START_SEC: f32 = 0.35;
-const INSPECT_SWEEP_SEC: f32 = 0.60;
-const INSPECT_HOLD_SEC: f32 = 0.85;
-const INSPECT_RETURN_SEC: f32 = 0.45;
+const SLIDE_CLIP_START_SEC: f32 = 0.0;
+const SLIDE_CLIP_END_SEC: f32 = 30.0 / 30.0; // frame 0..30 at 30 FPS
 
 impl PlayingState {
     fn preferred_hands_key_for_weapon(id: WeaponId) -> &'static str {
@@ -139,41 +136,13 @@ impl PlayingState {
         self.just_jumped = false;
         self.just_landed = false;
 
-        if is_key_pressed(KeyCode::V) {
-            self.inspect_phase = super::state::InspectPhase::Start;
-            self.inspect_timer = 0.0;
+        if self.dev_mode.ruler_set_start_requested {
+            self.dev_mode.ruler_start = Some(self.position);
+            self.dev_mode.ruler_set_start_requested = false;
         }
-
-        match self.inspect_phase {
-            super::state::InspectPhase::None => {}
-            super::state::InspectPhase::Start => {
-                self.inspect_timer += delta;
-                if self.inspect_timer >= INSPECT_START_SEC {
-                    self.inspect_phase = super::state::InspectPhase::Sweep;
-                    self.inspect_timer = 0.0;
-                }
-            }
-            super::state::InspectPhase::Sweep => {
-                self.inspect_timer += delta;
-                if self.inspect_timer >= INSPECT_SWEEP_SEC {
-                    self.inspect_phase = super::state::InspectPhase::Hold;
-                    self.inspect_timer = 0.0;
-                }
-            }
-            super::state::InspectPhase::Hold => {
-                self.inspect_timer += delta;
-                if self.inspect_timer >= INSPECT_HOLD_SEC {
-                    self.inspect_phase = super::state::InspectPhase::Return;
-                    self.inspect_timer = 0.0;
-                }
-            }
-            super::state::InspectPhase::Return => {
-                self.inspect_timer += delta;
-                if self.inspect_timer >= INSPECT_RETURN_SEC {
-                    self.inspect_phase = super::state::InspectPhase::None;
-                    self.inspect_timer = 0.0;
-                }
-            }
+        if self.dev_mode.ruler_set_end_requested {
+            self.dev_mode.ruler_end = Some(self.position);
+            self.dev_mode.ruler_set_end_requested = false;
         }
 
         // update kill feed timers and drop expired entries in a single pass
@@ -599,6 +568,19 @@ impl PlayingState {
             bot.simulate_yaw(delta, local_pos);
             bot.update(delta);
         }
+        let any_slide_skin_active =
+            self.other_players.iter().any(|p| p.skin_type == PlayerSkin::Slide) ||
+            self.practice_bots.iter().any(|b| b.player.skin_type == PlayerSkin::Slide);
+        if let Some(slide_anim) = self.animated_models.get_mut("anim_slide") {
+            if any_slide_skin_active && !self.prev_any_slide_anim_active {
+                slide_anim.play_segment(SLIDE_CLIP_START_SEC, SLIDE_CLIP_END_SEC, false);
+            } else if !any_slide_skin_active {
+                // Reset to frame 0 when no one is sliding, so the next slide starts cleanly.
+                slide_anim.stop_at_start();
+            }
+        }
+        self.prev_any_slide_anim_active = any_slide_skin_active;
+
         let animated_models = &self.animated_models;
         for p in &mut self.other_players {
             // here we refresh the hitbox positions every frame based on the current animation pose of the player so hit detection is accurate if they crouch, prone, slide, etc.
@@ -713,6 +695,14 @@ impl PlayingState {
         });
 
         self.update_stamina(config, delta);
+        if self.movement_state.prone_transition_timer > 0.0 {
+            self.movement_state.prone_transition_timer =
+                (self.movement_state.prone_transition_timer - delta).max(0.0);
+        }
+        if self.movement_state.slide_cooldown_timer > 0.0 {
+            self.movement_state.slide_cooldown_timer =
+                (self.movement_state.slide_cooldown_timer - delta).max(0.0);
+        }
         self.update_crouch_height(config, delta);
         let was_grounded = self.movement_state.is_grounded;
         // Only allow jumping when not frozen after teleport

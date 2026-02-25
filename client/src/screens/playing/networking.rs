@@ -40,7 +40,7 @@ impl PlayingState {
                 let _ = s.send_to(&msg, server_addr);
             }
 
-            while let Some((victim_id, damage)) = self.pending_hits.pop() {
+            while let Some((victim_id, damage, is_backstab)) = self.pending_hits.pop() {
                 let mut msg = vec![MSG_HIT];
                 msg.extend_from_slice(&victim_id.to_be_bytes());
                 msg.extend_from_slice(&damage.to_be_bytes());
@@ -48,6 +48,7 @@ impl PlayingState {
                 let weapon_name = self.weapons.active().stats().name.as_bytes();
                 msg.push(weapon_name.len() as u8);
                 msg.extend_from_slice(weapon_name);
+                msg.push(if is_backstab { 1 } else { 0 });
                 let _ = s.send_to(&msg, server_addr);
             }
 
@@ -113,11 +114,10 @@ impl PlayingState {
             if !self.movement_state.is_grounded {
                 state_flags |= FLAG_AIRBORNE;
             }
-            // Placeholders for future states (currently not implemented)
-            if false {
+            if self.movement_state.is_prone {
                 state_flags |= FLAG_PRONE;
             }
-            if false {
+            if self.movement_state.is_sliding {
                 state_flags |= FLAG_SLIDING;
             }
 
@@ -129,11 +129,10 @@ impl PlayingState {
             if self.just_landed {
                 event_flags |= EVT_LANDED;
             }
-            // Placeholders for future events
-            if false {
+            if self.movement_state.is_sliding && !self.prev_was_sliding {
                 event_flags |= EVT_SLIDE_START;
             }
-            if false {
+            if !self.movement_state.is_sliding && self.prev_was_sliding {
                 event_flags |= EVT_SLIDE_END;
             }
 
@@ -155,6 +154,7 @@ impl PlayingState {
             buf[p] = event_flags;
             p += 1;
             let _ = s.send_to(&buf[..p], server_addr);
+            self.prev_was_sliding = self.movement_state.is_sliding;
         }
     }
 }

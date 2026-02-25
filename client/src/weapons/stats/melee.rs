@@ -4,6 +4,21 @@ use super::{ CrosshairStyle, FireMode, WeaponStats };
 /// Left click = quick slash (cycles 3 swings), right click = heavy stab (one-shot).
 /// All gun-specific fields (bullet, tracer, spread, etc.) are zeroed out since
 /// melee doesn't use the hitscan/projectile pipeline.
+
+pub const KNIFE_LIGHT_DAMAGE: f32 = 40.0;
+pub const KNIFE_HEAVY_DAMAGE: f32 = 80.0;
+pub const KNIFE_MISS_PENALTY_SECS: f32 = 0.25;
+pub const KNIFE_MISS_MOVE_SLOW: f32 = 0.6;
+pub const KNIFE_MISS_MOVE_SLOW_DURATION: f32 = 0.5;
+pub const KNIFE_SPEED_BONUS: f32 = 1.15;
+pub const KNIFE_SWITCH_TO_TIME: f32 = 0.15;
+pub const KNIFE_SWITCH_FROM_TIME: f32 = 0.40;
+pub const KNIFE_LIGHT_ANIM_DURATION: f32 = 0.66;
+pub const KNIFE_HEAVY_ANIM_DURATION: f32 = 0.69;
+pub const BACKSTAB_CONE_DOT: f32 = 0.5;  // 0.5 cos(60) = 120 degree total cone
+// pub const BACKSTAB_CONE_DOT: f32 = 0.0;  // 90 degrees
+
+
 pub const KNIFE: WeaponStats = WeaponStats {
     name: "Knife",
     fire_mode: FireMode::SemiAuto,
@@ -75,6 +90,7 @@ pub const KNIFE: WeaponStats = WeaponStats {
 
     // draw_3d_viewmodel multiplies by 28.0; this keeps knife close to previous size.
     viewmodel_scale: 0.0035,
+    viewmodel_ads_scale: 0.0035,
     viewmodel_position: (0.345, 0.1, -0.37),
     viewmodel_rotation: (-0.15, 0.0, 0.0),
     viewmodel_muzzle_offset: (0.0, 0.0, 0.0),

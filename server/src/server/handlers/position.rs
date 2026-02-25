@@ -49,6 +49,8 @@ pub fn handle_position(
             player.is_crouched = (state_flags & FLAG_CROUCHING) != 0;
             player.is_ads = (state_flags & FLAG_ADS) != 0;
             player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
+            player.is_prone = (state_flags & FLAG_PRONE) != 0;
+            player.is_sliding = (state_flags & FLAG_SLIDING) != 0;
         }
     }
     if payload.len() >= 18 {

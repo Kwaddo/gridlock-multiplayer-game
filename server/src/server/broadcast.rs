@@ -161,6 +161,12 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
             if player.is_airborne {
                 state_flags |= FLAG_AIRBORNE;
             }
+            if player.is_prone {
+                state_flags |= FLAG_PRONE;
+            }
+            if player.is_sliding {
+                state_flags |= FLAG_SLIDING;
+            }
             state_msg.push(state_flags);
 
             let mut event_flags = 0u8;
