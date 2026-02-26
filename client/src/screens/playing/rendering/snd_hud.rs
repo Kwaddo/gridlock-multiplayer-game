@@ -8,6 +8,19 @@ impl PlayingState {
         let sw = screen_width();
         let sh = screen_height();
 
+        // ── Spectating overlay when dead (drawn first so HUD elements render on top) ──
+        if self.is_dead && self.snd_phase != 3 {
+            draw_rectangle(0.0, 0.0, sw, 40.0, Color::from_rgba(0, 0, 0, 150));
+            let spec_text = "SPECTATING - Waiting for round to end";
+            let spec_w = crate::ui::fonts::measure_game_text(spec_text, 16);
+            draw_text_ex(
+                spec_text,
+                (sw - spec_w) / 2.0,
+                25.0,
+                crate::ui::fonts::text_params(16, Color::from_rgba(200, 200, 200, 220)),
+            );
+        }
+
         // ── Round counter (top center) ──
         let round_text = format!("Round {}/{}", self.snd_round, self.snd_max_rounds);
         let round_w = crate::ui::fonts::measure_game_text(&round_text, 22);
@@ -126,20 +139,6 @@ impl PlayingState {
                 self.snd_defuse_progress,
                 "DEFUSING...",
                 Color::from_rgba(50, 180, 255, 255),
-            );
-        }
-
-        // ── Spectating overlay when dead ──
-        if self.is_dead && self.snd_phase != 3 {
-            // Dark overlay
-            draw_rectangle(0.0, 0.0, sw, 40.0, Color::from_rgba(0, 0, 0, 150));
-            let spec_text = "SPECTATING - Waiting for round to end";
-            let spec_w = crate::ui::fonts::measure_game_text(spec_text, 16);
-            draw_text_ex(
-                spec_text,
-                (sw - spec_w) / 2.0,
-                25.0,
-                crate::ui::fonts::text_params(16, Color::from_rgba(200, 200, 200, 220)),
             );
         }
 

@@ -354,16 +354,16 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.gun_level = gun_level;
                         other_player.hp = hp;
                         other_player.max_hp = max_hp;
+                        // Set team before the alive check so it is always applied
+                        // to this player's entry and never bleeds onto a different
+                        // player's slot when they happen to be dead.
+                        other_player.team = _team;
                         // Only add other players who are alive; dead players are
                         // represented by the alive flag and will be removed by
                         // the client when appropriate so offscreen deaths are
                         // reliably propagated.
                         if alive {
                             new_players.push(other_player);
-                        }
-                        // store team for minimap filtering
-                        if let Some(lp) = new_players.last_mut() {
-                            lp.team = _team;
                         }
                     } else {
                         // update own-kills value for local UI/scoreboard

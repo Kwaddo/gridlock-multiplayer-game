@@ -160,6 +160,20 @@ impl PlayingState {
                 // Auto-respawn once the death timer expires (not in S&D — round start handles it)
                 self.pending_respawn = true;
             }
+            // Keep other players' positions smoothed and their animations running
+            // while we're spectating — skipping this made everyone look frozen.
+            for p in &mut self.other_players {
+                p.update(delta);
+            }
+            for (key, model) in self.animated_models.iter_mut() {
+                if key.starts_with("anim_") {
+                    model.update(delta);
+                }
+            }
+            for bot in &mut self.practice_bots {
+                bot.simulate_yaw(delta, Some(self.position));
+                bot.update(delta);
+            }
             return;
         }
 
