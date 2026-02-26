@@ -47,7 +47,7 @@ impl PlayingState {
     /// Draws nametags (always) and health bars (dev mode) above other players.
     /// Uses proper camera-based 3D-to-screen projection. Hides tags when a
     /// maze wall is between the camera and the player.
-    pub(crate) fn draw_player_overhead(&self, camera: &Camera3D, maze: Option<&Maze>) {
+    pub(crate) fn draw_player_overhead(&self, camera: &Camera3D, maze: Option<&Maze>, player_id: u32) {
         let forward = (camera.target - camera.position).normalize();
         let right = forward.cross(camera.up).normalize();
         let up = right.cross(forward).normalize();
@@ -55,6 +55,19 @@ impl PlayingState {
         let fov_scale = screen_height() / (2.0 * (fov_rad / 2.0).tan());
 
         let show_hp = self.dev_mode.show_health_bars;
+
+        // Resolve local team for teammate/enemy distinction in team modes.
+        let is_team_mode = matches!(
+            self.match_mode,
+            Some(m) if m == crate::net::protocols::MODE_TEAM_DEATHMATCH
+                    || m == crate::net::protocols::MODE_SEARCH_AND_DESTROY
+        );
+        let local_team: u8 = self
+            .connected_players
+            .iter()
+            .find(|(id, ..)| *id == player_id)
+            .map(|(_, _, _, _, _, team, _, _)| *team)
+            .unwrap_or(0);
 
         // helper: project world-space point to screen coordinates
         let project = |world_pos: Vec3| -> Option<(f32, f32)> {
@@ -101,19 +114,22 @@ impl PlayingState {
 
         // Other players
         for p in &self.other_players {
-            
             let display_name = if p.is_bot {
                 format!("[BOT] {}", p.username)
             } else {
                 p.username.clone()
             };
 
-            // Position the tag just above the player model head
             let player_pos = p.render_position();
             let tag_pos = player_pos + vec3(0.0, 1.7, 0.0);
 
-            // Skip if behind a wall
-            if is_occluded(player_pos + vec3(0.0, 0.8, 0.0)) {
+            // In team modes distinguish teammates from enemies:
+            //   - teammates: always visible (no wall occlusion), shown in green
+            //   - enemies:   occluded by walls, shown in orange/red
+            // In non-team modes keep existing per-player color with wall occlusion.
+            let is_teammate = is_team_mode && local_team != 0 && p.team == local_team;
+
+            if !is_teammate && is_occluded(player_pos + vec3(0.0, 0.8, 0.0)) {
                 continue;
             }
 
@@ -121,7 +137,16 @@ impl PlayingState {
                 if show_hp {
                     Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
                 } else {
-                    Self::draw_nametag(sx, sy, &display_name, p.color);
+                    let tag_color = if is_team_mode {
+                        if is_teammate {
+                            Color::from_rgba(80, 220, 120, 255) // green for teammates
+                        } else {
+                            Color::from_rgba(255, 120, 60, 255) // orange-red for enemies
+                        }
+                    } else {
+                        p.color
+                    };
+                    Self::draw_nametag(sx, sy, &display_name, tag_color);
                 }
             }
         }

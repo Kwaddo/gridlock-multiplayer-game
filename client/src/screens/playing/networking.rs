@@ -104,11 +104,13 @@ impl PlayingState {
             // S&D interactions: bomb pickup, plant, defuse
             if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY) {
                 // Auto bomb pickup: if bomb is dropped and we're close, try to pick it up
-                if let Some((bx, _by, bz)) = self.snd_bomb_dropped {
-                    let dx = self.position.x - bx;
-                    let dz = self.position.z - bz;
-                    if (dx * dx + dz * dz).sqrt() <= 2.5 {
-                        let _ = s.send_to(&[MSG_SND_BOMB_PICKUP], server_addr);
+                if !self.is_dead {
+                    if let Some((bx, _by, bz)) = self.snd_bomb_dropped {
+                        let dx = self.position.x - bx;
+                        let dz = self.position.z - bz;
+                        if (dx * dx + dz * dz).sqrt() <= 2.5 {
+                            let _ = s.send_to(&[MSG_SND_BOMB_PICKUP], server_addr);
+                        }
                     }
                 }
 

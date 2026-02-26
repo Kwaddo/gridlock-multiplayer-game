@@ -51,9 +51,9 @@ impl PlayingState {
             let site_dist =
                 ((cam_pos.x - site_x).powi(2) + (cam_pos.z - site_z).powi(2)).sqrt();
 
-            // Bomb site marker - only visible within range
-            if site_dist <= 8.0 {
-                let alpha = if site_dist <= 5.0 {
+            // Bomb site marker — always visible to dead spectators, distance-gated for live players
+            if self.is_dead || site_dist <= 8.0 {
+                let alpha = if self.is_dead || site_dist <= 5.0 {
                     1.0
                 } else {
                     1.0 - ((site_dist - 5.0) / 3.0).clamp(0.0, 1.0)
@@ -77,12 +77,12 @@ impl PlayingState {
                 }
             }
 
-            // Dropped bomb - small glowing cube, visible only when close
+            // Dropped bomb — always visible to dead spectators, distance-gated for live players
             if let Some((bx, _by, bz)) = self.snd_bomb_dropped {
                 let bomb_dist =
                     ((cam_pos.x - bx).powi(2) + (cam_pos.z - bz).powi(2)).sqrt();
-                if bomb_dist <= 10.0 {
-                    let bomb_alpha = if bomb_dist <= 6.0 {
+                if self.is_dead || bomb_dist <= 10.0 {
+                    let bomb_alpha = if self.is_dead || bomb_dist <= 6.0 {
                         1.0
                     } else {
                         1.0 - ((bomb_dist - 6.0) / 4.0).clamp(0.0, 1.0)
@@ -102,9 +102,9 @@ impl PlayingState {
                 }
             }
 
-            // Planted bomb at site
-            if self.snd_bomb_planted && site_dist <= 10.0 {
-                let bomb_alpha = if site_dist <= 6.0 {
+            // Planted bomb at site — always visible to dead spectators
+            if self.snd_bomb_planted && (self.is_dead || site_dist <= 10.0) {
+                let bomb_alpha = if self.is_dead || site_dist <= 6.0 {
                     1.0
                 } else {
                     1.0 - ((site_dist - 6.0) / 4.0).clamp(0.0, 1.0)
@@ -174,7 +174,7 @@ impl PlayingState {
             }
         }
 
-        self.draw_player_overhead(&camera, maze);
+        self.draw_player_overhead(&camera, maze, player_id);
         self.draw_lobby_console_prompt();
         self.draw_shooting_range_prompt();
 

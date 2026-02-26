@@ -81,6 +81,23 @@ impl PlayingState {
         }
 
         if self.is_dead {
+            let is_snd_spectating =
+                self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
+                    && self.current_world == WorldId::Maze;
+            if is_snd_spectating {
+                // Allow free look while spectating in S&D
+                let sens = config.raw_sensitivity();
+                input::process_mouse(
+                    &mut self.last_mouse_pos,
+                    &mut self.yaw,
+                    &mut self.pitch,
+                    sens,
+                );
+            } else {
+                // Consume the mouse delta so it doesn't accumulate and cause a
+                // camera jump on the first frame after respawning.
+                self.last_mouse_pos = mouse_position();
+            }
             if self.current_world == WorldId::Lobby
                 && self.death_timer <= 0.0
                 && is_key_pressed(KeyCode::Space)
