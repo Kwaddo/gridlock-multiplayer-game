@@ -265,6 +265,25 @@ pub fn run() -> std::io::Result<()> {
                                     shooting_config: shooting_cfg,
                                     target_id: None,
                                     reaction_timer: 0.0,
+                                    // new fields required by BotState
+                                    personality: crate::bot::personality::BotPersonality {
+                                        name: "range", // generic
+                                        archetype:
+                                            crate::bot::personality::BotArchetype::AllRounder,
+                                        weapon,
+                                        range_min: 0.0,
+                                        range_max: 100.0,
+                                        aggression: 0.5,
+                                        flank_weight: 0.5,
+                                        hold_angle_weight: 0.5,
+                                        push_weight: 0.5,
+                                        retreat_health_threshold: 0.5,
+                                        peek_time: 1.0,
+                                        reposition_interval: 3.0,
+                                        noise_investigation_weight: 0.5,
+                                    },
+                                    difficulty: crate::bot::personality::BotDifficulty::Normal,
+                                    archetype: crate::bot::personality::BotArchetype::AllRounder,
                                 };
 
                                 bot_manager.spawn_bot(&mut players, bot_player, bot_state);
