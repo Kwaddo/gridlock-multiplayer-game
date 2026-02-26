@@ -12,6 +12,7 @@ use super::widgets::{
 
 pub(super) fn draw_weapon_tab(
     inv: &mut WeaponInventory,
+    dev: &mut DevModeState,
     x: f32,
     mut y: f32,
     w: f32,
@@ -28,6 +29,116 @@ pub(super) fn draw_weapon_tab(
         text_params(16, Color::from_rgba(255, 200, 80, 255)),
     );
     y += 24.0;
+
+    // world weapon adjustments
+    y += draw_section_header("World Weapon Position", x, y);
+    y += draw_slider(
+        "pos_x",
+        &mut dev.weapon_pos_offset.0,
+        -1.0,
+        1.0,
+        0.01,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "pos_y",
+        &mut dev.weapon_pos_offset.1,
+        -1.0,
+        1.0,
+        0.01,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "pos_z",
+        &mut dev.weapon_pos_offset.2,
+        -1.0,
+        1.0,
+        0.01,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_section_header("World Weapon Rotation", x, y);
+    y += draw_slider(
+        "rot_pitch",
+        &mut dev.weapon_rot_offset.0,
+        -3.15,
+        3.15,
+        0.05,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "rot_yaw",
+        &mut dev.weapon_rot_offset.1,
+        -3.15,
+        3.15,
+        0.05,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    // adjust yaw during movement (running/walking)
+    y += draw_slider(
+        "yaw_move",
+        &mut dev.weapon_yaw_adjust_move,
+        -3.15,
+        3.15,
+        0.01,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    // adjust yaw when aiming down sights
+    y += draw_slider(
+        "yaw_ads",
+        &mut dev.weapon_yaw_adjust_ads,
+        -3.15,
+        3.15,
+        0.01,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "rot_roll",
+        &mut dev.weapon_rot_offset.2,
+        -3.15,
+        3.15,
+        0.05,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("Damage", x, y);
     y += draw_slider(
@@ -386,11 +497,59 @@ pub(super) fn draw_crosshair_tab(
     let ch = &mut weapon.crosshair;
 
     y += draw_section_header("Shape", x, y);
-    y += draw_slider("center_gap", &mut ch.center_gap, 0.0, 20.0, 0.5, x, y, w, mouse, clicked, held);
-    y += draw_slider("line_length", &mut ch.line_length, 0.0, 30.0, 0.5, x, y, w, mouse, clicked, held);
-    y += draw_slider("line_thickness", &mut ch.line_thickness, 0.0, 5.0, 0.1, x, y, w, mouse, clicked, held);
+    y += draw_slider(
+        "center_gap",
+        &mut ch.center_gap,
+        0.0,
+        20.0,
+        0.5,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "line_length",
+        &mut ch.line_length,
+        0.0,
+        30.0,
+        0.5,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "line_thickness",
+        &mut ch.line_thickness,
+        0.0,
+        5.0,
+        0.1,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
     y += draw_toggle("dot_enabled", &mut ch.dot_enabled, x, y, mouse, clicked);
-    y += draw_slider("dot_size", &mut ch.dot_size, 0.0, 8.0, 0.05, x, y, w, mouse, clicked, held);
+    y += draw_slider(
+        "dot_size",
+        &mut ch.dot_size,
+        0.0,
+        8.0,
+        0.05,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("Kick", x, y);
     y += draw_slider(
@@ -437,13 +596,26 @@ pub(super) fn draw_crosshair_tab(
     let mut r = ch.color.r * 255.0;
     let mut g = ch.color.g * 255.0;
     let mut b = ch.color.b * 255.0;
-    y += draw_slider("Red", &mut r, 0.0, 255.0, 5.0, x, y, w, mouse, clicked, held);
-    y += draw_slider("Green", &mut g, 0.0, 255.0, 5.0, x, y, w, mouse, clicked, held);
-    y += draw_slider("Blue", &mut b, 0.0, 255.0, 5.0, x, y, w, mouse, clicked, held);
+    y += draw_slider(
+        "Red", &mut r, 0.0, 255.0, 5.0, x, y, w, mouse, clicked, held,
+    );
+    y += draw_slider(
+        "Green", &mut g, 0.0, 255.0, 5.0, x, y, w, mouse, clicked, held,
+    );
+    y += draw_slider(
+        "Blue", &mut b, 0.0, 255.0, 5.0, x, y, w, mouse, clicked, held,
+    );
     ch.color = Color::from_rgba(r as u8, g as u8, b as u8, 255);
 
     y += draw_section_header("Outline", x, y);
-    y += draw_toggle("outline_enabled", &mut ch.outline_enabled, x, y, mouse, clicked);
+    y += draw_toggle(
+        "outline_enabled",
+        &mut ch.outline_enabled,
+        x,
+        y,
+        mouse,
+        clicked,
+    );
     y += draw_slider(
         "outline_thickness",
         &mut ch.outline_thickness,
@@ -490,7 +662,8 @@ pub(super) fn draw_crosshair_tab(
 
     y += 8.0;
     let cat = weapon.id.category();
-    let (_, pressed) = draw_action_button("Reset Crosshair to Defaults", x, y, 260.0, mouse, clicked);
+    let (_, pressed) =
+        draw_action_button("Reset Crosshair to Defaults", x, y, 260.0, mouse, clicked);
     if pressed {
         inv.active_mut().crosshair = CrosshairConfig::for_category(cat);
     }
@@ -506,19 +679,127 @@ pub(super) fn draw_movement_tab(
     held: bool,
 ) {
     y += draw_section_header("Speed", x, y);
-    y += draw_slider("walk_speed", &mut mov.walk_speed, 1.0, 15.0, 0.5, x, y, w, mouse, clicked, held);
-    y += draw_slider("sprint_speed", &mut mov.sprint_speed, 2.0, 25.0, 0.5, x, y, w, mouse, clicked, held);
-    y += draw_slider("crouch_speed", &mut mov.crouch_speed, 0.5, 8.0, 0.5, x, y, w, mouse, clicked, held);
+    y += draw_slider(
+        "walk_speed",
+        &mut mov.walk_speed,
+        1.0,
+        15.0,
+        0.5,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "sprint_speed",
+        &mut mov.sprint_speed,
+        2.0,
+        25.0,
+        0.5,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "crouch_speed",
+        &mut mov.crouch_speed,
+        0.5,
+        8.0,
+        0.5,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("Physics", x, y);
-    y += draw_slider("acceleration", &mut mov.acceleration, 1.0, 30.0, 1.0, x, y, w, mouse, clicked, held);
-    y += draw_slider("friction", &mut mov.friction, 1.0, 20.0, 1.0, x, y, w, mouse, clicked, held);
-    y += draw_slider("gravity", &mut mov.gravity, 5.0, 40.0, 1.0, x, y, w, mouse, clicked, held);
-    y += draw_slider("jump_strength", &mut mov.jump_strength, 1.0, 15.0, 0.5, x, y, w, mouse, clicked, held);
+    y += draw_slider(
+        "acceleration",
+        &mut mov.acceleration,
+        1.0,
+        30.0,
+        1.0,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "friction",
+        &mut mov.friction,
+        1.0,
+        20.0,
+        1.0,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "gravity",
+        &mut mov.gravity,
+        5.0,
+        40.0,
+        1.0,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider(
+        "jump_strength",
+        &mut mov.jump_strength,
+        1.0,
+        15.0,
+        0.5,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("Stamina", x, y);
-    y += draw_slider("stamina_drain", &mut mov.stamina_drain, 5.0, 100.0, 5.0, x, y, w, mouse, clicked, held);
-    draw_slider("stamina_recover", &mut mov.stamina_recover, 5.0, 50.0, 5.0, x, y, w, mouse, clicked, held);
+    y += draw_slider(
+        "stamina_drain",
+        &mut mov.stamina_drain,
+        5.0,
+        100.0,
+        5.0,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    draw_slider(
+        "stamina_recover",
+        &mut mov.stamina_recover,
+        5.0,
+        50.0,
+        5.0,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 }
 
 pub(super) fn draw_viewmodel_tab(
@@ -545,56 +826,358 @@ pub(super) fn draw_viewmodel_tab(
     y += 24.0;
 
     // Precision mode toggle
-    let prec_label = if dev.precision_mode { "Precision Mode  [ON]" } else { "Precision Mode [OFF]" };
+    let prec_label = if dev.precision_mode {
+        "Precision Mode  [ON]"
+    } else {
+        "Precision Mode [OFF]"
+    };
     y += draw_toggle(prec_label, &mut dev.precision_mode, x, y, mouse, clicked);
 
     // ADS preview toggle — simulates ADS held without physically holding right-click
-    let ads_label = if dev.force_ads { "ADS Preview  [ON]" } else { "ADS Preview [OFF]" };
+    let ads_label = if dev.force_ads {
+        "ADS Preview  [ON]"
+    } else {
+        "ADS Preview [OFF]"
+    };
     y += draw_toggle(ads_label, &mut dev.force_ads, x, y, mouse, clicked);
 
     // Viewport drag mode — drag directly on viewport to adjust position / rotation
-    let drag_label = if dev.viewport_drag_active { "Drag Mode  [ON]" } else { "Drag Mode [OFF]" };
-    y += draw_toggle(drag_label, &mut dev.viewport_drag_active, x, y, mouse, clicked);
+    let drag_label = if dev.viewport_drag_active {
+        "Drag Mode  [ON]"
+    } else {
+        "Drag Mode [OFF]"
+    };
+    y += draw_toggle(
+        drag_label,
+        &mut dev.viewport_drag_active,
+        x,
+        y,
+        mouse,
+        clicked,
+    );
     y += 4.0;
 
     y += draw_section_header("Scale", x, y);
-    y += draw_slider_nudge("viewmodel_scale", &mut weapon.stats_data.viewmodel_scale, 0.001, 0.1, 0.001 * sm, x, y, w, mouse, clicked, held);
+    y += draw_slider_nudge(
+        "viewmodel_scale",
+        &mut weapon.stats_data.viewmodel_scale,
+        0.001,
+        0.1,
+        0.001 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("Position", x, y);
-    y += draw_slider_nudge("pos_x (right)", &mut weapon.stats_data.viewmodel_position.0, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("pos_y (up)", &mut weapon.stats_data.viewmodel_position.1, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("pos_z (forward)", &mut weapon.stats_data.viewmodel_position.2, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
+    y += draw_slider_nudge(
+        "pos_x (right)",
+        &mut weapon.stats_data.viewmodel_position.0,
+        -0.5,
+        0.5,
+        0.01 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "pos_y (up)",
+        &mut weapon.stats_data.viewmodel_position.1,
+        -0.5,
+        0.5,
+        0.01 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "pos_z (forward)",
+        &mut weapon.stats_data.viewmodel_position.2,
+        -0.5,
+        0.5,
+        0.01 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("Rotation (radians)", x, y);
-    y += draw_slider_nudge("pitch (up/down)", &mut weapon.stats_data.viewmodel_rotation.0, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("yaw (left/right)", &mut weapon.stats_data.viewmodel_rotation.1, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("roll (tilt)", &mut weapon.stats_data.viewmodel_rotation.2, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
+    y += draw_slider_nudge(
+        "pitch (up/down)",
+        &mut weapon.stats_data.viewmodel_rotation.0,
+        -3.15,
+        3.15,
+        0.05 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "yaw (left/right)",
+        &mut weapon.stats_data.viewmodel_rotation.1,
+        -3.15,
+        3.15,
+        0.05 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "roll (tilt)",
+        &mut weapon.stats_data.viewmodel_rotation.2,
+        -3.15,
+        3.15,
+        0.05 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("Muzzle Offset", x, y);
-    y += draw_slider_nudge("muzzle_x", &mut weapon.stats_data.viewmodel_muzzle_offset.0, -2.0, 2.0, 0.02 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("muzzle_y", &mut weapon.stats_data.viewmodel_muzzle_offset.1, -2.0, 2.0, 0.02 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("muzzle_z", &mut weapon.stats_data.viewmodel_muzzle_offset.2, -2.0, 2.0, 0.02 * sm, x, y, w, mouse, clicked, held);
+    y += draw_slider_nudge(
+        "muzzle_x",
+        &mut weapon.stats_data.viewmodel_muzzle_offset.0,
+        -2.0,
+        2.0,
+        0.02 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "muzzle_y",
+        &mut weapon.stats_data.viewmodel_muzzle_offset.1,
+        -2.0,
+        2.0,
+        0.02 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "muzzle_z",
+        &mut weapon.stats_data.viewmodel_muzzle_offset.2,
+        -2.0,
+        2.0,
+        0.02 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("FP Hands", x, y);
-    y += draw_slider_nudge("hands_scale", &mut weapon.stats_data.viewmodel_hands_scale, 0.01, 2.0, 0.01 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("hands_offset_x", &mut weapon.stats_data.viewmodel_hands_offset.0, -1.0, 1.0, 0.01 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("hands_offset_y", &mut weapon.stats_data.viewmodel_hands_offset.1, -1.0, 1.0, 0.01 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("hands_offset_z", &mut weapon.stats_data.viewmodel_hands_offset.2, -1.0, 1.0, 0.01 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("hands_rot_pitch", &mut weapon.stats_data.viewmodel_hands_rotation.0, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("hands_rot_yaw", &mut weapon.stats_data.viewmodel_hands_rotation.1, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-    y += draw_slider_nudge("hands_rot_roll", &mut weapon.stats_data.viewmodel_hands_rotation.2, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
+    y += draw_slider_nudge(
+        "hands_scale",
+        &mut weapon.stats_data.viewmodel_hands_scale,
+        0.01,
+        2.0,
+        0.01 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "hands_offset_x",
+        &mut weapon.stats_data.viewmodel_hands_offset.0,
+        -1.0,
+        1.0,
+        0.01 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "hands_offset_y",
+        &mut weapon.stats_data.viewmodel_hands_offset.1,
+        -1.0,
+        1.0,
+        0.01 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "hands_offset_z",
+        &mut weapon.stats_data.viewmodel_hands_offset.2,
+        -1.0,
+        1.0,
+        0.01 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "hands_rot_pitch",
+        &mut weapon.stats_data.viewmodel_hands_rotation.0,
+        -3.15,
+        3.15,
+        0.05 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "hands_rot_yaw",
+        &mut weapon.stats_data.viewmodel_hands_rotation.1,
+        -3.15,
+        3.15,
+        0.05 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
+    y += draw_slider_nudge(
+        "hands_rot_roll",
+        &mut weapon.stats_data.viewmodel_hands_rotation.2,
+        -3.15,
+        3.15,
+        0.05 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     y += draw_section_header("Hand + Gun Pair", x, y);
-    y += draw_toggle("Lock Together", &mut weapon.pair_locked, x, y, mouse, clicked);
+    y += draw_toggle(
+        "Lock Together",
+        &mut weapon.pair_locked,
+        x,
+        y,
+        mouse,
+        clicked,
+    );
     if weapon.pair_locked {
         y += draw_section_header("Pair Position", x, y);
-        y += draw_slider_nudge("pair_pos_x (right)", &mut weapon.pair_offset_pos.0, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("pair_pos_y (up)", &mut weapon.pair_offset_pos.1, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("pair_pos_z (forward)", &mut weapon.pair_offset_pos.2, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
+        y += draw_slider_nudge(
+            "pair_pos_x (right)",
+            &mut weapon.pair_offset_pos.0,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "pair_pos_y (up)",
+            &mut weapon.pair_offset_pos.1,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "pair_pos_z (forward)",
+            &mut weapon.pair_offset_pos.2,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
         y += draw_section_header("Pair Rotation (radians)", x, y);
-        y += draw_slider_nudge("pair_pitch", &mut weapon.pair_offset_rot.0, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("pair_yaw", &mut weapon.pair_offset_rot.1, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("pair_roll", &mut weapon.pair_offset_rot.2, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
+        y += draw_slider_nudge(
+            "pair_pitch",
+            &mut weapon.pair_offset_rot.0,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "pair_yaw",
+            &mut weapon.pair_offset_rot.1,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "pair_roll",
+            &mut weapon.pair_offset_rot.2,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
         let (h, pair_reset) = draw_action_button("Reset Pair", x, y, 120.0, mouse, clicked);
         y += h;
         if pair_reset {
@@ -604,8 +1187,27 @@ pub(super) fn draw_viewmodel_tab(
     }
 
     y += draw_section_header("ADS Viewmodel", x, y);
-    y += draw_toggle("Lock Gun + Hands (ADS)", &mut weapon.ads_pair_locked, x, y, mouse, clicked);
-    y += draw_slider_nudge("viewmodel_ads_scale", &mut weapon.stats_data.viewmodel_ads_scale, 0.001, 0.1, 0.001 * sm, x, y, w, mouse, clicked, held);
+    y += draw_toggle(
+        "Lock Gun + Hands (ADS)",
+        &mut weapon.ads_pair_locked,
+        x,
+        y,
+        mouse,
+        clicked,
+    );
+    y += draw_slider_nudge(
+        "viewmodel_ads_scale",
+        &mut weapon.stats_data.viewmodel_ads_scale,
+        0.001,
+        0.1,
+        0.001 * sm,
+        x,
+        y,
+        w,
+        mouse,
+        clicked,
+        held,
+    );
 
     if weapon.ads_pair_locked {
         // Locked: one set of sliders drives both gun and hands together
@@ -617,13 +1219,85 @@ pub(super) fn draw_viewmodel_tab(
         let mut ads_pair_rot_r = weapon.ads_rot_offset.2;
 
         y += draw_section_header("ADS Pair Position", x, y);
-        y += draw_slider_nudge("ads_pos_x (right)", &mut ads_pair_pos_x, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_pos_y (up)", &mut ads_pair_pos_y, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_pos_z (forward)", &mut ads_pair_pos_z, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
+        y += draw_slider_nudge(
+            "ads_pos_x (right)",
+            &mut ads_pair_pos_x,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_pos_y (up)",
+            &mut ads_pair_pos_y,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_pos_z (forward)",
+            &mut ads_pair_pos_z,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
         y += draw_section_header("ADS Pair Rotation", x, y);
-        y += draw_slider_nudge("ads_pitch", &mut ads_pair_rot_p, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_yaw", &mut ads_pair_rot_y, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_roll", &mut ads_pair_rot_r, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
+        y += draw_slider_nudge(
+            "ads_pitch",
+            &mut ads_pair_rot_p,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_yaw",
+            &mut ads_pair_rot_y,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_roll",
+            &mut ads_pair_rot_r,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
 
         // Apply to both gun and hands
         weapon.ads_pos_offset.0 = ads_pair_pos_x;
@@ -640,19 +1314,163 @@ pub(super) fn draw_viewmodel_tab(
         weapon.ads_hands_rot_offset.2 = ads_pair_rot_r;
     } else {
         // Unlocked: adjust gun and hands independently
-        y += draw_slider_nudge("ads_pos_x (right)", &mut weapon.ads_pos_offset.0, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_pos_y (up)", &mut weapon.ads_pos_offset.1, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_pos_z (forward)", &mut weapon.ads_pos_offset.2, -0.5, 0.5, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_pitch", &mut weapon.ads_rot_offset.0, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_yaw", &mut weapon.ads_rot_offset.1, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_roll", &mut weapon.ads_rot_offset.2, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
+        y += draw_slider_nudge(
+            "ads_pos_x (right)",
+            &mut weapon.ads_pos_offset.0,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_pos_y (up)",
+            &mut weapon.ads_pos_offset.1,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_pos_z (forward)",
+            &mut weapon.ads_pos_offset.2,
+            -0.5,
+            0.5,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_pitch",
+            &mut weapon.ads_rot_offset.0,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_yaw",
+            &mut weapon.ads_rot_offset.1,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_roll",
+            &mut weapon.ads_rot_offset.2,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
         y += draw_section_header("ADS Hands", x, y);
-        y += draw_slider_nudge("ads_hands_x", &mut weapon.ads_hands_pos_offset.0, -1.0, 1.0, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_hands_y", &mut weapon.ads_hands_pos_offset.1, -1.0, 1.0, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_hands_z", &mut weapon.ads_hands_pos_offset.2, -1.0, 1.0, 0.01 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_hands_pitch", &mut weapon.ads_hands_rot_offset.0, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_hands_yaw", &mut weapon.ads_hands_rot_offset.1, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
-        y += draw_slider_nudge("ads_hands_roll", &mut weapon.ads_hands_rot_offset.2, -3.15, 3.15, 0.05 * sm, x, y, w, mouse, clicked, held);
+        y += draw_slider_nudge(
+            "ads_hands_x",
+            &mut weapon.ads_hands_pos_offset.0,
+            -1.0,
+            1.0,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_hands_y",
+            &mut weapon.ads_hands_pos_offset.1,
+            -1.0,
+            1.0,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_hands_z",
+            &mut weapon.ads_hands_pos_offset.2,
+            -1.0,
+            1.0,
+            0.01 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_hands_pitch",
+            &mut weapon.ads_hands_rot_offset.0,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_hands_yaw",
+            &mut weapon.ads_hands_rot_offset.1,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
+        y += draw_slider_nudge(
+            "ads_hands_roll",
+            &mut weapon.ads_hands_rot_offset.2,
+            -3.15,
+            3.15,
+            0.05 * sm,
+            x,
+            y,
+            w,
+            mouse,
+            clicked,
+            held,
+        );
     }
 
     let (h, ads_reset) = draw_action_button("Reset ADS to Defaults", x, y, 200.0, mouse, clicked);
@@ -707,22 +1525,45 @@ pub(super) fn draw_viewmodel_tab(
             s.name,
             s.viewmodel_scale,
             s.viewmodel_ads_scale,
-            s.viewmodel_position.0, s.viewmodel_position.1, s.viewmodel_position.2,
-            s.viewmodel_rotation.0, s.viewmodel_rotation.1, s.viewmodel_rotation.2,
-            s.viewmodel_muzzle_offset.0, s.viewmodel_muzzle_offset.1, s.viewmodel_muzzle_offset.2,
+            s.viewmodel_position.0,
+            s.viewmodel_position.1,
+            s.viewmodel_position.2,
+            s.viewmodel_rotation.0,
+            s.viewmodel_rotation.1,
+            s.viewmodel_rotation.2,
+            s.viewmodel_muzzle_offset.0,
+            s.viewmodel_muzzle_offset.1,
+            s.viewmodel_muzzle_offset.2,
             s.viewmodel_hands_scale,
-            s.viewmodel_hands_offset.0, s.viewmodel_hands_offset.1, s.viewmodel_hands_offset.2,
-            s.viewmodel_hands_rotation.0, s.viewmodel_hands_rotation.1, s.viewmodel_hands_rotation.2,
-            weapon.pair_offset_pos.0, weapon.pair_offset_pos.1, weapon.pair_offset_pos.2,
-            weapon.pair_offset_rot.0, weapon.pair_offset_rot.1, weapon.pair_offset_rot.2,
-            weapon.ads_pos_offset.0, weapon.ads_pos_offset.1, weapon.ads_pos_offset.2,
-            weapon.ads_rot_offset.0, weapon.ads_rot_offset.1, weapon.ads_rot_offset.2,
-            weapon.ads_hands_pos_offset.0, weapon.ads_hands_pos_offset.1, weapon.ads_hands_pos_offset.2,
-            weapon.ads_hands_rot_offset.0, weapon.ads_hands_rot_offset.1, weapon.ads_hands_rot_offset.2,
+            s.viewmodel_hands_offset.0,
+            s.viewmodel_hands_offset.1,
+            s.viewmodel_hands_offset.2,
+            s.viewmodel_hands_rotation.0,
+            s.viewmodel_hands_rotation.1,
+            s.viewmodel_hands_rotation.2,
+            weapon.pair_offset_pos.0,
+            weapon.pair_offset_pos.1,
+            weapon.pair_offset_pos.2,
+            weapon.pair_offset_rot.0,
+            weapon.pair_offset_rot.1,
+            weapon.pair_offset_rot.2,
+            weapon.ads_pos_offset.0,
+            weapon.ads_pos_offset.1,
+            weapon.ads_pos_offset.2,
+            weapon.ads_rot_offset.0,
+            weapon.ads_rot_offset.1,
+            weapon.ads_rot_offset.2,
+            weapon.ads_hands_pos_offset.0,
+            weapon.ads_hands_pos_offset.1,
+            weapon.ads_hands_pos_offset.2,
+            weapon.ads_hands_rot_offset.0,
+            weapon.ads_hands_rot_offset.1,
+            weapon.ads_hands_rot_offset.2,
         );
     }
 
-    let (h, pressed) = draw_action_button("Reset Viewmodel to Defaults", x, y, 260.0, mouse, clicked);
+    let (h, pressed) =
+        draw_action_button("Reset Viewmodel to Defaults", x, y, 260.0, mouse, clicked);
     y += h;
     if pressed {
         let defaults = weapon.id.stats();
@@ -751,17 +1592,23 @@ pub(super) fn draw_viewmodel_tab(
     let mut copy_hip_from_slot: Option<usize> = None;
     let mut copy_ads_from_slot: Option<usize> = None;
     for i in 0..inv.weapons.len() {
-        if i == active_slot { continue; }
+        if i == active_slot {
+            continue;
+        }
         let wname: &'static str = inv.weapons[i].stats_data.name;
         let hip_label = format!("Copy Hip: {}", wname);
         let (h, hip_pressed) = draw_action_button(&hip_label, x, y, 220.0, mouse, clicked);
         y += h;
-        if hip_pressed { copy_hip_from_slot = Some(i); }
+        if hip_pressed {
+            copy_hip_from_slot = Some(i);
+        }
 
         let ads_label = format!("Copy ADS: {}", wname);
         let (h, ads_pressed) = draw_action_button(&ads_label, x, y, 220.0, mouse, clicked);
         y += h;
-        if ads_pressed { copy_ads_from_slot = Some(i); }
+        if ads_pressed {
+            copy_ads_from_slot = Some(i);
+        }
     }
     if let Some(src) = copy_hip_from_slot {
         let (scale, pos, rot, muz, hs, ho, hr, pp, pr) = {
@@ -820,11 +1667,32 @@ pub(super) fn draw_debug_tab(
     clicked: bool,
 ) {
     y += draw_section_header("Toggles", x, y);
-    y += draw_toggle("Infinite Ammo", &mut dev.infinite_ammo, x, y, mouse, clicked);
+    y += draw_toggle(
+        "Infinite Ammo",
+        &mut dev.infinite_ammo,
+        x,
+        y,
+        mouse,
+        clicked,
+    );
     y += draw_toggle("No Recoil", &mut dev.no_recoil, x, y, mouse, clicked);
     y += draw_toggle("God Mode", &mut dev.god_mode, x, y, mouse, clicked);
-    y += draw_toggle("Show Hitboxes", &mut dev.show_hitboxes, x, y, mouse, clicked);
-    y += draw_toggle("Show Health Bars", &mut dev.show_health_bars, x, y, mouse, clicked);
+    y += draw_toggle(
+        "Show Hitboxes",
+        &mut dev.show_hitboxes,
+        x,
+        y,
+        mouse,
+        clicked,
+    );
+    y += draw_toggle(
+        "Show Health Bars",
+        &mut dev.show_health_bars,
+        x,
+        y,
+        mouse,
+        clicked,
+    );
 
     y += draw_section_header("Actions", x, y);
 

@@ -113,7 +113,7 @@ pub fn draw_dev_overlay<F>(
     let content_w = panel_w - 32.0;
 
     match dev.active_tab {
-        0 => draw_weapon_tab(inventory, content_x, content_y, content_w, mouse, clicked, held),
+        0 => draw_weapon_tab(inventory, dev, content_x, content_y, content_w, mouse, clicked, held),
         1 => draw_crosshair_tab(inventory, content_x, content_y, content_w, mouse, clicked, held),
         2 => draw_movement_tab(
             move_config,

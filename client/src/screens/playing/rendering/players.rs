@@ -195,6 +195,7 @@ impl PlayingState {
                     // players should not have the yaw adjustment applied.
                     let mut yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
                     let is_moving = p.is_sprinting
+                        || p.is_crouching
                         || matches!(
                             p.skin_type,
                             crate::types::player::PlayerSkin::RifleWalk
@@ -204,9 +205,25 @@ impl PlayingState {
                                 | crate::types::player::PlayerSkin::SprintForward
                                 | crate::types::player::PlayerSkin::SprintLeft
                                 | crate::types::player::PlayerSkin::SprintRight
+                                | crate::types::player::PlayerSkin::CrouchForward
+                                | crate::types::player::PlayerSkin::CrouchBack
+                                | crate::types::player::PlayerSkin::CrouchLeft
+                                | crate::types::player::PlayerSkin::CrouchRight
                         );
                     if is_moving || p.is_ads {
-                        yaw_rot -= WORLD_WEAPON_YAW_ADJUST;
+                        let adjust = if self.dev_mode.is_unlocked() {
+                            // allow tweaking movement vs ADS separately
+                            if is_moving {
+                                self.dev_mode.weapon_yaw_adjust_move
+                            } else if p.is_ads {
+                                self.dev_mode.weapon_yaw_adjust_ads
+                            } else {
+                                self.dev_mode.weapon_rot_offset.1 // fallback
+                            }
+                        } else {
+                            WORLD_WEAPON_YAW_ADJUST
+                        };
+                        yaw_rot -= adjust;
                     }
                     // exceptions that are already oriented correctly (hands-based)
                     if world_key.contains("sawnoff")
@@ -216,17 +233,54 @@ impl PlayingState {
                         yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
                     }
 
-                    // nudge weapon forward or backward based on activity state
+                    // calculate weapon position with full 3D offset when dev mode is active
                     let forward_dir = vec3(render_yaw.cos(), 0.0, render_yaw.sin());
-                    let mut offset = WORLD_WEAPON_FORWARD_OFFSET;
-                    if !is_moving && !p.is_ads {
-                        // stationary/idle players: move weapon slightly backward
-                        offset = -0.05;
-                    }
-                    let weapon_pos = hand_world + forward_dir * offset;
-                    let weapon_transform = Mat4::from_translation(weapon_pos)
-                        * Mat4::from_rotation_y(yaw_rot)
-                        * Mat4::from_scale(Vec3::splat(scale_factor));
+                    // calculate weapon position with offsets
+                    // weapons that use hand animations shouldn't be moved at all – they
+                    // already include their own translation in the glTF data. revert to
+                    // the previous behavior by simply using hand_world in that case.
+                    let weapon_pos = if world_key.contains("sawnoff")
+                        || world_key.contains("minigun")
+                        || world_key.contains("knife")
+                    {
+                        hand_world
+                    } else {
+                        // when the player is walking/running/aiming, use the smaller
+                        // default offset instead of whatever the sliders are set to.
+                        let (off_x, off_y, off_z) = if is_moving || p.is_ads {
+                            (-0.03, -0.03, -0.01)
+                        } else {
+                            (
+                                self.dev_mode.weapon_pos_offset.0,
+                                self.dev_mode.weapon_pos_offset.1,
+                                self.dev_mode.weapon_pos_offset.2,
+                            )
+                        };
+                        let zval = if is_moving || p.is_ads { off_z } else { -off_z };
+                        let right_dir = vec3(-forward_dir.z, 0.0, forward_dir.x);
+                        let pos = hand_world
+                            + forward_dir * zval
+                            + right_dir * off_x
+                            + vec3(0.0, 1.0, 0.0) * off_y;
+                        let dyn_forward = if is_moving || p.is_ads {
+                            WORLD_WEAPON_FORWARD_OFFSET
+                        } else {
+                            -0.05
+                        };
+                        pos + forward_dir * dyn_forward
+                    };
+                    let weapon_transform = if self.dev_mode.is_unlocked() {
+                        let (rp, _, rr) = self.dev_mode.weapon_rot_offset;
+                        Mat4::from_translation(weapon_pos)
+                            * Mat4::from_rotation_y(yaw_rot)
+                            * Mat4::from_rotation_x(rp)
+                            * Mat4::from_rotation_z(rr)
+                            * Mat4::from_scale(Vec3::splat(scale_factor))
+                    } else {
+                        Mat4::from_translation(weapon_pos)
+                            * Mat4::from_rotation_y(yaw_rot)
+                            * Mat4::from_scale(Vec3::splat(scale_factor))
+                    };
                     wgl.quad_gl.push_model_matrix(weapon_transform);
                     if let Some(weapon_meshes) = self.models.get(world_key) {
                         for mesh in weapon_meshes {
