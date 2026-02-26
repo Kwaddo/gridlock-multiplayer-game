@@ -83,7 +83,7 @@ pub fn run() -> std::io::Result<()> {
                     MSG_DISCONNECT => handlers::handle_disconnect(&socket, &mut players, src_addr),
                     MSG_POSITION => {
                         handlers::handle_position(&socket, &mut players, src_addr, payload);
-                    }
+                    },
 
                     // client-requested world change (teleporter)
                     MSG_WORLD_CHANGE => {
@@ -94,8 +94,23 @@ pub fn run() -> std::io::Result<()> {
                             src_addr,
                             payload,
                         );
-                    }
-
+                    },
+                    MSG_WEAPON_CHANGE => {
+                        // client tells us which weapon they're now holding; update
+                        // player state and broadcast to everyone so world models
+                        // stay in sync.
+                        if let Some(p) = players.get_mut(&src_addr) {
+                            if !payload.is_empty() {
+                                let len = payload[0] as usize;
+                                if payload.len() >= 1 + len {
+                                    if let Ok(name) = std::str::from_utf8(&payload[1..1 + len]) {
+                                        p.current_weapon = name.to_string();
+                                        broadcast::broadcast_state(&socket, &players);
+                                    }
+                                }
+                            }
+                        }
+                    },
                     // client requests to start a match from the lobby
                     MSG_START_GAME => {
                         // read the requested game mode from the payload

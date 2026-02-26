@@ -42,6 +42,9 @@ pub const MSG_SND_PLANT_STOP: u8 = 30; // client -> server: stop planting bomb
 pub const MSG_SND_DEFUSE_START: u8 = 31; // client -> server: start defusing bomb
 pub const MSG_SND_DEFUSE_STOP: u8 = 32; // client -> server: stop defusing bomb
 
+// when client switches active weapon; payload = [len:1][UTF8 name]
+pub const MSG_WEAPON_CHANGE: u8 = 33; // client -> server: notify active weapon
+
 
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;

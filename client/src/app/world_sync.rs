@@ -115,6 +115,11 @@ pub fn sync_world(
                     current.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
                     current.kills = incoming.kills;
                     current.team = incoming.team;
+                    // copy weapon string verbatim; server will send a non-empty
+                    // string when the player has a weapon. clearing it when the
+                    // player drops/changes items is valid and ensures we don't
+                    // render stale guns.
+                    current.current_weapon = incoming.current_weapon;
                     current.hp = incoming.hp;
                     current.max_hp = incoming.max_hp;
                 } else {

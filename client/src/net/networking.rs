@@ -310,26 +310,23 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         offset += 1;
                     }
 
-                    // NOTE: server now appends `team:1` + `weapon_len:1` + `weapon bytes`
-                    // to each MSG_STATE entry. Older client parsers didn't consume
-                    // these bytes which caused subsequent reads to become
-                    // misaligned (weapon strings appearing as player names).
-                    // Consume them here to keep the message offsets in sync.
+                    // Server appends `team:1` + `weapon_len:1` + `weapon bytes`
+                    // to each MSG_STATE entry.
                     let mut _team: u8 = 0;
+                    let mut _weapon = String::new();
                     if offset < size {
                         _team = recv_buf[offset];
                         offset += 1;
-                        // weapon length + bytes
                         if offset < size {
                             let wlen = recv_buf[offset] as usize;
                             offset += 1;
                             if offset + wlen <= size {
-                                // discard weapon bytes for now (we keep weapon info
-                                // in MSG_PLAYER_LIST which the UI uses). If desired
-                                // later, we could store this on OtherPlayer.
+                                _weapon = String::from_utf8_lossy(
+                                    &recv_buf[offset..offset + wlen],
+                                )
+                                .into_owned();
                                 offset += wlen;
                             } else {
-                                // malformed/partial packet: clamp to available
                                 offset = size;
                             }
                         }
@@ -354,10 +351,12 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.gun_level = gun_level;
                         other_player.hp = hp;
                         other_player.max_hp = max_hp;
-                        // Set team before the alive check so it is always applied
-                        // to this player's entry and never bleeds onto a different
-                        // player's slot when they happen to be dead.
+                        // Set team and weapon before the alive check so they are always
+                        // applied to this player and never bleed onto another slot.
                         other_player.team = _team;
+                        if !_weapon.is_empty() {
+                            other_player.current_weapon = _weapon;
+                        }
                         // Only add other players who are alive; dead players are
                         // represented by the alive flag and will be removed by
                         // the client when appropriate so offscreen deaths are

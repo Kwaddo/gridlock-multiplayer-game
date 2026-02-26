@@ -221,6 +221,9 @@ pub struct OtherPlayer {
     pub gun_level: u8,
     pub team: u8,
 
+    // Current weapon name (e.g. "AK-47", "M4A1") — used to draw world-model gun
+    pub current_weapon: String,
+
     // bot
     pub is_bot: bool,
 }
@@ -282,6 +285,7 @@ impl OtherPlayer {
             move_anim_grace: 0.0,
             last_move_time: 0.0,
             gun_level: 1,
+            current_weapon: String::new(),
             is_bot: false,
         }
     }

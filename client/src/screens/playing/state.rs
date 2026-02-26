@@ -1,17 +1,17 @@
 use crate::net::protocols::MODE_TEAM_DEATHMATCH;
-use crate::physics::movement::{ MovementConfig, MovementState };
+use crate::physics::movement::{MovementConfig, MovementState};
 use crate::screens::target_dummy::TargetDummy;
 use crate::types::ai::simulated_player::SimulatedPlayer;
 use crate::types::animated_model::AnimatedModel;
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
-use crate::weapons::effects::{ BulletHole, BulletTracer, DamageNumber, WorldMuzzleFlash };
+use crate::weapons::effects::{BulletHole, BulletTracer, DamageNumber, WorldMuzzleFlash};
 use crate::weapons::WeaponInventory;
 
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
-use rodio::{ OutputStream, OutputStreamHandle };
-use std::collections::{ HashMap, HashSet };
+use rodio::{OutputStream, OutputStreamHandle};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
@@ -28,16 +28,16 @@ pub enum HandsPlaybackMode {
     KnifeEquip, // raising animation when switching to knife
     // Sawnoff-specific states (sawnoff_animated.glb includes hands)
     SawnoffIdle,
-    SawnoffShot, // playing shot animation, returns to SawnoffIdle when done
+    SawnoffShot,   // playing shot animation, returns to SawnoffIdle when done
     SawnoffReload, // playing reload animation, returns to SawnoffIdle when done
-    SawnoffEquip, // equip animation when switching to sawnoff
-    SawnoffLower, // lowering animation when switching away from sawnoff
+    SawnoffEquip,  // equip animation when switching to sawnoff
+    SawnoffLower,  // lowering animation when switching away from sawnoff
     // Minigun-specific states (minigun_animated.glb includes hands)
     MinigunIdle,
     MinigunShooting, // playing shoot loop
-    MinigunReload, // playing reload animation
-    MinigunEquip, // equip animation when switching to minigun
-    MinigunLower, // lowering animation when switching away
+    MinigunReload,   // playing reload animation
+    MinigunEquip,    // equip animation when switching to minigun
+    MinigunLower,    // lowering animation when switching away
 }
 
 pub struct PlayingState {
@@ -82,11 +82,14 @@ pub struct PlayingState {
 
     pub weapons: WeaponInventory,
 
+    // remember last weapon name sent to server so we only transmit changes.
+    pub last_sent_weapon: String,
+
     // countdown timers (server-synchronized)
     pub match_start_countdown_timer: f32,
     pub match_end_countdown_timer: f32,
     pub post_teleport_freeze_timer: f32, // seconds players cannot move immediately after teleport into Maze
-    pub match_time_left: f32, // client-side remaining match time (seconds)
+    pub match_time_left: f32,            // client-side remaining match time (seconds)
     pub match_end_winner: Option<String>,
 
     // authoritative/current match mode (None when not in a match)
@@ -144,8 +147,8 @@ pub struct PlayingState {
     pub hands_playback_mode: HandsPlaybackMode,
     pub hands_anim_initialized: bool,
     pub prev_hands_key: Option<String>, // tracks active hands rig key across swaps
-    pub prev_was_reloading: bool, // edge detection for reload anim trigger
-    pub prev_was_sliding: bool, // edge detection for slide start/end network events
+    pub prev_was_reloading: bool,       // edge detection for reload anim trigger
+    pub prev_was_sliding: bool,         // edge detection for slide start/end network events
     pub prev_any_slide_anim_active: bool, // edge detect for shared world slide clip playback
 
     pub knife_swing_index: u8, // cycles 0..2 for light slashes (swings 1-3)
@@ -170,8 +173,8 @@ pub struct PlayingState {
     pub snd_max_rounds: u8,
     pub snd_red_wins: u8,
     pub snd_blue_wins: u8,
-    pub snd_phase: u8,            // 0=freeze, 1=active, 2=bomb_planted, 3=round_over
-    pub snd_attacking_team: u8,   // 1=Red, 2=Blue
+    pub snd_phase: u8,          // 0=freeze, 1=active, 2=bomb_planted, 3=round_over
+    pub snd_attacking_team: u8, // 1=Red, 2=Blue
     pub snd_bomb_carrier_id: u32, // 0 = no carrier
     pub snd_bomb_dropped: Option<(f32, f32, f32)>, // world pos if bomb on ground
     pub snd_bomb_site: (f32, f32, f32),
@@ -179,8 +182,8 @@ pub struct PlayingState {
     pub snd_plant_progress: f32,
     pub snd_defuse_progress: f32,
     pub snd_phase_timer: f32,
-    pub snd_is_planting: bool,    // client is currently holding plant
-    pub snd_is_defusing: bool,    // client is currently holding defuse
+    pub snd_is_planting: bool, // client is currently holding plant
+    pub snd_is_defusing: bool, // client is currently holding defuse
 
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
@@ -247,6 +250,7 @@ impl PlayingState {
             pending_respawn: false,
             pending_hits: Vec::new(),
             weapons: WeaponInventory::new(),
+            last_sent_weapon: String::new(),
             target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
             hit_marker_timer: 0.0,
             hit_marker_headshot: false,

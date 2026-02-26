@@ -2,7 +2,8 @@ use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS, FLAG_AIRBORNE,
     FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MSG_BOT_DESPAWN_ALL, MSG_BOT_SPAWN,
     MSG_HIT, MSG_POSITION, MSG_SND_BOMB_PICKUP, MSG_SND_DEFUSE_START, MSG_SND_DEFUSE_STOP,
-    MSG_SND_PLANT_START, MSG_SND_PLANT_STOP, MSG_START_GAME, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    MSG_SND_PLANT_START, MSG_SND_PLANT_STOP, MSG_START_GAME, MSG_WALL_BROKEN, MSG_WEAPON_CHANGE,
+    MSG_WORLD_CHANGE,
 };
 use std::net::UdpSocket;
 
@@ -185,6 +186,18 @@ impl PlayingState {
             }
             if !self.movement_state.is_sliding && self.prev_was_sliding {
                 event_flags |= EVT_SLIDE_END;
+            }
+
+            // send weapon change if it differs from last sent
+            let current_weapon_name = self.weapons.active().stats().name;
+            if current_weapon_name != self.last_sent_weapon {
+                let bytes = current_weapon_name.as_bytes();
+                let mut msg = Vec::with_capacity(2 + bytes.len());
+                msg.push(MSG_WEAPON_CHANGE);
+                msg.push(bytes.len() as u8);
+                msg.extend_from_slice(bytes);
+                let _ = s.send_to(&msg, server_addr);
+                self.last_sent_weapon = current_weapon_name.to_string();
             }
 
             // pack position message into a small stack buffer to avoid per-frame heap allocations
