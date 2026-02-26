@@ -32,7 +32,7 @@ pub struct DevModeState {
     pub show_code_prompt: bool,
     pub hands_anim_request: Option<HandsAnimRequest>,
     pub precision_mode: bool, // viewmodel: shrinks all step sizes by 10x for micro-adjustments
-    pub force_ads: bool, // simulate ADS being held for viewmodel preview
+    pub force_ads: bool,      // simulate ADS being held for viewmodel preview
     pub viewport_drag_active: bool, // viewmodel: drag on viewport to adjust pos/rot
     pub viewport_drag_prev_mouse: (f32, f32), // last frame mouse pos for delta calc
     pub ruler_active: bool,
@@ -40,6 +40,13 @@ pub struct DevModeState {
     pub ruler_end: Option<Vec3>,
     pub ruler_set_start_requested: bool,
     pub ruler_set_end_requested: bool,
+    // world-weapon adjustment knobs (local space)
+    pub weapon_pos_offset: (f32, f32, f32),
+    pub weapon_rot_offset: (f32, f32, f32),
+    // additional yaw tweak applied when moving (walk/run)
+    pub weapon_yaw_adjust_move: f32,
+    // yaw tweak while aiming down sights
+    pub weapon_yaw_adjust_ads: f32,
 }
 
 impl DevModeState {
@@ -66,6 +73,13 @@ impl DevModeState {
             ruler_end: None,
             ruler_set_start_requested: false,
             ruler_set_end_requested: false,
+            // default offset: mirror the baseline adjustment used when dev mode is locked
+            // (X right/left, Y up/down, Z forward/back) – note that Z sign flips
+            // depending on movement/ADS state so the slider value is the magnitude.
+            weapon_pos_offset: (-0.14, -0.07, -0.01),
+            weapon_rot_offset: (0.0, 0.0, 0.0),
+            weapon_yaw_adjust_move: std::f32::consts::PI / 2.0,
+            weapon_yaw_adjust_ads: 0.0,
         }
     }
 
