@@ -112,8 +112,14 @@ impl PlayingState {
                 draw_text_ex(&timer_text, cx - tw / 2.0, cy + 20.0, text_params(24, GRAY));
             }
         } else if self.current_world == WorldId::Maze {
+            let is_snd = self.match_mode
+                == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY);
             if self.death_timer <= 0.0 {
-                let respawn_text = "Waiting to Respawn...";
+                let respawn_text = if is_snd {
+                    "Waiting for round to end..."
+                } else {
+                    "Waiting to Respawn..."
+                };
                 let tw = measure_game_text(respawn_text, 24);
                 draw_text_ex(
                     respawn_text,
@@ -122,14 +128,16 @@ impl PlayingState {
                     text_params(24, GRAY),
                 );
 
-                let hint_text = "(Game mode will respawn you)";
-                let hw = measure_game_text(hint_text, 16);
-                draw_text_ex(
-                    hint_text,
-                    cx - hw / 2.0,
-                    cy + 50.0,
-                    text_params(16, DARKGRAY),
-                );
+                if !is_snd {
+                    let hint_text = "(Game mode will respawn you)";
+                    let hw = measure_game_text(hint_text, 16);
+                    draw_text_ex(
+                        hint_text,
+                        cx - hw / 2.0,
+                        cy + 50.0,
+                        text_params(16, DARKGRAY),
+                    );
+                }
             } else {
                 let timer_text = format!("{:.1}s", self.death_timer);
                 let tw = measure_game_text(&timer_text, 48);
