@@ -9,6 +9,10 @@ const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 // Mixamo-style rigs are authored facing +Z, while gameplay yaw uses +X as forward.
 // Keep this offset centralized so yaw logic and movement math stay in gameplay space.
 const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
+// additional yaw (radians) to rotate world weapons rightwards
+const WORLD_WEAPON_YAW_ADJUST: f32 = std::f32::consts::PI / 2.0; // 45° right
+                                                                 // additional forward translation in world space to push guns away from hand
+const WORLD_WEAPON_FORWARD_OFFSET: f32 = 0.1; // units, tweak for desired spacing
 
 impl PlayingState {
     #[inline(always)]
@@ -32,10 +36,22 @@ impl PlayingState {
         let anim_model = desired_anim.or_else(|| self.animated_models.get("anim_rifle_idle"));
         let static_mesh_list = desired_static.or_else(|| self.models.get("anim_rifle_idle"));
 
+        // draw the player body; remember whether we actually rendered a model so
+        // we can fall back to cubes and still attach a weapon later.
+        let mut drawn_body = false;
+        // we also keep some variables around for hand offset calculation
+        let mut hand_world_pos: Option<Vec3> = None;
+        // these are only valid when the animated model branch runs
+        let mut anim_scale = WORLD_PLAYER_RENDER_SCALE;
+        let mut _anim_y_offset = 0.0f32;
+
         if p.skin_type.is_model_based() {
             if let Some(anim) = anim_model {
+                drawn_body = true;
                 let s = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
+                anim_scale = s;
                 let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
+                _anim_y_offset = y_offset;
                 let transform = Mat4::from_translation(render_pos + vec3(0.0, y_offset, 0.0))
                     * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                     * Mat4::from_scale(vec3(s, s, s));
@@ -69,9 +85,20 @@ impl PlayingState {
                     }
                 }
                 gl.quad_gl.pop_model_matrix();
-                return;
-            }
-            if let Some(meshes) = static_mesh_list {
+
+                // compute hand pos from joint (set hand_world_pos later when
+                // drawing weapon)
+                if let Some(r_hand) = anim
+                    .joint_position_with_tokens(&[&"right", &"hand"])
+                    .or_else(|| anim.joint_position_with_tokens(&[&"right", &"wrist"]))
+                {
+                    let offset = Mat3::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
+                        * (r_hand * s)
+                        + vec3(0.0, y_offset, 0.0);
+                    hand_world_pos = Some(render_pos + offset);
+                }
+            } else if let Some(meshes) = static_mesh_list {
+                drawn_body = true;
                 let transform = Mat4::from_translation(render_pos)
                     * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                     * Mat4::from_scale(vec3(
@@ -105,23 +132,115 @@ impl PlayingState {
                     }
                 }
                 gl.quad_gl.pop_model_matrix();
-                return;
             }
         }
 
-        let color = if p.skin.is_some() { WHITE } else { p.color };
-        draw_cube(
-            render_pos + vec3(0.0, 0.6, 0.0),
-            vec3(0.6, 1.2, 0.4),
-            None,
-            color,
-        );
-        draw_cube(
-            render_pos + vec3(0.0, 1.4, 0.0),
-            vec3(0.4, 0.4, 0.4),
-            None,
-            color,
-        );
+        if !drawn_body {
+            let color = if p.skin.is_some() { WHITE } else { p.color };
+            draw_cube(
+                render_pos + vec3(0.0, 0.6, 0.0),
+                vec3(0.6, 1.2, 0.4),
+                None,
+                color,
+            );
+            draw_cube(
+                render_pos + vec3(0.0, 1.4, 0.0),
+                vec3(0.4, 0.4, 0.4),
+                None,
+                color,
+            );
+        }
+
+        // === weapon rendering (runs regardless of body type) ===
+        if hand_world_pos.is_none() {
+            // no joint calculated earlier; use generic shoulder/hand offset
+            let forward = vec3(render_yaw.cos(), 0.0, render_yaw.sin());
+            let right = vec3(-forward.z, 0.0, forward.x);
+            hand_world_pos =
+                Some(render_pos + right * 0.3 * anim_scale + vec3(0.0, 1.0 * anim_scale, 0.0));
+        }
+
+        if let Some(weapon_id) = crate::weapons::stats::WeaponId::from_name(&p.current_weapon) {
+            if let Some(model_key) = weapon_id.stats().viewmodel_model {
+                // for world drawing we prefer a dedicated static model if one exists
+                // (e.g. `fp_hands_minigun` → `minigun_model`). this keeps other
+                // players from seeing our first‑person arms when wielding heavy
+                // weapons.
+                // compute an owned key string so that we can safely reference it
+                // for the duration of this block. `world_key` will borrow from the
+                // owned string via `as_str()` when used below.
+                let world_key_owned: String = if model_key.starts_with("fp_hands_") {
+                    let candidate = format!("{}_model", &model_key[9..]);
+                    if self.models.contains_key(&candidate) {
+                        candidate
+                    } else {
+                        model_key.to_string()
+                    }
+                } else {
+                    model_key.to_string()
+                };
+                let world_key = world_key_owned.as_str();
+
+                let wgl = unsafe { get_internal_gl() };
+                if let Some(hand_world) = hand_world_pos {
+                    // reduce overall model scale; sawnoff tends to come in huge so
+                    // apply an additional shrink factor when its key is detected.
+                    let mut scale_factor = anim_scale * 0.1;
+                    if world_key.contains("sawnoff") {
+                        scale_factor *= 0.1;
+                    }
+
+                    // rotate most guns slightly to the right when the player
+                    // is moving (walking/sprinting) or aiming down sights. idle
+                    // players should not have the yaw adjustment applied.
+                    let mut yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
+                    let is_moving = p.is_sprinting
+                        || matches!(
+                            p.skin_type,
+                            crate::types::player::PlayerSkin::RifleWalk
+                                | crate::types::player::PlayerSkin::WalkBack
+                                | crate::types::player::PlayerSkin::WalkLeft
+                                | crate::types::player::PlayerSkin::WalkRight
+                                | crate::types::player::PlayerSkin::SprintForward
+                                | crate::types::player::PlayerSkin::SprintLeft
+                                | crate::types::player::PlayerSkin::SprintRight
+                        );
+                    if is_moving || p.is_ads {
+                        yaw_rot -= WORLD_WEAPON_YAW_ADJUST;
+                    }
+                    // exceptions that are already oriented correctly (hands-based)
+                    if world_key.contains("sawnoff")
+                        || world_key.contains("minigun")
+                        || world_key.contains("knife")
+                    {
+                        yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
+                    }
+
+                    // nudge weapon forward or backward based on activity state
+                    let forward_dir = vec3(render_yaw.cos(), 0.0, render_yaw.sin());
+                    let mut offset = WORLD_WEAPON_FORWARD_OFFSET;
+                    if !is_moving && !p.is_ads {
+                        // stationary/idle players: move weapon slightly backward
+                        offset = -0.05;
+                    }
+                    let weapon_pos = hand_world + forward_dir * offset;
+                    let weapon_transform = Mat4::from_translation(weapon_pos)
+                        * Mat4::from_rotation_y(yaw_rot)
+                        * Mat4::from_scale(Vec3::splat(scale_factor));
+                    wgl.quad_gl.push_model_matrix(weapon_transform);
+                    if let Some(weapon_meshes) = self.models.get(world_key) {
+                        for mesh in weapon_meshes {
+                            draw_mesh(mesh);
+                        }
+                    } else if let Some(animated) = self.animated_models.get(world_key) {
+                        for mesh in animated.meshes() {
+                            draw_mesh(mesh);
+                        }
+                    }
+                    wgl.quad_gl.pop_model_matrix();
+                }
+            }
+        }
     }
 
     pub(crate) fn draw_target_dummy(&self) {

@@ -15,6 +15,9 @@ pub const MSG_WORLD_CHANGE: u8 = 9; // server -> client: bi-directional world tr
                                     // The additional bytes are only included when transitioning into the maze (match start)
                                     // so clients can synchronise timers even if packets reorder.  match_timer_secs uses the
                                     // same clamped-to-255 value as MSG_MATCH_TIMER.
+
+// client -> server: active weapon changed (UTF‑8 name length + bytes)
+pub const MSG_WEAPON_CHANGE: u8 = 33;
 pub const MSG_ASSETS: u8 = 10; // server -> client: asset manifest per world
 pub const MSG_DISCOVER: u8 = 11; // client -> server: LAN discovery broadcast
 pub const MSG_WALL_BROKEN: u8 = 12; // client <-> server: breakable wall destroyed (x, y)
