@@ -469,3 +469,100 @@ Level 2 bot: Spawn Level 2, verify it moves side-to-side and shoots faster
 Level 3 bot: Spawn Level 3, verify it moves, jumps, and aims more accurately
 Clear all: Use "Clear All Bots" button, verify all bots disappear
 Multiple clients: Connect 2 clients, verify both see the same bot
+
+---
+
+Progress Update (Do Not Edit Original Plan Above)
+Date: 2026-02-25
+
+Completed Today (remove these from pending)
+
+Phase 1A
+- Step 1: Add glam to server + math helpers
+- Step 2: Port movement physics to server
+- Step 3: Add is_bot field to Player
+
+Phase 1B
+- Step 4: Create bot module structure
+- Step 5: BotManager core orchestrator (spawn/despawn/tick wired)
+- Step 6: BotState and BotBehavior implemented and integrated
+- Step 16: names file created (currently range flow is not using personality naming)
+
+Phase 1C
+- Step 8: apply_damage extracted and reused by bots
+
+Phase 1D
+- Step 9: Skip network sends to bots in broadcast/damage flows
+- Step 10: Skip bots in cleanup + bot respawn handling updated
+- Step 11: FLAG_IS_BOT added and client parse/display path wired
+
+Phase 1E
+- Step 12: BotManager integrated in server runtime loop
+- Step 13: Bot control protocol messages wired (spawn/clear)
+- Step 15: Dev mode bot tab path wired for server-side spawn controls
+
+Phase 1F
+- Step 14: Shooting range experience implemented in lobby (geometry, collision, start interaction)
+- Step 7: Bot shooting implemented and iterated:
+  - weapon damage/range sourced server-side from weapon stats
+  - per-bot fire cadence/reaction/accuracy tuning
+  - per-bot detection range support
+  - randomized fire cadence (no synchronized volleys)
+  - bot shot feedback packet path added (MSG_BOT_SHOT)
+
+Additional Completed Today (not explicitly listed in original step text)
+- Lobby health/death safety work:
+  - player damage clamped in lobby (player does not hard-die there)
+  - lobby regen delay + regen loop handling present
+- Level design system for range:
+  - Level 1: static shooters with mixed pistol/SMG loadouts and per-bot tuning
+  - Level 2: moving shooters with mixed AR/shotgun loadouts and per-bot tuning
+  - Level 3: timed 1-HP target challenge setup (non-shooting targets)
+- Manual per-bot level definitions (explicit entries instead of generated map loops)
+- Bot aiming behavior added (faces target when target exists)
+
+Missing / Next Work (add these to active scope)
+
+Priority Fixes (current blockers)
+- Verify/fix remaining issues reported in playtests:
+  - bots not dying consistently in shooting range
+  - lobby player death still happening in some paths
+  - bot tracer/muzzle visibility consistency
+  - bot animation playback parity with normal players while moving/shooting
+- Ensure no bots exist before range start in all code paths
+- Confirm respawn-in-lobby behavior remains correct after latest combat changes
+
+Gameplay Bots (separate from range bots) - Missing
+- Create separate gameplay bot profile system (not tied to shooting range level presets)
+- Difficulty system (independent of personality):
+  - reaction time
+  - angular offset
+  - perception/FOV
+  - repath frequency
+  - strategy aggressiveness/flanking weights
+- Maze pathfinding stack:
+  - nav graph
+  - BFS/A*
+  - periodic repath
+  - maze wall collision integration in server bot movement
+- Personality bots for match gameplay:
+  - fixed names per personality
+  - archetype behavior weights
+  - preferred weapons and ranges
+- Runtime controls for match testing:
+  - choose exact gameplay bot by name/profile
+  - choose difficulty
+  - choose team
+  - spawn into real match context for testing
+- Match auto-fill integration:
+  - fill to target count
+  - team balancing
+  - dynamic leave when humans join
+
+Verification Additions Needed
+- Add explicit verification for:
+  - no pre-start bot spawn in lobby range
+  - Level 2 path variety (across-lane + non-linear patrols)
+  - Level 3 timeout behavior
+  - bot visual shot feedback for hit and miss cases
+  - bot death/remove behavior in all range levels
