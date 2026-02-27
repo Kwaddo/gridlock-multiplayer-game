@@ -247,7 +247,7 @@ impl BotManager {
                 if !state.can_shoot {
                     continue;
                 }
-                if let Some(decision) = shooting::try_shoot(*addr, players, state, dt) {
+                if let Some(decision) = shooting::try_shoot(*addr, players, state, maze, dt) {
                     let weapon = players
                         .get(addr)
                         .map(|p| p.current_weapon.clone())

@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use rand::Rng;
+use crate::bot::personality::difficulty_mods;
+use crate::maze::MazeData;
 use crate::player::{Player, Team, WorldId};
+use crate::server::game::MAZE_CELL_SIZE;
 use crate::bot::ai::BotState;
 use crate::weapons_stats::get_weapon_stats;
 
@@ -29,6 +32,7 @@ pub fn try_shoot(
     bot_addr: SocketAddr,
     players: &HashMap<SocketAddr, Player>,
     bot_state: &mut BotState,
+    maze: Option<&MazeData>,
     dt: f32,
 ) -> Option<ShotDecision> {
 
@@ -51,12 +55,19 @@ pub fn try_shoot(
 
     // find target
     
+    let runtime_fov = bot_state
+        .personality
+        .base_fov_degrees
+        .max(difficulty_mods(bot_state.difficulty).fov_degrees);
+
     let target = players.values()
         .filter(|p| {
             p.id != bot.id 
             && p.is_alive 
             && p.world == bot.world 
             && distance(bot.position, p.position) <= bot_state.shooting_config.detection_range.unwrap_or(weapon_stats.range)
+            && is_in_fov(bot, p, runtime_fov)
+            && has_line_of_sight(bot, p, maze)
             && (
                 if bot.world == WorldId::Lobby {
                     !p.is_bot
@@ -129,4 +140,61 @@ fn distance(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
     let dy = a.1 - b.1;
     let dz = a.2 - b.2;
     (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+fn is_in_fov(bot: &Player, target: &Player, fov_degrees: f32) -> bool {
+    let dx = target.position.0 - bot.position.0;
+    let dz = target.position.2 - bot.position.2;
+    let len_sq = dx * dx + dz * dz;
+    if len_sq <= 1e-6 {
+        return true;
+    }
+
+    let fov = fov_degrees.clamp(1.0, 359.0);
+    let half_fov_cos = (fov.to_radians() * 0.5).cos();
+    let inv_len = len_sq.sqrt().recip();
+    let to_target = (dx * inv_len, dz * inv_len);
+    let forward = (bot.yaw.cos(), bot.yaw.sin());
+    let dot = to_target.0 * forward.0 + to_target.1 * forward.1;
+    dot >= half_fov_cos
+}
+
+fn has_line_of_sight(bot: &Player, target: &Player, maze: Option<&MazeData>) -> bool {
+    // Lobby has no server-side wall grid representation; only maze mode is occluded here.
+    if bot.world != WorldId::Maze {
+        return true;
+    }
+    let Some(maze) = maze else {
+        return true;
+    };
+
+    let x0 = bot.position.0;
+    let z0 = bot.position.2;
+    let dx = target.position.0 - x0;
+    let dz = target.position.2 - z0;
+    let dist = (dx * dx + dz * dz).sqrt();
+    if dist <= 1e-5 {
+        return true;
+    }
+
+    // Sample several points per cell along the segment and reject as soon as it enters a wall cell.
+    let steps = ((dist / (MAZE_CELL_SIZE * 0.2)).ceil() as i32).max(1);
+    for i in 1..steps {
+        let t = i as f32 / steps as f32;
+        let x = x0 + dx * t;
+        let z = z0 + dz * t;
+        let cx = (x / MAZE_CELL_SIZE).floor() as i32;
+        let cy = (z / MAZE_CELL_SIZE).floor() as i32;
+
+        if cx < 0 || cy < 0 || cx >= maze.width as i32 || cy >= maze.height as i32 {
+            return false;
+        }
+
+        let idx = cy as usize * maze.width as usize + cx as usize;
+        if maze.cells.get(idx).copied().unwrap_or(0) == 0 {
+            return false;
+        }
+    }
+
+    true
 }
