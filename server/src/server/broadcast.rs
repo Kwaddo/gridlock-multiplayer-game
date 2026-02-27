@@ -184,6 +184,9 @@ pub fn broadcast_state(socket: &UdpSocket, players: &HashMap<std::net::SocketAdd
             if player.is_bot {
                 state_flags |= FLAG_IS_BOT;
             }
+            if player.is_silent {
+                state_flags |= FLAG_SILENT;
+            }
             state_msg.push(state_flags);
 
             let mut event_flags = 0u8;

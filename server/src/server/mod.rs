@@ -58,6 +58,9 @@ pub fn run() -> std::io::Result<()> {
     let mut match_total_maze_entries: usize = 0;
     // Search & Destroy state (only Some when S&D mode is active)
     let mut snd_state: Option<snd::SndState> = None;
+    // Auto-fill bot settings (set by the client that starts the match)
+    let mut autofill_bots_per_team: u8 = 0; // 0=disabled, 1-8=per team
+    let mut autofill_diff_mask: u8 = 0b11111; // all difficulties enabled by default
     // Track last tick time for delta-time calculation
     let mut last_tick = Instant::now();
 
@@ -123,6 +126,14 @@ pub fn run() -> std::io::Result<()> {
                                 match_mode = requested;
                             }
                         }
+                        // parse auto-fill settings: payload[3]=bots_per_team, payload[4]=diff_mask
+                        if payload.len() >= 5 {
+                            autofill_bots_per_team = payload[3].min(8);
+                            autofill_diff_mask = payload[4] & 0b11111;
+                        } else {
+                            autofill_bots_per_team = 0;
+                            autofill_diff_mask = 0b11111;
+                        }
                         // Duration is fixed per mode: TDM = 15 min, S&D = None (round-based), Gun Game = default
                         let requested_duration: Option<Duration> = match match_mode {
                             MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
@@ -161,6 +172,7 @@ pub fn run() -> std::io::Result<()> {
                         &mut match_end_pending,
                         match_mode,
                         &mut snd_state,
+                        bot_manager.bot_states_mut(),
                     ),
                     MSG_RESPAWN_REQUEST => {
                         handlers::handle_respawn_request(
@@ -257,8 +269,10 @@ pub fn run() -> std::io::Result<()> {
                                     team: bot_cfg.team,
                                     current_weapon: weapon.to_string(),
                                     is_bot: true,
+                                    is_silent: false,
                                     auto_respawn: false,
                                     lobby_regen_resume_at: None,
+
                                 };
 
                                 let bot_state = BotState {
@@ -296,9 +310,18 @@ pub fn run() -> std::io::Result<()> {
                                         peek_time: 1.0,
                                         reposition_interval: 3.0,
                                         noise_investigation_weight: 0.5,
+                                        base_aim_offset: 0.0,
+                                        base_reaction_time: shooting_cfg.reaction_time,
+                                        base_fov_degrees: 90.0,
+                                        base_repath_interval: 2.0,
+                                        
                                     },
                                     difficulty: crate::bot::personality::BotDifficulty::Normal,
                                     archetype: crate::bot::personality::BotArchetype::AllRounder,
+                                    personality_id: None,
+                                    last_known_enemy_pos: None,
+                                    behavior_decision_timer: 0.0,
+                                    hits_received_since_teleport: 0,
                                 };
 
                                 bot_manager.spawn_bot(&mut players, bot_player, bot_state);
@@ -357,7 +380,7 @@ pub fn run() -> std::io::Result<()> {
             }
         }
         // tick bots
-        bot_manager.tick(&socket, &mut players, &mut match_end_pending, match_mode);
+        bot_manager.tick(&socket, &mut players, &mut match_end_pending, match_mode, maze.as_ref());
         if bot_manager.handle_range_challenge_timeout(&mut players) {
             broadcast::broadcast_state(&socket, &players);
             broadcast::broadcast_player_list(&socket, &players);
@@ -403,6 +426,9 @@ pub fn run() -> std::io::Result<()> {
                 match_mode,
                 &mut snd_state,
                 match_duration,
+                &mut bot_manager,
+                autofill_bots_per_team,
+                autofill_diff_mask,
             );
         }
 
@@ -473,6 +499,7 @@ pub fn run() -> std::io::Result<()> {
                     &mut match_duration,
                     winner_name,
                     &mut snd_state,
+                    &mut bot_manager,
                 );
             }
         }

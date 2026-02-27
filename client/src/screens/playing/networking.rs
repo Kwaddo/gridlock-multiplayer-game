@@ -48,6 +48,17 @@ impl PlayingState {
                 // always append two bytes for the duration code so server can parse easily
                 msg.push((dur_code >> 8) as u8);
                 msg.push((dur_code & 0xFF) as u8);
+                // auto-fill: bots_per_team (0=disabled, 1-8=per team count)
+                let bpt = if self.autofill_enabled { self.autofill_bots_per_team } else { 0 };
+                msg.push(bpt);
+                // difficulty mask: bit0=Recruit, bit1=Easy, bit2=Normal, bit3=Hard, bit4=Nightmare
+                let mut diff_mask: u8 = 0;
+                if self.autofill_diff_recruit   { diff_mask |= 1 << 0; }
+                if self.autofill_diff_easy      { diff_mask |= 1 << 1; }
+                if self.autofill_diff_normal    { diff_mask |= 1 << 2; }
+                if self.autofill_diff_hard      { diff_mask |= 1 << 3; }
+                if self.autofill_diff_nightmare { diff_mask |= 1 << 4; }
+                msg.push(diff_mask);
                 let _ = s.send_to(&msg, server_addr);
             }
 

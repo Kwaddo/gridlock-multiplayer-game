@@ -76,6 +76,15 @@ pub struct PlayingState {
     pub pending_set_team: Option<u8>,
     pub pending_range_start: bool,
     pub lobby_console_open: bool,
+    // auto-fill bot settings (lobby console)
+    pub autofill_enabled: bool,
+    pub autofill_bots_per_team: u8,   // 0..=8
+    pub autofill_diff_recruit: bool,
+    pub autofill_diff_easy: bool,
+    pub autofill_diff_normal: bool,
+    pub autofill_diff_hard: bool,
+    pub autofill_diff_nightmare: bool,
+    pub autofill_dropdown_open: bool,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
     pub pending_hits: Vec<(u32, f32, bool)>, // victim_id, damage, backstab attempt?
@@ -185,6 +194,9 @@ pub struct PlayingState {
     pub snd_is_planting: bool, // client is currently holding plant
     pub snd_is_defusing: bool, // client is currently holding defuse
 
+    // local player footstep timer
+    pub local_footstep_timer: f32,
+
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
 
@@ -246,6 +258,14 @@ impl PlayingState {
             pending_set_team: None,
             pending_range_start: false,
             lobby_console_open: false,
+            autofill_enabled: false,
+            autofill_bots_per_team: 3,
+            autofill_diff_recruit: true,
+            autofill_diff_easy: true,
+            autofill_diff_normal: true,
+            autofill_diff_hard: true,
+            autofill_diff_nightmare: true,
+            autofill_dropdown_open: false,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
             pending_hits: Vec::new(),
@@ -338,6 +358,7 @@ impl PlayingState {
             snd_is_planting: false,
             snd_is_defusing: false,
 
+            local_footstep_timer: 0.0,
             destroyed_lights: HashSet::new(),
 
             match_start_cached_secs: -1,

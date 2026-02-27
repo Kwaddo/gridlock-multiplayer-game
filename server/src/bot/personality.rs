@@ -25,7 +25,7 @@ pub struct BotPersonality {
     pub base_fov_degrees: f32, // optional but its how wide the bots eyes are
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BotDifficulty {
     Recruit,
     Easy,
@@ -126,7 +126,7 @@ pub fn compute_runtime(p: &BotPersonality, d: BotDifficulty) -> DifficultyMods {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BotPersonalityId {
     Heater, // fast-entry duelist, high aggression, close-mid range
     Stinger, // poke/harass bot, quick peeks, medium aggression

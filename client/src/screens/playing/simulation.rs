@@ -9,10 +9,26 @@ use crate::weapons::combat::{default_player_hitboxes, CombatEntity, HitZone, Hit
 use crate::weapons::stats::{WeaponCategory, WeaponId};
 
 use macroquad::prelude::*;
+use rodio::{Decoder, Sink};
 use std::collections::HashMap;
+use std::io::Cursor;
 
 use super::state::HandsPlaybackMode;
 use super::PlayingState;
+
+// ── Footstep constants ──
+/// Maximum distance (world units) at which footsteps are audible
+const FOOTSTEP_MAX_DIST: f32 = 30.0;
+/// Footstep intervals (seconds between steps)
+const FOOTSTEP_INTERVAL_WALK: f32 = 0.50;
+const FOOTSTEP_INTERVAL_SPRINT: f32 = 0.32;
+const FOOTSTEP_INTERVAL_CROUCH: f32 = 0.72;
+/// Base volumes per movement type (before distance attenuation)
+const FOOTSTEP_VOLUME_WALK: f32 = 0.45;
+const FOOTSTEP_VOLUME_SPRINT: f32 = 0.75;
+const FOOTSTEP_VOLUME_CROUCH: f32 = 0.22;
+/// Slide sound volume
+const SLIDE_SOUND_VOLUME: f32 = 0.6;
 
 const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
@@ -576,9 +592,59 @@ impl PlayingState {
         self.prev_hands_key = active_hands_key.map(|k| k.to_string());
 
         self.target_dummy.update(delta);
+
+        // update other players and collect footstep sounds to play
+        let mut footstep_sounds: Vec<(Vec3, Vec3, f32)> = Vec::new(); // (pos, vel, volume)
+        let mut slide_sounds: Vec<(Vec3, Vec3)> = Vec::new();
         for p in &mut self.other_players {
             p.update(delta);
+
+            // skip silent players (Shadow bot) and dead players
+            if p.is_silent || p.hp <= 0.0 {
+                continue;
+            }
+
+            // determine movement state for footstep sounds
+            let is_moving = p.last_move_dir != crate::types::animation_state::MoveDir::None;
+            let is_sliding = p.is_sliding;
+
+            if is_sliding {
+                // slide sound plays once at start (timer acts as "played" flag)
+                if p.footstep_timer <= 0.0 {
+                    let pos = p.render_position();
+                    let vel = vec3(p.render_x - p.prev_x, 0.0, p.render_z - p.prev_z) / delta.max(0.001);
+                    slide_sounds.push((pos, vel));
+                    p.footstep_timer = 1.0; // prevent re-triggering during same slide
+                }
+            } else if is_moving {
+                p.footstep_timer -= delta;
+                if p.footstep_timer <= 0.0 {
+                    let (interval, volume) = if p.is_sprinting {
+                        (FOOTSTEP_INTERVAL_SPRINT, FOOTSTEP_VOLUME_SPRINT)
+                    } else if p.is_crouching {
+                        (FOOTSTEP_INTERVAL_CROUCH, FOOTSTEP_VOLUME_CROUCH)
+                    } else {
+                        (FOOTSTEP_INTERVAL_WALK, FOOTSTEP_VOLUME_WALK)
+                    };
+                    let pos = p.render_position();
+                    let vel = vec3(p.render_x - p.prev_x, 0.0, p.render_z - p.prev_z) / delta.max(0.001);
+                    footstep_sounds.push((pos, vel, volume));
+                    p.footstep_timer = interval;
+                }
+            } else {
+                // not moving — reset timer so first step plays immediately on next move
+                p.footstep_timer = 0.0;
+            }
         }
+
+        // play collected footstep sounds (outside mutable borrow)
+        for (pos, vel, volume) in footstep_sounds {
+            self.play_spatial_sound("footstep", pos, vel, volume, config);
+        }
+        for (pos, vel) in slide_sounds {
+            self.play_spatial_sound("slide", pos, vel, SLIDE_SOUND_VOLUME, config);
+        }
+
         let local_pos = Some(self.position);
         for bot in &mut self.practice_bots {
             bot.simulate_yaw(delta, local_pos);
@@ -788,6 +854,36 @@ impl PlayingState {
         }
         self.prev_was_reloading = self.weapons.active().is_reloading;
 
+        // ── Local player footstep sounds ──
+        if !self.is_dead && self.movement_state.is_grounded {
+            let is_moving = self.move_dir.length_squared() > 0.01;
+            let is_sliding = self.movement_state.is_sliding;
+
+            if is_sliding {
+                if self.local_footstep_timer <= 0.0 {
+                    self.play_local_sound("slide", SLIDE_SOUND_VOLUME, config);
+                    self.local_footstep_timer = 1.0;
+                }
+            } else if is_moving {
+                self.local_footstep_timer -= delta;
+                if self.local_footstep_timer <= 0.0 {
+                    let (interval, volume) = if self.movement_state.is_sprinting {
+                        (FOOTSTEP_INTERVAL_SPRINT, FOOTSTEP_VOLUME_SPRINT)
+                    } else if self.movement_state.is_crouching {
+                        (FOOTSTEP_INTERVAL_CROUCH, FOOTSTEP_VOLUME_CROUCH)
+                    } else {
+                        (FOOTSTEP_INTERVAL_WALK, FOOTSTEP_VOLUME_WALK)
+                    };
+                    self.play_local_sound("footstep", volume, config);
+                    self.local_footstep_timer = interval;
+                }
+            } else {
+                self.local_footstep_timer = 0.0;
+            }
+        } else {
+            self.local_footstep_timer = 0.0;
+        }
+
         /*
             this is the function that actually updates the players hitbox
             The way it works is by finding the animated model for the player based on their skin, then finds the position if important joints and builds hitboxes based on these
@@ -996,5 +1092,100 @@ impl PlayingState {
 
             Some(hitboxes)
         }
+    }
+}
+
+// ── Spatial audio helpers ──
+impl PlayingState {
+    /// Play a sound with distance-based volume falloff and doppler pitch shift.
+    /// `source_pos` is the world position of the emitter.
+    /// `source_vel` is the emitter's velocity (world units/sec) — used for doppler.
+    /// `base_volume` is the volume at distance 0 (before attenuation).
+    pub fn play_spatial_sound(
+        &self,
+        sound_key: &str,
+        source_pos: Vec3,
+        source_vel: Vec3,
+        base_volume: f32,
+        config: &GameConfig,
+    ) {
+        if config.mute_audio {
+            return;
+        }
+        let Some(sample_bytes) = self.sound_samples.get(sound_key) else {
+            return;
+        };
+        let Some(audio_handle) = self.audio_stream_handle.as_ref() else {
+            return;
+        };
+
+        let listener_pos = self.position;
+        let diff = source_pos - listener_pos;
+        let dist = diff.length();
+        if dist > FOOTSTEP_MAX_DIST {
+            return; // too far, don't bother
+        }
+
+        // distance attenuation: inverse-linear falloff to zero at max dist
+        let attenuation = 1.0 - (dist / FOOTSTEP_MAX_DIST);
+        let volume = base_volume * attenuation * attenuation; // squared for more natural falloff
+
+        // doppler effect: pitch shifts based on relative velocity toward/away from listener
+        let speed_of_sound = 50.0; // tuned for game units (not real-world 343 m/s)
+        let doppler_pitch = if dist > 0.1 {
+            // unit vector from source toward listener
+            let dir_to_listener = diff / dist;
+            // positive = source moving toward listener
+            let v_source = source_vel.dot(-dir_to_listener);
+            // listener velocity: approximate from position (we don't track it, so use 0)
+            // doppler: f' = f * (v_sound) / (v_sound + v_source)
+            // v_source positive when moving AWAY from listener
+            let denom = (speed_of_sound + v_source).max(1.0);
+            speed_of_sound / denom
+        } else {
+            1.0
+        };
+
+        // add small random variation to avoid robotic repetition
+        let pitch_variation = macroquad::rand::gen_range(0.95f32, 1.05f32);
+        let final_pitch = (doppler_pitch * pitch_variation).clamp(0.5, 2.0);
+
+        let cursor: Cursor<Vec<u8>> = Cursor::new(sample_bytes.to_vec());
+        let Ok(source) = Decoder::new(cursor) else {
+            return;
+        };
+        let Ok(sink) = Sink::try_new(audio_handle) else {
+            return;
+        };
+        sink.set_speed(final_pitch);
+        sink.set_volume(volume);
+        sink.append(source);
+        sink.detach();
+    }
+
+    /// Play a sound at the local player's position (no distance attenuation, no doppler).
+    fn play_local_sound(&self, sound_key: &str, volume: f32, config: &GameConfig) {
+        if config.mute_audio {
+            return;
+        }
+        let Some(sample_bytes) = self.sound_samples.get(sound_key) else {
+            return;
+        };
+        let Some(audio_handle) = self.audio_stream_handle.as_ref() else {
+            return;
+        };
+
+        let pitch = macroquad::rand::gen_range(0.95f32, 1.05f32);
+        let cursor: Cursor<Vec<u8>> = Cursor::new(sample_bytes.to_vec());
+        let Ok(source) = Decoder::new(cursor) else {
+            return;
+        };
+        let Ok(sink) = Sink::try_new(audio_handle) else {
+            return;
+        };
+        sink.set_speed(pitch);
+        sink.set_volume(volume);
+        sink.append(source);
+        sink.detach();
     }
 }

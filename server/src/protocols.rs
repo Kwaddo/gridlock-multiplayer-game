@@ -59,6 +59,7 @@ pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
 pub const MSG_BOT_SHOT: u8 = 52; // server -> client: bot fired (shooter_id, victim_id)
 
 pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
+pub const FLAG_SILENT: u8 = 1 << 7; // no footstep sounds (shadow bot)
 
 // State flags for player movement and actions, sent in the position message
 pub const FLAG_SPRINTING: u8 = 1 << 0;

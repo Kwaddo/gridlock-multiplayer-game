@@ -226,6 +226,10 @@ pub struct OtherPlayer {
 
     // bot
     pub is_bot: bool,
+    pub is_silent: bool, // shadow bot: no footstep sounds
+
+    // footstep audio
+    pub footstep_timer: f32,
 }
 
 impl OtherPlayer {
@@ -287,6 +291,8 @@ impl OtherPlayer {
             gun_level: 1,
             current_weapon: String::new(),
             is_bot: false,
+            is_silent: false,
+            footstep_timer: 0.0,
         }
     }
 
