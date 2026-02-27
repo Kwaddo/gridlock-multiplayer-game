@@ -199,7 +199,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                 BotPersonality {
                     name: "Heater",
                     archetype: Rusher,
-                    weapon: "MP5",
+                    weapon: "Benelli",
                     range_min: 6.0,
                     range_max: 24.0,
                     aggression: 0.88,
@@ -589,7 +589,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
     A     Ghost        H      0.210s  0.0154   180    0.90s   0.80   0.78   3.0s
            Patient camper. Sits in one spot forever, punishes anyone who peeks.
     A     Heater       H      0.210s  0.0245   180    0.60s   0.80   0.78   3.0s
-           Fast-entry duelist with MP5. Kicks down the door and starts blasting.
+           Fast-entry duelist with shotgun. Kicks down the door and starts blasting.
     A-    Viper        H      0.225s  0.0280   180    0.49s   0.80   0.78   3.0s
            Flanking ambusher. Takes the long way around and catches you off guard.
     A-    Rex          H      0.225s  0.0266   180    0.56s   0.80   0.78   3.0s
