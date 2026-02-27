@@ -4,6 +4,7 @@ use rand::Rng;
 
 use crate::maze::generation::generate_maze;
 use crate::maze::types::{MazeLight, Prop, Room};
+use crate::maze::analysis::{ self, MazeAnalysis };
 use crate::protocols::MSG_MAZE;
 
 pub struct MazeData {
@@ -15,12 +16,14 @@ pub struct MazeData {
     pub props: Vec<Prop>,
     pub lights: Vec<MazeLight>,
     pub teleporter: (u8, u8),
+    pub analysis: MazeAnalysis,
 }
 
 impl MazeData {
     pub fn new(width: u8, height: u8) -> Self {
         let seed = rand::thread_rng().gen();
         let (cells, rooms, props, lights, teleporter) = generate_maze(width, height, seed);
+        let maze_analysis = analysis::compute(&cells, width, height, &rooms);
         Self {
             width,
             height,
@@ -30,6 +33,7 @@ impl MazeData {
             props,
             lights,
             teleporter,
+            analysis: maze_analysis,
         }
     }
 

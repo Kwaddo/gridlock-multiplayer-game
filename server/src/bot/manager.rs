@@ -1,7 +1,9 @@
 use std::{ collections::HashMap, net::{SocketAddr, UdpSocket}, time::{ Duration, Instant } };
-use crate::{ bot::ai::{ self, BotState }, physics::PhysicsConfig };
-use crate::player::Player;
+use crate::{ bot::ai::{ self, BotState, BotBehavior }, physics::PhysicsConfig };
+use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
+use crate::bot::behavior;
+use crate::bot::personality::{ self, BotPersonalityId, BotArchetype };
 use crate::protocols::MSG_BOT_SHOT;
 use crate::server::handlers::other;
 pub struct BotManager {
@@ -30,8 +32,10 @@ impl BotManager {
     }
 
     pub fn is_bot(&self, addr: &SocketAddr) -> bool {
-        // check membership in bot_states or bot_addrs
         self.bot_states.contains_key(addr) || self.bot_addrs.contains(addr)
+    }
+    pub fn bot_states_mut(&mut self) -> &mut HashMap<SocketAddr, BotState> {
+        &mut self.bot_states
     }
     pub fn spawn_bot(
         &mut self,
@@ -43,6 +47,7 @@ impl BotManager {
         self.next_bot_idx += 1;
 
         player.is_bot = true;
+        player.is_silent = bot_state.personality.archetype == crate::bot::personality::BotArchetype::KnifeSneaker;
         player.socket_addr = addr;
         players.insert(addr, player);
 
@@ -65,6 +70,90 @@ impl BotManager {
         self.bot_addrs.clear();
         self.range_challenge_deadline = None;
     }
+    /// Spawn a bot with a full personality into a match.
+    /// Returns the virtual SocketAddr assigned to the bot.
+    pub fn spawn_personality_bot(
+        &mut self,
+        players: &mut HashMap<SocketAddr, Player>,
+        personality_id: BotPersonalityId,
+        team: Team,
+        weapon_override: &str,
+        spawn_pos: (f32, f32, f32),
+    ) -> SocketAddr {
+        let (pers, diff) = personality::get_personality(personality_id);
+        let runtime = personality::compute_runtime(&pers, diff);
+        let bot_id = 9000u32 + self.next_bot_idx as u32;
+
+        let bot_player = Player {
+            id: bot_id,
+            username: pers.name.to_string(),
+            position: spawn_pos,
+            yaw: 0.0,
+            pitch: 0.0,
+            health: 100,
+            shield: 0,
+            max_health: 100,
+            max_shield: 100,
+            is_alive: true,
+            kills: 0,
+            deaths: 0,
+            gun_level: 1,
+            socket_addr: Self::virtual_addr(0), // spawn_bot will overwrite
+            last_activity: Instant::now(),
+            death_time: None,
+            world: WorldId::Maze,
+            post_teleport_freeze_until: None,
+            is_sprinting: false,
+            is_ads: false,
+            is_crouched: false,
+            is_airborne: false,
+            is_prone: false,
+            is_sliding: false,
+            evt_jump_start: false,
+            evt_landed: false,
+            team,
+            current_weapon: weapon_override.to_string(),
+            is_bot: true,
+            is_silent: false, // spawn_bot will set based on archetype
+            auto_respawn: true,
+            lobby_regen_resume_at: None,
+        };
+
+        let bot_state = BotState {
+            movement: crate::physics::BotMovementState {
+                velocity: glam::Vec3::ZERO,
+                is_grounded: true,
+                height: 1.6,
+            },
+            behavior: BotBehavior::Static, // decide_behavior will pick on first tick
+            can_shoot: true,
+            shooting: shooting::BotShootingState {
+                fire_rate: 0.0,
+                has_target: false,
+                reaction_remaining: runtime.reaction_time_mult,
+            },
+            shooting_config: shooting::BotShootingConfig {
+                fire_rate: pers.base_reaction_time * 1.5, // rough fire interval from personality
+                angular_offset: runtime.aim_offset_mult,
+                reaction_time: runtime.reaction_time_mult,
+                detection_range: Some(pers.range_max),
+            },
+            target_id: None,
+            reaction_timer: 0.0,
+            personality: pers,
+            difficulty: diff,
+            archetype: pers.archetype,
+            personality_id: Some(personality_id),
+            last_known_enemy_pos: None,
+            behavior_decision_timer: 0.0,
+            hits_received_since_teleport: 0,
+        };
+
+        let addr = self.spawn_bot(players, bot_player, bot_state);
+        println!("Spawned bot '{}' ({:?}) on {:?} with {}", pers.name, diff, team, weapon_override);
+        addr
+    }
+
     pub fn set_range_challenge_deadline(&mut self, deadline: Option<Instant>) {
         self.range_challenge_deadline = deadline;
     }
@@ -83,7 +172,8 @@ impl BotManager {
         socket: &UdpSocket,
         players: &mut HashMap<SocketAddr, Player>,
         match_end_pending: &mut Option<(Instant, u32, String)>,
-        match_mode: u8
+        match_mode: u8,
+        maze: Option<&crate::maze::MazeData>,
     ) {
         if self.last_tick.elapsed() < self.tick_interval {
             return;
@@ -91,6 +181,35 @@ impl BotManager {
             self.last_tick = Instant::now();
         }
         let dt = self.tick_interval.as_secs_f32();
+
+        // ── Brain: run decide_behavior for maze-world bots ──
+        // Collect behavior changes first, then apply (avoids borrow conflicts).
+        if let Some(m) = maze {
+            let mut behavior_changes: Vec<(SocketAddr, ai::BotBehavior)> = Vec::new();
+            for addr in &self.bot_addrs {
+                let bot = match players.get(addr) {
+                    Some(p) if p.is_alive && p.world == WorldId::Maze => p,
+                    _ => continue,
+                };
+                let state = match self.bot_states.get(addr) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                // only run for bots with a personality_id (maze bots, not shooting range bots)
+                if state.personality_id.is_none() {
+                    continue;
+                }
+                if let Some(new_behavior) = behavior::decide_behavior(bot, state, players, m, &m.analysis) {
+                    behavior_changes.push((*addr, new_behavior));
+                }
+            }
+            // apply behavior changes
+            for (addr, new_behavior) in behavior_changes {
+                if let Some(state) = self.bot_states.get_mut(&addr) {
+                    state.behavior = new_behavior;
+                }
+            }
+        }
 
         for addr in &self.bot_addrs {
             if !players.get(addr).map_or(false, |p| p.is_alive) {
@@ -103,8 +222,11 @@ impl BotManager {
                 .and_then(|target_id| players.values().find(|p| p.id == target_id).map(|p| p.position));
             if let Some(bot) = players.get_mut(addr) {
                 if let Some(state) = self.bot_states.get_mut(addr) {
-                    ai::tick_bot(bot, state, dt, &PhysicsConfig::default());
+                    let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height));
+                    ai::tick_bot(bot, state, dt, &PhysicsConfig::default(), maze_cells);
                     if let Some(target_pos) = target_pos {
+                        // remember last known enemy position for investigation behavior
+                        state.last_known_enemy_pos = Some(target_pos);
                         let dx = target_pos.0 - bot.position.0;
                         let dz = target_pos.2 - bot.position.2;
                         if dx * dx + dz * dz > 0.0001 {
@@ -173,6 +295,8 @@ impl BotManager {
                     false,
                     match_end_pending,
                     match_mode,
+                    &mut self.bot_states,
+                    maze,
                 );
             }
         }
