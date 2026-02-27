@@ -4,7 +4,7 @@ use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
 use crate::bot::personality::{ self, BotPersonalityId, BotArchetype };
-use crate::protocols::MSG_BOT_SHOT;
+use crate::protocols::{MSG_BOT_SHOT, MODE_TEAM_DEATHMATCH};
 use crate::server::handlers::other;
 pub struct BotManager {
     bot_addrs: Vec<SocketAddr>,
@@ -102,7 +102,10 @@ impl BotManager {
             last_activity: Instant::now(),
             death_time: None,
             world: WorldId::Maze,
-            post_teleport_freeze_until: None,
+            post_teleport_freeze_until: Some(
+                Instant::now()
+                    + Duration::from_secs(crate::server::game::MATCH_POST_TELEPORT_FREEZE_SECS),
+            ),
             is_sprinting: false,
             is_ads: false,
             is_crouched: false,
@@ -191,6 +194,13 @@ impl BotManager {
                     Some(p) if p.is_alive && p.world == WorldId::Maze => p,
                     _ => continue,
                 };
+                if match_mode == MODE_TEAM_DEATHMATCH
+                    && bot
+                        .post_teleport_freeze_until
+                        .map_or(false, |t| t > Instant::now())
+                {
+                    continue;
+                }
                 let state = match self.bot_states.get(addr) {
                     Some(s) => s,
                     None => continue,
@@ -215,6 +225,11 @@ impl BotManager {
             if !players.get(addr).map_or(false, |p| p.is_alive) {
                 continue;
             }
+            let is_frozen = players.get(addr).map_or(false, |p| {
+                match_mode == MODE_TEAM_DEATHMATCH
+                    && p.world == WorldId::Maze
+                    && p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
+            });
             let target_pos = self
                 .bot_states
                 .get(addr)
@@ -222,6 +237,11 @@ impl BotManager {
                 .and_then(|target_id| players.values().find(|p| p.id == target_id).map(|p| p.position));
             if let Some(bot) = players.get_mut(addr) {
                 if let Some(state) = self.bot_states.get_mut(addr) {
+                    if is_frozen {
+                        state.movement.velocity.x = 0.0;
+                        state.movement.velocity.z = 0.0;
+                        continue;
+                    }
                     let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height));
                     ai::tick_bot(bot, state, dt, &PhysicsConfig::default(), maze_cells);
                     if let Some(target_pos) = target_pos {
@@ -241,6 +261,14 @@ impl BotManager {
         let mut pending_shots: Vec<(SocketAddr, u32, Option<u32>, String)> = Vec::new();
         for addr in &self.bot_addrs {
             if !players.get(addr).map_or(false, |p| p.is_alive) {
+                continue;
+            }
+            let is_frozen = players.get(addr).map_or(false, |p| {
+                match_mode == MODE_TEAM_DEATHMATCH
+                    && p.world == WorldId::Maze
+                    && p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
+            });
+            if is_frozen {
                 continue;
             }
             if let Some(state) = self.bot_states.get_mut(addr) {
