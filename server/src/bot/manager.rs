@@ -90,10 +90,8 @@ impl BotManager {
             position: spawn_pos,
             yaw: 0.0,
             pitch: 0.0,
-            health: 100,
-            shield: 0,
-            max_health: 100,
-            max_shield: 100,
+            health: 125,
+            max_health: 125,
             is_alive: true,
             kills: 0,
             deaths: 0,
@@ -119,7 +117,7 @@ impl BotManager {
             is_bot: true,
             is_silent: false, // spawn_bot will set based on archetype
             auto_respawn: true,
-            lobby_regen_resume_at: None,
+            regen_resume_at: None,
         };
 
         let bot_state = BotState {

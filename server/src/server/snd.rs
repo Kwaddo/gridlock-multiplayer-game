@@ -152,7 +152,6 @@ impl SndState {
             }
             player.is_alive = true;
             player.health = player.max_health;
-            player.shield = 0;
             player.death_time = None;
 
             // Spawn at team position

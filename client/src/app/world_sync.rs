@@ -271,7 +271,6 @@ pub fn sync_world(
                 // Reset local player state for a fresh match
                 playing_state.is_dead = false;
                 playing_state.hp = playing_state.max_hp;
-                playing_state.shield = 0.0;
                 playing_state.death_timer = 0.0;
                 playing_state.local_kills = 0;
                 playing_state.local_deaths = 0;
@@ -310,7 +309,6 @@ pub fn sync_world(
                 // Reset local player state when returning to lobby
                 playing_state.is_dead = false;
                 playing_state.hp = playing_state.max_hp;
-                playing_state.shield = 0.0;
                 playing_state.death_timer = 0.0;
                 playing_state.local_kills = 0;
                 playing_state.local_deaths = 0;

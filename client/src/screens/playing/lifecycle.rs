@@ -18,17 +18,7 @@ impl PlayingState {
             return;
         }
 
-        if self.shield > 0.0 {
-            let shield_damage = damage.min(self.shield);
-            self.shield -= shield_damage;
-            let remaining_damage = damage - shield_damage;
-
-            if remaining_damage > 0.0 {
-                self.hp -= remaining_damage;
-            }
-        } else {
-            self.hp = (self.hp - damage).max(0.0);
-        }
+        self.hp = (self.hp - damage).max(0.0);
 
         // brief damage flash and attacker info for HUD
         self.damage_flash_timer = 0.6;
@@ -160,7 +150,6 @@ impl PlayingState {
     pub fn respawn(&mut self, spawn_pos: Vec3) {
         self.is_dead = false;
         self.hp = self.max_hp;
-        self.shield = 0.0;
         self.death_timer = 0.0;
         self.position = spawn_pos;
         self.movement_state.velocity = Vec3::ZERO;
