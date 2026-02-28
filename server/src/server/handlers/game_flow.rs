@@ -325,7 +325,6 @@ pub fn maybe_start_match(
 
                     // reset per-match player state
                     player.health = player.max_health;
-                    player.shield = 0;
                     player.is_alive = true;
                     player.kills = 0;
                     player.deaths = 0;

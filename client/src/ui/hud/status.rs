@@ -7,8 +7,6 @@ pub(super) fn draw_status_panels(
     movement_state: &MovementState,
     hp: f32,
     max_hp: f32,
-    shield: f32,
-    max_shield: f32,
     match_time_left: f32,
     config: &crate::core::GameConfig,
 ) {
@@ -65,37 +63,6 @@ pub(super) fn draw_status_panels(
         hp_bar_y + 15.0,
         text_params(16, WHITE),
     );
-
-    if max_shield > 0.0 {
-        let shield_bar_y = hp_bar_y - 25.0;
-        let shield_frac = (shield / max_shield).clamp(0.0, 1.0);
-
-        draw_rectangle(
-            hp_bar_x,
-            shield_bar_y,
-            hp_bar_w,
-            hp_bar_h,
-            Color::from_rgba(40, 40, 40, 200),
-        );
-
-        draw_rectangle(
-            hp_bar_x,
-            shield_bar_y,
-            hp_bar_w * shield_frac,
-            hp_bar_h,
-            Color::from_rgba(80, 180, 255, 255),
-        );
-
-        draw_rectangle_lines(hp_bar_x, shield_bar_y, hp_bar_w, hp_bar_h, 2.0, WHITE);
-
-        let shield_text = format!("{:.0} SHIELD", shield);
-        draw_text_ex(
-            &shield_text,
-            hp_bar_x + 5.0,
-            shield_bar_y + 15.0,
-            text_params(16, WHITE),
-        );
-    }
 
     let bar_width = 200.0;
     let bar_height = 8.0;

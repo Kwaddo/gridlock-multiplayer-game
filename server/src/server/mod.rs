@@ -246,9 +246,7 @@ pub fn run() -> std::io::Result<()> {
                                     yaw: std::f32::consts::PI,
                                     pitch: 0.0,
                                     health: hp,
-                                    shield: 0,
                                     max_health: hp,
-                                    max_shield: 100,
                                     is_alive: true,
                                     kills: 0,
                                     deaths: 0,
@@ -271,7 +269,7 @@ pub fn run() -> std::io::Result<()> {
                                     is_bot: true,
                                     is_silent: false,
                                     auto_respawn: false,
-                                    lobby_regen_resume_at: None,
+                                    regen_resume_at: None,
 
                                 };
 

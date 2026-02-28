@@ -22,8 +22,19 @@ const ROW_BG: Color = Color::new(0.07, 0.08, 0.15, 1.0);
 const ROW_HOVER: Color = Color::new(0.12, 0.14, 0.24, 1.0);
 const CATEGORY_HEADER: Color = Color::new(0.85, 0.65, 0.30, 1.0);
 
+const SLOT_LABELS: [&str; LOADOUT_SLOTS] = ["PRIMARY", "SECONDARY"];
+
+/// Which weapon categories are valid for each slot.
+fn allowed_categories(slot: usize) -> &'static [WeaponCategory] {
+    match slot {
+        0 => &[WeaponCategory::Shotgun, WeaponCategory::AssaultRifle, WeaponCategory::Sniper],
+        1 => &[WeaponCategory::Pistol],
+        _ => &[],
+    }
+}
+
 pub struct LobbyInventoryScreen {
-    pub selected_slot: Option<usize>, // which slot (0-4) the player clicked to assign into
+    pub selected_slot: Option<usize>, // which slot (0-1) the player clicked to assign into
     pub scroll_offset: f32,
 }
 
@@ -80,6 +91,8 @@ impl LobbyInventoryScreen {
                 } else {
                     Some(i)
                 };
+                // reset scroll when switching slots so valid weapons are visible
+                self.scroll_offset = 0.0;
             }
         }
 
@@ -91,9 +104,15 @@ impl LobbyInventoryScreen {
 
         // only process clicks if a slot is selected
         if let Some(slot) = self.selected_slot {
+            let allowed = allowed_categories(slot);
             let mut y = list_y - self.scroll_offset;
             for cat in &WeaponCategory::ALL {
                 y += header_h; // skip header
+                if !allowed.contains(cat) {
+                    // skip weapons in this category (they're dimmed/unclickable)
+                    y += WeaponId::all_in(*cat).len() as f32 * row_h;
+                    continue;
+                }
                 let weapons = WeaponId::all_in(*cat);
                 for weapon_id in weapons {
                     if y + row_h > list_y && y < list_y + list_h {
@@ -199,9 +218,10 @@ impl LobbyInventoryScreen {
                 if is_selected { ACCENT } else { PANEL_BORDER },
             );
 
-            // slot number
-            let num = format!("{}", i + 1);
-            draw_text_ex(&num, sx + 6.0, slots_y + 16.0, text_params(12, TEXT_DIM));
+            // slot label (PRIMARY / SECONDARY)
+            let label = SLOT_LABELS[i];
+            let lw = measure_game_text(label, 11);
+            draw_text_ex(label, sx + (slot_w - lw) / 2.0, slots_y + 16.0, text_params(11, TEXT_DIM));
 
             // weapon name
             let name = loadout.slots[i].display_name();
@@ -211,8 +231,12 @@ impl LobbyInventoryScreen {
         }
 
         // hint
-        let hint = if self.selected_slot.is_some() {
-            "Click a weapon below to assign it"
+        let hint = if let Some(slot) = self.selected_slot {
+            if slot == 0 {
+                "Select a Shotgun, Assault Rifle, or Sniper"
+            } else {
+                "Select a Pistol"
+            }
         } else {
             "Click a slot above to change its weapon"
         };
@@ -237,25 +261,35 @@ impl LobbyInventoryScreen {
         // track which weapons are currently in the loadout for highlighting
         let loadout_set: Vec<WeaponId> = loadout.slots.to_vec();
 
+        // which categories are valid for the currently selected slot (None = show all dimmed)
+        let active_allowed: Option<&[WeaponCategory]> =
+            self.selected_slot.map(|s| allowed_categories(s));
+
         for cat in &WeaponCategory::ALL {
             let weapons = WeaponId::all_in(*cat);
+            let cat_allowed = active_allowed.map_or(true, |allowed| allowed.contains(cat));
 
             // category header
             if y + header_h > list_y && y < list_y + list_h {
                 let display_y = y.max(list_y);
                 if display_y == y {
+                    let header_color = if cat_allowed || active_allowed.is_none() {
+                        CATEGORY_HEADER
+                    } else {
+                        Color::new(0.40, 0.35, 0.20, 1.0) // dimmed
+                    };
                     draw_text_ex(
                         cat.display_name(),
                         panel_x + 20.0,
                         y + 20.0,
-                        text_params(14, CATEGORY_HEADER),
+                        text_params(14, header_color),
                     );
                     draw_rectangle(
                         panel_x + 20.0,
                         y + header_h - 2.0,
                         panel_w - 40.0,
                         1.0,
-                        Color::new(0.85, 0.65, 0.30, 0.3),
+                        Color::new(0.85, 0.65, 0.30, if cat_allowed { 0.3 } else { 0.1 }),
                     );
                 }
             }
@@ -265,13 +299,13 @@ impl LobbyInventoryScreen {
                 if y + row_h > list_y && y < list_y + list_h {
                     let row_x = panel_x + 16.0;
                     let row_w = panel_w - 32.0;
-                    let hover =
-                        in_rect(mouse, row_x, y, row_w, row_h) && self.selected_slot.is_some();
+                    let can_click = cat_allowed && self.selected_slot.is_some();
+                    let hover = in_rect(mouse, row_x, y, row_w, row_h) && can_click;
                     let in_loadout = loadout_set.contains(&weapon_id);
 
                     let bg = if hover {
                         ROW_HOVER
-                    } else if in_loadout {
+                    } else if in_loadout && cat_allowed {
                         Color::new(0.10, 0.12, 0.22, 1.0)
                     } else {
                         ROW_BG
@@ -279,12 +313,18 @@ impl LobbyInventoryScreen {
                     draw_rectangle(row_x, y, row_w, row_h, bg);
 
                     let name: &str = weapon_id.display_name();
-                    let text_color = if in_loadout { ACCENT } else { TEXT_LABEL };
+                    let text_color = if !cat_allowed && active_allowed.is_some() {
+                        Color::new(0.35, 0.35, 0.42, 1.0) // dimmed / unavailable
+                    } else if in_loadout {
+                        ACCENT
+                    } else {
+                        TEXT_LABEL
+                    };
                     draw_text_ex(name, row_x + 12.0, y + 21.0, text_params(14, text_color));
 
                     // show which slot it's in
                     if let Some(slot_idx) = loadout.slots.iter().position(|&w| w == weapon_id) {
-                        let tag = format!("[Slot {}]", slot_idx + 1);
+                        let tag = format!("[{}]", SLOT_LABELS[slot_idx]);
                         let tag_w = measure_game_text(&tag, 12);
                         draw_text_ex(
                             &tag,

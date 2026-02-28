@@ -49,9 +49,7 @@ pub struct Player {
     pub yaw: f32,
     pub pitch: f32,
     pub health: u32,
-    pub shield: u32,
     pub max_health: u32,
-    pub max_shield: u32,
     pub is_alive: bool,
     pub kills: u32,
     pub deaths: u32,
@@ -84,8 +82,8 @@ pub struct Player {
     pub is_silent: bool, // shadow bot: no footstep sounds
     // whether server auto-respawn loop should revive this player after death
     pub auto_respawn: bool,
-    // Lobby-only regen delay anchor for human players.
-    pub lobby_regen_resume_at: Option<Instant>,
+    // Regen delay anchor: health won't regenerate until this instant has passed.
+    pub regen_resume_at: Option<Instant>,
 }
 
 impl Player {
@@ -96,10 +94,8 @@ impl Player {
             position: (0.0, 0.0, 0.0),
             yaw: 0.0,
             pitch: 0.0,
-            health: 100,
-            shield: 0,
-            max_health: 100,
-            max_shield: 100,
+            health: 125,
+            max_health: 125,
             is_alive: true,
             kills: 0,
             deaths: 0,
@@ -123,7 +119,7 @@ impl Player {
             is_bot: false,
             is_silent: false,
             auto_respawn: true,
-            lobby_regen_resume_at: None,
+            regen_resume_at: None,
         }
     }
 }

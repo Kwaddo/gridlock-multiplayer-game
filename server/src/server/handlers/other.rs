@@ -623,8 +623,8 @@ pub fn apply_damage(
         let mut shadow_teleport = false;
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.health -= damage;
-            if vmut.world == WorldId::Lobby && !vmut.is_bot {
-                vmut.lobby_regen_resume_at = Some(Instant::now() + Duration::from_millis(1500));
+            if !vmut.is_bot {
+                vmut.regen_resume_at = Some(Instant::now() + Duration::from_secs(7));
             }
             // shadow teleport check: must read is_bot before dropping borrow
             if vmut.is_bot {

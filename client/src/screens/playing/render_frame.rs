@@ -211,8 +211,6 @@ impl PlayingState {
                 self.hit_marker_pellet_mask,
                 self.hp,
                 self.max_hp,
-                self.shield,
-                self.max_shield,
                 &self.kill_feed,
                 // Hide the match timer in S&D — timing is handled per-round
                 if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY) {

@@ -101,7 +101,6 @@ pub fn move_all_players_to_lobby(
         if reset_scores {
             p.is_alive = true;
             p.health = p.max_health;
-            p.shield = 0;
             p.kills = 0;
             p.gun_level = 1; // reset Gun Game progression
             p.death_time = None;

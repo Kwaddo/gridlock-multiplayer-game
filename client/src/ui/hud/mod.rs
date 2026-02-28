@@ -32,8 +32,6 @@ pub fn draw_hud(
     hit_marker_pellet_mask: u16,
     hp: f32,
     max_hp: f32,
-    shield: f32,
-    max_shield: f32,
     kill_feed: &[crate::screens::playing::KillFeedEntry],
     match_time_left: f32,
     damage_flash_timer: f32,
@@ -95,8 +93,6 @@ pub fn draw_hud(
         movement_state,
         hp,
         max_hp,
-        shield,
-        max_shield,
         match_time_left,
         config,
     );

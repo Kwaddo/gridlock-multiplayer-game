@@ -197,7 +197,6 @@ pub fn process_auto_respawns(
         if let Some(player) = players.get_mut(&addr) {
             player.is_alive = true;
             player.health = player.max_health;
-            player.shield = 0;
             player.death_time = None;
             player.position = (sx, sy, sz);
             to_respawn.push((
@@ -252,11 +251,13 @@ pub fn process_auto_respawns(
     }
 }
 
-/// Regenerate lobby player health after a short delay.
+/// Regenerate player health after 7 seconds out of combat.
+/// Applies to all worlds; combat resets the timer via regen_resume_at.
 pub fn process_lobby_regen(players: &mut HashMap<SocketAddr, Player>) {
     let now = Instant::now();
     for player in players.values_mut() {
-        if player.world != WorldId::Lobby || player.is_bot || !player.is_alive {
+        if player.is_bot || !player.is_alive {
+            // In lobby, keep human players alive (no real death)
             if player.world == WorldId::Lobby && !player.is_bot && !player.is_alive {
                 player.is_alive = true;
             }
@@ -268,7 +269,7 @@ pub fn process_lobby_regen(players: &mut HashMap<SocketAddr, Player>) {
         if player.health >= player.max_health {
             continue;
         }
-        if let Some(resume_at) = player.lobby_regen_resume_at {
+        if let Some(resume_at) = player.regen_resume_at {
             if now < resume_at {
                 continue;
             }
