@@ -2,7 +2,7 @@ use crate::physics::{ BotMovementState, PhysicsConfig, simulate_bot_physics };
 use crate::bot::shooting::{ BotShootingConfig, BotShootingState };
 use crate::player::{ Player, Team };
 use crate::bot::personality::{ BotArchetype, BotDifficulty, BotPersonality, BotPersonalityId };
-use crate::maze::pathfinding::{cell_to_world, world_to_cell};
+use crate::maze::pathfinding::{ cell_to_world, world_to_cell };
 use crate::server::game::MAZE_CELL_SIZE;
 use glam::Vec3;
 
@@ -21,6 +21,7 @@ pub struct BotState {
     pub last_known_enemy_pos: Option<(f32, f32, f32)>,
     pub behavior_decision_timer: f32, // timer for how often the bot reevaluates its behavior
     pub hits_received_since_teleport: u32, // shadow teleport counter
+    pub stuck_timer: f32, // timer for how long the bot has been stuck in the same position
 }
 
 const PATH_ARRIVAL_THRESHOLD: f32 = 0.5; // distance threshold for considering a bot has arrived at a path node
@@ -69,10 +70,20 @@ pub enum BotBehavior {
     },
 }
 
-pub fn tick_bot(bot: &mut Player, state: &mut BotState, dt: f32, physics: &PhysicsConfig, maze_cells: Option<(&[u8], u8, u8)>) {
+pub fn tick_bot(
+    bot: &mut Player,
+    state: &mut BotState,
+    dt: f32,
+    physics: &PhysicsConfig,
+    maze_cells: Option<(&[u8], u8, u8)>
+) {
     let mut desired_dir = Vec3::ZERO; // movement we intend to apply every tick
     let mut want_jump = false; // whether we want to jump this tick
-    let speed = physics.walk_speed;
+    let speed: f32 = if state.archetype == BotArchetype::KnifeSneaker {
+        physics.walk_speed * 2.5
+    } else {
+        physics.walk_speed
+    };
 
     match &mut state.behavior {
         BotBehavior::Static => {}
@@ -208,8 +219,17 @@ pub fn tick_bot(bot: &mut Player, state: &mut BotState, dt: f32, physics: &Physi
 
     // check if inside wall
     if let Some((cells, width, height)) = maze_cells {
-        if let Some(cell) = world_to_cell(bot.position.0, bot.position.2, MAZE_CELL_SIZE, cells, width, height) {
-            let idx = cell.1 as usize * width as usize + cell.0 as usize;
+        if
+            let Some(cell) = world_to_cell(
+                bot.position.0,
+                bot.position.2,
+                MAZE_CELL_SIZE,
+                cells,
+                width,
+                height
+            )
+        {
+            let idx = (cell.1 as usize) * (width as usize) + (cell.0 as usize);
             if cells[idx] == 0 {
                 // walked into a wall
                 bot.position.0 = old_pos.0;
@@ -233,7 +253,6 @@ pub fn tick_bot(bot: &mut Player, state: &mut BotState, dt: f32, physics: &Physi
         after behavior logic runs
     */
 
-
     // update replicated movement flags for client animation state
     bot.is_airborne = !state.movement.is_grounded;
     bot.evt_jump_start = evt_jump_start;
@@ -252,5 +271,20 @@ pub fn tick_bot(bot: &mut Player, state: &mut BotState, dt: f32, physics: &Physi
     // HoldAngle overrides yaw to face the strategic direction
     if let BotBehavior::HoldAngle { face_direction, .. } = &state.behavior {
         bot.yaw = face_direction.1.atan2(face_direction.0);
+    }
+
+    // stuck detection
+    // track consecutive time without meaningful movement
+    let dominated_by_movement = !matches!(
+        state.behavior,
+        BotBehavior::Static | BotBehavior::HoldAngle { .. }
+    );
+    let dx = bot.position.0 - old_pos.0;
+    let dz = bot.position.2 - old_pos.2;
+    let moved = (dx * dx + dz * dz).sqrt();
+    if dominated_by_movement && moved < 0.01 {
+        state.stuck_timer += dt;
+    } else {
+        state.stuck_timer = 0.0;
     }
 }

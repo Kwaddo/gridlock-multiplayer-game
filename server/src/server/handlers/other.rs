@@ -631,7 +631,7 @@ pub fn apply_damage(
                 if let Some(bot_state) = bot_states.get_mut(&victim_addr) {
                     if bot_state.personality.archetype == BotArchetype::KnifeSneaker {
                         bot_state.hits_received_since_teleport += 1;
-                        if bot_state.hits_received_since_teleport >= 1 {
+                        if bot_state.hits_received_since_teleport >= 2 {
                             shadow_teleport = true;
                             bot_state.hits_received_since_teleport = 0;
                         }
