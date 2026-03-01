@@ -25,16 +25,44 @@ pub fn decide_behavior(
     state: &BotState,
     players: &HashMap<SocketAddr, Player>,
     maze: &MazeData,
-    analysis: &MazeAnalysis,
+    analysis: &MazeAnalysis
 ) -> Option<BotBehavior> {
     if !bot.is_alive {
         return None;
     }
 
-    let bot_cell = world_to_cell(
-        bot.position.0, bot.position.2,
-        MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
-    )?;
+    let bot_cell = match
+        world_to_cell(
+            bot.position.0,
+            bot.position.2,
+            MAZE_CELL_SIZE,
+            &maze.cells,
+            maze.width,
+            maze.height
+        )
+    {
+        Some(c) => c,
+        None => {
+            // Bot is in an invalid position — find any random walkable cell as fallback
+            let mut rng = rand::thread_rng();
+            let mut fallback = None;
+            for _ in 0..50 {
+                let x = rng.gen_range(1..maze.width - 1);
+                let y = rng.gen_range(1..maze.height - 1);
+                let idx = (y as usize) * (maze.width as usize) + (x as usize);
+                if maze.cells[idx] == 1 {
+                    fallback = Some((x, y));
+                    break;
+                }
+            }
+            match fallback {
+                Some(c) => c,
+                None => {
+                    return None;
+                }
+            }
+        }
+    };
 
     // find nearest living enemy
     let nearest_enemy = players
@@ -52,7 +80,7 @@ pub fn decide_behavior(
     }
 
     // check if bot should retreat (health below threshold)
-    let health_ratio = bot.health as f32 / 100.0;
+    let health_ratio = (bot.health as f32) / 100.0;
     if health_ratio < state.personality.retreat_health_threshold {
         if !matches!(state.behavior, BotBehavior::Retreat { .. }) {
             return retreat_from_enemy(bot_cell, nearest_enemy, maze);
@@ -72,11 +100,25 @@ pub fn decide_behavior(
             if *repath_timer <= 0.0 {
                 // repath timer expired — recalculate path to target
                 if let Some(enemy) = find_player_by_id(players, *target_player_id) {
-                    if let Some(goal) = world_to_cell(
-                        enemy.position.0, enemy.position.2,
-                        MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
-                    ) {
-                        if let Some(new_path) = astar(&maze.cells, maze.width, maze.height, bot_cell, goal) {
+                    if
+                        let Some(goal) = world_to_cell(
+                            enemy.position.0,
+                            enemy.position.2,
+                            MAZE_CELL_SIZE,
+                            &maze.cells,
+                            maze.width,
+                            maze.height
+                        )
+                    {
+                        if
+                            let Some(new_path) = astar(
+                                &maze.cells,
+                                maze.width,
+                                maze.height,
+                                bot_cell,
+                                goal
+                            )
+                        {
                             return Some(BotBehavior::Hunt {
                                 path: new_path,
                                 path_idx: 0,
@@ -146,9 +188,10 @@ pub fn decide_behavior(
 
     if let Some(enemy) = nearest_enemy {
         let roll = rand::thread_rng().gen::<f32>();
-        let total = state.personality.push_weight
-            + state.personality.flank_weight
-            + state.personality.hold_angle_weight;
+        let total =
+            state.personality.push_weight +
+            state.personality.flank_weight +
+            state.personality.hold_angle_weight;
 
         let push_chance = state.personality.push_weight / total;
         let flank_chance = state.personality.flank_weight / total;
@@ -156,8 +199,12 @@ pub fn decide_behavior(
         if roll < push_chance {
             // HUNT — A* directly to the enemy
             let enemy_cell = world_to_cell(
-                enemy.position.0, enemy.position.2,
-                MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
+                enemy.position.0,
+                enemy.position.2,
+                MAZE_CELL_SIZE,
+                &maze.cells,
+                maze.width,
+                maze.height
             )?;
             let path = astar(&maze.cells, maze.width, maze.height, bot_cell, enemy_cell)?;
             return Some(BotBehavior::Hunt {
@@ -179,11 +226,25 @@ pub fn decide_behavior(
     if let Some(last_pos) = state.last_known_enemy_pos {
         let roll = rand::thread_rng().gen::<f32>();
         if roll < state.personality.noise_investigation_weight {
-            if let Some(target_cell) = world_to_cell(
-                last_pos.0, last_pos.2,
-                MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
-            ) {
-                if let Some(path) = astar(&maze.cells, maze.width, maze.height, bot_cell, target_cell) {
+            if
+                let Some(target_cell) = world_to_cell(
+                    last_pos.0,
+                    last_pos.2,
+                    MAZE_CELL_SIZE,
+                    &maze.cells,
+                    maze.width,
+                    maze.height
+                )
+            {
+                if
+                    let Some(path) = astar(
+                        &maze.cells,
+                        maze.width,
+                        maze.height,
+                        bot_cell,
+                        target_cell
+                    )
+                {
                     return Some(BotBehavior::Investigate {
                         path,
                         path_index: 0,
@@ -199,63 +260,124 @@ pub fn decide_behavior(
         BotArchetype::Camper | BotArchetype::Sniper => {
             pick_hold_angle(bot_cell, None, analysis, maze, state)
         }
-        _ => {
-            roam_to_random_point(bot_cell, analysis, maze)
-        }
+        _ => { roam_to_random_point(bot_cell, analysis, maze) }
     }
 }
 
-//  Helper functions 
+//  Helper functions
 
 fn decide_knife_sneaker(
     bot_cell: (u8, u8),
     nearest_enemy: Option<&Player>,
     state: &BotState,
     maze: &MazeData,
-    analysis: &MazeAnalysis,
+    analysis: &MazeAnalysis
 ) -> Option<BotBehavior> {
-    if let Some(enemy) = nearest_enemy {
-        // A* to cell ~2 cells behind the enemy (opposite their facing direction)
-        let behind_x = enemy.position.0 - enemy.yaw.cos() * MAZE_CELL_SIZE * 2.0;
-        let behind_z = enemy.position.2 - enemy.yaw.sin() * MAZE_CELL_SIZE * 2.0;
-        let behind_cell = world_to_cell(
-            behind_x, behind_z,
-            MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
+    let Some(enemy) = nearest_enemy else {
+        // no enemy — roam
+        return roam_to_random_point(bot_cell, analysis, maze);
+    };
+
+    let dist_to_enemy = {
+        let dx = enemy.position.0 - state.personality.range_max; // using bot position from caller
+        let dz = enemy.position.2;
+        // Actually need bot position — we have bot_cell, convert back
+        let (bx, bz) = crate::maze::pathfinding::cell_to_world(
+            bot_cell.0,
+            bot_cell.1,
+            MAZE_CELL_SIZE
         );
-        let target_cell = behind_cell.or_else(||
-            world_to_cell(
-                enemy.position.0, enemy.position.2,
-                MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
-            )
+        let dx = enemy.position.0 - bx;
+        let dz = enemy.position.2 - bz;
+        (dx * dx + dz * dz).sqrt()
+    };
+
+    // Close range (< 5 units): commit to direct attack
+    if dist_to_enemy < 5.0 {
+        let enemy_cell = world_to_cell(
+            enemy.position.0,
+            enemy.position.2,
+            MAZE_CELL_SIZE,
+            &maze.cells,
+            maze.width,
+            maze.height
         )?;
-        let path = astar(&maze.cells, maze.width, maze.height, bot_cell, target_cell)?;
-        return Some(BotBehavior::Flank {
-            path,
-            path_index: 0,
-            target_player_id: enemy.id,
-            repath_timer: state.personality.base_repath_interval,
-        });
+        if let Some(path) = astar(&maze.cells, maze.width, maze.height, bot_cell, enemy_cell) {
+            return Some(BotBehavior::Hunt {
+                path,
+                path_idx: 0,
+                target_player_id: enemy.id,
+                repath_timer: state.personality.base_repath_interval,
+            });
+        }
     }
-    // no enemy — roam
-    roam_to_random_point(bot_cell, analysis, maze)
+
+    // Medium range: try 1 cell behind enemy (not 2 — maze corridors are too narrow)
+    let behind_x = enemy.position.0 - enemy.yaw.cos() * MAZE_CELL_SIZE;
+    let behind_z = enemy.position.2 - enemy.yaw.sin() * MAZE_CELL_SIZE;
+    let behind_cell = world_to_cell(
+        behind_x,
+        behind_z,
+        MAZE_CELL_SIZE,
+        &maze.cells,
+        maze.width,
+        maze.height
+    );
+
+    // try flanking path first
+    if let Some(target) = behind_cell {
+        if let Some(path) = astar(&maze.cells, maze.width, maze.height, bot_cell, target) {
+            return Some(BotBehavior::Flank {
+                path,
+                path_index: 0,
+                target_player_id: enemy.id,
+                repath_timer: state.personality.base_repath_interval,
+            });
+        }
+    }
+
+    // fallback: hunt directly toward enemy — never give up when enemy exists
+    let enemy_cell = world_to_cell(
+        enemy.position.0,
+        enemy.position.2,
+        MAZE_CELL_SIZE,
+        &maze.cells,
+        maze.width,
+        maze.height
+    )?;
+    let path = astar(&maze.cells, maze.width, maze.height, bot_cell, enemy_cell)?;
+    Some(BotBehavior::Hunt {
+        path,
+        path_idx: 0,
+        target_player_id: enemy.id,
+        repath_timer: state.personality.base_repath_interval,
+    })
 }
 
 fn flank_behind_enemy(
     bot_cell: (u8, u8),
     enemy: &Player,
     state: &BotState,
-    maze: &MazeData,
+    maze: &MazeData
 ) -> Option<BotBehavior> {
     let behind_x = enemy.position.0 - enemy.yaw.cos() * MAZE_CELL_SIZE * 2.0;
     let behind_z = enemy.position.2 - enemy.yaw.sin() * MAZE_CELL_SIZE * 2.0;
     let behind_cell = world_to_cell(
-        behind_x, behind_z,
-        MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
+        behind_x,
+        behind_z,
+        MAZE_CELL_SIZE,
+        &maze.cells,
+        maze.width,
+        maze.height
     );
     let target_cell = behind_cell.or_else(||
         world_to_cell(
-            enemy.position.0, enemy.position.2,
-            MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
+            enemy.position.0,
+            enemy.position.2,
+            MAZE_CELL_SIZE,
+            &maze.cells,
+            maze.width,
+            maze.height
         )
     )?;
     let path = astar(&maze.cells, maze.width, maze.height, bot_cell, target_cell)?;
@@ -270,26 +392,30 @@ fn flank_behind_enemy(
 fn retreat_from_enemy(
     bot_cell: (u8, u8),
     nearest_enemy: Option<&Player>,
-    maze: &MazeData,
+    maze: &MazeData
 ) -> Option<BotBehavior> {
     // retreat away from enemy - pick a cell in the opposite direction
     let (retreat_cx, retreat_cz) = if let Some(enemy) = nearest_enemy {
         let enemy_cx = enemy.position.0 / MAZE_CELL_SIZE;
         let enemy_cz = enemy.position.2 / MAZE_CELL_SIZE;
-        let dx = bot_cell.0 as f32 - enemy_cx;
-        let dz = bot_cell.1 as f32 - enemy_cz;
+        let dx = (bot_cell.0 as f32) - enemy_cx;
+        let dz = (bot_cell.1 as f32) - enemy_cz;
         let len = (dx * dx + dz * dz).sqrt().max(0.01);
         // project 8 cells away from enemy
-        let tx = (bot_cell.0 as f32 + dx / len * 8.0).clamp(1.0, (maze.width - 2) as f32);
-        let tz = (bot_cell.1 as f32 + dz / len * 8.0).clamp(1.0, (maze.height - 2) as f32);
+        let tx = ((bot_cell.0 as f32) + (dx / len) * 8.0).clamp(1.0, (maze.width - 2) as f32);
+        let tz = ((bot_cell.1 as f32) + (dz / len) * 8.0).clamp(1.0, (maze.height - 2) as f32);
         (tx, tz)
     } else {
-        (maze.width as f32 / 2.0, maze.height as f32 / 2.0)
+        ((maze.width as f32) / 2.0, (maze.height as f32) / 2.0)
     };
 
     let retreat_cell = world_to_cell(
-        retreat_cx * MAZE_CELL_SIZE, retreat_cz * MAZE_CELL_SIZE,
-        MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height,
+        retreat_cx * MAZE_CELL_SIZE,
+        retreat_cz * MAZE_CELL_SIZE,
+        MAZE_CELL_SIZE,
+        &maze.cells,
+        maze.width,
+        maze.height
     )?;
     let path = astar(&maze.cells, maze.width, maze.height, bot_cell, retreat_cell)?;
     Some(BotBehavior::Retreat {
@@ -303,26 +429,38 @@ fn pick_hold_angle(
     nearest_enemy: Option<&Player>,
     analysis: &MazeAnalysis,
     maze: &MazeData,
-    state: &BotState,
+    state: &BotState
 ) -> Option<BotBehavior> {
     let mut rng = rand::thread_rng();
 
     // pick strategic positions based on archetype
     let candidates: &[(u8, u8)] = match state.personality.archetype {
         BotArchetype::Sniper => {
-            if !analysis.long_sightlines.is_empty() { &analysis.long_sightlines }
-            else if !analysis.chokepoints.is_empty() { &analysis.chokepoints }
-            else { &analysis.intersections }
+            if !analysis.long_sightlines.is_empty() {
+                &analysis.long_sightlines
+            } else if !analysis.chokepoints.is_empty() {
+                &analysis.chokepoints
+            } else {
+                &analysis.intersections
+            }
         }
         BotArchetype::Camper => {
-            if !analysis.room_entrances.is_empty() { &analysis.room_entrances }
-            else if !analysis.chokepoints.is_empty() { &analysis.chokepoints }
-            else { &analysis.intersections }
+            if !analysis.room_entrances.is_empty() {
+                &analysis.room_entrances
+            } else if !analysis.chokepoints.is_empty() {
+                &analysis.chokepoints
+            } else {
+                &analysis.intersections
+            }
         }
         _ => {
-            if !analysis.intersections.is_empty() { &analysis.intersections }
-            else if !analysis.chokepoints.is_empty() { &analysis.chokepoints }
-            else { &analysis.long_sightlines }
+            if !analysis.intersections.is_empty() {
+                &analysis.intersections
+            } else if !analysis.chokepoints.is_empty() {
+                &analysis.chokepoints
+            } else {
+                &analysis.long_sightlines
+            }
         }
     };
 
@@ -334,13 +472,13 @@ fn pick_hold_angle(
 
     // face direction: toward enemy if we have one, otherwise toward map center
     let (face_dx, face_dz) = if let Some(enemy) = nearest_enemy {
-        let dx = enemy.position.0 - (target.0 as f32 + 0.5) * MAZE_CELL_SIZE;
-        let dz = enemy.position.2 - (target.1 as f32 + 0.5) * MAZE_CELL_SIZE;
+        let dx = enemy.position.0 - ((target.0 as f32) + 0.5) * MAZE_CELL_SIZE;
+        let dz = enemy.position.2 - ((target.1 as f32) + 0.5) * MAZE_CELL_SIZE;
         let len = (dx * dx + dz * dz).sqrt().max(0.01);
         (dx / len, dz / len)
     } else {
-        let cx = maze.width as f32 / 2.0 - target.0 as f32;
-        let cz = maze.height as f32 / 2.0 - target.1 as f32;
+        let cx = (maze.width as f32) / 2.0 - (target.0 as f32);
+        let cz = (maze.height as f32) / 2.0 - (target.1 as f32);
         let len = (cx * cx + cz * cz).sqrt().max(0.01);
         (cx / len, cz / len)
     };
@@ -369,7 +507,7 @@ fn pick_hold_angle(
 fn roam_to_random_point(
     bot_cell: (u8, u8),
     analysis: &MazeAnalysis,
-    maze: &MazeData,
+    maze: &MazeData
 ) -> Option<BotBehavior> {
     let mut rng = rand::thread_rng();
 
@@ -382,7 +520,7 @@ fn roam_to_random_point(
         loop {
             let x = rng.gen_range(1..maze.width - 1);
             let y = rng.gen_range(1..maze.height - 1);
-            let idx = y as usize * maze.width as usize + x as usize;
+            let idx = (y as usize) * (maze.width as usize) + (x as usize);
             if maze.cells[idx] == 1 {
                 break (x, y);
             }
@@ -406,10 +544,7 @@ fn roam_to_random_point(
     })
 }
 
-fn find_player_by_id<'a>(
-    players: &'a HashMap<SocketAddr, Player>,
-    id: u32,
-) -> Option<&'a Player> {
+fn find_player_by_id<'a>(players: &'a HashMap<SocketAddr, Player>, id: u32) -> Option<&'a Player> {
     players.values().find(|p| p.id == id && p.is_alive)
 }
 

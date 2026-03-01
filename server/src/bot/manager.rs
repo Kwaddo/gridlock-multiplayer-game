@@ -1,10 +1,10 @@
-use std::{ collections::HashMap, net::{SocketAddr, UdpSocket}, time::{ Duration, Instant } };
+use std::{ collections::HashMap, net::{ SocketAddr, UdpSocket }, time::{ Duration, Instant } };
 use crate::{ bot::ai::{ self, BotState, BotBehavior }, physics::PhysicsConfig };
 use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
 use crate::bot::personality::{ self, BotPersonalityId, BotArchetype };
-use crate::protocols::{MSG_BOT_SHOT, MODE_TEAM_DEATHMATCH};
+use crate::protocols::{ MSG_BOT_SHOT, MODE_TEAM_DEATHMATCH };
 use crate::server::handlers::other;
 pub struct BotManager {
     bot_addrs: Vec<SocketAddr>,
@@ -47,7 +47,8 @@ impl BotManager {
         self.next_bot_idx += 1;
 
         player.is_bot = true;
-        player.is_silent = bot_state.personality.archetype == crate::bot::personality::BotArchetype::KnifeSneaker;
+        player.is_silent =
+            bot_state.personality.archetype == crate::bot::personality::BotArchetype::KnifeSneaker;
         player.socket_addr = addr;
         players.insert(addr, player);
 
@@ -78,11 +79,11 @@ impl BotManager {
         personality_id: BotPersonalityId,
         team: Team,
         weapon_override: &str,
-        spawn_pos: (f32, f32, f32),
+        spawn_pos: (f32, f32, f32)
     ) -> SocketAddr {
         let (pers, diff) = personality::get_personality(personality_id);
         let runtime = personality::compute_runtime(&pers, diff);
-        let bot_id = 9000u32 + self.next_bot_idx as u32;
+        let bot_id = 9000u32 + (self.next_bot_idx as u32);
 
         let bot_player = Player {
             id: bot_id,
@@ -101,8 +102,8 @@ impl BotManager {
             death_time: None,
             world: WorldId::Maze,
             post_teleport_freeze_until: Some(
-                Instant::now()
-                    + Duration::from_secs(crate::server::game::MATCH_POST_TELEPORT_FREEZE_SECS),
+                Instant::now() +
+                    Duration::from_secs(crate::server::game::MATCH_POST_TELEPORT_FREEZE_SECS)
             ),
             is_sprinting: false,
             is_ads: false,
@@ -158,7 +159,10 @@ impl BotManager {
     pub fn set_range_challenge_deadline(&mut self, deadline: Option<Instant>) {
         self.range_challenge_deadline = deadline;
     }
-    pub fn handle_range_challenge_timeout(&mut self, players: &mut HashMap<SocketAddr, Player>) -> bool {
+    pub fn handle_range_challenge_timeout(
+        &mut self,
+        players: &mut HashMap<SocketAddr, Player>
+    ) -> bool {
         let Some(deadline) = self.range_challenge_deadline else {
             return false;
         };
@@ -174,7 +178,7 @@ impl BotManager {
         players: &mut HashMap<SocketAddr, Player>,
         match_end_pending: &mut Option<(Instant, u32, String)>,
         match_mode: u8,
-        maze: Option<&crate::maze::MazeData>,
+        maze: Option<&crate::maze::MazeData>
     ) {
         if self.last_tick.elapsed() < self.tick_interval {
             return;
@@ -190,24 +194,35 @@ impl BotManager {
             for addr in &self.bot_addrs {
                 let bot = match players.get(addr) {
                     Some(p) if p.is_alive && p.world == WorldId::Maze => p,
-                    _ => continue,
+                    _ => {
+                        continue;
+                    }
                 };
-                if match_mode == MODE_TEAM_DEATHMATCH
-                    && bot
-                        .post_teleport_freeze_until
-                        .map_or(false, |t| t > Instant::now())
+                if
+                    match_mode == MODE_TEAM_DEATHMATCH &&
+                    bot.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
                 {
                     continue;
                 }
                 let state = match self.bot_states.get(addr) {
                     Some(s) => s,
-                    None => continue,
+                    None => {
+                        continue;
+                    }
                 };
                 // only run for bots with a personality_id (maze bots, not shooting range bots)
                 if state.personality_id.is_none() {
                     continue;
                 }
-                if let Some(new_behavior) = behavior::decide_behavior(bot, state, players, m, &m.analysis) {
+                if
+                    let Some(new_behavior) = behavior::decide_behavior(
+                        bot,
+                        state,
+                        players,
+                        m,
+                        &m.analysis
+                    )
+                {
                     behavior_changes.push((*addr, new_behavior));
                 }
             }
@@ -223,16 +238,22 @@ impl BotManager {
             if !players.get(addr).map_or(false, |p| p.is_alive) {
                 continue;
             }
-            let is_frozen = players.get(addr).map_or(false, |p| {
-                match_mode == MODE_TEAM_DEATHMATCH
-                    && p.world == WorldId::Maze
-                    && p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
-            });
-            let target_pos = self
-                .bot_states
+            let is_frozen = players
+                .get(addr)
+                .map_or(false, |p| {
+                    match_mode == MODE_TEAM_DEATHMATCH &&
+                        p.world == WorldId::Maze &&
+                        p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
+                });
+            let target_pos = self.bot_states
                 .get(addr)
                 .and_then(|s| s.target_id)
-                .and_then(|target_id| players.values().find(|p| p.id == target_id).map(|p| p.position));
+                .and_then(|target_id|
+                    players
+                        .values()
+                        .find(|p| p.id == target_id)
+                        .map(|p| p.position)
+                );
             if let Some(bot) = players.get_mut(addr) {
                 if let Some(state) = self.bot_states.get_mut(addr) {
                     if is_frozen {
@@ -261,11 +282,13 @@ impl BotManager {
             if !players.get(addr).map_or(false, |p| p.is_alive) {
                 continue;
             }
-            let is_frozen = players.get(addr).map_or(false, |p| {
-                match_mode == MODE_TEAM_DEATHMATCH
-                    && p.world == WorldId::Maze
-                    && p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
-            });
+            let is_frozen = players
+                .get(addr)
+                .map_or(false, |p| {
+                    match_mode == MODE_TEAM_DEATHMATCH &&
+                        p.world == WorldId::Maze &&
+                        p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
+                });
             if is_frozen {
                 continue;
             }
@@ -284,7 +307,10 @@ impl BotManager {
         }
 
         for (attacker_addr, victim_id, damage_opt, weapon) in pending_shots {
-            let shooter_id = players.get(&attacker_addr).map(|p| p.id).unwrap_or(0);
+            let shooter_id = players
+                .get(&attacker_addr)
+                .map(|p| p.id)
+                .unwrap_or(0);
             let shooter_pos = players
                 .get(&attacker_addr)
                 .map(|p| p.position)
@@ -297,12 +323,12 @@ impl BotManager {
             let mut shot_msg = vec![MSG_BOT_SHOT];
             shot_msg.extend_from_slice(&shooter_id.to_be_bytes());
             shot_msg.extend_from_slice(&victim_id.to_be_bytes());
-            shot_msg.extend_from_slice(&(shooter_pos.0).to_be_bytes());
+            shot_msg.extend_from_slice(&shooter_pos.0.to_be_bytes());
             shot_msg.extend_from_slice(&(shooter_pos.1 + 1.2).to_be_bytes());
-            shot_msg.extend_from_slice(&(shooter_pos.2).to_be_bytes());
-            shot_msg.extend_from_slice(&(victim_pos.0).to_be_bytes());
+            shot_msg.extend_from_slice(&shooter_pos.2.to_be_bytes());
+            shot_msg.extend_from_slice(&victim_pos.0.to_be_bytes());
             shot_msg.extend_from_slice(&(victim_pos.1 + 1.0).to_be_bytes());
-            shot_msg.extend_from_slice(&(victim_pos.2).to_be_bytes());
+            shot_msg.extend_from_slice(&victim_pos.2.to_be_bytes());
             for p in players.values() {
                 if p.is_bot {
                     continue;
@@ -322,10 +348,9 @@ impl BotManager {
                     match_end_pending,
                     match_mode,
                     &mut self.bot_states,
-                    maze,
+                    maze
                 );
             }
         }
     }
-    
 }
