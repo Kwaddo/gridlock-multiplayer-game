@@ -74,7 +74,7 @@ pub fn auto_assign_lobby_teams(players: &mut HashMap<SocketAddr, Player>) {
     let mut lobby_pairs: Vec<(SocketAddr, u32)> = players
         .iter()
         .filter_map(|(addr, p)| {
-            if p.world == WorldId::Lobby {
+            if p.world == WorldId::Lobby && !p.is_bot {
                 Some((*addr, p.id))
             } else {
                 None

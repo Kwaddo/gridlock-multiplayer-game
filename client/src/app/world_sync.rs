@@ -159,10 +159,11 @@ pub fn sync_world(
             }
 
             // remove any players the server no longer reports
+            // (keep dying players until their death animation timer expires)
             if !playing_state.seen_player_ids.is_empty() {
                 playing_state
                     .other_players
-                    .retain(|p| playing_state.seen_player_ids.contains(&p.id));
+                    .retain(|p| playing_state.seen_player_ids.contains(&p.id) || p.death_timer.is_some());
                 // rebuild index after potential removals/shifts
                 playing_state.rebuild_player_index();
             }
