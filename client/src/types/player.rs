@@ -230,6 +230,9 @@ pub struct OtherPlayer {
 
     // footstep audio
     pub footstep_timer: f32,
+
+    // death animation: when Some, the player is dying and will be removed when timer hits 0
+    pub death_timer: Option<f32>,
 }
 
 impl OtherPlayer {
@@ -293,6 +296,7 @@ impl OtherPlayer {
             is_bot: false,
             is_silent: false,
             footstep_timer: 0.0,
+            death_timer: None,
         }
     }
 

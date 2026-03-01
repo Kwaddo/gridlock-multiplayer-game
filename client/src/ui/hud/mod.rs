@@ -8,6 +8,7 @@ pub use players::draw_player_list;
 mod scope;
 mod status;
 mod weapon_feed;
+pub use weapon_feed::draw_kill_feed;
 
 use crate::core::GameConfig;
 use crate::physics::movement::MovementState;
@@ -106,6 +107,7 @@ pub fn draw_hud(
         kill_feed,
         player_id,
         username,
+        local_team,
     );
 
     minimap::draw_minimap(
