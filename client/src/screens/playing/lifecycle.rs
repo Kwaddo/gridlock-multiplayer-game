@@ -45,6 +45,13 @@ impl PlayingState {
         self.is_dead = true;
         self.hp = 0.0;
         self.death_timer = 3.0;
+
+        // Start third-person death camera pullback
+        self.death_camera_phase = super::state::DeathCameraPhase::ZoomOut {
+            timer: 0.0,
+            corpse_pos: self.position,
+            corpse_yaw: self.yaw,
+        };
     }
 
     pub fn draw_death_screen(&self) {
@@ -160,6 +167,7 @@ impl PlayingState {
         self.movement_state.is_sliding = false;
         self.death_killer_name = None;
         self.death_weapon_name = None;
+        self.death_camera_phase = super::state::DeathCameraPhase::None;
     }
 
     /// Full-screen victory overlay displayed when the match ends.

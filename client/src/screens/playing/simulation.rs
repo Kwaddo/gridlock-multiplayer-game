@@ -167,6 +167,27 @@ impl PlayingState {
             entry.timer > 0.0
         });
 
+        // tick kill confirmation timer
+        if self.kill_confirm_timer > 0.0 {
+            self.kill_confirm_timer = (self.kill_confirm_timer - delta).max(0.0);
+        }
+
+        // tick death animation timers on other players; remove when expired
+        let mut need_rebuild = false;
+        self.other_players.retain_mut(|p| {
+            if let Some(ref mut t) = p.death_timer {
+                *t -= delta;
+                if *t <= 0.0 {
+                    need_rebuild = true;
+                    return false; // remove
+                }
+            }
+            true
+        });
+        if need_rebuild {
+            self.rebuild_player_index();
+        }
+
         if self.is_dead {
             if self.death_timer > 0.0 {
                 self.death_timer -= delta;
@@ -175,6 +196,40 @@ impl PlayingState {
             {
                 // Auto-respawn once the death timer expires (not in S&D — round start handles it)
                 self.pending_respawn = true;
+            }
+
+            // Tick death camera phase
+            use super::state::DeathCameraPhase;
+            match self.death_camera_phase {
+                DeathCameraPhase::ZoomOut { timer, corpse_pos, corpse_yaw } => {
+                    let new_timer = timer + delta;
+                    if new_timer >= 0.5 {
+                        self.death_camera_phase = DeathCameraPhase::Watching {
+                            timer: 0.0,
+                            corpse_pos,
+                            corpse_yaw,
+                        };
+                    } else {
+                        self.death_camera_phase = DeathCameraPhase::ZoomOut {
+                            timer: new_timer,
+                            corpse_pos,
+                            corpse_yaw,
+                        };
+                    }
+                }
+                DeathCameraPhase::Watching { timer, corpse_pos, corpse_yaw } => {
+                    let new_timer = timer + delta;
+                    if new_timer >= 2.0 {
+                        self.death_camera_phase = DeathCameraPhase::Done;
+                    } else {
+                        self.death_camera_phase = DeathCameraPhase::Watching {
+                            timer: new_timer,
+                            corpse_pos,
+                            corpse_yaw,
+                        };
+                    }
+                }
+                _ => {}
             }
             // Keep other players' positions smoothed and their animations running
             // while we're spectating — skipping this made everyone look frozen.

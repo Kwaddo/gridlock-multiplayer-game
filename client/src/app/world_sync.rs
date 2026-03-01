@@ -58,6 +58,11 @@ pub fn sync_world(
                     // update existing player by index
                     let current = &mut playing_state.other_players[idx];
 
+                    // skip updating dying players — they're playing a death animation
+                    if current.death_timer.is_some() {
+                        continue;
+                    }
+
                     // Check if this player's position actually changed.
                     // The server broadcasts state on every position packet from
                     // ANY player, so most broadcasts carry the same position for
@@ -438,6 +443,20 @@ pub fn sync_world(
                         .unwrap_or_else(|| "Player".to_string())
                 };
 
+                // resolve teams from connected_players
+                let killer_team = playing_state
+                    .connected_players
+                    .iter()
+                    .find(|(id, ..)| *id == killer_id)
+                    .map(|(_, _, _, _, _, team, _, _)| *team)
+                    .unwrap_or(0);
+                let victim_team = playing_state
+                    .connected_players
+                    .iter()
+                    .find(|(id, ..)| *id == victim_id)
+                    .map(|(_, _, _, _, _, team, _, _)| *team)
+                    .unwrap_or(0);
+
                 // push a kill-feed entry for UI
                 playing_state
                     .kill_feed
@@ -446,19 +465,33 @@ pub fn sync_world(
                         victim_id,
                         killer_name,
                         victim_name,
+                        killer_team,
+                        victim_team,
                         weapon,
                         timer: 5.0,
                     });
 
-                // if the victim is another player, remove them immediately so no
-                // corpse lingers. the server will eventually stop sending a state
-                // update for the dead player, but the kill-feed packet arrives
-                // slightly earlier and gives us an opportunity to cull them right
-                // away. note: we only remove non-local players here since the
-                // local client handles its own death path separately.
+                // kill confirmation effect for local player
+                if killer_id == player_id {
+                    playing_state.kill_confirm_timer = 0.3;
+                }
+
+                // mark victim as dying so they play a death animation before removal.
+                // the server will eventually stop sending state updates for the dead
+                // player, but the kill-feed packet arrives earlier and gives us an
+                // opportunity to trigger the animation right away.
                 if victim_id != player_id {
-                    playing_state.other_players.retain(|p| p.id != victim_id);
-                    playing_state.rebuild_player_index();
+                    if let Some(victim) = playing_state.other_players.iter_mut().find(|p| p.id == victim_id) {
+                        // pick death animation based on current stance
+                        victim.skin_type = if victim.is_prone {
+                            client::types::player::PlayerSkin::ProneDeath
+                        } else if victim.is_crouching {
+                            client::types::player::PlayerSkin::CrouchDeath
+                        } else {
+                            client::types::player::PlayerSkin::StandDeath
+                        };
+                        victim.death_timer = Some(2.0);
+                    }
                 }
             }
         }

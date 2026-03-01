@@ -16,6 +16,25 @@ use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DeathCameraPhase {
+    None,
+    /// Camera pulls back from first-person to third-person over ~0.5s
+    ZoomOut {
+        timer: f32,
+        corpse_pos: Vec3,
+        corpse_yaw: f32,
+    },
+    /// Camera watches the corpse for ~2s
+    Watching {
+        timer: f32,
+        corpse_pos: Vec3,
+        corpse_yaw: f32,
+    },
+    /// Transition complete — show death screen overlay
+    Done,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HandsPlaybackMode {
     IdleLoop,
@@ -146,6 +165,12 @@ pub struct PlayingState {
     pub death_killer_name: Option<String>,
     pub death_weapon_name: Option<String>,
 
+    // kill confirmation effect timer (brief screen flash when you get a kill)
+    pub kill_confirm_timer: f32,
+
+    // death camera: third-person pullback before showing death screen
+    pub death_camera_phase: DeathCameraPhase,
+
     // short bottom-left announcements (message, timer)
     pub announcements: Vec<(String, f32)>,
     pub lobby_console_message: Option<String>,
@@ -213,6 +238,8 @@ pub struct KillFeedEntry {
     pub victim_id: u32,
     pub killer_name: String,
     pub victim_name: String,
+    pub killer_team: u8,
+    pub victim_team: u8,
     pub weapon: String,
     pub timer: f32,
 }
@@ -290,6 +317,8 @@ impl PlayingState {
             local_deaths: 0,
             death_killer_name: None,
             death_weapon_name: None,
+            kill_confirm_timer: 0.0,
+            death_camera_phase: DeathCameraPhase::None,
             // countdown timers
             match_start_countdown_timer: 0.0,
             match_end_countdown_timer: 0.0,
