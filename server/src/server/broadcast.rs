@@ -13,8 +13,7 @@ pub fn send_player_list(
     dest: std::net::SocketAddr,
 ) {
     // format: [MSG_PLAYER_LIST][count:1][entries...]
-    // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1]
-    // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1][team:1][weapon_len:1][weapon bytes]
+    // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1][team:1][weapon_len:1][weapon bytes][is_bot:1]
     let count = players.len().min(255) as u8;
     let mut msg = vec![MSG_PLAYER_LIST, count];
     for p in players.values() {
@@ -31,6 +30,7 @@ pub fn send_player_list(
         let wbytes = p.current_weapon.as_bytes();
         msg.push(wbytes.len() as u8);
         msg.extend_from_slice(wbytes);
+        msg.push(if p.is_bot { 1u8 } else { 0u8 });
     }
     let _ = socket.send_to(&msg, dest);
 }
@@ -63,6 +63,7 @@ pub fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<std::net::Soc
             let wbytes = player.current_weapon.as_bytes();
             msg.push(wbytes.len() as u8);
             msg.extend_from_slice(wbytes);
+            msg.push(if player.is_bot { 1u8 } else { 0u8 });
         }
         let _ = socket.send_to(&msg, p.socket_addr);
     }

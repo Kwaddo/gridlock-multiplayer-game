@@ -246,9 +246,9 @@ impl OtherPlayer {
     pub const MOVE_DIR_GRACE: f32 = 0.12; // seconds
 
     pub fn color_for_id(id: u32) -> Color {
-        let r = ((id * 73 + 29) % 256) as u8;
-        let g = ((id * 97 + 53) % 256) as u8;
-        let b = ((id * 61 + 19) % 256) as u8;
+        let r = (id.wrapping_mul(73).wrapping_add(29) % 256) as u8;
+        let g = (id.wrapping_mul(97).wrapping_add(53) % 256) as u8;
+        let b = (id.wrapping_mul(61).wrapping_add(19) % 256) as u8;
         Color::from_rgba(r, g, b, 255)
     }
 
