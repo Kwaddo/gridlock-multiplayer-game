@@ -30,7 +30,7 @@ pub const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 10; // seconds players cannot m
 // Names must match client-side `WeaponStats.name` values. Keep this in
 // sync with the client `WeaponStats.name` strings (see
 // client/src/weapons/stats/*).
-pub const GUN_GAME_PROGRESSION: [&str; 19] = [
+pub const GUN_GAME_PROGRESSION: [&str; 16] = [
     // Pistols
     "M1911",
     "Desert Eagle",
@@ -52,10 +52,6 @@ pub const GUN_GAME_PROGRESSION: [&str; 19] = [
     "AS VAL",
     // Snipers
     "Bolt Action",
-    "Hunting Rifle",
-    "Semi-Auto Sniper",
-    // Other
-    "Minigun",
 ];
 
 // Team loadouts: list of primary weapons available per team. Knife is always
@@ -63,7 +59,7 @@ pub const GUN_GAME_PROGRESSION: [&str; 19] = [
 pub const TEAM_LOADOUT_RED: [&str; 5] = ["M4A1", "MP5", "Benelli", "Desert Eagle", "Bolt Action"];
 
 pub const TEAM_LOADOUT_BLUE: [&str; 5] =
-    ["AK-47", "P90", "SPAS-12", "Revolver", "Semi-Auto Sniper"];
+    ["AK-47", "P90", "SPAS-12", "Revolver", "Bolt Action"];
 
 use crate::player::Team;
 
@@ -158,6 +154,7 @@ pub fn process_auto_respawns(
     socket: &UdpSocket,
     maze: Option<&MazeData>,
     players: &mut HashMap<SocketAddr, Player>,
+    match_mode: u8,
 ) {
     let now = Instant::now();
     // include a bool indicating whether the teleporter fallback was used
@@ -225,14 +222,22 @@ pub fn process_auto_respawns(
         respawn_msg.push(if *used_fallback { 1u8 } else { 0u8 });
         // choose weapon for the respawned player based on mode
         let chosen_weapon = if let Some(pref) = players.get(socket_addr) {
-            let gl = pref.gun_level as usize;
-            if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
-                // Gun Game: weapon from progression
-                GUN_GAME_PROGRESSION[gl - 1].to_string()
-            } else if gl > GUN_GAME_PROGRESSION.len() {
-                "Knife".to_string()
+            if match_mode == crate::protocols::MODE_GUN_GAME {
+                let gl = pref.gun_level as usize;
+                if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
+                    GUN_GAME_PROGRESSION[gl - 1].to_string()
+                } else if gl > GUN_GAME_PROGRESSION.len() {
+                    "Knife".to_string()
+                } else {
+                    "Knife".to_string()
+                }
             } else if pref.team != Team::Spectator {
-                choose_team_weapon_for_player(players, pref)
+                // TDM/S&D: keep current weapon, or pick from team loadout
+                if !pref.current_weapon.is_empty() {
+                    pref.current_weapon.clone()
+                } else {
+                    choose_team_weapon_for_player(players, pref)
+                }
             } else {
                 "Knife".to_string()
             }

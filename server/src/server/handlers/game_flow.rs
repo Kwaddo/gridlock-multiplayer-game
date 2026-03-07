@@ -394,6 +394,9 @@ pub fn maybe_start_match(
                 }
             }
 
+            // Despawn any shooting range bots before spawning game bots
+            bot_manager.despawn_range_bots(players);
+
             // ── Auto-fill with bots ──
             // Spawn `autofill_bots_per_team` bots per team (equal teams).
             // Randomly pick from personalities whose difficulty matches the mask.
@@ -464,13 +467,13 @@ pub fn maybe_start_match(
                     let mut used_personalities: Vec<BotPersonalityId> = Vec::new();
 
                     for _ in 0..bots_to_spawn {
-                        // pick a random personality (prefer unused, allow repeats if pool exhausted)
+                        // pick a random unused personality; stop if all used (no duplicates)
                         let remaining: Vec<&BotPersonalityId> = eligible
                             .iter()
                             .filter(|p| !used_personalities.contains(p))
                             .collect();
                         let pid = if remaining.is_empty() {
-                            *eligible.choose(&mut rng).unwrap()
+                            break;
                         } else {
                             **remaining.choose(&mut rng).unwrap()
                         };

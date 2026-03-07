@@ -429,7 +429,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                 BotPersonality {
                     name: "Ghost",
                     archetype: Camper,
-                    weapon: "Semi-Auto Sniper",
+                    weapon: "Bolt Action",
                     range_min: 20.0,
                     range_max: 65.0,
                     aggression: 0.26,
@@ -543,7 +543,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                 BotPersonality {
                     name: "Overwatch",
                     archetype: Sniper,
-                    weapon: "Semi-Auto Sniper",
+                    weapon: "Bolt Action",
                     range_min: 18.0,
                     range_max: 70.0,
                     aggression: 0.18,

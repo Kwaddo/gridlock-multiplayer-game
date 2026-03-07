@@ -250,6 +250,11 @@ impl PlayingState {
 
         self.weapons.update(delta);
 
+        // Auto-switch to another weapon when current is empty (all modes except Gun Game)
+        if self.match_mode != Some(crate::net::protocols::MODE_GUN_GAME) {
+            self.weapons.auto_switch_on_empty();
+        }
+
         let active_weapon_id = self.weapons.active().id;
         let reloading_started = self.weapons.active().is_reloading && !self.prev_was_reloading;
         let uses_special_hands_machine = matches!(

@@ -475,6 +475,10 @@ pub fn sync_world(
                 // kill confirmation effect for local player
                 if killer_id == player_id {
                     playing_state.kill_confirm_timer = 0.3;
+                    // TDM: resupply ammo on kill
+                    if playing_state.match_mode == Some(client::net::protocols::MODE_TEAM_DEATHMATCH) {
+                        playing_state.weapons.resupply_active(15);
+                    }
                 }
 
                 // mark victim as dying so they play a death animation before removal.
@@ -492,6 +496,12 @@ pub fn sync_world(
                             client::types::player::PlayerSkin::StandDeath
                         };
                         victim.death_timer = Some(2.0);
+                        // reset animation playback so it starts from the beginning
+                        if let Some(model_key) = victim.skin_type.model_key() {
+                            if let Some(anim) = playing_state.animated_models.get_mut(model_key) {
+                                anim.play_from_start(false);
+                            }
+                        }
                     }
                 }
             }
@@ -597,7 +607,7 @@ pub fn sync_world(
         if let Some(list) = updates.player_list {
             // detect whether the server still knows about *us* — if not, server removed us (timed out)
             let still_present = list.iter().any(
-                |(id, _name, _kills, _deaths, _world, _alive, _gl, _team, _weapon)| {
+                |(id, _name, _kills, _deaths, _world, _alive, _gl, _team, _weapon, _is_bot)| {
                     *id == player_id
                 },
             );
@@ -617,22 +627,16 @@ pub fn sync_world(
             let before = playing_state.other_players.len();
             playing_state
                 .other_players
-                .retain(|p| server_ids.contains(&p.id));
+                .retain(|p| server_ids.contains(&p.id) || p.death_timer.is_some());
             if playing_state.other_players.len() != before {
                 playing_state.rebuild_player_index();
             }
 
-            // `list` now has entries: (id, name, kills, deaths, world, alive, gun_level, team, weapon)
+            // `list` now has entries: (id, name, kills, deaths, world, alive, gun_level, team, weapon, is_bot)
             playing_state.connected_players = list
                 .into_iter()
                 .map(
-                    |(id, name, kills, deaths, _world, _alive, gun_level, team, weapon)| {
-                        let is_bot = playing_state
-                            .other_players
-                            .iter()
-                            .find(|p| p.id == id)
-                            .map(|p| p.is_bot)
-                            .unwrap_or(false);
+                    |(id, name, kills, deaths, _world, _alive, gun_level, team, weapon, is_bot)| {
                         (id, name, kills, deaths, gun_level, team, weapon, is_bot)
                     },
                 )

@@ -71,6 +71,20 @@ impl BotManager {
         self.bot_addrs.clear();
         self.range_challenge_deadline = None;
     }
+    /// Despawn only shooting-range bots (those without a personality_id).
+    /// Game bots with personalities are left intact.
+    pub fn despawn_range_bots(&mut self, players: &mut HashMap<SocketAddr, Player>) {
+        let to_remove: Vec<SocketAddr> = self.bot_addrs.iter()
+            .filter(|addr| self.bot_states.get(addr).map_or(false, |s| s.personality_id.is_none()))
+            .copied()
+            .collect();
+        for addr in &to_remove {
+            players.remove(addr);
+            self.bot_states.remove(addr);
+        }
+        self.bot_addrs.retain(|a| !to_remove.contains(a));
+        self.range_challenge_deadline = None;
+    }
     /// Spawn a bot with a full personality into a match.
     /// Returns the virtual SocketAddr assigned to the bot.
     pub fn spawn_personality_bot(
@@ -150,6 +164,7 @@ impl BotManager {
             behavior_decision_timer: 0.0,
             hits_received_since_teleport: 0,
             stuck_timer: 0.0,
+            idle_look_timer: 0.0,
         };
 
         let addr = self.spawn_bot(players, bot_player, bot_state);

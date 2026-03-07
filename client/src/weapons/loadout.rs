@@ -31,7 +31,7 @@ impl Loadout {
     pub fn slot_allows(slot: usize, weapon: WeaponId) -> bool {
         let cat = weapon.category();
         match slot {
-            0 => matches!(cat, WeaponCategory::Shotgun | WeaponCategory::AssaultRifle | WeaponCategory::Sniper),
+            0 => matches!(cat, WeaponCategory::Shotgun | WeaponCategory::AssaultRifle | WeaponCategory::Sniper | WeaponCategory::Smg),
             1 => matches!(cat, WeaponCategory::Pistol),
             _ => false,
         }
