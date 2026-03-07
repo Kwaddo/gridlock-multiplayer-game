@@ -321,6 +321,7 @@ pub fn run() -> std::io::Result<()> {
                                     behavior_decision_timer: 0.0,
                                     hits_received_since_teleport: 0,
                                     stuck_timer: 0.0,
+                                    idle_look_timer: 0.0,
                                 };
 
                                 bot_manager.spawn_bot(&mut players, bot_player, bot_state);
@@ -350,7 +351,7 @@ pub fn run() -> std::io::Result<()> {
 
         // Auto-respawn dead players EXCEPT in Search & Destroy mode (one life per round)
         if match_mode != MODE_SEARCH_AND_DESTROY {
-            game::process_auto_respawns(&socket, maze.as_ref(), &mut players);
+            game::process_auto_respawns(&socket, maze.as_ref(), &mut players, match_mode);
         }
 
         // S&D tick: advance round state
@@ -389,7 +390,7 @@ pub fn run() -> std::io::Result<()> {
 
         // Always attempt to auto-respawn dead players; maze may be None if no
         // match is currently generated but players still need respawn handling.
-        game::process_auto_respawns(&socket, maze.as_ref(), &mut players);
+        game::process_auto_respawns(&socket, maze.as_ref(), &mut players, match_mode);
         if game::cleanup_inactive_players(&mut players) {
             // players were removed — broadcast so other clients drop their characters
             broadcast::broadcast_state(&socket, &players);

@@ -13,7 +13,7 @@ pub struct BotState {
     pub shooting: BotShootingState,
     pub shooting_config: BotShootingConfig,
     pub target_id: Option<u32>,
-    pub reaction_timer: f32,
+    pub reaction_timer: f32,  
     pub personality: BotPersonality,
     pub difficulty: BotDifficulty,
     pub archetype: BotArchetype,
@@ -22,6 +22,7 @@ pub struct BotState {
     pub behavior_decision_timer: f32, // timer for how often the bot reevaluates its behavior
     pub hits_received_since_teleport: u32, // shadow teleport counter
     pub stuck_timer: f32, // timer for how long the bot has been stuck in the same position
+    pub idle_look_timer: f32, // accumulator for idle look-around yaw sweep
 }
 
 const PATH_ARRIVAL_THRESHOLD: f32 = 0.5; // distance threshold for considering a bot has arrived at a path node
@@ -266,6 +267,13 @@ pub fn tick_bot(
     // Face movement direction by default.
     if desired_dir.length_squared() > 0.0001 {
         bot.yaw = desired_dir.z.atan2(desired_dir.x);
+        state.idle_look_timer = 0.0;
+    } else if state.target_id.is_none() {
+        // Idle look-around: slowly sweep yaw when not moving and no target
+        state.idle_look_timer += dt;
+        let sweep_speed = 0.4;
+        bot.yaw += (state.idle_look_timer * sweep_speed).sin() * 0.3 * dt;
+        bot.pitch = (state.idle_look_timer * 0.25).sin() * 0.08;
     }
 
     // HoldAngle overrides yaw to face the strategic direction
@@ -286,5 +294,35 @@ pub fn tick_bot(
         state.stuck_timer += dt;
     } else {
         state.stuck_timer = 0.0;
+    }
+
+    // Unstick: if stuck for >1s, teleport to nearest adjacent open cell
+    if state.stuck_timer > 1.0 {
+        if let Some((cells, width, height)) = maze_cells {
+            if let Some(cell) = world_to_cell(
+                bot.position.0, bot.position.2,
+                MAZE_CELL_SIZE, cells, width, height,
+            ) {
+                let neighbors: [(i8, i8); 4] = [(0, 1), (0, -1), (1, 0), (-1, 0)];
+                for &(ndx, ndz) in &neighbors {
+                    let nx = cell.0 as i16 + ndx as i16;
+                    let nz = cell.1 as i16 + ndz as i16;
+                    if nx >= 0 && nz >= 0
+                        && (nx as usize) < width as usize
+                        && (nz as usize) < height as usize
+                    {
+                        let ni = (nz as usize) * (width as usize) + (nx as usize);
+                        if cells[ni] != 0 {
+                            let (wx, wz) = cell_to_world(nx as u8, nz as u8, MAZE_CELL_SIZE);
+                            bot.position.0 = wx;
+                            bot.position.2 = wz;
+                            state.stuck_timer = 0.0;
+                            state.movement.velocity = Vec3::ZERO;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 }

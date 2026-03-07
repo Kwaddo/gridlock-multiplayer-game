@@ -27,7 +27,7 @@ const SLOT_LABELS: [&str; LOADOUT_SLOTS] = ["PRIMARY", "SECONDARY"];
 /// Which weapon categories are valid for each slot.
 fn allowed_categories(slot: usize) -> &'static [WeaponCategory] {
     match slot {
-        0 => &[WeaponCategory::Shotgun, WeaponCategory::AssaultRifle, WeaponCategory::Sniper],
+        0 => &[WeaponCategory::Shotgun, WeaponCategory::AssaultRifle, WeaponCategory::Sniper, WeaponCategory::Smg],
         1 => &[WeaponCategory::Pistol],
         _ => &[],
     }

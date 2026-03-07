@@ -397,6 +397,41 @@ impl WeaponInventory {
         self.switch_to(new_slot);
     }
 
+    /// Auto-switch weapon when current gun is completely empty (ammo + reserve = 0).
+    /// Tries the other gun slot first, then falls back to knife.
+    pub fn auto_switch_on_empty(&mut self) {
+        if self.knife_active {
+            return;
+        }
+        let current = &self.weapons[self.active_slot];
+        if current.ammo > 0 || current.reserve > 0 {
+            return;
+        }
+        // Try other gun slot
+        let other_slot = if self.active_slot == 0 { 1 } else { 0 };
+        if other_slot < self.weapons.len() {
+            let other = &self.weapons[other_slot];
+            if other.ammo > 0 || other.reserve > 0 {
+                self.active_slot = other_slot;
+                self.switch_cooldown = 0.3;
+                return;
+            }
+        }
+        // All guns empty — switch to knife
+        self.knife_active = true;
+        self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_TO_TIME;
+    }
+
+    /// Add reserve ammo to the active gun (used for kill-resupply in TDM).
+    pub fn resupply_active(&mut self, amount: u32) {
+        if self.knife_active {
+            return;
+        }
+        let weapon = &mut self.weapons[self.active_slot];
+        let max = weapon.stats_data.max_reserve;
+        weapon.reserve = (weapon.reserve + amount).min(max);
+    }
+
     // tick switch cooldown + all weapon states.
     pub fn update(&mut self, delta: f32) {
         if self.switch_cooldown > 0.0 {
