@@ -129,6 +129,9 @@ pub fn process_weapon_input(inventory: &mut WeaponInventory, config: &GameConfig
     if config.bind_weapon5.is_pressed() {
         inventory.switch_to(4);
     }
+    if config.bind_taurus_toggle.is_pressed() && !inventory.knife_active {
+        inventory.active_mut().toggle_taurus_fire_mode();
+    }
 
     // mouse wheel switching
     let (_, wheel_y) = mouse_wheel();

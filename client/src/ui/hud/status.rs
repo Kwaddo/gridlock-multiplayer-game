@@ -66,8 +66,8 @@ pub(super) fn draw_status_panels(
 
     let bar_width = 200.0;
     let bar_height = 8.0;
-    let bar_x = screen_width() - bar_width - 20.0;
-    let bar_y = screen_height() - 40.0;
+    let bar_x = hp_bar_x;
+    let bar_y = hp_bar_y + hp_bar_h + 8.0;
     draw_rectangle(
         bar_x,
         bar_y,

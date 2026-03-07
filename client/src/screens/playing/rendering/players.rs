@@ -190,7 +190,7 @@ impl PlayingState {
                         scale_factor *= 0.1;
                     }
                     if world_key.contains("knife") {
-                        scale_factor *= 0.35;
+                        scale_factor *= 0.1;
                     }
 
                     // rotate most guns slightly to the right when the player

@@ -237,6 +237,7 @@ impl WeaponId {
 
     /// Weapons removed from selection (kept in code but hidden from UI/loadout).
     pub const HIDDEN: &[WeaponId] = &[
+        WeaponId::P90,
         WeaponId::HuntingRifle,
         WeaponId::SemiAutoSniper,
         WeaponId::Minigun,
