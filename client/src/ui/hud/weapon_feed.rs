@@ -90,13 +90,15 @@ pub(super) fn draw_weapon_and_kill_feed(
     local_player_id: u32,
     _local_username: &str,
     local_team: u8,
+    config: &crate::core::GameConfig,
 ) {
     // --- Valorant-style 3-slot weapon display (bottom-right) ---
-    let slot_width = 180.0;
-    let slot_height = 46.0;
-    let slot_gap = 3.0;
-    let margin_right = 16.0;
-    let margin_bottom = 20.0;
+    let hud_scale = 1.5;
+    let slot_width = 180.0 * hud_scale;
+    let slot_height = 46.0 * hud_scale;
+    let slot_gap = 3.0 * hud_scale;
+    let margin_right = 16.0 * hud_scale;
+    let margin_bottom = 20.0 * hud_scale;
 
     // Slots: Primary (0), Secondary (1), Knife
     let slots: [(&crate::weapons::WeaponState, &str, bool); 3] = [
@@ -130,19 +132,42 @@ pub(super) fn draw_weapon_and_kill_feed(
         // key label (left side)
         draw_text_ex(
             key_label,
-            base_x + 6.0,
+            base_x + 12.0,
             y + slot_height * 0.65,
-            text_params(11, Color::from_rgba(150, 150, 160, alpha)),
+            text_params(22, Color::from_rgba(150, 150, 160, alpha)),
         );
 
         // weapon name
         let stats = weapon.stats();
         draw_text_ex(
             stats.name,
-            base_x + 22.0,
-            y + 16.0,
-            text_params(13, Color::from_rgba(200, 200, 210, alpha)),
+            base_x + 44.0,
+            y + 32.0,
+            text_params(26, Color::from_rgba(200, 200, 210, alpha)),
         );
+
+        if *is_active && weapon.id == WeaponId::TaurusRaging {
+            let mode_text = if weapon.taurus_shotgun_mode {
+                "SHOTGUN"
+            } else {
+                "REVOLVER"
+            };
+            draw_text_ex(
+                mode_text,
+                base_x + 44.0,
+                y + 56.0,
+                text_params(22, Color::from_rgba(230, 210, 150, alpha)),
+            );
+
+            let key_name = config.bind_taurus_toggle.display_name();
+            let toggle_hint = format!("Press '{}' to toggle", key_name);
+            draw_text_ex(
+                &toggle_hint,
+                base_x + 44.0,
+                y + slot_height - 8.0,
+                text_params(20, Color::from_rgba(190, 190, 200, alpha)),
+            );
+        }
 
         // ammo (skip for knife)
         if weapon.id != WeaponId::Knife {
@@ -158,15 +183,19 @@ pub(super) fn draw_weapon_and_kill_feed(
             };
             draw_text_ex(
                 &ammo_text,
-                base_x + 22.0,
+                if *is_active && weapon.id == WeaponId::TaurusRaging {
+                    base_x + 236.0
+                } else {
+                    base_x + 44.0
+                },
                 y + slot_height - 8.0,
-                text_params(12, ammo_color),
+                text_params(24, ammo_color),
             );
         }
 
         // weapon icon (right side)
-        let icon_size = 32.0;
-        let icon_x = base_x + slot_width - icon_size - 8.0;
+        let icon_size = 64.0;
+        let icon_x = base_x + slot_width - icon_size - 16.0;
         let icon_y_pos = y + (slot_height - icon_size) * 0.5;
         if let Some(tex) = assets.get(stats.icon_asset_key) {
             draw_texture_ex(

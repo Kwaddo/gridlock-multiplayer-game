@@ -51,6 +51,7 @@ pub struct WeaponState {
 
     // -- Burst fire
     pub burst_remaining: u32, // shots left in current burst (0 = not bursting)
+    pub taurus_shotgun_mode: bool,
 
     // -- Dev: pair lock (hand + gun move together)
     pub pair_locked: bool,
@@ -104,6 +105,7 @@ impl WeaponState {
             shot_index: 0,
             pattern_reset_timer: 0.0,
             burst_remaining: 0,
+            taurus_shotgun_mode: false,
             pair_locked: false,
             pair_offset_pos: stats.viewmodel_pair_offset_pos,
             pair_offset_rot: stats.viewmodel_pair_offset_rot,
@@ -122,6 +124,32 @@ impl WeaponState {
     // reset stats to factory defaults (from const definitions)
     pub fn reset_stats(&mut self) {
         self.stats_data = self.id.stats().clone();
+        if self.id == WeaponId::TaurusRaging {
+            self.apply_taurus_fire_mode();
+        }
+    }
+
+    pub fn toggle_taurus_fire_mode(&mut self) -> bool {
+        if self.id != WeaponId::TaurusRaging {
+            return false;
+        }
+        self.taurus_shotgun_mode = !self.taurus_shotgun_mode;
+        self.apply_taurus_fire_mode();
+        true
+    }
+
+    fn apply_taurus_fire_mode(&mut self) {
+        if self.id != WeaponId::TaurusRaging {
+            return;
+        }
+        if self.taurus_shotgun_mode {
+            super::stats::pistols::apply_taurus_raging_shotgun_mode(&mut self.stats_data);
+        } else {
+            super::stats::pistols::apply_taurus_raging_pistol_mode(&mut self.stats_data);
+        }
+        self.fire_cooldown = 0.0;
+        self.trigger_held = false;
+        self.burst_remaining = 0;
     }
 
     // can we fire right now?

@@ -330,57 +330,59 @@ pub const SUPPRESSED_PISTOL: WeaponStats = WeaponStats {
     ..M1911
 };
 
-/// Taurus Raging Judge — shotgun-pistol hybrid, fires multiple pellets like a shotgun
-/// but sits in the secondary (Pistol) slot. Slow fire rate, devastating up close.
+pub const TAURUS_RAGING_SHOTGUN_PELLET_SPREAD: &[(f32, f32)] = &[
+    (0.0, 0.0),    // center
+    (0.6283, 0.7), // ring of 4
+    (1.8850, 0.7),
+    (3.1416, 0.7),
+    (4.7124, 0.7),
+];
+
+/// Taurus Raging Judge — LeMat-style hybrid sidearm.
+/// Default profile is normal revolver-like rounds, with a toggle to shotgun shell mode.
 pub const TAURUS_RAGING: WeaponStats = WeaponStats {
     name: "Taurus Raging",
     fire_mode: FireMode::SemiAuto,
 
-    damage: 14.0,
-    headshot_mult: 1.8,
-    pellet_count: 5,
-    pellet_spread: Some(&[
-        (0.0, 0.0),       // center
-        (0.6283, 0.7),    // ring of 4
-        (1.8850, 0.7),
-        (3.1416, 0.7),
-        (4.7124, 0.7),
-    ]),
+    damage: 34.0,
+    headshot_mult: 2.0,
+    pellet_count: 1,
+    pellet_spread: None,
 
-    fire_rate: 1.4,
+    fire_rate: 2.2,
     magazine_size: 5,
     max_reserve: 30,
     reload_time: 2.2,
 
-    recoil_vertical: 0.06,
-    recoil_horizontal: 0.03,
-    recoil_recovery: 2.5,
+    recoil_vertical: 0.035,
+    recoil_horizontal: 0.012,
+    recoil_recovery: 3.5,
 
-    hip_spread: 0.05,
-    ads_spread: 0.025,
-    spread_per_shot: 0.04,
-    spread_recovery: 1.0,
+    hip_spread: 0.028,
+    ads_spread: 0.006,
+    spread_per_shot: 0.02,
+    spread_recovery: 1.8,
     move_spread_mult: 1.3,
     sprint_spread_mult: 1.6,
     crouch_spread_mult: 0.8,
 
-    ads_zoom_fov: 70.0,
+    ads_zoom_fov: 65.0,
     ads_time: 0.2,
     ads_sensitivity: None,
 
-    bullet_speed: 150.0,
-    bullet_range: 15.0,
-    tracer_length: 1.5,
-    tracer_color: [255, 160, 50, 255],
-    tracer_thickness: 0.009,
-    tracer_lifetime: 0.7,
-    bullet_hole_size: 0.25,
+    bullet_speed: 210.0,
+    bullet_range: 45.0,
+    tracer_length: 2.2,
+    tracer_color: [255, 190, 70, 255],
+    tracer_thickness: 0.012,
+    tracer_lifetime: 1.3,
+    bullet_hole_size: 0.22,
     bullet_hole_lifetime: 5.0,
     bullet_hole_color: [200, 200, 200, 255],
 
-    crosshair_kick_per_shot: 2.5,
+    crosshair_kick_per_shot: 1.7,
     crosshair_kick_decay: 6.0,
-    crosshair_kick_max: 4.0,
+    crosshair_kick_max: 2.3,
 
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.4),
@@ -409,18 +411,99 @@ pub const TAURUS_RAGING: WeaponStats = WeaponStats {
     viewmodel_ads_hands_pos_offset: (0.132, 0.035, -0.427),
     viewmodel_ads_hands_rot_offset: (0.105, 0.225, 0.085),
 
-    falloff_start: 4.0,
-    falloff_end: 12.0,
-    falloff_min_mult: 0.2,
+    falloff_start: 20.0,
+    falloff_end: 45.0,
+    falloff_min_mult: 0.55,
 
     recoil_pattern: &[
-        (0.06, 0.0),
-        (0.05, 0.1),
-        (0.045, -0.1),
-        (0.04, 0.08),
-        (0.035, -0.08),
+        (0.035, 0.0),
+        (0.030, 0.1),
+        (0.028, -0.1),
+        (0.025, 0.15),
+        (0.022, -0.15),
     ],
     pattern_randomness: 0.2,
     randomness_growth: 0.1,
     pattern_reset_time: 0.8,
 };
+
+pub fn apply_taurus_raging_pistol_mode(stats: &mut WeaponStats) {
+    stats.damage = 34.0;
+    stats.headshot_mult = 2.0;
+    stats.pellet_count = 1;
+    stats.pellet_spread = None;
+    stats.fire_rate = 2.2;
+    stats.recoil_vertical = 0.035;
+    stats.recoil_horizontal = 0.012;
+    stats.recoil_recovery = 3.5;
+    stats.hip_spread = 0.028;
+    stats.ads_spread = 0.006;
+    stats.spread_per_shot = 0.02;
+    stats.spread_recovery = 1.8;
+    stats.ads_zoom_fov = 65.0;
+    stats.bullet_speed = 210.0;
+    stats.bullet_range = 45.0;
+    stats.tracer_length = 2.2;
+    stats.tracer_color = [255, 190, 70, 255];
+    stats.tracer_thickness = 0.012;
+    stats.tracer_lifetime = 1.3;
+    stats.bullet_hole_size = 0.22;
+    stats.crosshair_kick_per_shot = 1.7;
+    stats.crosshair_kick_decay = 6.0;
+    stats.crosshair_kick_max = 2.3;
+    stats.fire_sound_asset_key = "revolver_shot";
+    stats.falloff_start = 20.0;
+    stats.falloff_end = 45.0;
+    stats.falloff_min_mult = 0.55;
+    stats.recoil_pattern = &[
+        (0.035, 0.0),
+        (0.030, 0.1),
+        (0.028, -0.1),
+        (0.025, 0.15),
+        (0.022, -0.15),
+    ];
+    stats.pattern_randomness = 0.2;
+    stats.randomness_growth = 0.1;
+    stats.pattern_reset_time = 0.8;
+}
+
+pub fn apply_taurus_raging_shotgun_mode(stats: &mut WeaponStats) {
+    stats.damage = 14.0;
+    stats.headshot_mult = 1.8;
+    stats.magazine_size = 1;
+    stats.pellet_count = 5;
+    stats.pellet_spread = Some(TAURUS_RAGING_SHOTGUN_PELLET_SPREAD);
+    stats.fire_rate = 1.4;
+    stats.recoil_vertical = 0.06;
+    stats.recoil_horizontal = 0.03;
+    stats.recoil_recovery = 2.5;
+    stats.hip_spread = 0.05;
+    stats.ads_spread = 0.025;
+    stats.spread_per_shot = 0.04;
+    stats.spread_recovery = 1.0;
+    stats.ads_zoom_fov = 70.0;
+    stats.bullet_speed = 150.0;
+    stats.bullet_range = 15.0;
+    stats.tracer_length = 1.5;
+    stats.tracer_color = [255, 160, 50, 255];
+    stats.tracer_thickness = 0.009;
+    stats.tracer_lifetime = 0.7;
+    stats.bullet_hole_size = 0.25;
+    stats.crosshair_kick_per_shot = 2.5;
+    stats.crosshair_kick_decay = 6.0;
+    stats.crosshair_kick_max = 4.0;
+    stats.fire_sound_asset_key = "shotgun_shot";
+    stats.falloff_start = 4.0;
+    stats.falloff_end = 12.0;
+    stats.falloff_min_mult = 0.2;
+    stats.recoil_pattern = &[
+        (0.06, 0.0),
+        (0.05, 0.1),
+        (0.045, -0.1),
+        (0.04, 0.08),
+        (0.035, -0.08),
+    ];
+    stats.pattern_randomness = 0.2;
+    stats.randomness_growth = 0.1;
+    stats.pattern_reset_time = 0.8;
+}

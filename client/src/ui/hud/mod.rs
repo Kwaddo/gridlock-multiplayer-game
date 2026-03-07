@@ -108,6 +108,7 @@ pub fn draw_hud(
         player_id,
         username,
         local_team,
+        config,
     );
 
     minimap::draw_minimap(
