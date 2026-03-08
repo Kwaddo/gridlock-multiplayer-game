@@ -189,6 +189,9 @@ impl PlayingState {
                     if world_key.contains("sawnoff") {
                         scale_factor *= 0.1;
                     }
+                    if world_key.contains("knife") {
+                        scale_factor *= 0.1;
+                    }
 
                     // rotate most guns slightly to the right when the player
                     // is moving (walking/sprinting) or aiming down sights. idle
@@ -337,6 +340,45 @@ impl PlayingState {
             let origin: Vec3 = bot.player.render_position();
             Self::draw_entity_hitboxes(origin, &bot.player.hitboxes);
         }
+    }
+
+    /// Draw a corpse model at the death position during the death camera sequence.
+    pub(crate) fn draw_death_corpse(&self) {
+        use crate::screens::playing::state::DeathCameraPhase;
+
+        let (corpse_pos, corpse_yaw) = match self.death_camera_phase {
+            DeathCameraPhase::ZoomOut { corpse_pos, corpse_yaw, .. }
+            | DeathCameraPhase::Watching { corpse_pos, corpse_yaw, .. } => (corpse_pos, corpse_yaw),
+            _ => return,
+        };
+
+        // Determine death animation based on what stance we were in when we died
+        let skin = if self.movement_state.is_prone {
+            crate::types::player::PlayerSkin::ProneDeath
+        } else if self.movement_state.is_crouching {
+            crate::types::player::PlayerSkin::CrouchDeath
+        } else {
+            crate::types::player::PlayerSkin::StandDeath
+        };
+
+        // Create a temporary OtherPlayer to render the corpse
+        let mut corpse = crate::types::player::OtherPlayer::new(
+            u32::MAX, // dummy ID
+            String::new(),
+            self.current_world,
+        );
+        corpse.x = corpse_pos.x;
+        corpse.y = corpse_pos.y;
+        corpse.z = corpse_pos.z;
+        corpse.render_x = corpse_pos.x;
+        corpse.render_y = corpse_pos.y;
+        corpse.render_z = corpse_pos.z;
+        corpse.yaw = corpse_yaw;
+        corpse.render_yaw = corpse_yaw;
+        corpse.skin_type = skin;
+        corpse.color = WHITE;
+
+        self.draw_player_model(&corpse);
     }
 
     #[inline(always)]

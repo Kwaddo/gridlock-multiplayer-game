@@ -201,6 +201,7 @@ pub struct OtherPlayer {
     pub world: WorldId,
     pub hp: f32,
     pub max_hp: f32,
+    pub is_alive: bool,
     pub hit_timer: f32,
     pub hitboxes: Vec<Hitbox>,
     pub kills: u32,
@@ -226,6 +227,13 @@ pub struct OtherPlayer {
 
     // bot
     pub is_bot: bool,
+    pub is_silent: bool, // no footstep sounds
+
+    // footstep audio
+    pub footstep_timer: f32,
+
+    // death animation: when Some, the player is dying and will be removed when timer hits 0
+    pub death_timer: Option<f32>,
 }
 
 impl OtherPlayer {
@@ -239,9 +247,9 @@ impl OtherPlayer {
     pub const MOVE_DIR_GRACE: f32 = 0.12; // seconds
 
     pub fn color_for_id(id: u32) -> Color {
-        let r = ((id * 73 + 29) % 256) as u8;
-        let g = ((id * 97 + 53) % 256) as u8;
-        let b = ((id * 61 + 19) % 256) as u8;
+        let r = (id.wrapping_mul(73).wrapping_add(29) % 256) as u8;
+        let g = (id.wrapping_mul(97).wrapping_add(53) % 256) as u8;
+        let b = (id.wrapping_mul(61).wrapping_add(19) % 256) as u8;
         Color::from_rgba(r, g, b, 255)
     }
 
@@ -273,6 +281,7 @@ impl OtherPlayer {
             team: 0,
             hp: 100.0,
             max_hp: 100.0,
+            is_alive: true,
             hit_timer: 0.0,
             hitboxes: default_player_hitboxes(),
             kills: 0,
@@ -287,6 +296,9 @@ impl OtherPlayer {
             gun_level: 1,
             current_weapon: String::new(),
             is_bot: false,
+            is_silent: false,
+            footstep_timer: 0.0,
+            death_timer: None,
         }
     }
 
@@ -359,11 +371,18 @@ impl CombatEntity for OtherPlayer {
     }
 
     fn is_alive(&self) -> bool {
-        self.hp > 0.0
+        self.is_alive
     }
 
     fn update(&mut self, delta: f32) {
         self.smooth_render_state(delta);
+
+        // Dying players keep their death skin locked — don't let
+        // idle/movement transitions overwrite it.
+        if self.death_timer.is_some() {
+            return;
+        }
+
         if self.hit_timer > 0.0 {
             self.hit_timer = (self.hit_timer - delta).max(0.0);
         }

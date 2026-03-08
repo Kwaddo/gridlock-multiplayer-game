@@ -16,6 +16,25 @@ use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DeathCameraPhase {
+    None,
+    /// Camera pulls back from first-person to third-person over ~0.5s
+    ZoomOut {
+        timer: f32,
+        corpse_pos: Vec3,
+        corpse_yaw: f32,
+    },
+    /// Camera watches the corpse for ~2s
+    Watching {
+        timer: f32,
+        corpse_pos: Vec3,
+        corpse_yaw: f32,
+    },
+    /// Transition complete — show death screen overlay
+    Done,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HandsPlaybackMode {
     IdleLoop,
@@ -76,6 +95,15 @@ pub struct PlayingState {
     pub pending_set_team: Option<u8>,
     pub pending_range_start: bool,
     pub lobby_console_open: bool,
+    // auto-fill bot settings (lobby console)
+    pub autofill_enabled: bool,
+    pub autofill_bots_per_team: u8,   // 0..=8
+    pub autofill_diff_recruit: bool,
+    pub autofill_diff_easy: bool,
+    pub autofill_diff_normal: bool,
+    pub autofill_diff_hard: bool,
+    pub autofill_diff_nightmare: bool,
+    pub autofill_dropdown_open: bool,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
     pub pending_hits: Vec<(u32, f32, bool)>, // victim_id, damage, backstab attempt?
@@ -123,8 +151,6 @@ pub struct PlayingState {
     pub next_bot_id: u32,
 
     pub hp: f32,
-    pub shield: f32,
-    pub max_shield: f32,
     pub max_hp: f32,
     pub is_dead: bool,
     pub death_timer: f32,
@@ -138,6 +164,12 @@ pub struct PlayingState {
     // death screen: who killed us and with what weapon
     pub death_killer_name: Option<String>,
     pub death_weapon_name: Option<String>,
+
+    // kill confirmation effect timer (brief screen flash when you get a kill)
+    pub kill_confirm_timer: f32,
+
+    // death camera: third-person pullback before showing death screen
+    pub death_camera_phase: DeathCameraPhase,
 
     // short bottom-left announcements (message, timer)
     pub announcements: Vec<(String, f32)>,
@@ -185,6 +217,9 @@ pub struct PlayingState {
     pub snd_is_planting: bool, // client is currently holding plant
     pub snd_is_defusing: bool, // client is currently holding defuse
 
+    // local player footstep timer
+    pub local_footstep_timer: f32,
+
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
 
@@ -203,6 +238,8 @@ pub struct KillFeedEntry {
     pub victim_id: u32,
     pub killer_name: String,
     pub victim_name: String,
+    pub killer_team: u8,
+    pub victim_team: u8,
     pub weapon: String,
     pub timer: f32,
 }
@@ -246,6 +283,14 @@ impl PlayingState {
             pending_set_team: None,
             pending_range_start: false,
             lobby_console_open: false,
+            autofill_enabled: false,
+            autofill_bots_per_team: 3,
+            autofill_diff_recruit: true,
+            autofill_diff_easy: true,
+            autofill_diff_normal: true,
+            autofill_diff_hard: true,
+            autofill_diff_nightmare: true,
+            autofill_dropdown_open: false,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
             pending_hits: Vec::new(),
@@ -262,10 +307,8 @@ impl PlayingState {
             dev_mode: DevModeState::new(),
             practice_bots: Vec::with_capacity(Self::INIT_PRACTICE_BOTS),
             next_bot_id: 9000,
-            hp: 100.0,
-            max_hp: 100.0,
-            shield: 0.0,
-            max_shield: 100.0,
+            hp: 125.0,
+            max_hp: 125.0,
             is_dead: false,
             death_timer: 0.0,
             invulnerability_timer: 0.0,
@@ -274,6 +317,8 @@ impl PlayingState {
             local_deaths: 0,
             death_killer_name: None,
             death_weapon_name: None,
+            kill_confirm_timer: 0.0,
+            death_camera_phase: DeathCameraPhase::None,
             // countdown timers
             match_start_countdown_timer: 0.0,
             match_end_countdown_timer: 0.0,
@@ -338,6 +383,7 @@ impl PlayingState {
             snd_is_planting: false,
             snd_is_defusing: false,
 
+            local_footstep_timer: 0.0,
             destroyed_lights: HashSet::new(),
 
             match_start_cached_secs: -1,

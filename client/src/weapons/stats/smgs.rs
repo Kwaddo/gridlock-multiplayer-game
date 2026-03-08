@@ -165,12 +165,97 @@ pub const P90: WeaponStats = WeaponStats {
     ..MP5
 };
 
-// Honey Badger — stealth assault SMG hybrid, suppressed + rifle damage feel
+/// Honey Badger — suppressed AR/SMG hybrid, good damage with stealth tracers
 pub const HONEY_BADGER: WeaponStats = WeaponStats {
     name: "Honey Badger",
+    fire_mode: FireMode::FullAuto,
+
+    damage: 26.0,
+    headshot_mult: 1.8,
+    pellet_count: 1,
+    pellet_spread: None,
+    fire_rate: 8.0,
+    magazine_size: 30,
+    max_reserve: 90,
+    reload_time: 1.75,
+
+    recoil_vertical: 0.016,
+    recoil_horizontal: 0.008,
+    recoil_recovery: 4.5,
+
+    hip_spread: 0.022,
+    ads_spread: 0.008,
+    spread_per_shot: 0.014,
+    spread_recovery: 2.8,
+    move_spread_mult: 1.15,
+    sprint_spread_mult: 1.4,
+    crouch_spread_mult: 0.8,
+
+    ads_zoom_fov: 65.0,
+    ads_time: 0.2,
+    ads_sensitivity: None,
+
+    // Suppressed — faint tracers
+    bullet_speed: 190.0,
+    bullet_range: 50.0,
+    tracer_length: 0.5,
+    tracer_color: [80, 80, 80, 80],
+    tracer_thickness: 0.005,
+    tracer_lifetime: 0.4,
+    bullet_hole_size: 0.18,
+    bullet_hole_lifetime: 5.0,
+    bullet_hole_color: [200, 200, 200, 255],
+
+    crosshair_kick_per_shot: 0.9,
+    crosshair_kick_decay: 7.0,
+    crosshair_kick_max: 2.2,
+
+    crosshair_style: CrosshairStyle::Standard,
+    fsa_time: Some(0.22),
+    fsa_suppresses_kick: false,
+
+    fire_sound_asset_key: "smg_shot",
+    icon_asset_key: "smg_icon",
+    icon_width: 95.0,
+    icon_height: 45.0,
+    icon_flip_x: true,
+
     viewmodel_model: Some("honey_badger_model"),
     viewmodel_asset_key: None,
-    ..MP5
+    viewmodel_scale: 0.0041,
+    viewmodel_ads_scale: 0.003,
+    viewmodel_position: (0.176, 0.052, -0.222),
+    viewmodel_rotation: (-0.1, -1.675, 0.0),
+    viewmodel_muzzle_offset: (-1.1, 0.02, -0.25),
+    viewmodel_hands_scale: 0.074,
+    viewmodel_hands_offset: (0.075, 0.04, -0.392),
+    viewmodel_hands_rotation: (-0.245, 0.375, -0.135),
+    viewmodel_pair_offset_pos: (0.049, -0.003, -0.037),
+    viewmodel_pair_offset_rot: (0.1, 0.175, 0.0),
+    viewmodel_ads_pos_offset: (0.173, 0.05, -0.147),
+    viewmodel_ads_rot_offset: (0.0, 0.105, -0.15),
+    viewmodel_ads_hands_pos_offset: (0.174, 0.05, -0.147),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.175, -0.15),
+
+    falloff_start: 12.0,
+    falloff_end: 35.0,
+    falloff_min_mult: 0.45,
+
+    recoil_pattern: &[
+        (0.016, 0.0),
+        (0.015, 0.03),
+        (0.014, 0.08),
+        (0.014, 0.15),
+        (0.013, 0.1),
+        (0.012, -0.05),
+        (0.011, -0.15),
+        (0.011, -0.1),
+        (0.01, 0.0),
+        (0.009, 0.05),
+    ],
+    pattern_randomness: 0.2,
+    randomness_growth: 0.04,
+    pattern_reset_time: 0.35,
 };
 
 /// Tommy Gun — vintage SMG, heavy recoil but strong close range, drum mag
@@ -216,6 +301,22 @@ pub const TOMMY_GUN: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("tommy_gun_model"),
     viewmodel_asset_key: None,
+
+    // Tommy Gun viewmodel
+    viewmodel_scale: 0.0041,
+    viewmodel_ads_scale: 0.003,
+    viewmodel_position: (0.176, 0.052, -0.276),
+    viewmodel_rotation: (-0.1, -1.75, 0.0),
+    viewmodel_muzzle_offset: (-1.1, 0.02, -0.25),
+    viewmodel_hands_scale: 0.074,
+    viewmodel_hands_offset: (0.086, 0.041, -0.401),
+    viewmodel_hands_rotation: (-0.245, 0.275, -0.135),
+    viewmodel_pair_offset_pos: (0.049, -0.003, -0.003),
+    viewmodel_pair_offset_rot: (0.1, 0.175, 0.0),
+    viewmodel_ads_pos_offset: (0.174, 0.05, -0.147),
+    viewmodel_ads_rot_offset: (0.0, 0.175, -0.15),
+    viewmodel_ads_hands_pos_offset: (0.0, 0.0, -0.69),
+    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
 
     falloff_start: 8.0,
     falloff_end: 25.0,

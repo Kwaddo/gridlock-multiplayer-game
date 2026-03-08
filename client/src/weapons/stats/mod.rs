@@ -68,12 +68,12 @@ pub enum WeaponId {
     Deagle,
     Revolver,
     SuppressedPistol,
-    // TaurusRaging,
+    TaurusRaging,
 
     // SMGs
     Mp5,
     P90,
-    // HoneyBadger,
+    HoneyBadger,
     TommyGun,
 
     // Shotguns
@@ -108,12 +108,12 @@ impl WeaponId {
         WeaponId::Deagle,
         WeaponId::Revolver,
         WeaponId::SuppressedPistol,
-        // WeaponId::TaurusRaging,
+        WeaponId::TaurusRaging,
 
         // SMGs
         WeaponId::Mp5,
         WeaponId::P90,
-        // WeaponId::HoneyBadger,
+        WeaponId::HoneyBadger,
         WeaponId::TommyGun,
 
         // Shotguns
@@ -145,11 +145,11 @@ impl WeaponId {
         match self {
             WeaponId::M1911 | WeaponId::Deagle | WeaponId::Revolver
             | WeaponId::SuppressedPistol
-            // | WeaponId::TaurusRaging
+            | WeaponId::TaurusRaging
             => WeaponCategory::Pistol,
 
             WeaponId::Mp5 | WeaponId::P90
-            // | WeaponId::HoneyBadger
+            | WeaponId::HoneyBadger
             | WeaponId::TommyGun
             => WeaponCategory::Smg,
 
@@ -182,12 +182,12 @@ impl WeaponId {
             WeaponId::Deagle => &pistols::DEAGLE,
             WeaponId::Revolver => &pistols::REVOLVER,
             WeaponId::SuppressedPistol => &pistols::SUPPRESSED_PISTOL,
-            // WeaponId::TaurusRaging => &pistols::TAURUS_RAGING,
+            WeaponId::TaurusRaging => &pistols::TAURUS_RAGING,
 
             // SMGs
             WeaponId::Mp5 => &smgs::MP5,
             WeaponId::P90 => &smgs::P90,
-            // WeaponId::HoneyBadger => &smgs::HONEY_BADGER,
+            WeaponId::HoneyBadger => &smgs::HONEY_BADGER,
             WeaponId::TommyGun => &smgs::TOMMY_GUN,
 
             // Shotguns
@@ -235,9 +235,19 @@ impl WeaponId {
             })
     }
 
-    /// All weapon IDs belonging to a given category.
+    /// Weapons removed from selection (kept in code but hidden from UI/loadout).
+    pub const HIDDEN: &[WeaponId] = &[
+        WeaponId::P90,
+        WeaponId::HuntingRifle,
+        WeaponId::SemiAutoSniper,
+        WeaponId::Minigun,
+    ];
+
+    /// All weapon IDs belonging to a given category (excludes hidden weapons).
     pub fn all_in(cat: WeaponCategory) -> Vec<WeaponId> {
-        Self::ALL.iter().copied().filter(|w| w.category() == cat).collect()
+        Self::ALL.iter().copied()
+            .filter(|w| w.category() == cat && !Self::HIDDEN.contains(w))
+            .collect()
     }
 }
 

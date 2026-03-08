@@ -65,6 +65,7 @@ pub fn handle_hit(
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
     snd_state: &mut Option<crate::server::snd::SndState>,
+    bot_states: &mut HashMap<SocketAddr, crate::bot::ai::BotState>,
 ) {
     // the sender of the hit packet is the attacker
     let attacker = src_addr;
@@ -298,6 +299,7 @@ pub fn handle_hit(
         }
         let _ = socket.send_to(&dmg_msg, victim_addr);
     }
+     
     apply_damage(
         socket,
         players,
@@ -308,6 +310,8 @@ pub fn handle_hit(
         is_backstab_claim,
         match_end_pending,
         match_mode,
+        bot_states,
+        _maze.as_ref(), // pass immutable reference for any maze queries during damage application
     );
 }
 
@@ -422,6 +426,8 @@ pub fn apply_damage(
     is_backstab: bool,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
+    _bot_states: &mut HashMap<SocketAddr, crate::bot::ai::BotState>,
+    _maze: Option<&MazeData>,
 ) {
     let (attacker, attacker_world, attacker_is_bot) = match players.get(&attacker_addr) {
         Some(a) => {
@@ -611,10 +617,11 @@ pub fn apply_damage(
             let _ = socket.send_to(&feed, p.socket_addr);
         }
     } else {
+        // apply non-lethal damage
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.health -= damage;
-            if vmut.world == WorldId::Lobby && !vmut.is_bot {
-                vmut.lobby_regen_resume_at = Some(Instant::now() + Duration::from_millis(1500));
+            if !vmut.is_bot {
+                vmut.regen_resume_at = Some(Instant::now() + Duration::from_secs(7));
             }
         }
 

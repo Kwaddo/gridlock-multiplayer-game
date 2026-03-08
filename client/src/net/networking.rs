@@ -4,7 +4,7 @@ use macroquad::prelude::*;
 
 use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_IS_BOT, FLAG_PRONE,
-    FLAG_SLIDING, FLAG_SPRINTING, MSG_ASSETS, MSG_BOT_SHOT, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED,
+    FLAG_SILENT, FLAG_SLIDING, FLAG_SPRINTING, MSG_ASSETS, MSG_BOT_SHOT, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED,
     MSG_MATCH_COUNTDOWN, MSG_MATCH_END, MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE,
     MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN, MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN,
     MSG_WORLD_CHANGE,
@@ -35,7 +35,7 @@ pub struct NetUpdate {
     pub match_time_left: Option<u16>,
     pub match_end_winner: Option<String>,
     pub match_end_countdown: Option<u8>,
-    pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8, u8, String)>>, // (id, name, kills, deaths, world, alive, gun_level, team, weapon)
+    pub player_list: Option<Vec<(u32, String, u32, u32, WorldId, bool, u8, u8, String, bool)>>, // (id, name, kills, deaths, world, alive, gun_level, team, weapon, is_bot)
     pub self_kills: Option<u32>,
     pub self_gun_level: Option<u8>,
     pub self_hp: Option<f32>,
@@ -345,25 +345,24 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.is_ads = (state_flags & FLAG_ADS) != 0;
                         other_player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
                         other_player.is_bot = (state_flags & FLAG_IS_BOT) != 0;
+                        other_player.is_silent = (state_flags & FLAG_SILENT) != 0;
                         other_player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
                         other_player.evt_landed = (event_flags & EVT_LANDED) != 0;
                         other_player.kills = kills;
                         other_player.gun_level = gun_level;
                         other_player.hp = hp;
                         other_player.max_hp = max_hp;
+                        other_player.is_alive = alive;
                         // Set team and weapon before the alive check so they are always
                         // applied to this player and never bleed onto another slot.
                         other_player.team = _team;
                         if !_weapon.is_empty() {
                             other_player.current_weapon = _weapon;
                         }
-                        // Only add other players who are alive; dead players are
-                        // represented by the alive flag and will be removed by
-                        // the client when appropriate so offscreen deaths are
-                        // reliably propagated.
-                        if alive {
-                            new_players.push(other_player);
+                        if !alive {
+                            other_player.hp = 0.0;
                         }
+                        new_players.push(other_player);
                     } else {
                         // update own-kills value for local UI/scoreboard
                         update.self_kills = Some(kills);
@@ -469,7 +468,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
             }
             MSG_PLAYER_LIST => {
                 // format: [MSG_PLAYER_LIST][count:1][entries...]
-                // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1]
+                // entry: [id:4][name_len:1][name bytes][kills:4][deaths:4][world:1][alive:1][gun_level:1][team:1][weapon_len:1][weapon bytes][is_bot:1]
                 if size >= 2 {
                     let count = recv_buf[1] as usize;
                     let mut offset = 2usize;
@@ -528,10 +527,15 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                             String::from_utf8_lossy(&recv_buf[offset..offset + weapon_len])
                                 .to_string();
                         offset += weapon_len;
+                        if offset + 1 > size {
+                            break;
+                        }
+                        let is_bot = recv_buf[offset] != 0;
+                        offset += 1;
 
                         let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
                         list.push((
-                            id, name, kills, deaths, world, alive, gun_level, team, weapon,
+                            id, name, kills, deaths, world, alive, gun_level, team, weapon, is_bot,
                         ));
                     }
                     update.player_list = Some(list);

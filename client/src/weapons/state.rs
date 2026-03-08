@@ -51,6 +51,7 @@ pub struct WeaponState {
 
     // -- Burst fire
     pub burst_remaining: u32, // shots left in current burst (0 = not bursting)
+    pub taurus_shotgun_mode: bool,
 
     // -- Dev: pair lock (hand + gun move together)
     pub pair_locked: bool,
@@ -104,6 +105,7 @@ impl WeaponState {
             shot_index: 0,
             pattern_reset_timer: 0.0,
             burst_remaining: 0,
+            taurus_shotgun_mode: false,
             pair_locked: false,
             pair_offset_pos: stats.viewmodel_pair_offset_pos,
             pair_offset_rot: stats.viewmodel_pair_offset_rot,
@@ -122,6 +124,32 @@ impl WeaponState {
     // reset stats to factory defaults (from const definitions)
     pub fn reset_stats(&mut self) {
         self.stats_data = self.id.stats().clone();
+        if self.id == WeaponId::TaurusRaging {
+            self.apply_taurus_fire_mode();
+        }
+    }
+
+    pub fn toggle_taurus_fire_mode(&mut self) -> bool {
+        if self.id != WeaponId::TaurusRaging {
+            return false;
+        }
+        self.taurus_shotgun_mode = !self.taurus_shotgun_mode;
+        self.apply_taurus_fire_mode();
+        true
+    }
+
+    fn apply_taurus_fire_mode(&mut self) {
+        if self.id != WeaponId::TaurusRaging {
+            return;
+        }
+        if self.taurus_shotgun_mode {
+            super::stats::pistols::apply_taurus_raging_shotgun_mode(&mut self.stats_data);
+        } else {
+            super::stats::pistols::apply_taurus_raging_pistol_mode(&mut self.stats_data);
+        }
+        self.fire_cooldown = 0.0;
+        self.trigger_held = false;
+        self.burst_remaining = 0;
     }
 
     // can we fire right now?
@@ -395,6 +423,41 @@ impl WeaponInventory {
         let len = self.weapons.len() as i32;
         let new_slot = ((self.active_slot as i32) + direction).rem_euclid(len) as usize;
         self.switch_to(new_slot);
+    }
+
+    /// Auto-switch weapon when current gun is completely empty (ammo + reserve = 0).
+    /// Tries the other gun slot first, then falls back to knife.
+    pub fn auto_switch_on_empty(&mut self) {
+        if self.knife_active {
+            return;
+        }
+        let current = &self.weapons[self.active_slot];
+        if current.ammo > 0 || current.reserve > 0 {
+            return;
+        }
+        // Try other gun slot
+        let other_slot = if self.active_slot == 0 { 1 } else { 0 };
+        if other_slot < self.weapons.len() {
+            let other = &self.weapons[other_slot];
+            if other.ammo > 0 || other.reserve > 0 {
+                self.active_slot = other_slot;
+                self.switch_cooldown = 0.3;
+                return;
+            }
+        }
+        // All guns empty — switch to knife
+        self.knife_active = true;
+        self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_TO_TIME;
+    }
+
+    /// Add reserve ammo to the active gun (used for kill-resupply in TDM).
+    pub fn resupply_active(&mut self, amount: u32) {
+        if self.knife_active {
+            return;
+        }
+        let weapon = &mut self.weapons[self.active_slot];
+        let max = weapon.stats_data.max_reserve;
+        weapon.reserve = (weapon.reserve + amount).min(max);
     }
 
     // tick switch cooldown + all weapon states.

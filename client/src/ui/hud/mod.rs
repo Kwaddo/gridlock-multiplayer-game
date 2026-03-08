@@ -8,6 +8,7 @@ pub use players::draw_player_list;
 mod scope;
 mod status;
 mod weapon_feed;
+pub use weapon_feed::draw_kill_feed;
 
 use crate::core::GameConfig;
 use crate::physics::movement::MovementState;
@@ -32,8 +33,6 @@ pub fn draw_hud(
     hit_marker_pellet_mask: u16,
     hp: f32,
     max_hp: f32,
-    shield: f32,
-    max_shield: f32,
     kill_feed: &[crate::screens::playing::KillFeedEntry],
     match_time_left: f32,
     damage_flash_timer: f32,
@@ -95,8 +94,6 @@ pub fn draw_hud(
         movement_state,
         hp,
         max_hp,
-        shield,
-        max_shield,
         match_time_left,
         config,
     );
@@ -110,6 +107,8 @@ pub fn draw_hud(
         kill_feed,
         player_id,
         username,
+        local_team,
+        config,
     );
 
     minimap::draw_minimap(

@@ -151,6 +151,22 @@ pub const BENELLI: WeaponStats = WeaponStats {
     viewmodel_model: Some("benelli_model"),
     viewmodel_asset_key: None,
 
+    
+    viewmodel_scale: 0.002,
+    viewmodel_ads_scale: 0.002,
+    viewmodel_position: (0.22, 0.13, -0.44),
+    viewmodel_rotation: (-0.1, -1.45, 0.0),
+    viewmodel_muzzle_offset: (-1.1, 0.02, -0.25),
+    viewmodel_hands_scale: 1.93,
+    viewmodel_hands_offset: (0.18, -0.12, -0.466),
+    viewmodel_hands_rotation: (-0.05, 0.9, 0.1),
+    viewmodel_pair_offset_pos: (0.044, 0.0, 0.0),
+    viewmodel_pair_offset_rot: (0.1, 0.0, 0.0),
+    viewmodel_ads_pos_offset: (0.126, 0.025, -0.06),
+    viewmodel_ads_rot_offset: (0.275, -0.12, 0.125),
+    viewmodel_ads_hands_pos_offset: (0.134, 0.026, -0.537),
+    viewmodel_ads_hands_rot_offset: (0.1, 0.0, 0.085),
+
     falloff_start: 4.0,
     falloff_end: 12.0,
     falloff_min_mult: 0.15,

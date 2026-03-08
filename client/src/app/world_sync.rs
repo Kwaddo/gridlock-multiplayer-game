@@ -57,6 +57,12 @@ pub fn sync_world(
                 if let Some(&idx) = playing_state.player_index.get(&incoming.id) {
                     // update existing player by index
                     let current = &mut playing_state.other_players[idx];
+                    let incoming_dead = !incoming.is_alive;
+
+                    // skip updating dying players — they're playing a death animation
+                    if current.death_timer.is_some() {
+                        continue;
+                    }
 
                     // Check if this player's position actually changed.
                     // The server broadcasts state on every position packet from
@@ -122,6 +128,23 @@ pub fn sync_world(
                     current.current_weapon = incoming.current_weapon;
                     current.hp = incoming.hp;
                     current.max_hp = incoming.max_hp;
+                    current.is_alive = incoming.is_alive;
+
+                    if incoming_dead && current.death_timer.is_none() {
+                        current.skin_type = if current.is_prone {
+                            client::types::player::PlayerSkin::ProneDeath
+                        } else if current.is_crouching {
+                            client::types::player::PlayerSkin::CrouchDeath
+                        } else {
+                            client::types::player::PlayerSkin::StandDeath
+                        };
+                        current.death_timer = Some(2.0);
+                        if let Some(model_key) = current.skin_type.model_key() {
+                            if let Some(anim) = playing_state.animated_models.get_mut(model_key) {
+                                anim.play_from_start(false);
+                            }
+                        }
+                    }
                 } else {
                     // new player
                     if incoming.is_sprinting {
@@ -145,6 +168,16 @@ pub fn sync_world(
                     incoming.pending_move_dir = None;
                     incoming.pending_move_timer = 0.0;
                     incoming.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
+                    if !incoming.is_alive {
+                        incoming.skin_type = if incoming.is_prone {
+                            client::types::player::PlayerSkin::ProneDeath
+                        } else if incoming.is_crouching {
+                            client::types::player::PlayerSkin::CrouchDeath
+                        } else {
+                            client::types::player::PlayerSkin::StandDeath
+                        };
+                        incoming.death_timer = Some(2.0);
+                    }
                     let idx = playing_state.other_players.len();
                     playing_state.other_players.push(incoming);
                     playing_state
@@ -154,10 +187,11 @@ pub fn sync_world(
             }
 
             // remove any players the server no longer reports
+            // (keep dying players until their death animation timer expires)
             if !playing_state.seen_player_ids.is_empty() {
                 playing_state
                     .other_players
-                    .retain(|p| playing_state.seen_player_ids.contains(&p.id));
+                    .retain(|p| playing_state.seen_player_ids.contains(&p.id) || p.death_timer.is_some());
                 // rebuild index after potential removals/shifts
                 playing_state.rebuild_player_index();
             }
@@ -271,7 +305,6 @@ pub fn sync_world(
                 // Reset local player state for a fresh match
                 playing_state.is_dead = false;
                 playing_state.hp = playing_state.max_hp;
-                playing_state.shield = 0.0;
                 playing_state.death_timer = 0.0;
                 playing_state.local_kills = 0;
                 playing_state.local_deaths = 0;
@@ -310,7 +343,6 @@ pub fn sync_world(
                 // Reset local player state when returning to lobby
                 playing_state.is_dead = false;
                 playing_state.hp = playing_state.max_hp;
-                playing_state.shield = 0.0;
                 playing_state.death_timer = 0.0;
                 playing_state.local_kills = 0;
                 playing_state.local_deaths = 0;
@@ -440,6 +472,20 @@ pub fn sync_world(
                         .unwrap_or_else(|| "Player".to_string())
                 };
 
+                // resolve teams from connected_players
+                let killer_team = playing_state
+                    .connected_players
+                    .iter()
+                    .find(|(id, ..)| *id == killer_id)
+                    .map(|(_, _, _, _, _, team, _, _)| *team)
+                    .unwrap_or(0);
+                let victim_team = playing_state
+                    .connected_players
+                    .iter()
+                    .find(|(id, ..)| *id == victim_id)
+                    .map(|(_, _, _, _, _, team, _, _)| *team)
+                    .unwrap_or(0);
+
                 // push a kill-feed entry for UI
                 playing_state
                     .kill_feed
@@ -448,19 +494,43 @@ pub fn sync_world(
                         victim_id,
                         killer_name,
                         victim_name,
+                        killer_team,
+                        victim_team,
                         weapon,
                         timer: 5.0,
                     });
 
-                // if the victim is another player, remove them immediately so no
-                // corpse lingers. the server will eventually stop sending a state
-                // update for the dead player, but the kill-feed packet arrives
-                // slightly earlier and gives us an opportunity to cull them right
-                // away. note: we only remove non-local players here since the
-                // local client handles its own death path separately.
+                // kill confirmation effect for local player
+                if killer_id == player_id {
+                    playing_state.kill_confirm_timer = 0.3;
+                    // TDM: resupply ammo on kill
+                    if playing_state.match_mode == Some(client::net::protocols::MODE_TEAM_DEATHMATCH) {
+                        playing_state.weapons.resupply_active(15);
+                    }
+                }
+
+                // mark victim as dying so they play a death animation before removal.
+                // the server will eventually stop sending state updates for the dead
+                // player, but the kill-feed packet arrives earlier and gives us an
+                // opportunity to trigger the animation right away.
                 if victim_id != player_id {
-                    playing_state.other_players.retain(|p| p.id != victim_id);
-                    playing_state.rebuild_player_index();
+                    if let Some(victim) = playing_state.other_players.iter_mut().find(|p| p.id == victim_id) {
+                        // pick death animation based on current stance
+                        victim.skin_type = if victim.is_prone {
+                            client::types::player::PlayerSkin::ProneDeath
+                        } else if victim.is_crouching {
+                            client::types::player::PlayerSkin::CrouchDeath
+                        } else {
+                            client::types::player::PlayerSkin::StandDeath
+                        };
+                        victim.death_timer = Some(2.0);
+                        // reset animation playback so it starts from the beginning
+                        if let Some(model_key) = victim.skin_type.model_key() {
+                            if let Some(anim) = playing_state.animated_models.get_mut(model_key) {
+                                anim.play_from_start(false);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -565,7 +635,7 @@ pub fn sync_world(
         if let Some(list) = updates.player_list {
             // detect whether the server still knows about *us* — if not, server removed us (timed out)
             let still_present = list.iter().any(
-                |(id, _name, _kills, _deaths, _world, _alive, _gl, _team, _weapon)| {
+                |(id, _name, _kills, _deaths, _world, _alive, _gl, _team, _weapon, _is_bot)| {
                     *id == player_id
                 },
             );
@@ -585,22 +655,16 @@ pub fn sync_world(
             let before = playing_state.other_players.len();
             playing_state
                 .other_players
-                .retain(|p| server_ids.contains(&p.id));
+                .retain(|p| server_ids.contains(&p.id) || p.death_timer.is_some());
             if playing_state.other_players.len() != before {
                 playing_state.rebuild_player_index();
             }
 
-            // `list` now has entries: (id, name, kills, deaths, world, alive, gun_level, team, weapon)
+            // `list` now has entries: (id, name, kills, deaths, world, alive, gun_level, team, weapon, is_bot)
             playing_state.connected_players = list
                 .into_iter()
                 .map(
-                    |(id, name, kills, deaths, _world, _alive, gun_level, team, weapon)| {
-                        let is_bot = playing_state
-                            .other_players
-                            .iter()
-                            .find(|p| p.id == id)
-                            .map(|p| p.is_bot)
-                            .unwrap_or(false);
+                    |(id, name, kills, deaths, _world, _alive, gun_level, team, weapon, is_bot)| {
                         (id, name, kills, deaths, gun_level, team, weapon, is_bot)
                     },
                 )
