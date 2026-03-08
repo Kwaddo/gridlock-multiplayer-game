@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
+use crate::bot::manager::BotManager;
+use crate::bot::personality::BotPersonalityId;
 use crate::maze::MazeData;
 use crate::player::Team;
 use crate::player::{Player, WorldId};
@@ -219,6 +221,9 @@ pub fn maybe_start_match(
     match_mode: u8,
     snd_state: &mut Option<crate::server::snd::SndState>,
     match_duration: Option<Duration>,
+    bot_manager: &mut BotManager,
+    autofill_bots_per_team: u8,
+    autofill_diff_mask: u8,
 ) {
     if let Some(end) = *match_warmup_end {
         if Instant::now() >= end {
@@ -320,7 +325,6 @@ pub fn maybe_start_match(
 
                     // reset per-match player state
                     player.health = player.max_health;
-                    player.shield = 0;
                     player.is_alive = true;
                     player.kills = 0;
                     player.deaths = 0;
@@ -387,6 +391,145 @@ pub fn maybe_start_match(
                     let _ = socket.send_to(&response, player.socket_addr);
 
                     current_maze.send(&socket, player.socket_addr);
+                }
+            }
+
+            // Despawn any shooting range bots before spawning game bots
+            bot_manager.despawn_range_bots(players);
+
+            // ── Auto-fill with bots ──
+            // Spawn `autofill_bots_per_team` bots per team (equal teams).
+            // Randomly pick from personalities whose difficulty matches the mask.
+            if match_mode != MODE_GUN_GAME && autofill_bots_per_team > 0 {
+                use rand::seq::SliceRandom;
+
+                let all_personalities = [
+                    BotPersonalityId::Heater,
+                    BotPersonalityId::Stinger,
+                    BotPersonalityId::Rex,
+                    BotPersonalityId::Merlin,
+                    BotPersonalityId::Viper,
+                    BotPersonalityId::Phantom,
+                    BotPersonalityId::Nexto,
+                    BotPersonalityId::Bandit,
+                    BotPersonalityId::Slater,
+                    BotPersonalityId::Storm,
+                    BotPersonalityId::Ghost,
+                    BotPersonalityId::Sniper,
+                    BotPersonalityId::Bulwark,
+                    BotPersonalityId::Wraith,
+                    BotPersonalityId::Overwatch,
+                ];
+
+                // filter by difficulty mask: bit0=Recruit, bit1=Easy, bit2=Normal, bit3=Hard, bit4=Nightmare
+                let eligible: Vec<BotPersonalityId> = all_personalities
+                    .iter()
+                    .copied()
+                    .filter(|pid| {
+                        let (_, diff) = crate::bot::personality::get_personality(*pid);
+                        let bit = match diff {
+                            crate::bot::personality::BotDifficulty::Recruit   => 0,
+                            crate::bot::personality::BotDifficulty::Easy      => 1,
+                            crate::bot::personality::BotDifficulty::Normal    => 2,
+                            crate::bot::personality::BotDifficulty::Hard      => 3,
+                            crate::bot::personality::BotDifficulty::Nightmare => 4,
+                        };
+                        (autofill_diff_mask >> bit) & 1 == 1
+                    })
+                    .collect();
+
+                if !eligible.is_empty() {
+                    let mut rng = rand::thread_rng();
+                    let total_bots = (autofill_bots_per_team as usize) * 2;
+
+                    // ensure we don't exceed max players
+                    let current_count = players.values().filter(|p| p.world == WorldId::Maze).count();
+                    let slots_available = MATCH_MAX_PLAYERS.saturating_sub(current_count);
+                    // must be even to keep teams equal
+                    let bots_to_spawn = total_bots.min(slots_available) & !1;
+
+                    // count current team sizes for balancing
+                    let mut red_count = players.values().filter(|p| p.world == WorldId::Maze && p.team == Team::Red).count();
+                    let mut blue_count = players.values().filter(|p| p.world == WorldId::Maze && p.team == Team::Blue).count();
+
+                    // track assigned weapons per team to avoid duplicates
+                    let mut red_weapons: Vec<String> = players.values()
+                        .filter(|p| p.world == WorldId::Maze && p.team == Team::Red)
+                        .map(|p| p.current_weapon.clone())
+                        .collect();
+                    let mut blue_weapons: Vec<String> = players.values()
+                        .filter(|p| p.world == WorldId::Maze && p.team == Team::Blue)
+                        .map(|p| p.current_weapon.clone())
+                        .collect();
+
+                    // track used personalities so we don't spawn duplicates
+                    let mut used_personalities: Vec<BotPersonalityId> = Vec::new();
+
+                    for _ in 0..bots_to_spawn {
+                        // pick a random unused personality; stop if all used (no duplicates)
+                        let remaining: Vec<&BotPersonalityId> = eligible
+                            .iter()
+                            .filter(|p| !used_personalities.contains(p))
+                            .collect();
+                        let pid = if remaining.is_empty() {
+                            break;
+                        } else {
+                            **remaining.choose(&mut rng).unwrap()
+                        };
+                        used_personalities.push(pid);
+
+                        let (pers, _) = crate::bot::personality::get_personality(pid);
+
+                        // balance teams
+                        let team = if red_count <= blue_count { Team::Red } else { Team::Blue };
+
+                        // pick weapon
+                        let pool = match team {
+                            Team::Red => &TEAM_LOADOUT_RED,
+                            Team::Blue => &TEAM_LOADOUT_BLUE,
+                            _ => &TEAM_LOADOUT_RED,
+                        };
+                        let assigned = if team == Team::Red { &mut red_weapons } else { &mut blue_weapons };
+
+                        let weapon = if !assigned.iter().any(|w| w == pers.weapon) {
+                            pers.weapon.to_string()
+                        } else {
+                            let mut chosen = None;
+                            for &w in pool.iter() {
+                                if !assigned.iter().any(|a| a == w) {
+                                    chosen = Some(w.to_string());
+                                    break;
+                                }
+                            }
+                            chosen.unwrap_or_else(|| pers.weapon.to_string())
+                        };
+                        assigned.push(weapon.clone());
+
+                        let spawn_pos = if let Some((red_spawn, blue_spawn)) = team_spawns {
+                            match team {
+                                Team::Red => red_spawn,
+                                Team::Blue => blue_spawn,
+                                _ => red_spawn,
+                            }
+                        } else {
+                            let (sx, sy, sz, _) = current_maze.random_spawn_world(MAZE_CELL_SIZE);
+                            (sx, sy, sz)
+                        };
+
+                        bot_manager.spawn_personality_bot(players, pid, team, &weapon, spawn_pos);
+
+                        match team {
+                            Team::Red => red_count += 1,
+                            Team::Blue => blue_count += 1,
+                            _ => {}
+                        }
+                    }
+
+                    if bots_to_spawn > 0 {
+                        println!("Auto-filled {} bots into match ({} per team)", bots_to_spawn, bots_to_spawn / 2);
+                    }
+                } else {
+                    println!("Auto-fill: no eligible bot personalities (diff mask {:05b})", autofill_diff_mask);
                 }
             }
 
@@ -623,11 +766,15 @@ pub fn execute_scheduled_match_end(
     match_duration: &mut Option<Duration>,
     winner_name: String,
     snd_state: &mut Option<crate::server::snd::SndState>,
+    bot_manager: &mut BotManager,
 ) {
     println!(
         "Match end countdown expired — returning players to Lobby (winner {})",
         winner_name
     );
+
+    // Despawn all bots before moving players back
+    bot_manager.despawn_all(players);
 
     // Move all players back to Lobby, reset match state and clear maze
     broadcast::move_all_players_to_lobby(socket, players, true);

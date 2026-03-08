@@ -40,7 +40,7 @@ pub const MODE_SEARCH_AND_DESTROY: u8 = 3;
 pub const MSG_START_DENIED: u8 = 20; // server -> client: start request rejected (match running / full)
 pub const MSG_MATCH_JOINED: u8 = 21; // server -> all: announce player joined a running match (id, name)
 pub const MSG_MATCH_END: u8 = 22; // server -> all: announce match end (winner_id, name, countdown_secs)
-pub const MSG_PLAYER_LIST: u8 = 23; // server -> client: full connected player list (id,name,kills,world,is_alive)
+pub const MSG_PLAYER_LIST: u8 = 23; // server -> client: full connected player list (id,name,kills,deaths,world,is_alive,gun_level,team,weapon,is_bot)
 pub const MSG_MATCH_COUNTDOWN: u8 = 24; // server -> all: match start countdown (seconds)
 pub const MSG_MATCH_TIMER: u8 = 25; // server -> all: authoritative match time remaining (seconds)
                                     // format: [MSG_MATCH_TIMER][secs_hi:1][secs_lo:1] (big-endian u16)
@@ -59,6 +59,7 @@ pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
 pub const MSG_BOT_SHOT: u8 = 52; // server -> client: bot fired (shooter_id, victim_id)
 
 pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
+pub const FLAG_SILENT: u8 = 1 << 7; // no footstep sounds
 
 // State flags for player movement and actions, sent in the position message
 pub const FLAG_SPRINTING: u8 = 1 << 0;

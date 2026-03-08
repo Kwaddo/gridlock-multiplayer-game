@@ -12,11 +12,13 @@ pub fn get_weapon_stats(name: &str) -> ServerWeaponStats {
         "Desert Eagle" => ServerWeaponStats { damage: 75, range: 50.0, shots_per_sec: 1.2 },
         "Revolver" => ServerWeaponStats { damage: 45, range: 45.0, shots_per_sec: 1.6 },
         "Suppressed Pistol" => ServerWeaponStats { damage: 24, range: 35.0, shots_per_sec: 4.5 },
+        "Taurus Raging" => ServerWeaponStats { damage: 14, range: 15.0, shots_per_sec: 1.4 },
 
         // SMGs
         "MP5" => ServerWeaponStats { damage: 20, range: 45.0, shots_per_sec: 11.0 },
         "P90" => ServerWeaponStats { damage: 17, range: 40.0, shots_per_sec: 13.0 },
         "Tommy Gun" => ServerWeaponStats { damage: 23, range: 35.0, shots_per_sec: 9.0 },
+        "Honey Badger" => ServerWeaponStats { damage: 26, range: 50.0, shots_per_sec: 8.0 },
 
         // Shotguns
         "SPAS-12" => ServerWeaponStats { damage: 12, range: 20.0, shots_per_sec: 1.0 },

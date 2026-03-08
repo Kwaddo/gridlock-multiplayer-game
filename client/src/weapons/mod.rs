@@ -27,7 +27,7 @@ pub use stats::{WeaponCategory, WeaponId};
 
 /// Gun Game weapon progression — must match the server's GUN_GAME_PROGRESSION.
 /// gun_level 1 = first entry, gun_level 19 = last entry, gun_level 20 = knife only.
-pub const GUN_GAME_PROGRESSION: [WeaponId; 19] = [
+pub const GUN_GAME_PROGRESSION: [WeaponId; 16] = [
     // Pistols
     WeaponId::M1911,
     WeaponId::Deagle,
@@ -49,8 +49,4 @@ pub const GUN_GAME_PROGRESSION: [WeaponId; 19] = [
     WeaponId::AsVal,
     // Snipers
     WeaponId::BoltAction,
-    WeaponId::HuntingRifle,
-    WeaponId::SemiAutoSniper,
-    // Other
-    WeaponId::Minigun,
 ];

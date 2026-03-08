@@ -41,7 +41,7 @@ impl PlayingState {
 
         // ── panel ─────────────────────────────────────────────────────────────
         let panel_w = 600.0_f32.min(sw * 0.88);
-        let panel_h = 480.0_f32.min(sh * 0.86);
+        let panel_h = 620.0_f32.min(sh * 0.92);
         let panel_x = (sw - panel_w) / 2.0;
         let panel_y = (sh - panel_h) / 2.0;
 
@@ -371,6 +371,204 @@ impl PlayingState {
                 self.pending_set_team = Some(2u8);
                 self.lobby_console_message = Some("Requested team: Blue".to_string());
                 self.lobby_console_message_timer = 3.0;
+            }
+        }
+
+        // ── auto-fill bot settings ──────────────────────────────────────────────
+        let autofill_top = if self.pending_start_gamemode != MODE_GUN_GAME {
+            roster_top + 118.0 + 14.0
+        } else {
+            desc_y + 44.0
+        };
+
+        // Show auto-fill section for team-based modes only
+        if self.pending_start_gamemode != MODE_GUN_GAME {
+            let section_x = panel_x + 24.0;
+            let section_w = panel_w - 48.0;
+
+            // ── auto-fill checkbox ──
+            let cb_y = autofill_top;
+            let cb_size = 18.0;
+            let cb_hov = mouse.0 >= section_x
+                && mouse.0 <= section_x + cb_size
+                && mouse.1 >= cb_y
+                && mouse.1 <= cb_y + cb_size;
+
+            // checkbox box
+            draw_rectangle(section_x, cb_y, cb_size, cb_size,
+                if cb_hov { Color::new(0.18, 0.20, 0.32, 1.0) } else { Color::new(0.12, 0.13, 0.22, 1.0) });
+            draw_rectangle_lines(section_x, cb_y, cb_size, cb_size, 1.0,
+                if self.autofill_enabled { ACCENT } else { PANEL_BORDER });
+
+            // checkmark
+            if self.autofill_enabled {
+                let cx = section_x + 4.0;
+                let cy = cb_y + 4.0;
+                draw_rectangle(cx, cy, cb_size - 8.0, cb_size - 8.0, ACCENT);
+            }
+
+            if cb_hov && clicked {
+                self.autofill_enabled = !self.autofill_enabled;
+            }
+
+            draw_text_ex("AUTO-FILL BOTS", section_x + cb_size + 8.0, cb_y + 14.0,
+                text_params(14, if self.autofill_enabled { WHITE } else { TEXT_DIM }));
+
+            // ── bots per team (only when enabled) ──
+            if self.autofill_enabled {
+                let bpt_y = cb_y + 28.0;
+
+                draw_text_ex("BOTS PER TEAM", section_x, bpt_y + 14.0,
+                    text_params(12, TEXT_LABEL));
+
+                // minus button
+                let minus_x = section_x + 120.0;
+                let btn_sz = 22.0;
+                let minus_hov = mouse.0 >= minus_x && mouse.0 <= minus_x + btn_sz
+                    && mouse.1 >= bpt_y && mouse.1 <= bpt_y + btn_sz;
+                draw_rectangle(minus_x, bpt_y, btn_sz, btn_sz,
+                    if minus_hov { ACCENT_HOVER } else { ACCENT });
+                let mw = measure_game_text("-", 16);
+                draw_text_ex("-", minus_x + (btn_sz - mw) / 2.0, bpt_y + 17.0,
+                    text_params(16, Color::new(0.05, 0.05, 0.05, 1.0)));
+                if minus_hov && clicked && self.autofill_bots_per_team > 1 {
+                    self.autofill_bots_per_team -= 1;
+                }
+
+                // number display
+                let num_x = minus_x + btn_sz + 6.0;
+                let num_w = 36.0;
+                draw_rectangle(num_x, bpt_y, num_w, btn_sz,
+                    Color::new(0.12, 0.13, 0.22, 1.0));
+                draw_rectangle_lines(num_x, bpt_y, num_w, btn_sz, 1.0, PANEL_BORDER);
+                let num_str = format!("{}", self.autofill_bots_per_team);
+                let nw = measure_game_text(&num_str, 16);
+                draw_text_ex(&num_str, num_x + (num_w - nw) / 2.0, bpt_y + 17.0,
+                    text_params(16, WHITE));
+
+                // plus button
+                let plus_x = num_x + num_w + 6.0;
+                let plus_hov = mouse.0 >= plus_x && mouse.0 <= plus_x + btn_sz
+                    && mouse.1 >= bpt_y && mouse.1 <= bpt_y + btn_sz;
+                draw_rectangle(plus_x, bpt_y, btn_sz, btn_sz,
+                    if plus_hov { ACCENT_HOVER } else { ACCENT });
+                let pw = measure_game_text("+", 16);
+                draw_text_ex("+", plus_x + (btn_sz - pw) / 2.0, bpt_y + 17.0,
+                    text_params(16, Color::new(0.05, 0.05, 0.05, 1.0)));
+                if plus_hov && clicked && self.autofill_bots_per_team < 8 {
+                    self.autofill_bots_per_team += 1;
+                }
+
+                // total bots label
+                let total = self.autofill_bots_per_team * 2;
+                let total_str = format!("({} total)", total);
+                draw_text_ex(&total_str, plus_x + btn_sz + 10.0, bpt_y + 14.0,
+                    text_params(12, TEXT_DIM));
+
+                // ── difficulty filter dropdown ──
+                let dd_y = bpt_y + 30.0;
+                let arrow_label = "DIFFICULTY FILTER";
+                draw_text_ex(arrow_label, section_x, dd_y + 14.0,
+                    text_params(12, TEXT_LABEL));
+
+                // dropdown arrow button
+                let arrow_x = section_x + 140.0;
+                let arrow_w = 24.0;
+                let arrow_h = 20.0;
+                let arrow_hov = mouse.0 >= arrow_x && mouse.0 <= arrow_x + arrow_w
+                    && mouse.1 >= dd_y && mouse.1 <= dd_y + arrow_h;
+                draw_rectangle(arrow_x, dd_y, arrow_w, arrow_h,
+                    if arrow_hov { Color::new(0.18, 0.20, 0.32, 1.0) } else { Color::new(0.12, 0.13, 0.22, 1.0) });
+                draw_rectangle_lines(arrow_x, dd_y, arrow_w, arrow_h, 1.0, PANEL_BORDER);
+                let arrow_char = if self.autofill_dropdown_open { "^" } else { "v" };
+                let aw = measure_game_text(arrow_char, 12);
+                draw_text_ex(arrow_char, arrow_x + (arrow_w - aw) / 2.0, dd_y + 14.0,
+                    text_params(12, TEXT_LABEL));
+
+                if arrow_hov && clicked {
+                    self.autofill_dropdown_open = !self.autofill_dropdown_open;
+                }
+
+                // active difficulties summary (inline)
+                let mut active: Vec<&str> = Vec::new();
+                if self.autofill_diff_recruit { active.push("Rec"); }
+                if self.autofill_diff_easy { active.push("Easy"); }
+                if self.autofill_diff_normal { active.push("Norm"); }
+                if self.autofill_diff_hard { active.push("Hard"); }
+                if self.autofill_diff_nightmare { active.push("NM"); }
+                let summary = if active.len() == 5 { "All".to_string() } else if active.is_empty() { "None!".to_string() } else { active.join(", ") };
+                draw_text_ex(&summary, arrow_x + arrow_w + 8.0, dd_y + 14.0,
+                    text_params(12, if active.is_empty() { Color::new(1.0, 0.3, 0.3, 1.0) } else { TEXT_DIM }));
+
+                // dropdown panel (drawn on top)
+                if self.autofill_dropdown_open {
+                    let dd_panel_x = arrow_x;
+                    let dd_panel_y = dd_y + arrow_h + 2.0;
+                    let dd_panel_w = section_w - (arrow_x - section_x);
+                    let dd_row_h = 24.0;
+                    let dd_panel_h = dd_row_h * 5.0 + 8.0;
+
+                    draw_rectangle(dd_panel_x, dd_panel_y, dd_panel_w, dd_panel_h,
+                        Color::new(0.08, 0.09, 0.16, 0.98));
+                    draw_rectangle_lines(dd_panel_x, dd_panel_y, dd_panel_w, dd_panel_h, 1.0, PANEL_BORDER);
+
+                    let difficulties: [(&str, &str); 5] = [
+                        ("Recruit", "Slowest reaction, worst aim"),
+                        ("Easy", "Below average skill"),
+                        ("Normal", "Average players"),
+                        ("Hard", "Skilled opponents"),
+                        ("Nightmare", "Near-perfect aim & reactions"),
+                    ];
+                    let diff_flags: [bool; 5] = [
+                        self.autofill_diff_recruit,
+                        self.autofill_diff_easy,
+                        self.autofill_diff_normal,
+                        self.autofill_diff_hard,
+                        self.autofill_diff_nightmare,
+                    ];
+
+                    for (di, ((diff_name, diff_desc), &enabled)) in
+                        difficulties.iter().zip(diff_flags.iter()).enumerate()
+                    {
+                        let row_y = dd_panel_y + 4.0 + di as f32 * dd_row_h;
+                        let dcb_x = dd_panel_x + 8.0;
+                        let dcb_sz = 16.0;
+                        let row_hov = mouse.0 >= dd_panel_x
+                            && mouse.0 <= dd_panel_x + dd_panel_w
+                            && mouse.1 >= row_y
+                            && mouse.1 <= row_y + dd_row_h;
+
+                        if row_hov {
+                            draw_rectangle(dd_panel_x + 1.0, row_y, dd_panel_w - 2.0, dd_row_h,
+                                Color::new(0.15, 0.17, 0.28, 0.8));
+                        }
+
+                        // checkbox
+                        draw_rectangle(dcb_x, row_y + 4.0, dcb_sz, dcb_sz,
+                            Color::new(0.12, 0.13, 0.22, 1.0));
+                        draw_rectangle_lines(dcb_x, row_y + 4.0, dcb_sz, dcb_sz, 1.0,
+                            if enabled { ACCENT } else { PANEL_BORDER });
+                        if enabled {
+                            draw_rectangle(dcb_x + 3.0, row_y + 7.0, dcb_sz - 6.0, dcb_sz - 6.0, ACCENT);
+                        }
+
+                        draw_text_ex(diff_name, dcb_x + dcb_sz + 8.0, row_y + 16.0,
+                            text_params(13, if enabled { WHITE } else { TEXT_DIM }));
+                        draw_text_ex(diff_desc, dcb_x + dcb_sz + 90.0, row_y + 16.0,
+                            text_params(11, Color::new(0.45, 0.47, 0.58, 0.8)));
+
+                        if row_hov && clicked {
+                            match di {
+                                0 => self.autofill_diff_recruit = !self.autofill_diff_recruit,
+                                1 => self.autofill_diff_easy = !self.autofill_diff_easy,
+                                2 => self.autofill_diff_normal = !self.autofill_diff_normal,
+                                3 => self.autofill_diff_hard = !self.autofill_diff_hard,
+                                4 => self.autofill_diff_nightmare = !self.autofill_diff_nightmare,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
             }
         }
 

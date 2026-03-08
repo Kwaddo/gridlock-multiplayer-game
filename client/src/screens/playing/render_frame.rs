@@ -131,6 +131,7 @@ impl PlayingState {
         }
 
         self.draw_other_players();
+        self.draw_death_corpse();
         self.draw_player_hitboxes();
         self.draw_tracers(camera.position);
         self.draw_world_muzzle_flashes();
@@ -211,8 +212,6 @@ impl PlayingState {
                 self.hit_marker_pellet_mask,
                 self.hp,
                 self.max_hp,
-                self.shield,
-                self.max_shield,
                 &self.kill_feed,
                 // Hide the match timer in S&D — timing is handled per-round
                 if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY) {
@@ -345,11 +344,94 @@ impl PlayingState {
             }
         }
 
+        // Kill confirmation effect — brief white vignette flash when you get a kill
+        if self.kill_confirm_timer > 0.0 {
+            let t = self.kill_confirm_timer / 0.3; // 0..1 normalized
+            let alpha = (t * 60.0) as u8; // subtle, max 60 alpha
+            let sw = screen_width();
+            let sh = screen_height();
+            // top edge
+            draw_rectangle(0.0, 0.0, sw, sh * 0.08, Color::from_rgba(255, 255, 255, alpha));
+            // bottom edge
+            draw_rectangle(0.0, sh * 0.92, sw, sh * 0.08, Color::from_rgba(255, 255, 255, alpha));
+            // left edge
+            draw_rectangle(0.0, 0.0, sw * 0.06, sh, Color::from_rgba(255, 255, 255, alpha));
+            // right edge
+            draw_rectangle(sw * 0.94, 0.0, sw * 0.06, sh, Color::from_rgba(255, 255, 255, alpha));
+        }
+
         let is_snd = self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
             && self.current_world == WorldId::Maze
             && self.snd_round > 0;
-        if self.is_dead && self.match_end_countdown_timer <= 0.0 && !is_snd {
+        // Death camera: show gradual darkening during Watching phase + "killed by" text
+        {
+            use crate::screens::playing::state::DeathCameraPhase;
+            match self.death_camera_phase {
+                DeathCameraPhase::ZoomOut { timer, .. } => {
+                    // Slight vignette that builds during zoom-out
+                    let t = (timer / 0.5).clamp(0.0, 1.0);
+                    let alpha = (t * 40.0) as u8;
+                    draw_rectangle(
+                        0.0, 0.0, screen_width(), screen_height(),
+                        Color::from_rgba(0, 0, 0, alpha),
+                    );
+                }
+                DeathCameraPhase::Watching { timer, .. } => {
+                    // Gradual darkening over the 2s watching period
+                    let t = (timer / 2.0).clamp(0.0, 1.0);
+                    let alpha = (40.0 + t * 160.0) as u8;
+                    draw_rectangle(
+                        0.0, 0.0, screen_width(), screen_height(),
+                        Color::from_rgba(0, 0, 0, alpha),
+                    );
+                    // "Killed by" text during watching phase
+                    if let Some(killer) = &self.death_killer_name {
+                        let txt = if let Some(weapon) = &self.death_weapon_name {
+                            format!("Killed by {} with {}", killer, weapon)
+                        } else {
+                            format!("Killed by {}", killer)
+                        };
+                        let tw = crate::ui::fonts::measure_game_text(&txt, 22);
+                        let text_alpha = ((timer / 0.5).clamp(0.0, 1.0) * 255.0) as u8;
+                        draw_text_ex(
+                            &txt,
+                            (screen_width() - tw) / 2.0,
+                            screen_height() * 0.15,
+                            crate::ui::fonts::text_params(
+                                22,
+                                Color::from_rgba(255, 160, 160, text_alpha),
+                            ),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Only show the full death screen overlay once the death camera is done
+        let death_cam_done = matches!(
+            self.death_camera_phase,
+            crate::screens::playing::state::DeathCameraPhase::Done
+                | crate::screens::playing::state::DeathCameraPhase::None
+        );
+        if self.is_dead && self.match_end_countdown_timer <= 0.0 && !is_snd && death_cam_done {
             self.draw_death_screen();
+        }
+
+        // Draw kill feed on top of death screen so it stays visible when dead
+        if self.is_dead {
+            let local_team = self
+                .connected_players
+                .iter()
+                .find(|(id, ..)| *id == player_id)
+                .map(|(_, _, _, _, _, team, _, _)| *team)
+                .unwrap_or(0u8);
+            crate::ui::hud::draw_kill_feed(
+                &self.kill_feed,
+                &self.assets,
+                player_id,
+                local_team,
+            );
         }
 
         // S&D HUD overlay

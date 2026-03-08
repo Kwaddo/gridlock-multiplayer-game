@@ -18,17 +18,7 @@ impl PlayingState {
             return;
         }
 
-        if self.shield > 0.0 {
-            let shield_damage = damage.min(self.shield);
-            self.shield -= shield_damage;
-            let remaining_damage = damage - shield_damage;
-
-            if remaining_damage > 0.0 {
-                self.hp -= remaining_damage;
-            }
-        } else {
-            self.hp = (self.hp - damage).max(0.0);
-        }
+        self.hp = (self.hp - damage).max(0.0);
 
         // brief damage flash and attacker info for HUD
         self.damage_flash_timer = 0.6;
@@ -55,6 +45,13 @@ impl PlayingState {
         self.is_dead = true;
         self.hp = 0.0;
         self.death_timer = 3.0;
+
+        // Start third-person death camera pullback
+        self.death_camera_phase = super::state::DeathCameraPhase::ZoomOut {
+            timer: 0.0,
+            corpse_pos: self.position,
+            corpse_yaw: self.yaw,
+        };
     }
 
     pub fn draw_death_screen(&self) {
@@ -160,7 +157,6 @@ impl PlayingState {
     pub fn respawn(&mut self, spawn_pos: Vec3) {
         self.is_dead = false;
         self.hp = self.max_hp;
-        self.shield = 0.0;
         self.death_timer = 0.0;
         self.position = spawn_pos;
         self.movement_state.velocity = Vec3::ZERO;
@@ -171,6 +167,7 @@ impl PlayingState {
         self.movement_state.is_sliding = false;
         self.death_killer_name = None;
         self.death_weapon_name = None;
+        self.death_camera_phase = super::state::DeathCameraPhase::None;
     }
 
     /// Full-screen victory overlay displayed when the match ends.

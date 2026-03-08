@@ -54,6 +54,8 @@
     "minigun_model": "assets/models/weapons/Other/minigun.glb",
     "rpg_model": "assets/models/weapons/Other/rpg.glb",
     "deagle_shot": "assets/sounds/deagle.ogg",
+    "footstep": "assets/sounds/footstep.ogg",
+    "slide": "assets/sounds/slide.ogg",
 
     "anim_crouch": "assets/models/player/Crouch.glb",
     "anim_crouch_aim": "assets/models/player/Crouch_Aim.glb",

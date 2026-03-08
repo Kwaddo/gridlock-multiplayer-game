@@ -260,6 +260,10 @@ impl AnimatedModel {
             })
     }
 
+    pub fn duration(&self) -> f32 {
+        self.duration
+    }
+
     pub fn play_from_start(&mut self, looping: bool) {
         self.time = 0.0;
         self.playback_loop = looping;
