@@ -57,6 +57,7 @@ pub fn sync_world(
                 if let Some(&idx) = playing_state.player_index.get(&incoming.id) {
                     // update existing player by index
                     let current = &mut playing_state.other_players[idx];
+                    let incoming_dead = !incoming.is_alive;
 
                     // skip updating dying players — they're playing a death animation
                     if current.death_timer.is_some() {
@@ -127,6 +128,23 @@ pub fn sync_world(
                     current.current_weapon = incoming.current_weapon;
                     current.hp = incoming.hp;
                     current.max_hp = incoming.max_hp;
+                    current.is_alive = incoming.is_alive;
+
+                    if incoming_dead && current.death_timer.is_none() {
+                        current.skin_type = if current.is_prone {
+                            client::types::player::PlayerSkin::ProneDeath
+                        } else if current.is_crouching {
+                            client::types::player::PlayerSkin::CrouchDeath
+                        } else {
+                            client::types::player::PlayerSkin::StandDeath
+                        };
+                        current.death_timer = Some(2.0);
+                        if let Some(model_key) = current.skin_type.model_key() {
+                            if let Some(anim) = playing_state.animated_models.get_mut(model_key) {
+                                anim.play_from_start(false);
+                            }
+                        }
+                    }
                 } else {
                     // new player
                     if incoming.is_sprinting {
@@ -150,6 +168,16 @@ pub fn sync_world(
                     incoming.pending_move_dir = None;
                     incoming.pending_move_timer = 0.0;
                     incoming.apply_snapshot(incoming.x, incoming.y, incoming.z, incoming.yaw);
+                    if !incoming.is_alive {
+                        incoming.skin_type = if incoming.is_prone {
+                            client::types::player::PlayerSkin::ProneDeath
+                        } else if incoming.is_crouching {
+                            client::types::player::PlayerSkin::CrouchDeath
+                        } else {
+                            client::types::player::PlayerSkin::StandDeath
+                        };
+                        incoming.death_timer = Some(2.0);
+                    }
                     let idx = playing_state.other_players.len();
                     playing_state.other_players.push(incoming);
                     playing_state

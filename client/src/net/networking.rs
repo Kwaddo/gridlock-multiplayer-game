@@ -352,19 +352,17 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         other_player.gun_level = gun_level;
                         other_player.hp = hp;
                         other_player.max_hp = max_hp;
+                        other_player.is_alive = alive;
                         // Set team and weapon before the alive check so they are always
                         // applied to this player and never bleed onto another slot.
                         other_player.team = _team;
                         if !_weapon.is_empty() {
                             other_player.current_weapon = _weapon;
                         }
-                        // Only add other players who are alive; dead players are
-                        // represented by the alive flag and will be removed by
-                        // the client when appropriate so offscreen deaths are
-                        // reliably propagated.
-                        if alive {
-                            new_players.push(other_player);
+                        if !alive {
+                            other_player.hp = 0.0;
                         }
+                        new_players.push(other_player);
                     } else {
                         // update own-kills value for local UI/scoreboard
                         update.self_kills = Some(kills);

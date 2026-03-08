@@ -79,7 +79,7 @@ pub struct Player {
 
     // bot shit
     pub is_bot: bool,
-    pub is_silent: bool, // shadow bot: no footstep sounds
+    pub is_silent: bool, // no footstep sounds
     // whether server auto-respawn loop should revive this player after death
     pub auto_respawn: bool,
     // Regen delay anchor: health won't regenerate until this instant has passed.

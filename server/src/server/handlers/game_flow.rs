@@ -416,7 +416,6 @@ pub fn maybe_start_match(
                     BotPersonalityId::Storm,
                     BotPersonalityId::Ghost,
                     BotPersonalityId::Sniper,
-                    BotPersonalityId::Shadow,
                     BotPersonalityId::Bulwark,
                     BotPersonalityId::Wraith,
                     BotPersonalityId::Overwatch,
@@ -492,9 +491,7 @@ pub fn maybe_start_match(
                         };
                         let assigned = if team == Team::Red { &mut red_weapons } else { &mut blue_weapons };
 
-                        let weapon = if pers.archetype == crate::bot::personality::BotArchetype::KnifeSneaker {
-                            "Knife".to_string()
-                        } else if !assigned.iter().any(|w| w == pers.weapon) {
+                        let weapon = if !assigned.iter().any(|w| w == pers.weapon) {
                             pers.weapon.to_string()
                         } else {
                             let mut chosen = None;

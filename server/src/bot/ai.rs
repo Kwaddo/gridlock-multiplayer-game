@@ -20,7 +20,6 @@ pub struct BotState {
     pub personality_id: Option<BotPersonalityId>,
     pub last_known_enemy_pos: Option<(f32, f32, f32)>,
     pub behavior_decision_timer: f32, // timer for how often the bot reevaluates its behavior
-    pub hits_received_since_teleport: u32, // shadow teleport counter
     pub stuck_timer: f32, // timer for how long the bot has been stuck in the same position
     pub idle_look_timer: f32, // accumulator for idle look-around yaw sweep
 }
@@ -80,11 +79,7 @@ pub fn tick_bot(
 ) {
     let mut desired_dir = Vec3::ZERO; // movement we intend to apply every tick
     let mut want_jump = false; // whether we want to jump this tick
-    let speed: f32 = if state.archetype == BotArchetype::KnifeSneaker {
-        physics.walk_speed * 2.5
-    } else {
-        physics.walk_speed
-    };
+    let speed: f32 = physics.walk_speed;
 
     match &mut state.behavior {
         BotBehavior::Static => {}
