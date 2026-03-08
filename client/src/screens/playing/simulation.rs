@@ -659,8 +659,8 @@ impl PlayingState {
         for p in &mut self.other_players {
             p.update(delta);
 
-            // skip silent players (Shadow bot) and dead players
-            if p.is_silent || p.hp <= 0.0 {
+            // skip dead players
+            if p.hp <= 0.0 {
                 continue;
             }
 

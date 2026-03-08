@@ -3,7 +3,7 @@ use crate::{ bot::ai::{ self, BotState, BotBehavior }, physics::PhysicsConfig };
 use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
-use crate::bot::personality::{ self, BotPersonalityId, BotArchetype };
+use crate::bot::personality::{ self, BotPersonalityId };
 use crate::protocols::{ MSG_BOT_SHOT, MODE_TEAM_DEATHMATCH };
 use crate::server::handlers::other;
 pub struct BotManager {
@@ -47,8 +47,7 @@ impl BotManager {
         self.next_bot_idx += 1;
 
         player.is_bot = true;
-        player.is_silent =
-            bot_state.personality.archetype == crate::bot::personality::BotArchetype::KnifeSneaker;
+        player.is_silent = false;
         player.socket_addr = addr;
         players.insert(addr, player);
 
@@ -162,7 +161,6 @@ impl BotManager {
             personality_id: Some(personality_id),
             last_known_enemy_pos: None,
             behavior_decision_timer: 0.0,
-            hits_received_since_teleport: 0,
             stuck_timer: 0.0,
             idle_look_timer: 0.0,
         };

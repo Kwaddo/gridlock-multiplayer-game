@@ -74,11 +74,6 @@ pub fn decide_behavior(
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
 
-    // special behavior for shadow bot
-    if state.personality.archetype == BotArchetype::KnifeSneaker {
-        return decide_knife_sneaker(bot_cell, nearest_enemy, state, maze, analysis);
-    }
-
     // check if bot should retreat (health below threshold)
     let health_ratio = (bot.health as f32) / 100.0;
     if health_ratio < state.personality.retreat_health_threshold {
@@ -265,94 +260,6 @@ pub fn decide_behavior(
 }
 
 //  Helper functions
-
-fn decide_knife_sneaker(
-    bot_cell: (u8, u8),
-    nearest_enemy: Option<&Player>,
-    state: &BotState,
-    maze: &MazeData,
-    analysis: &MazeAnalysis
-) -> Option<BotBehavior> {
-    let Some(enemy) = nearest_enemy else {
-        // no enemy — roam
-        return roam_to_random_point(bot_cell, analysis, maze);
-    };
-
-    let dist_to_enemy = {
-        let dx = enemy.position.0 - state.personality.range_max; // using bot position from caller
-        let dz = enemy.position.2;
-        // Actually need bot position — we have bot_cell, convert back
-        let (bx, bz) = crate::maze::pathfinding::cell_to_world(
-            bot_cell.0,
-            bot_cell.1,
-            MAZE_CELL_SIZE
-        );
-        let dx = enemy.position.0 - bx;
-        let dz = enemy.position.2 - bz;
-        (dx * dx + dz * dz).sqrt()
-    };
-
-    // Close range (< 5 units): commit to direct attack
-    if dist_to_enemy < 5.0 {
-        let enemy_cell = world_to_cell(
-            enemy.position.0,
-            enemy.position.2,
-            MAZE_CELL_SIZE,
-            &maze.cells,
-            maze.width,
-            maze.height
-        )?;
-        if let Some(path) = astar(&maze.cells, maze.width, maze.height, bot_cell, enemy_cell) {
-            return Some(BotBehavior::Hunt {
-                path,
-                path_idx: 0,
-                target_player_id: enemy.id,
-                repath_timer: state.personality.base_repath_interval,
-            });
-        }
-    }
-
-    // Medium range: try 1 cell behind enemy (not 2 — maze corridors are too narrow)
-    let behind_x = enemy.position.0 - enemy.yaw.cos() * MAZE_CELL_SIZE;
-    let behind_z = enemy.position.2 - enemy.yaw.sin() * MAZE_CELL_SIZE;
-    let behind_cell = world_to_cell(
-        behind_x,
-        behind_z,
-        MAZE_CELL_SIZE,
-        &maze.cells,
-        maze.width,
-        maze.height
-    );
-
-    // try flanking path first
-    if let Some(target) = behind_cell {
-        if let Some(path) = astar(&maze.cells, maze.width, maze.height, bot_cell, target) {
-            return Some(BotBehavior::Flank {
-                path,
-                path_index: 0,
-                target_player_id: enemy.id,
-                repath_timer: state.personality.base_repath_interval,
-            });
-        }
-    }
-
-    // fallback: hunt directly toward enemy — never give up when enemy exists
-    let enemy_cell = world_to_cell(
-        enemy.position.0,
-        enemy.position.2,
-        MAZE_CELL_SIZE,
-        &maze.cells,
-        maze.width,
-        maze.height
-    )?;
-    let path = astar(&maze.cells, maze.width, maze.height, bot_cell, enemy_cell)?;
-    Some(BotBehavior::Hunt {
-        path,
-        path_idx: 0,
-        target_player_id: enemy.id,
-        repath_timer: state.personality.base_repath_interval,
-    })
-}
 
 fn flank_behind_enemy(
     bot_cell: (u8, u8),

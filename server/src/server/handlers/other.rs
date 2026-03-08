@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use crate::bot::personality::BotArchetype;
 use crate::maze::MazeData;
 use crate::player::{Player, Team, WorldId};
 use crate::protocols::*;
 use crate::server::{broadcast, game};
-use crate::server::game::MAZE_CELL_SIZE;
 
 const BACKSTAB_CONE_DOT: f32 = 0.5;
 
@@ -428,8 +426,8 @@ pub fn apply_damage(
     is_backstab: bool,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
-    bot_states: &mut HashMap<SocketAddr, crate::bot::ai::BotState>,
-    maze: Option<&MazeData>,
+    _bot_states: &mut HashMap<SocketAddr, crate::bot::ai::BotState>,
+    _maze: Option<&MazeData>,
 ) {
     let (attacker, attacker_world, attacker_is_bot) = match players.get(&attacker_addr) {
         Some(a) => {
@@ -619,33 +617,11 @@ pub fn apply_damage(
             let _ = socket.send_to(&feed, p.socket_addr);
         }
     } else {
-        // apply non-lethal damage and check for shadow teleport
-        let mut shadow_teleport = false;
+        // apply non-lethal damage
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.health -= damage;
             if !vmut.is_bot {
                 vmut.regen_resume_at = Some(Instant::now() + Duration::from_secs(7));
-            }
-            // shadow teleport check: must read is_bot before dropping borrow
-            if vmut.is_bot {
-                if let Some(bot_state) = bot_states.get_mut(&victim_addr) {
-                    if bot_state.personality.archetype == BotArchetype::KnifeSneaker {
-                        bot_state.hits_received_since_teleport += 1;
-                        if bot_state.hits_received_since_teleport >= 2 {
-                            shadow_teleport = true;
-                            bot_state.hits_received_since_teleport = 0;
-                        }
-                    }
-                }
-            }
-        }
-        // teleport shadow far from all players (borrow on players is dropped now)
-        if shadow_teleport {
-            if let Some(m) = maze {
-                let (x, _y, z, _) = game::random_spawn_far(m, players, MAZE_CELL_SIZE * 3.0);
-                if let Some(vmut) = players.get_mut(&victim_addr) {
-                    vmut.position = (x, 0.0, z);
-                }
             }
         }
 

@@ -39,7 +39,6 @@ pub enum BotArchetype {
     Rusher,
     Sniper,
     Flanker,
-    KnifeSneaker,
     AllRounder,
     Camper,
 }
@@ -140,7 +139,6 @@ pub enum BotPersonalityId {
     Storm, // tempo disruptor, constant pressure and movement
     Ghost, // patient camper/anchor, punishes over-peeks
     Sniper, // long-range specialist, angle control first
-    Shadow, // knife/sneak specialist, close-range pickoffs
     Bulwark, // Anchor / tank
     Wraith, // flanker
     Overwatch, // angle-holding specialist
@@ -161,10 +159,9 @@ impl BotPersonalityId {
             9 => Some(BotPersonalityId::Storm),
             10 => Some(BotPersonalityId::Ghost),
             11 => Some(BotPersonalityId::Sniper),
-            12 => Some(BotPersonalityId::Shadow),
-            13 => Some(BotPersonalityId::Bulwark),
-            14 => Some(BotPersonalityId::Wraith),
-            15 => Some(BotPersonalityId::Overwatch),
+            12 => Some(BotPersonalityId::Bulwark),
+            13 => Some(BotPersonalityId::Wraith),
+            14 => Some(BotPersonalityId::Overwatch),
             _ => None,
         }
     }
@@ -182,10 +179,9 @@ impl BotPersonalityId {
             BotPersonalityId::Storm => 9,
             BotPersonalityId::Ghost => 10,
             BotPersonalityId::Sniper => 11,
-            BotPersonalityId::Shadow => 12,
-            BotPersonalityId::Bulwark => 13,
-            BotPersonalityId::Wraith => 14,
-            BotPersonalityId::Overwatch => 15,
+            BotPersonalityId::Bulwark => 12,
+            BotPersonalityId::Wraith => 13,
+            BotPersonalityId::Overwatch => 14,
         }
     }
 }
@@ -470,28 +466,6 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                 },
                 Hard,
             ),
-        BotPersonalityId::Shadow =>
-            (
-                BotPersonality {
-                    name: "Shadow",
-                    archetype: KnifeSneaker,
-                    weapon: "Knife",
-                    range_min: 0.0,
-                    range_max: 8.0,
-                    aggression: 0.7,
-                    flank_weight: 0.95,
-                    hold_angle_weight: 0.1,
-                    push_weight: 0.65,
-                    retreat_health_threshold: 0.18,
-                    peek_time: 0.4,
-                    reposition_interval: 0.8,
-                    noise_investigation_weight: 0.99,
-                    base_reaction_time: 0.12,
-                    base_aim_offset: 0.01,
-                    base_repath_interval: 0.3,
-                    base_fov_degrees: 240.0,
-                }, Nightmare
-            ),
         BotPersonalityId::Bulwark =>
             (
                 BotPersonality {
@@ -577,8 +551,6 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
            Near-aimbot with a semi-auto sniper. Locks a sightline and doesn't miss.
     S     Wraith       NM     0.068s  0.0060   270    0.20s   0.92   0.92   4.0s
            Elite flanker with an MP5. Fastest repath in the game, always behind you.
-    S     Shadow       NM     0.054s  0.0040   270    0.15s   0.92   0.92   4.0s
-           Silent knife assassin. Backstab = instant kill. Teleports after hit taken.
     S-    Nexto        NM     0.171s  0.0072   270    0.43s   0.92   0.92   4.0s
            Does everything well. The "pro player" bot — no weaknesses, adapts to any fight.
     ----- ------------ -----  ------  -------  -----  ------  -----  -----  --------

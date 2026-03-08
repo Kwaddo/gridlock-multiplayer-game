@@ -432,6 +432,7 @@ pub fn apply_taurus_raging_pistol_mode(stats: &mut WeaponStats) {
     stats.headshot_mult = 2.0;
     stats.pellet_count = 1;
     stats.pellet_spread = None;
+    stats.magazine_size = 5;
     stats.fire_rate = 2.2;
     stats.recoil_vertical = 0.035;
     stats.recoil_horizontal = 0.012;

@@ -319,7 +319,6 @@ pub fn run() -> std::io::Result<()> {
                                     personality_id: None,
                                     last_known_enemy_pos: None,
                                     behavior_decision_timer: 0.0,
-                                    hits_received_since_teleport: 0,
                                     stuck_timer: 0.0,
                                     idle_look_timer: 0.0,
                                 };
