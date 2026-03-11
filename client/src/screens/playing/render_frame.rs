@@ -263,6 +263,39 @@ impl PlayingState {
                 self.current_world == WorldId::Maze,
                 self.match_mode,
             );
+
+            // FPS counter — averaged over 0.5s window so the number is stable
+            let dt = get_frame_time();
+            self.fps_frame_count += 1;
+            self.fps_time_acc += dt;
+            if self.fps_time_acc >= 0.5 {
+                self.fps_display = (self.fps_frame_count as f32 / self.fps_time_acc).round() as i32;
+                self.fps_frame_count = 0;
+                self.fps_time_acc = 0.0;
+            }
+            let fps = self.fps_display;
+            let fps_text = format!("{} FPS", fps);
+            let text_w = crate::ui::fonts::measure_game_text(&fps_text, 14);
+            let pad = 10.0;
+            let pill_w = text_w + pad * 2.0;
+            let pill_h = 24.0;
+            let pill_x = screen_width() - pill_w - 12.0;
+            let pill_y = 12.0;
+            draw_rectangle(pill_x, pill_y, pill_w, pill_h, Color::from_rgba(8, 10, 18, 200));
+            draw_rectangle_lines(pill_x, pill_y, pill_w, pill_h, 1.0, Color::from_rgba(255, 255, 255, 30));
+            let fps_color = if fps >= 60 {
+                Color::from_rgba(100, 220, 100, 255)
+            } else if fps >= 30 {
+                Color::from_rgba(220, 180, 60, 255)
+            } else {
+                Color::from_rgba(220, 80, 80, 255)
+            };
+            draw_text_ex(
+                &fps_text,
+                pill_x + pad,
+                pill_y + 17.0,
+                crate::ui::fonts::text_params(14, fps_color),
+            );
         }
 
         // Spawn feedback toast (e.g. teleporter fallback)

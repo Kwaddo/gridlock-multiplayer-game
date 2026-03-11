@@ -231,6 +231,11 @@ pub struct PlayingState {
 
     // cached measurement for the static "TARGET DUMMY" HUD label
     pub target_dummy_label_dims: (f32, f32),
+
+    // fps counter: averaged over a fixed window so it's stable
+    pub fps_display: i32,
+    pub fps_frame_count: u32,
+    pub fps_time_acc: f32,
 }
 
 pub struct KillFeedEntry {
@@ -394,6 +399,9 @@ impl PlayingState {
                 let m = crate::ui::fonts::measure_game_text("TARGET DUMMY", 14);
                 (m, 0.0) // width only used currently; height can be computed if needed
             },
+            fps_display: 0,
+            fps_frame_count: 0,
+            fps_time_acc: 0.0,
         }
     }
 }
