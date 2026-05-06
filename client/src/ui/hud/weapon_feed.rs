@@ -92,7 +92,7 @@ pub(super) fn draw_weapon_and_kill_feed(
     local_team: u8,
     config: &crate::core::GameConfig,
 ) {
-    // --- Valorant-style 3-slot weapon display (bottom-right) ---
+    // --- Valorant-style 2-slot weapon display (bottom-right) ---
     let hud_scale = 1.5;
     let slot_width = 180.0 * hud_scale;
     let slot_height = 46.0 * hud_scale;
@@ -100,15 +100,14 @@ pub(super) fn draw_weapon_and_kill_feed(
     let margin_right = 16.0 * hud_scale;
     let margin_bottom = 20.0 * hud_scale;
 
-    // Slots: Primary (0), Secondary (1), Knife
-    let slots: [(&crate::weapons::WeaponState, &str, bool); 3] = [
+    // Slots: Primary (0), Secondary (1) — punch is a button, not a weapon slot
+    let slots: [(&crate::weapons::WeaponState, &str, bool); 2] = [
         (&weapons.weapons[0], "1", !weapons.knife_active && weapons.active_slot == 0),
         (&weapons.weapons[1], "2", !weapons.knife_active && weapons.active_slot == 1),
-        (&weapons.knife, "X", weapons.knife_active),
     ];
 
     let base_x = screen_width() - slot_width - margin_right;
-    let total_height = 3.0 * slot_height + 2.0 * slot_gap;
+    let total_height = 2.0 * slot_height + 1.0 * slot_gap;
     let base_y = screen_height() - total_height - margin_bottom;
 
     for (i, (weapon, key_label, is_active)) in slots.iter().enumerate() {

@@ -25,30 +25,42 @@ impl PlayingState {
         }
     }
 
+    fn draw_punch_sprite(&self, tex: &Texture2D) {
+        let sw = screen_width();
+        let sh = screen_height();
+        let target_h = sh * 0.42;
+        let scale = target_h / tex.height().max(1.0);
+        let size = vec2(tex.width() * scale, tex.height() * scale);
+        let x = sw * 0.58;
+        let y = sh - size.y * 0.9;
+        draw_texture_ex(
+            tex,
+            x,
+            y,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(size),
+                ..Default::default()
+            },
+        );
+    }
+
     pub(crate) fn draw_viewmodel(&self) {
         let weapon = self.weapons.active();
         let stats = weapon.stats();
 
-        // While switching away from knife, keep rendering the knife-lower segment
-        // until simulation promotes back to regular hands.
-        if self.hands_playback_mode == HandsPlaybackMode::KnifeLower {
-            if let Some(knife_model) = self.animated_models.get("fp_hands_knife") {
-                let knife_weapon = &self.weapons.knife;
-                let knife_stats = knife_weapon.stats();
-                for mesh in knife_model.meshes() {
-                    self.draw_3d_viewmodel(
-                        mesh,
-                        knife_model.normalize_scale,
-                        knife_model.y_offset,
-                        None,
-                        None,
-                        knife_weapon,
-                        knife_stats,
-                        false,
-                    );
+        // Punch: when knife_active, show the appropriate punch frame sprite.
+        // Only render during the attack lock (the actual punch motion).
+        // No idle viewmodel when just standing with punch ready.
+        if weapon.id == WeaponId::Knife {
+            if self.knife_attack_locked {
+                let frame_key = self.punch_frame_key();
+                if let Some(tex) = self.assets.get(frame_key) {
+                    self.draw_punch_sprite(tex);
                 }
-                return;
             }
+            // No rendering when not actively punching (clean — no knife standing idle)
+            return;
         }
 
         let force_ads = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
@@ -64,15 +76,12 @@ impl PlayingState {
             .animated_models
             .get(preferred_hands_key)
             .or_else(|| self.animated_models.get("fp_hands"));
-        // we only ever use the first mesh for the hands model;
-        // older code assumed a single Mesh so adapt accordingly
         let hands_static = self
             .models
             .get(preferred_hands_key)
             .and_then(|mvec| mvec.first())
             .or_else(|| self.models.get("fp_hands").and_then(|mvec| mvec.first()));
-        // These weapons already include hands in their animated viewmodel.
-        let draw_hands = !matches!(weapon.id, WeaponId::Knife | WeaponId::Sawnoff | WeaponId::Minigun);
+        let draw_hands = !matches!(weapon.id, WeaponId::Sawnoff | WeaponId::Minigun);
 
         if let Some(model_key) = stats.viewmodel_model {
             if let Some(meshes) = self.models.get(model_key) {
@@ -112,6 +121,20 @@ impl PlayingState {
         }
 
         self.draw_2d_viewmodel(weapon, stats);
+    }
+
+    /// Select which punch frame to show based on how far through the animation we are.
+    fn punch_frame_key(&self) -> &'static str {
+        let total = crate::weapons::stats::melee::KNIFE_LIGHT_ANIM_DURATION;
+        let elapsed = (total - self.knife_attack_lock_timer).max(0.0);
+        let progress = (elapsed / total).clamp(0.0, 1.0);
+        if progress < 0.33 {
+            "punch1"
+        } else if progress < 0.66 {
+            "punch2"
+        } else {
+            "punch3"
+        }
     }
 
     fn draw_3d_viewmodel(

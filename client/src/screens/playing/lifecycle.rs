@@ -109,8 +109,7 @@ impl PlayingState {
                 draw_text_ex(&timer_text, cx - tw / 2.0, cy + 20.0, text_params(24, GRAY));
             }
         } else if self.current_world == WorldId::Maze {
-            let is_snd = self.match_mode
-                == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY);
+            let is_snd = self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY);
             if self.death_timer <= 0.0 {
                 let respawn_text = if is_snd {
                     "Waiting for round to end..."
