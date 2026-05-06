@@ -23,6 +23,7 @@ pub struct BotPersonality {
     pub base_aim_offset: f32,
     pub base_repath_interval: f32,
     pub base_fov_degrees: f32, // optional but its how wide the bots eyes are
+    pub base_turn_rate:   f32, // how fast the bot can turn to look at targets, in degrees per second, this is especially important for snipers who should have a slower turn rate than rushers, or for difficulties
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +52,7 @@ pub struct DifficultyMods {
     pub target_stickiness: f32, // 0.0 to 1.0, where 0.0 is no stickiness (the bot will switch targets as soon as a better one is available) and 1.0 is perfect stickiness (the bot will never switch targets unless its current target is dead)
     pub burst_discipline: f32, // 0.0 to 1.0, where 0.0 is no burst discipline (the bot will always shoot as soon as it can) and 1.0 is perfect burst discipline (the bot will always wait for the optimal time to shoot based on its weapon's characteristics)
     pub wall_read_memory_time: f32, // time in seconds that the bot will remember an enemy's position after losing line of sight, this is especially important for campers and snipers who rely on holding angles and pre-aiming
+    pub turn_rate_mult: f32, // >1.0 = slower, <1.0 = faster, this is a multiplier for the bot's turn rate, where 1.0 is the base turn rate defined in the BotState, and higher values make the bot turn slower
 }
 
 pub fn difficulty_mods(d: BotDifficulty) -> DifficultyMods {
@@ -64,6 +66,7 @@ pub fn difficulty_mods(d: BotDifficulty) -> DifficultyMods {
                 target_stickiness: 0.25,
                 burst_discipline: 0.2,
                 wall_read_memory_time: 0.8,
+                turn_rate_mult: 1.8,
             },
         BotDifficulty::Easy =>
             DifficultyMods {
@@ -74,6 +77,7 @@ pub fn difficulty_mods(d: BotDifficulty) -> DifficultyMods {
                 target_stickiness: 0.45,
                 burst_discipline: 0.4,
                 wall_read_memory_time: 1.4,
+                turn_rate_mult: 1.4,
             },
         BotDifficulty::Normal =>
             DifficultyMods {
@@ -84,6 +88,7 @@ pub fn difficulty_mods(d: BotDifficulty) -> DifficultyMods {
                 target_stickiness: 0.65,
                 burst_discipline: 0.6,
                 wall_read_memory_time: 2.2,
+                turn_rate_mult: 1.0,
             },
         BotDifficulty::Hard =>
             DifficultyMods {
@@ -94,6 +99,7 @@ pub fn difficulty_mods(d: BotDifficulty) -> DifficultyMods {
                 target_stickiness: 0.8,
                 burst_discipline: 0.78,
                 wall_read_memory_time: 3.0,
+                turn_rate_mult: 0.75,
             },
         BotDifficulty::Nightmare =>
             DifficultyMods {
@@ -104,6 +110,7 @@ pub fn difficulty_mods(d: BotDifficulty) -> DifficultyMods {
                 target_stickiness: 0.92,
                 burst_discipline: 0.92,
                 wall_read_memory_time: 4.0,
+                turn_rate_mult: 0.45,
             },
     }
 }
@@ -122,6 +129,7 @@ pub fn compute_runtime(p: &BotPersonality, d: BotDifficulty) -> DifficultyMods {
         target_stickiness: m.target_stickiness,
         burst_discipline: m.burst_discipline,
         wall_read_memory_time: m.wall_read_memory_time,
+        turn_rate_mult: p.base_turn_rate * m.turn_rate_mult,
     }
 }
 
@@ -210,6 +218,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.035,
                     base_repath_interval: 0.8,
                     base_fov_degrees: 165.0,
+                    base_turn_rate: 6.0,
                 },
                 Hard,
             ),
@@ -233,6 +242,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.05,
                     base_repath_interval: 0.9,
                     base_fov_degrees: 155.0,
+                    base_turn_rate: 4.5,
                 },
                 Normal,
             ),
@@ -256,6 +266,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.038,
                     base_repath_interval: 0.75,
                     base_fov_degrees: 165.0,
+                    base_turn_rate: 5.5,
                 },
                 Hard,
             ),
@@ -279,6 +290,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.055,
                     base_repath_interval: 1.1,
                     base_fov_degrees: 145.0,
+                    base_turn_rate: 3.5,
                 },
                 Normal,
             ),
@@ -302,6 +314,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.04,
                     base_repath_interval: 0.65,
                     base_fov_degrees: 175.0,
+                    base_turn_rate: 5.5,
                 },
                 Hard,
             ),
@@ -325,6 +338,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.06,
                     base_repath_interval: 0.85,
                     base_fov_degrees: 170.0,
+                    base_turn_rate: 4.0,
                 },
                 Normal,
             ),
@@ -348,6 +362,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.018,
                     base_repath_interval: 0.85,
                     base_fov_degrees: 190.0,
+                    base_turn_rate: 7.0,
                 },
                 Nightmare,
             ),
@@ -371,6 +386,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.09,
                     base_repath_interval: 1.2,
                     base_fov_degrees: 150.0,
+                    base_turn_rate: 3.0,
                 },
                 Easy,
             ),
@@ -394,6 +410,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.032,
                     base_repath_interval: 0.8,
                     base_fov_degrees: 170.0,
+                    base_turn_rate: 5.0,
                 },
                 Hard,
             ),
@@ -417,6 +434,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.05,
                     base_repath_interval: 0.95,
                     base_fov_degrees: 160.0,
+                    base_turn_rate: 4.5,
                 },
                 Normal,
             ),
@@ -440,6 +458,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.022,
                     base_repath_interval: 1.2,
                     base_fov_degrees: 145.0,
+                    base_turn_rate: 4.0,
                 },
                 Hard,
             ),
@@ -463,6 +482,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.016,
                     base_repath_interval: 1.25,
                     base_fov_degrees: 140.0,
+                    base_turn_rate: 3.0,
                 },
                 Hard,
             ),
@@ -486,6 +506,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.12,
                     base_repath_interval: 3.0,
                     base_fov_degrees: 110.0,
+                    base_turn_rate: 2.0,
                 },
                 Recruit,
             ),
@@ -509,6 +530,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.015,
                     base_repath_interval: 0.4,
                     base_fov_degrees: 210.0,
+                    base_turn_rate: 9.0,
                 },
                 Nightmare,
             ),
@@ -532,6 +554,7 @@ pub fn get_personality(p: BotPersonalityId) -> (BotPersonality, BotDifficulty) {
                     base_aim_offset: 0.008,
                     base_repath_interval: 0.5,
                     base_fov_degrees: 135.0,
+                    base_turn_rate: 5.0,
                 },
                 Nightmare,
             ),

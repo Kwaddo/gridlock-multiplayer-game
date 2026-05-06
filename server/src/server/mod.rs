@@ -312,7 +312,7 @@ pub fn run() -> std::io::Result<()> {
                                         base_reaction_time: shooting_cfg.reaction_time,
                                         base_fov_degrees: 90.0,
                                         base_repath_interval: 2.0,
-                                        
+                                        base_turn_rate: 4.0,
                                     },
                                     difficulty: crate::bot::personality::BotDifficulty::Normal,
                                     archetype: crate::bot::personality::BotArchetype::AllRounder,
@@ -321,6 +321,8 @@ pub fn run() -> std::io::Result<()> {
                                     behavior_decision_timer: 0.0,
                                     stuck_timer: 0.0,
                                     idle_look_timer: 0.0,
+                                    current_yaw: 0.0,
+                                    current_pitch: 0.0,
                                 };
 
                                 bot_manager.spawn_bot(&mut players, bot_player, bot_state);

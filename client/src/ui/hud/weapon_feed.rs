@@ -152,20 +152,13 @@ pub(super) fn draw_weapon_and_kill_feed(
             } else {
                 "REVOLVER"
             };
-            draw_text_ex(
-                mode_text,
-                base_x + 44.0,
-                y + 56.0,
-                text_params(22, Color::from_rgba(230, 210, 150, alpha)),
-            );
-
             let key_name = config.bind_taurus_toggle.display_name();
-            let toggle_hint = format!("Press '{}' to toggle", key_name);
+            let toggle_hint = format!("{} · {} to toggle", mode_text, key_name);
             draw_text_ex(
                 &toggle_hint,
                 base_x + 44.0,
-                y + slot_height - 8.0,
-                text_params(20, Color::from_rgba(190, 190, 200, alpha)),
+                y + 56.0,
+                text_params(18, Color::from_rgba(230, 210, 150, alpha)),
             );
         }
 
