@@ -15,6 +15,7 @@ pub struct BotShootingConfig {
     pub angular_offset: f32, // max angle offset in degrees for inaccuracy
     pub reaction_time: f32, // time in seconds before bot starts shooting after seeing target
     pub detection_range: Option<f32>, // override weapon range for target detection (None = use weapon range)
+    pub aim_threshold: f32, // max angular error before bot is allowed to fire
 }
 
 pub struct BotShootingState {
@@ -100,6 +101,29 @@ pub fn try_shoot(
         // has target and reaction time elapsed, attempt to shoot
         if bot_state.shooting.reaction_remaining > 0.0 {
             return None; // still reacting, can't shoot yet
+        }
+
+        // gate fire on aim alignment — bot must actually be looking at the target, this is to guard against bot firing when target is not visually in sight
+        {
+            let dx = target.position.0 - bot.position.0;
+            let dy = target.position.1 - bot.position.1;
+            let dz = target.position.2 - bot.position.2;
+            let horiz = (dx * dx + dz * dz).sqrt();
+            let target_yaw = dz.atan2(dx);
+            let target_pitch = -(dy / horiz.max(0.001)).atan();
+
+            let yaw_err = {
+                let d = target_yaw - bot_state.current_yaw;
+                ((d + std::f32::consts::PI).rem_euclid(2.0 * std::f32::consts::PI)
+                    - std::f32::consts::PI).abs()
+            };
+            let pitch_err = (target_pitch - bot_state.current_pitch).abs();
+
+            if yaw_err > bot_state.shooting_config.aim_threshold
+                || pitch_err > bot_state.shooting_config.aim_threshold * 1.5
+            {
+                return None; // still tracking, not on target yet
+            }
         }
 
         if bot_state.shooting.fire_rate > 0.0 {

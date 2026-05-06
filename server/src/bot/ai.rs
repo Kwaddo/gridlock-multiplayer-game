@@ -22,6 +22,9 @@ pub struct BotState {
     pub behavior_decision_timer: f32, // timer for how often the bot reevaluates its behavior
     pub stuck_timer: f32, // timer for how long the bot has been stuck in the same position
     pub idle_look_timer: f32, // accumulator for idle look-around yaw sweep
+
+    pub current_yaw: f32, // current facing direction in radians
+    pub current_pitch: f32, // current pitch angle for looking up/down
 }
 
 const PATH_ARRIVAL_THRESHOLD: f32 = 0.5; // distance threshold for considering a bot has arrived at a path node
@@ -213,33 +216,28 @@ pub fn tick_bot(
         physics
     );
 
-    // check if inside wall
+    // axis-separated wall sliding
     if let Some((cells, width, height)) = maze_cells {
-        if
-            let Some(cell) = world_to_cell(
-                bot.position.0,
-                bot.position.2,
-                MAZE_CELL_SIZE,
-                cells,
-                width,
-                height
-            )
-        {
-            let idx = (cell.1 as usize) * (width as usize) + (cell.0 as usize);
-            if cells[idx] == 0 {
-                // walked into a wall
-                bot.position.0 = old_pos.0;
-                bot.position.2 = old_pos.2;
+        let in_wall = |x: f32, z: f32| -> bool {
+            match world_to_cell(x, z, MAZE_CELL_SIZE, cells, width, height) {
+                Some(cell) => {
+                    let idx = (cell.1 as usize) * (width as usize) + (cell.0 as usize);
+                    cells[idx] == 0
+                }
+                None => true, // outside grid, treat as solid
+            }
+        };
 
-                state.movement.velocity.x = 0.0;
+        if in_wall(bot.position.0, bot.position.2) {
+            // revert X, keep Z — try sliding along Z axis
+            bot.position.0 = old_pos.0;
+            state.movement.velocity.x = 0.0;
+
+            // if Z alone also puts us in a wall it's a corner — full stop
+            if in_wall(bot.position.0, bot.position.2) {
+                bot.position.2 = old_pos.2;
                 state.movement.velocity.z = 0.0;
             }
-        } else {
-            // outside grid entirely (shouldn't happen), also rollback
-            bot.position.0 = old_pos.0;
-            bot.position.2 = old_pos.2;
-            state.movement.velocity.x = 0.0;
-            state.movement.velocity.z = 0.0;
         }
     }
 
@@ -292,7 +290,7 @@ pub fn tick_bot(
     }
 
     // Unstick: if stuck for >1s, teleport to nearest adjacent open cell
-    if state.stuck_timer > 1.0 {
+    if state.stuck_timer > 2.5 {
         if let Some((cells, width, height)) = maze_cells {
             if let Some(cell) = world_to_cell(
                 bot.position.0, bot.position.2,
