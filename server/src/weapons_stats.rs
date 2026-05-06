@@ -39,7 +39,7 @@ pub fn get_weapon_stats(name: &str) -> ServerWeaponStats {
 
         // Other / melee
         "Minigun" => ServerWeaponStats { damage: 14, range: 50.0, shots_per_sec: 20.0 },
-        "Knife" => ServerWeaponStats { damage: 40, range: 2.5, shots_per_sec: 3.0 },
+        "Punch" => ServerWeaponStats { damage: 44, range: 2.5, shots_per_sec: 3.0 },
 
         // Safe fallback
         _ => ServerWeaponStats { damage: 20, range: 40.0, shots_per_sec: 5.0 },

@@ -141,12 +141,7 @@ pub fn process_weapon_input(inventory: &mut WeaponInventory, config: &GameConfig
         inventory.scroll(1);
     }
 
-    // knife toggle (X key — like Fortnite pickaxe)
-    if config.bind_toggle_knife.is_pressed() {
-        inventory.toggle_knife();
-    }
-
-    // reload (not applicable when knife is out)
+    // reload (not applicable when punch/knife is out)
     if config.bind_reload.is_pressed() && !inventory.knife_active {
         inventory.active_mut().start_reload();
     }
