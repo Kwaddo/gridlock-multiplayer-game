@@ -82,21 +82,6 @@ const CARBINE_MELEE_HIT_START_SEC: f32 = 6.79;
 #[allow(dead_code)]
 const CARBINE_MELEE_HIT_END_SEC: f32 = 7.40;
 
-// Knife animation segments (knife_animated.glb — single baked clip)
-const KNIFE_IDLE_START: f32 = 0.0;
-const KNIFE_IDLE_END: f32 = 1.36;
-const KNIFE_SWING1_START: f32 = 1.37;
-const KNIFE_SWING1_END: f32 = 2.03;
-const KNIFE_SWING2_START: f32 = 2.04;
-const KNIFE_SWING2_END: f32 = 2.70;
-const KNIFE_SWING3_START: f32 = 2.70;
-const KNIFE_SWING3_END: f32 = 3.43;
-const KNIFE_SWING4_START: f32 = 3.47;
-const KNIFE_SWING4_END: f32 = 4.16;
-const KNIFE_LOWER_START: f32 = 4.17;
-const KNIFE_LOWER_END: f32 = 4.50;
-const KNIFE_EQUIP_START: f32 = 4.51;
-const KNIFE_EQUIP_END: f32 = 4.83;
 const SLIDE_CLIP_START_SEC: f32 = 0.0;
 const SLIDE_CLIP_END_SEC: f32 = 30.0 / 30.0; // frame 0..30 at 30 FPS
 
@@ -335,108 +320,6 @@ impl PlayingState {
             }
         }
 
-        // --- Knife animation state machine ---
-        // This must be outside the `if let Some(hands)` block above because it
-        // borrows a different key ("fp_hands_knife") from animated_models.
-        let is_knife = self.weapons.active().id == WeaponId::Knife;
-        let was_knife = self.prev_weapon_was_knife;
-
-        if is_knife {
-            if let Some(knife) = self.animated_models.get_mut("fp_hands_knife") {
-                // First time equipping knife, or switching TO knife from another weapon
-                if !self.knife_anim_initialized || (!was_knife && is_knife) {
-                    knife.play_segment(KNIFE_EQUIP_START, KNIFE_EQUIP_END, false);
-                    self.hands_playback_mode = HandsPlaybackMode::KnifeEquip;
-                    self.knife_anim_initialized = true;
-                    self.knife_swing_index = 0;
-                }
-
-                // Heavy swing request (right-click) takes priority over light chain.
-                if self.knife_heavy_swing_requested {
-                    self.knife_heavy_swing_requested = false;
-                    self.knife_swing_requested = false;
-                    knife.play_segment(KNIFE_SWING4_START, KNIFE_SWING4_END, false);
-                    self.hands_playback_mode = HandsPlaybackMode::KnifeSwing;
-                } else if self.knife_swing_requested {
-                    // Handle light swing request (set by input_processing when weapon.fire() succeeds)
-                    self.knife_swing_requested = false;
-                    let (start, end) = match self.knife_swing_index {
-                        0 => (KNIFE_SWING1_START, KNIFE_SWING1_END),
-                        1 => (KNIFE_SWING2_START, KNIFE_SWING2_END),
-                        2 => (KNIFE_SWING3_START, KNIFE_SWING3_END),
-                        _ => (KNIFE_SWING1_START, KNIFE_SWING1_END),
-                    };
-                    knife.play_segment(start, end, false);
-                    self.hands_playback_mode = HandsPlaybackMode::KnifeSwing;
-                    self.knife_swing_index = (self.knife_swing_index + 1) % 3;
-                }
-
-                // Transition back to idle when swing/equip finishes
-                match self.hands_playback_mode {
-                    HandsPlaybackMode::KnifeSwing | HandsPlaybackMode::KnifeEquip => {
-                        if knife.is_playback_finished() {
-                            knife.play_segment(KNIFE_IDLE_START, KNIFE_IDLE_END, true);
-                            self.hands_playback_mode = HandsPlaybackMode::KnifeIdle;
-                        }
-                    }
-                    HandsPlaybackMode::KnifeIdle => {} // looping idle, nothing to do
-                    _ => {
-                        // If somehow in a non-knife state while knife is active, start idle
-                        knife.play_segment(KNIFE_IDLE_START, KNIFE_IDLE_END, true);
-                        self.hands_playback_mode = HandsPlaybackMode::KnifeIdle;
-                    }
-                }
-            }
-        } else if was_knife {
-            // Just switched away from knife: play lower and keep it active until finished.
-            if let Some(knife) = self.animated_models.get_mut("fp_hands_knife") {
-                knife.play_segment(KNIFE_LOWER_START, KNIFE_LOWER_END, false);
-            }
-            self.hands_playback_mode = HandsPlaybackMode::KnifeLower;
-            self.knife_anim_initialized = false;
-            self.knife_swing_requested = false;
-            self.knife_heavy_swing_requested = false;
-        } else if self.hands_playback_mode == HandsPlaybackMode::KnifeLower {
-            let lower_finished = self
-                .animated_models
-                .get("fp_hands_knife")
-                .map(|knife| knife.is_playback_finished())
-                .unwrap_or(true);
-            if lower_finished {
-                self.knife_anim_initialized = false;
-                self.knife_swing_requested = false;
-                self.knife_heavy_swing_requested = false;
-                self.knife_swing_index = 0;
-                let preferred_hands_key = Self::preferred_hands_key_for_weapon(self.weapons.active().id);
-                let hands_key = if self.animated_models.contains_key(preferred_hands_key)
-                    || self.models.contains_key(preferred_hands_key)
-                {
-                    preferred_hands_key
-                } else {
-                    "fp_hands"
-                };
-                let hands_is_all_in_one = self
-                    .asset_source_paths
-                    .get(hands_key)
-                    .map(|p| Self::is_all_in_one_hands_source(p))
-                    .unwrap_or(false);
-                if let Some(hands) = self.animated_models.get_mut(hands_key) {
-                    if hands_is_all_in_one {
-                        hands.stop_at_start();
-                        self.hands_playback_mode = HandsPlaybackMode::Stopped;
-                    } else {
-                        hands.play_from_start(true);
-                        self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
-                    }
-                } else {
-                    self.hands_playback_mode = HandsPlaybackMode::IdleLoop;
-                }
-            }
-        } else {
-            self.knife_heavy_swing_requested = false;
-        }
-        self.prev_weapon_was_knife = is_knife;
-
         // --- Sawnoff animation state machine ---
         // Like the knife, sawnoff uses its own animated model that includes hands.
         let is_sawnoff = self.weapons.active().id == WeaponId::Sawnoff;
@@ -612,9 +495,7 @@ impl PlayingState {
         self.prev_weapon_was_minigun = is_minigun;
 
         // Advance world/player clips plus only the active first-person hands model.
-        let active_hands_key = if is_knife {
-            Some("fp_hands_knife")
-        } else if is_sawnoff {
+        let active_hands_key = if is_sawnoff {
             Some("fp_hands_sawnoff")
         } else if is_minigun {
             Some("fp_hands_minigun")
@@ -630,8 +511,6 @@ impl PlayingState {
         for (key, model) in self.animated_models.iter_mut() {
             let should_update = if key.starts_with("anim_") {
                 true
-            } else if key == "fp_hands_knife" {
-                is_knife || self.hands_playback_mode == HandsPlaybackMode::KnifeLower
             } else if key == "fp_hands_sawnoff" {
                 is_sawnoff
             } else if key == "fp_hands_minigun" {

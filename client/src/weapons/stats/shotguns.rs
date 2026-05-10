@@ -244,8 +244,7 @@ pub const SAWNOFF: WeaponStats = WeaponStats {
     icon_height: 45.0,
     icon_flip_x: false,
 
-    // Sawnoff model includes hands — rendered as a single animated model
-    // like the knife (fp_hands_knife). No separate hands drawn.
+    // Sawnoff model includes hands — rendered as a single animated model. No separate hands drawn.
     viewmodel_model: Some("fp_hands_sawnoff"),
     viewmodel_asset_key: None,
 

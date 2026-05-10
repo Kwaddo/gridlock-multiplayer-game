@@ -4,7 +4,6 @@ use macroquad::models::Mesh;
 use macroquad::prelude::*;
 use macroquad::window::get_internal_gl;
 
-use super::super::state::HandsPlaybackMode;
 use super::super::PlayingState;
 
 const HANDS_BASE_SCALE: f32 = 0.35;

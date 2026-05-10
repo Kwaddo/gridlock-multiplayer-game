@@ -3,8 +3,6 @@
     "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
     "fp_hands_pistol": "assets/models/hand/fps_pistol_animated.glb",
 
-    "fp_hands_knife": "assets/models/hand/knife_animated.glb",
-
     "pistol_shot": "assets/sounds/pew.ogg",
     "smg_shot": "assets/sounds/pew.ogg",
     "shotgun_shot": "assets/sounds/pew.ogg",

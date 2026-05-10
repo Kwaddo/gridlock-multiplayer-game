@@ -189,9 +189,6 @@ impl PlayingState {
                     if world_key.contains("sawnoff") {
                         scale_factor *= 0.1;
                     }
-                    if world_key.contains("knife") {
-                        scale_factor *= 0.1;
-                    }
 
                     // rotate most guns slightly to the right when the player
                     // is moving (walking/sprinting) or aiming down sights. idle
@@ -229,10 +226,7 @@ impl PlayingState {
                         yaw_rot -= adjust;
                     }
                     // exceptions that are already oriented correctly (hands-based)
-                    if world_key.contains("sawnoff")
-                        || world_key.contains("minigun")
-                        || world_key.contains("knife")
-                    {
+                    if world_key.contains("sawnoff") || world_key.contains("minigun") {
                         yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
                     }
 
@@ -244,7 +238,6 @@ impl PlayingState {
                     // the previous behavior by simply using hand_world in that case.
                     let weapon_pos = if world_key.contains("sawnoff")
                         || world_key.contains("minigun")
-                        || world_key.contains("knife")
                     {
                         hand_world
                     } else {
