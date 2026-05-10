@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "name": "custom_preset_1",
+    "is_default": false,
+    "crosshair_type": "Cross",
+    "color": [
+      255,
+      255,
+      255,
+      255
+    ],
+    "dot_enabled": true,
+    "dot_size": 0.15,
+    "line_length": 1.0,
+    "line_thickness": 0.2,
+    "center_gap": 3.7,
+    "outline_enabled": true,
+    "outline_thickness": 0.1
+  }
+]

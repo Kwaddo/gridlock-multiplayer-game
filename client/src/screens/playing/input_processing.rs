@@ -293,7 +293,6 @@ impl PlayingState {
                         self.knife_swing_requested = true;
                         self.knife_attack_locked = true;
                         self.knife_attack_lock_timer = KNIFE_LIGHT_ANIM_DURATION;
-                        self.knife_last_attack_was_heavy = false;
                     }
                     // Signal sawnoff shot animation
                     if weapon.id == crate::weapons::stats::WeaponId::Sawnoff {

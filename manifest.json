@@ -1,7 +1,6 @@
 {
   "global": {
     "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
-    "fp_hands_knife": "assets/models/hand/knife_animated.glb",
     "fp_hands_pistol": "assets/models/hand/fps_pistol_animated.glb",
     "fp_hands_smg": "assets/models/hand/fps_animated_smg.glb",
     "fp_hands_sniper": "assets/models/hand/sniper_animated.glb",
