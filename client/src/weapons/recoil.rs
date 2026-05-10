@@ -5,7 +5,6 @@
     as additional multipliers without changing this core logic.
 */
 use super::state::WeaponState; //use super means "use from the parent module" (weapons::state)
-use super::stats::FireMode;
 
 /*
     Context flags that affect spread calculation.

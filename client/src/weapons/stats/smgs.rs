@@ -1,4 +1,4 @@
-use super::{ CrosshairStyle, FireMode, WeaponStats, VM_BASE_POS, VM_BASE_ROT, VM_BASE_SCALE };
+use super::{ CrosshairStyle, FireMode, WeaponStats };
 
 /// MP5 — control SMG, laser accuracy spray
 pub const MP5: WeaponStats = WeaponStats {

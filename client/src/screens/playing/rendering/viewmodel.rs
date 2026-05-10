@@ -27,10 +27,10 @@ impl PlayingState {
     fn draw_punch_sprite(&self, tex: &Texture2D) {
         let sw = screen_width();
         let sh = screen_height();
-        let target_h = sh * 0.42;
+        let target_h = sh * 0.65;
         let scale = target_h / tex.height().max(1.0);
         let size = vec2(tex.width() * scale, tex.height() * scale);
-        let x = sw * 0.58;
+        let x = (sw - size.x) * 0.5;
         let y = sh - size.y * 0.9;
         draw_texture_ex(
             tex,
@@ -184,12 +184,12 @@ impl PlayingState {
 
         // Pair offset only applies during hip-fire — fades to zero as ADS comes in
         let pair_scale = 1.0 - ads_p;
-        let mut pair_pos = vec3(
+        let pair_pos = vec3(
             weapon.pair_offset_pos.0 * pair_scale,
             weapon.pair_offset_pos.1 * pair_scale,
             weapon.pair_offset_pos.2 * pair_scale,
         );
-        let mut pair_rot = (
+        let pair_rot = (
             weapon.pair_offset_rot.0 * pair_scale,
             weapon.pair_offset_rot.1 * pair_scale,
             weapon.pair_offset_rot.2 * pair_scale,

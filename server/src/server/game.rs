@@ -135,7 +135,7 @@ pub fn random_spawn_far(
     let min2 = min_dist * min_dist;
     for _ in 0..8 {
         let cand = maze.random_spawn_world(MAZE_CELL_SIZE);
-        let (cx, _cy, cz, used) = cand;
+        let (cx, _cy, cz, _used) = cand;
         // check squared distance to every live player
         let ok = players.values().all(|p| {
             let dx = p.position.0 - cx;
@@ -227,9 +227,9 @@ pub fn process_auto_respawns(
                 if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
                     GUN_GAME_PROGRESSION[gl - 1].to_string()
                 } else if gl > GUN_GAME_PROGRESSION.len() {
-                    "Knife".to_string()
+                    "Punch".to_string()
                 } else {
-                    "Knife".to_string()
+                    GUN_GAME_PROGRESSION[0].to_string()
                 }
             } else if pref.team != Team::Spectator {
                 // TDM/S&D: keep current weapon, or pick from team loadout

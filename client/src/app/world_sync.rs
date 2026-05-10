@@ -220,7 +220,7 @@ pub fn sync_world(
             let current_mode = updates.match_mode.or(playing_state.match_mode);
             if current_mode == Some(MODE_GUN_GAME) {
                 // server sends 1 = first slot; convert to zero-based slot index
-                let slot = (gl as usize).saturating_sub(1);
+                let _slot = (gl as usize).saturating_sub(1);
 
                 // If we're already in the Maze, apply immediately. If the update also contains a
                 // pending world_change to Maze (same poll), apply immediately as well. Otherwise

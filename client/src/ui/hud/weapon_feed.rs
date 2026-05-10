@@ -100,14 +100,19 @@ pub(super) fn draw_weapon_and_kill_feed(
     let margin_right = 16.0 * hud_scale;
     let margin_bottom = 20.0 * hud_scale;
 
-    // Slots: Primary (0), Secondary (1) — punch is a button, not a weapon slot
-    let slots: [(&crate::weapons::WeaponState, &str, bool); 2] = [
-        (&weapons.weapons[0], "1", !weapons.knife_active && weapons.active_slot == 0),
-        (&weapons.weapons[1], "2", !weapons.knife_active && weapons.active_slot == 1),
-    ];
+    // In Gun Game only slot 0 exists; hide slot 1 to avoid showing the default secondary.
+    let gun_game = weapons.locked_slot.is_some();
+    let slots: Vec<(&crate::weapons::WeaponState, &str, bool)> = if gun_game {
+        vec![(&weapons.weapons[0], "1", !weapons.knife_active)]
+    } else {
+        vec![
+            (&weapons.weapons[0], "1", !weapons.knife_active && weapons.active_slot == 0),
+            (&weapons.weapons[1], "2", !weapons.knife_active && weapons.active_slot == 1),
+        ]
+    };
 
     let base_x = screen_width() - slot_width - margin_right;
-    let total_height = 2.0 * slot_height + 1.0 * slot_gap;
+    let total_height = slots.len() as f32 * slot_height + (slots.len() as f32 - 1.0) * slot_gap;
     let base_y = screen_height() - total_height - margin_bottom;
 
     for (i, (weapon, key_label, is_active)) in slots.iter().enumerate() {

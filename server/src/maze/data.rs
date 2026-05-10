@@ -225,6 +225,10 @@ impl MazeData {
     /// Returns (x, y, z, used_fallback)
     /// used_fallback == true when the teleporter fallback was used.
     pub fn random_spawn_world(&self, cell_size: f32) -> (f32, f32, f32, bool) {
+        if self.width <= 2 || self.height <= 2 {
+            let (tx, ty, tz) = self.teleporter_world(cell_size);
+            return (tx, ty, tz, true);
+        }
         let mut rng = rand::thread_rng();
         let width_usize = self.width as usize;
         let height_usize = self.height as usize;

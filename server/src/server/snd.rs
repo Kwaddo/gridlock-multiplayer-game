@@ -110,17 +110,17 @@ impl SndState {
         socket: &UdpSocket,
         players: &mut HashMap<SocketAddr, Player>,
     ) -> bool {
-        self.current_round += 1;
-
         // Check if a team has won the match (first to 4 rounds in a best-of-7)
         let rounds_to_win = (self.max_rounds / 2) + 1; // 4
         if self.red_round_wins >= rounds_to_win || self.blue_round_wins >= rounds_to_win {
             return false; // match over
         }
 
-        if self.current_round > self.max_rounds {
+        if self.current_round + 1 > self.max_rounds {
             return false; // match over
         }
+
+        self.current_round += 1;
 
         // Alternate attacking team each round
         self.attacking_team = if self.current_round % 2 == 1 {
@@ -361,24 +361,6 @@ impl SndState {
         } else {
             None
         }
-    }
-
-    /// Handle a player death in S&D — drop bomb if they had it, mark as dead
-    pub fn on_player_death(
-        &mut self,
-        dead_player_id: u32,
-        dead_player_pos: (f32, f32, f32),
-    ) {
-        // If the dead player was carrying the bomb, drop it
-        if self.bomb_carrier == Some(dead_player_id) {
-            self.bomb_carrier = None;
-            self.bomb_dropped_pos = Some(dead_player_pos);
-            self.plant_progress = 0.0;
-            self.planter = None;
-        }
-
-        // If the dead player was defusing, cancel
-        // (defuser tracking is by SocketAddr, handled separately)
     }
 
     /// Handle bomb pickup request

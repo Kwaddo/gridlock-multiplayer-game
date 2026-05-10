@@ -6,8 +6,8 @@ use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_IS_BOT, FLAG_PRONE,
     FLAG_SILENT, FLAG_SLIDING, FLAG_SPRINTING, MSG_ASSETS, MSG_BOT_SHOT, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED,
     MSG_MATCH_COUNTDOWN, MSG_MATCH_END, MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE,
-    MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN, MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN,
-    MSG_WORLD_CHANGE,
+    MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN, MSG_SND_ROUND_STATE, MSG_START_DENIED, MSG_STATE,
+    MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
@@ -219,6 +219,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 let mut offset = 5;
                 let mut new_players = Vec::new();
                 for _ in 0..player_count {
+                    if offset + 4 > size { break; }
                     let id = u32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -226,6 +227,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[offset + 3],
                     ]);
                     offset += 4;
+                    if offset + 4 > size { break; }
                     let x = f32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -233,6 +235,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[offset + 3],
                     ]);
                     offset += 4;
+                    if offset + 4 > size { break; }
                     let y = f32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -240,6 +243,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[offset + 3],
                     ]);
                     offset += 4;
+                    if offset + 4 > size { break; }
                     let z = f32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -247,6 +251,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[offset + 3],
                     ]);
                     offset += 4;
+                    if offset + 4 > size { break; }
                     let yaw = f32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -254,15 +259,19 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[offset + 3],
                     ]);
                     offset += 4;
+                    if offset + 1 > size { break; }
                     let world_id = recv_buf[offset];
                     offset += 1;
                     let world = WorldId::from_u8(world_id).unwrap_or(WorldId::Lobby);
+                    if offset + 1 > size { break; }
                     let state_flags = recv_buf[offset];
                     offset += 1;
+                    if offset + 1 > size { break; }
                     let event_flags = recv_buf[offset];
                     offset += 1;
 
                     // new: kills (u32)
+                    if offset + 4 > size { break; }
                     let kills = u32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -272,10 +281,12 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     offset += 4;
 
                     // new: gun level (1 = first weapon)
+                    if offset + 1 > size { break; }
                     let gun_level = recv_buf[offset];
                     offset += 1;
 
                     // health and max_health (f32 each)
+                    if offset + 4 > size { break; }
                     let hp = f32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -283,6 +294,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[offset + 3],
                     ]);
                     offset += 4;
+                    if offset + 4 > size { break; }
                     let max_hp = f32::from_be_bytes([
                         recv_buf[offset],
                         recv_buf[offset + 1],
@@ -291,8 +303,10 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     ]);
                     offset += 4;
 
+                    if offset + 1 > size { break; }
                     let name_len = recv_buf[offset] as usize;
                     offset += 1;
+                    if offset + name_len > size { break; }
                     let name =
                         String::from_utf8_lossy(&recv_buf[offset..offset + name_len]).to_string();
                     offset += name_len;
@@ -718,7 +732,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                         recv_buf[47],
                     ]);
 
-                    let bomb_dropped = if carrier_id == 0 && !planted && (bx != 0.0 || bz != 0.0) {
+                    let bomb_dropped = if carrier_id == 0 && !planted {
                         Some((bx, by, bz))
                     } else {
                         None

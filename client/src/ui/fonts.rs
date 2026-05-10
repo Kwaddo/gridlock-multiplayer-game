@@ -1,13 +1,34 @@
 use macroquad::prelude::*;
+use std::path::Path;
 use std::sync::OnceLock;
 
 static GAME_FONT: OnceLock<Font> = OnceLock::new();
 
 // Call once at startup to load the font.
 pub async fn init_font() {
-    if let Ok(font) = load_ttf_font("assets/fonts/Pixel Game.otf").await {
+    let path = resolve_font_path("assets/fonts/Pixel Game.otf");
+    if let Ok(font) = load_ttf_font(&path).await {
         let _ = GAME_FONT.set(font);
     }
+}
+
+fn resolve_font_path(rel: &str) -> String {
+    if Path::new(rel).exists() {
+        return rel.to_string();
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join(rel);
+            if candidate.exists() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+    }
+    let client_path = format!("client/{}", rel);
+    if Path::new(&client_path).exists() {
+        return client_path;
+    }
+    rel.to_string()
 }
 
 // pub async fn init_font() {

@@ -64,11 +64,11 @@ pub fn handle_hit(
     _match_start_time: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
-    snd_state: &mut Option<crate::server::snd::SndState>,
+    _snd_state: &mut Option<crate::server::snd::SndState>,
     bot_states: &mut HashMap<SocketAddr, crate::bot::ai::BotState>,
 ) {
     // the sender of the hit packet is the attacker
-    let attacker = src_addr;
+    let _attacker = src_addr;
     if payload.len() < 8 {
         return;
     }
@@ -131,175 +131,6 @@ pub fn handle_hit(
         }
     }
 
-    let backstab_verified = if is_backstab_claim && weapon_name.eq_ignore_ascii_case("knife") {
-        let atk_yaw = players.get(&src_addr).map(|a| a.yaw).unwrap_or(0.0);
-        let vic_yaw = players.get(&victim_addr).map(|v| v.yaw).unwrap_or(0.0);
-        let atk_fwd = (atk_yaw.cos(), atk_yaw.sin());
-        let vic_fwd = (vic_yaw.cos(), vic_yaw.sin());
-        let dot = atk_fwd.0 * vic_fwd.0 + atk_fwd.1 * vic_fwd.1;
-        dot > BACKSTAB_CONE_DOT
-    } else {
-        false
-    };
-    let damage = if backstab_verified {
-        players
-            .get(&victim_addr)
-            .map(|v| v.health.saturating_add(1))
-            .unwrap_or(damage)
-    } else {
-        damage
-    };
-
-    if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
-        // fatal blow: mutate victim in a short scope and send death message
-        let wbytes = weapon_name.as_bytes();
-
-        // pick a new primary for the victim (team modes) — unused in Gun Game
-        let _chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
-            if vref.team != Team::Spectator {
-                game::choose_team_weapon_for_player(players, vref)
-            } else {
-                "Knife".to_string()
-            }
-        } else {
-            "Knife".to_string()
-        };
-
-        {
-            if let Some(vmut) = players.get_mut(&victim_addr) {
-                vmut.is_alive = false;
-                vmut.deaths += 1;
-            }
-        }
-
-        // S&D: notify the round state that a player died (drops bomb if they had it)
-        if match_mode == MODE_SEARCH_AND_DESTROY {
-            if let Some(ref mut snd) = snd_state {
-                // Get victim position for bomb drop
-                let victim_pos = players
-                    .get(&victim_addr)
-                    .map(|v| v.position)
-                    .unwrap_or((0.0, 0.0, 0.0));
-                snd.on_player_death(victim_id, victim_pos);
-                // Also cancel any defuse/plant if the dead player was doing it
-                snd.stop_plant(victim_addr);
-                snd.stop_defuse(victim_addr);
-            }
-        }
-
-        // notify victim of death (include attacker id if known)
-        let mut death_msg = vec![MSG_DEATH];
-        if let Some(att) = players.get(&attacker) {
-            death_msg.extend_from_slice(&att.id.to_be_bytes());
-        } else {
-            death_msg.extend_from_slice(&0u32.to_be_bytes());
-        }
-        death_msg.push(wbytes.len() as u8);
-        death_msg.extend_from_slice(wbytes);
-        let _ = socket.send_to(&death_msg, victim_addr);
-
-        // reward killer — separate mutable borrow
-        let mut victim_reset_required = false;
-        if let Some(killer) = players.get_mut(&attacker) {
-            killer.kills += 1;
-
-            if match_mode == MODE_GUN_GAME {
-                let is_knife = weapon_name.eq_ignore_ascii_case("knife");
-                // gun_level 1..19 = guns from GUN_GAME_PROGRESSION, 20 = knife-only level
-                let final_knife_level = (game::GUN_GAME_PROGRESSION.len() + 1) as u32;
-                if is_knife {
-                    if killer.gun_level == final_knife_level {
-                        // Knife kill on final level = win the game
-                        let winner_id = killer.id;
-                        let winner_name = killer.username.clone();
-                        println!("Gun Game winner (knife final): {}", winner_name);
-
-                        let mut end_msg = vec![MSG_MATCH_END];
-                        end_msg.extend_from_slice(&winner_id.to_be_bytes());
-                        let name_bytes = winner_name.as_bytes();
-                        end_msg.push(name_bytes.len() as u8);
-                        end_msg.extend_from_slice(name_bytes);
-                        end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
-                        for p in players.values() {
-                            let _ = socket.send_to(&end_msg, p.socket_addr);
-                        }
-
-                        *match_end_pending = Some((
-                            Instant::now()
-                                + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
-                            winner_id,
-                            winner_name,
-                        ));
-                    } else {
-                        // Non-final knife kill: reset victim to first weapon
-                        victim_reset_required = true;
-                    }
-                } else {
-                    // Non-knife kill: advance killer along the progression
-                    if (killer.gun_level as usize) < game::GUN_GAME_PROGRESSION.len() + 1 {
-                        killer.gun_level = killer.gun_level.saturating_add(1);
-                        // Update the killer's current_weapon to match new gun_level
-                        let new_level = killer.gun_level as usize;
-                        if new_level <= game::GUN_GAME_PROGRESSION.len() {
-                            killer.current_weapon =
-                                game::GUN_GAME_PROGRESSION[new_level - 1].to_string();
-                        } else {
-                            // Reached knife-only level
-                            killer.current_weapon = "Knife".to_string();
-                        }
-                    }
-                }
-            }
-
-            // send kill confirmation to killer
-            let mut kill_msg = vec![MSG_KILL];
-            kill_msg.extend_from_slice(&victim_id.to_be_bytes());
-            kill_msg.push(wbytes.len() as u8);
-            kill_msg.extend_from_slice(wbytes);
-            let _ = socket.send_to(&kill_msg, attacker);
-        }
-
-        // If needed, reset victim's gun level now that the killer borrow has ended
-        if victim_reset_required {
-            if let Some(vmut) = players.get_mut(&victim_addr) {
-                vmut.gun_level = 1;
-                // Reset to the first Gun Game weapon
-                vmut.current_weapon = game::GUN_GAME_PROGRESSION[0].to_string();
-            }
-        }
-
-        // propagate score/gun-level changes (after victim reset so clients see updated gun_level)
-        broadcast::broadcast_state(socket, players);
-        broadcast::broadcast_player_list(socket, players);
-
-        // broadcast kill feed (include weapon name so client can display it)
-        let mut feed = vec![MSG_KILL_FEED];
-        if let Some(killer) = players.get(&attacker) {
-            feed.extend_from_slice(&killer.id.to_be_bytes());
-        } else {
-            feed.extend_from_slice(&0u32.to_be_bytes());
-        }
-        feed.extend_from_slice(&victim_id.to_be_bytes());
-        feed.push(wbytes.len() as u8);
-        feed.extend_from_slice(wbytes);
-        for p in players.values() {
-            let _ = socket.send_to(&feed, p.socket_addr);
-        }
-    } else {
-        // non-lethal damage: apply mutation in a short scope and send damage msg
-        if let Some(vmut) = players.get_mut(&victim_addr) {
-            vmut.health -= damage;
-        }
-        let mut dmg_msg = vec![MSG_DAMAGE];
-        dmg_msg.extend_from_slice(&(damage as f32).to_be_bytes());
-        if let Some(att) = players.get(&attacker) {
-            dmg_msg.extend_from_slice(&att.id.to_be_bytes());
-        } else {
-            dmg_msg.extend_from_slice(&0u32.to_be_bytes());
-        }
-        let _ = socket.send_to(&dmg_msg, victim_addr);
-    }
-     
     apply_damage(
         socket,
         players,
@@ -337,18 +168,22 @@ pub fn handle_respawn_request(
     // compute spawn first using only immutable access to `players`
     let spawn = if let Some(pref) = players.get(&src_addr) {
         if pref.world == WorldId::Maze {
+            let maze_data = match maze {
+                Some(m) => m,
+                None => return,
+            };
             match pref.team {
                 Team::Red => {
-                    let (red, _blue) = maze.unwrap().team_spawn_positions(game::MAZE_CELL_SIZE);
+                    let (red, _blue) = maze_data.team_spawn_positions(game::MAZE_CELL_SIZE);
                     (red.0, red.1, red.2)
                 }
                 Team::Blue => {
-                    let (_red, blue) = maze.unwrap().team_spawn_positions(game::MAZE_CELL_SIZE);
+                    let (_red, blue) = maze_data.team_spawn_positions(game::MAZE_CELL_SIZE);
                     (blue.0, blue.1, blue.2)
                 }
                 _ => {
                     let (sx, sy, sz, _fallback) =
-                        game::random_spawn_far(maze.unwrap(), players, game::MAZE_CELL_SIZE * 3.0);
+                        game::random_spawn_far(maze_data, players, game::MAZE_CELL_SIZE * 3.0);
                     (sx, sy, sz)
                 }
             }
@@ -380,7 +215,7 @@ pub fn handle_respawn_request(
             // Gun Game: assign weapon matching current progression level
             game::GUN_GAME_PROGRESSION[gl - 1].to_string()
         } else if gl > game::GUN_GAME_PROGRESSION.len() {
-            "Knife".to_string()
+            "Punch".to_string()
         } else if pref.team != Team::Spectator {
             game::choose_team_weapon_for_player(players, pref)
         } else {
@@ -475,13 +310,17 @@ pub fn apply_damage(
         }
     }
 
-    let backstab_verified = if is_backstab && weapon_name.eq_ignore_ascii_case("knife") {
-        let atk_yaw = players.get(&attacker_addr).map(|a| a.yaw).unwrap_or(0.0);
+    let backstab_verified = if is_backstab && (weapon_name.eq_ignore_ascii_case("knife") || weapon_name.eq_ignore_ascii_case("punch")) {
+        let atk_pos = players.get(&attacker_addr).map(|a| a.position).unwrap_or((0.0, 0.0, 0.0));
+        let vic_pos = players.get(&victim_addr).map(|v| v.position).unwrap_or((0.0, 0.0, 0.0));
         let vic_yaw = players.get(&victim_addr).map(|v| v.yaw).unwrap_or(0.0);
-        let atk_fwd = (atk_yaw.cos(), atk_yaw.sin());
         let vic_fwd = (vic_yaw.cos(), vic_yaw.sin());
-        let dot = atk_fwd.0 * vic_fwd.0 + atk_fwd.1 * vic_fwd.1;
-        dot > BACKSTAB_CONE_DOT
+        let dx = atk_pos.0 - vic_pos.0;
+        let dz = atk_pos.2 - vic_pos.2;
+        let len = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
+        let vic_to_atk = (dx / len, dz / len);
+        let dot = vic_fwd.0 * vic_to_atk.0 + vic_fwd.1 * vic_to_atk.1;
+        dot < -BACKSTAB_CONE_DOT
     } else {
         false
     };
@@ -509,7 +348,7 @@ pub fn apply_damage(
     if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
         let wbytes = weapon_name.as_bytes();
 
-        let chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
+        let _chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
             if vref.team != Team::Spectator {
                 game::choose_team_weapon_for_player(players, vref)
             } else {
@@ -545,17 +384,23 @@ pub fn apply_damage(
             killer.kills += 1;
 
             if match_mode == MODE_GUN_GAME {
-                let is_knife = weapon_name.eq_ignore_ascii_case("knife");
-                let final_knife_level = (game::GUN_GAME_PROGRESSION.len() + 1) as u32;
+                let is_punch = weapon_name.eq_ignore_ascii_case("punch");
+                let final_punch_level = (game::GUN_GAME_PROGRESSION.len() + 1) as u32;
 
-                if is_knife {
-                    if killer.gun_level == final_knife_level {
+                if is_punch {
+                    if killer.gun_level == final_punch_level {
                         pending_match_end = Some((killer.id, killer.username.clone()));
                     } else {
                         victim_reset_required = true;
                     }
                 } else if (killer.gun_level as usize) < game::GUN_GAME_PROGRESSION.len() + 1 {
                     killer.gun_level = killer.gun_level.saturating_add(1);
+                    let new_level = killer.gun_level as usize;
+                    if new_level <= game::GUN_GAME_PROGRESSION.len() {
+                        killer.current_weapon = game::GUN_GAME_PROGRESSION[new_level - 1].to_string();
+                    } else {
+                        killer.current_weapon = "Punch".to_string();
+                    }
                 }
             }
 
@@ -593,7 +438,7 @@ pub fn apply_damage(
         if victim_reset_required {
             if let Some(vmut) = players.get_mut(&victim_addr) {
                 vmut.gun_level = 1;
-                vmut.current_weapon = chosen_weapon_for_victim.clone();
+                vmut.current_weapon = game::GUN_GAME_PROGRESSION[0].to_string();
             }
         }
 

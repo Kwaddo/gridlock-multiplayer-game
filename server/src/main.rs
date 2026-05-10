@@ -1,5 +1,3 @@
-use crate::bot::manager::BotManager;
-
 mod maze;
 mod player;
 mod protocols;

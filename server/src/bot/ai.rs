@@ -1,11 +1,12 @@
 use crate::physics::{ BotMovementState, PhysicsConfig, simulate_bot_physics };
 use crate::bot::shooting::{ BotShootingConfig, BotShootingState };
-use crate::player::{ Player, Team };
+use crate::player::Player;
 use crate::bot::personality::{ BotArchetype, BotDifficulty, BotPersonality, BotPersonalityId };
 use crate::maze::pathfinding::{ cell_to_world, world_to_cell };
 use crate::server::game::MAZE_CELL_SIZE;
 use glam::Vec3;
 
+#[allow(dead_code)]
 pub struct BotState {
     pub movement: BotMovementState,
     pub behavior: BotBehavior,
@@ -37,13 +38,6 @@ pub enum BotBehavior {
         current: usize,
         arrival_threshold: f32,
     },
-    PatrolJump {
-        waypoints: Vec<(f32, f32, f32)>,
-        current: usize,
-        jump_interval: f32,
-        jump_timer: f32,
-        arrival_threshold: f32,
-    },
     Hunt {
         path: Vec<(u8, u8)>, // A* path
         path_idx: usize,
@@ -51,7 +45,6 @@ pub enum BotBehavior {
         repath_timer: f32,
     },
     HoldAngle {
-        position: (u8, u8), // strategic cell to sit at
         face_direction: (f32, f32), // world direction to face (dx, dz)
         hold_timer: f32, // how long we've been holding
         max_hold_time: f32, // from personality.reposition_interval
@@ -81,7 +74,7 @@ pub fn tick_bot(
     maze_cells: Option<(&[u8], u8, u8)>
 ) {
     let mut desired_dir = Vec3::ZERO; // movement we intend to apply every tick
-    let mut want_jump = false; // whether we want to jump this tick
+    let want_jump = false; // whether we want to jump this tick
     let speed: f32 = physics.walk_speed;
 
     match &mut state.behavior {
@@ -104,37 +97,6 @@ pub fn tick_bot(
                 }
             }
         }
-        BotBehavior::PatrolJump {
-            waypoints,
-            current,
-            jump_interval,
-            jump_timer,
-            arrival_threshold,
-        } => {
-            if !waypoints.is_empty() {
-                let waypoint = waypoints[*current];
-                desired_dir = Vec3::new(
-                    waypoint.0 - bot.position.0,
-                    0.0,
-                    waypoint.2 - bot.position.2
-                );
-
-                if desired_dir.length() < *arrival_threshold {
-                    *current = (*current + 1) % waypoints.len();
-                } else {
-                    desired_dir = desired_dir.normalize();
-                }
-            }
-
-            *jump_timer -= dt;
-            if *jump_timer <= 0.0 {
-                *jump_timer = *jump_interval;
-                if state.movement.is_grounded {
-                    want_jump = true;
-                }
-            }
-        }
-
         // path-following behaviors: Hunt, Flank, Retreat, Investigate
         // all share the same core logic: walk toward the next cell in the A* path
         /*
@@ -155,6 +117,8 @@ pub fn tick_bot(
                 } else {
                     desired_dir = desired_dir.normalize();
                 }
+            } else {
+                *repath_timer = 0.0;
             }
         }
 
@@ -168,6 +132,8 @@ pub fn tick_bot(
                 } else {
                     desired_dir = desired_dir.normalize();
                 }
+            } else {
+                *repath_timer = 0.0;
             }
         }
 
@@ -193,6 +159,8 @@ pub fn tick_bot(
                 } else {
                     desired_dir = desired_dir.normalize();
                 }
+            } else {
+                *give_up_timer = 0.0;
             }
         }
 
@@ -216,25 +184,34 @@ pub fn tick_bot(
         physics
     );
 
-    // axis-separated wall sliding
+    // axis-separated wall sliding with radius-based corner checks
     if let Some((cells, width, height)) = maze_cells {
-        let in_wall = |x: f32, z: f32| -> bool {
-            match world_to_cell(x, z, MAZE_CELL_SIZE, cells, width, height) {
-                Some(cell) => {
-                    let idx = (cell.1 as usize) * (width as usize) + (cell.0 as usize);
-                    cells[idx] == 0
-                }
-                None => true, // outside grid, treat as solid
+        // Direct cell lookup — no fallback search so walls are always detected.
+        let cell_is_wall = |x: f32, z: f32| -> bool {
+            let cx = (x / MAZE_CELL_SIZE).floor() as i16;
+            let cz = (z / MAZE_CELL_SIZE).floor() as i16;
+            if cx < 0 || cz < 0 || cx >= width as i16 || cz >= height as i16 {
+                return true;
             }
+            cells[(cz as usize) * (width as usize) + (cx as usize)] == 0
         };
 
-        if in_wall(bot.position.0, bot.position.2) {
+        // Check all 4 corners of the bot's footprint so body width is respected.
+        const BOT_RADIUS: f32 = 0.28;
+        let hits_wall = |x: f32, z: f32| -> bool {
+            cell_is_wall(x - BOT_RADIUS, z - BOT_RADIUS)
+                || cell_is_wall(x + BOT_RADIUS, z - BOT_RADIUS)
+                || cell_is_wall(x - BOT_RADIUS, z + BOT_RADIUS)
+                || cell_is_wall(x + BOT_RADIUS, z + BOT_RADIUS)
+        };
+
+        if hits_wall(bot.position.0, bot.position.2) {
             // revert X, keep Z — try sliding along Z axis
             bot.position.0 = old_pos.0;
             state.movement.velocity.x = 0.0;
 
             // if Z alone also puts us in a wall it's a corner — full stop
-            if in_wall(bot.position.0, bot.position.2) {
+            if hits_wall(bot.position.0, bot.position.2) {
                 bot.position.2 = old_pos.2;
                 state.movement.velocity.z = 0.0;
             }

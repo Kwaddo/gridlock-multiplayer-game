@@ -12,7 +12,7 @@ use crate::protocols::*;
 use crate::server::{
     broadcast, game,
     game::{
-        MATCH_DURATION, MATCH_END_COUNTDOWN_SECS, MATCH_MAX_PLAYERS,
+        MATCH_END_COUNTDOWN_SECS, MATCH_MAX_PLAYERS,
         MATCH_POST_TELEPORT_FREEZE_SECS, MATCH_SCORE_TO_WIN, MATCH_START_COUNTDOWN_SECS,
         MAZE_CELL_SIZE, MAZE_HEIGHT, MAZE_WIDTH, MIN_PLAYERS_TO_START, TEAM_LOADOUT_BLUE,
         TEAM_LOADOUT_RED,
@@ -25,7 +25,7 @@ pub fn handle_start_game(
     socket: &UdpSocket,
     players: &mut HashMap<SocketAddr, Player>,
     maze: &mut Option<MazeData>,
-    match_running: bool,
+    match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
     match_warmup_end: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
@@ -39,21 +39,22 @@ pub fn handle_start_game(
 ) {
     // If a match is marked running but there are no players in the Maze,
     // treat it as stale and clear it so new starts are accepted.
-    if match_running {
+    if *match_running {
         let maze_count = players
             .values()
             .filter(|p| p.world == WorldId::Maze)
             .count();
         if maze_count == 0 {
             println!("Stale match detected (no players) — clearing match state");
-            // caller will clear flags; we just early return
+            *match_running = false;
             *match_start_time = None;
             *match_duration = game::MATCH_DURATION;
+            *match_end_pending = None;
         }
     }
 
     // only accept start requests when not already running or scheduled
-    if !match_running && match_warmup_end.is_none() && match_end_pending.is_none() {
+    if !*match_running && match_warmup_end.is_none() && match_end_pending.is_none() {
         // honour requested duration when scheduling new match
         *match_duration = requested_duration;
         // require minimal number of players in lobby
@@ -630,11 +631,14 @@ pub fn check_early_end_conditions(
             }
         }
         if red_kills >= MATCH_SCORE_TO_WIN || blue_kills >= MATCH_SCORE_TO_WIN {
-            let (winner_team_name, winner_id) = if red_kills >= MATCH_SCORE_TO_WIN {
-                ("Red Team".to_string(), 0u32)
-            } else {
-                ("Blue Team".to_string(), 0u32)
-            };
+            let winning_team = if red_kills >= MATCH_SCORE_TO_WIN { Team::Red } else { Team::Blue };
+            let winner_team_name = if winning_team == Team::Red { "Red Team".to_string() } else { "Blue Team".to_string() };
+            let winner_id = players
+                .values()
+                .filter(|p| p.world == WorldId::Maze && p.team == winning_team)
+                .max_by_key(|p| p.kills)
+                .map(|p| p.id)
+                .unwrap_or(0);
 
             println!(
                 "Team Deathmatch win: {} reached {} kills",
@@ -714,9 +718,11 @@ pub fn update_match_timer(
                     }
                 }
                 if red_kills > blue_kills {
-                    (0u32, "Red Team".to_string())
+                    let id = players.values().filter(|p| p.world == WorldId::Maze && p.team == Team::Red).max_by_key(|p| p.kills).map(|p| p.id).unwrap_or(0);
+                    (id, "Red Team".to_string())
                 } else if blue_kills > red_kills {
-                    (0u32, "Blue Team".to_string())
+                    let id = players.values().filter(|p| p.world == WorldId::Maze && p.team == Team::Blue).max_by_key(|p| p.kills).map(|p| p.id).unwrap_or(0);
+                    (id, "Blue Team".to_string())
                 } else {
                     (0u32, "Draw".to_string())
                 }
