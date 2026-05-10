@@ -513,7 +513,7 @@ impl PlayingState {
                                 // on‑screen decals are less intrusive.  The stats values
                                 // can remain as before (e.g. sniper still has a larger
                                 // base value) but the final radius is shrunk uniformly.
-                                self.bullet_holes.push(crate::weapons::effects::BulletHole {
+                                self.bullet_holes.push_back(crate::weapons::effects::BulletHole {
                                     position: hit_point + normal * 0.002,
                                     normal,
                                     lifetime: stats.bullet_hole_lifetime,
@@ -525,7 +525,7 @@ impl PlayingState {
                                 });
                                 // cap total bullet holes to avoid memory bloat
                                 if self.bullet_holes.len() > 200 {
-                                    self.bullet_holes.remove(0);
+                                    self.bullet_holes.pop_front();
                                 }
                             }
                         }
@@ -543,6 +543,9 @@ impl PlayingState {
 
                         // check other players (client-side prediction / hit registration)
                         for (idx, other) in self.other_players.iter().enumerate() {
+                            if !other.is_alive() {
+                                continue;
+                            }
                             if let Some((zone, dist)) = other.ray_test(eye, fwd, range) {
                                 let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
                                 if !blocked {
@@ -556,6 +559,9 @@ impl PlayingState {
 
                         // check practice bots
                         for (idx, bot) in self.practice_bots.iter().enumerate() {
+                            if !bot.is_alive() {
+                                continue;
+                            }
                             if let Some((zone, dist)) = bot.ray_test(eye, fwd, range) {
                                 let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
                                 if !blocked {
@@ -584,7 +590,16 @@ impl PlayingState {
                                 EntityKind::Player => {
                                     if let Some(victim_id) = self.other_players[idx].entity_id() {
                                         *player_damage_by_id.entry(victim_id).or_insert(0.0) += dmg;
-                                        player_backstab_by_id.insert(victim_id, false);
+                                        let victim_pos = Vec3::new(
+                                            self.other_players[idx].x,
+                                            self.other_players[idx].y,
+                                            self.other_players[idx].z,
+                                        );
+                                        let victim_yaw = self.other_players[idx].yaw;
+                                        let atk_dir = (self.position - victim_pos).normalize_or_zero();
+                                        let fwd = Vec3::new(victim_yaw.cos(), 0.0, victim_yaw.sin());
+                                        let is_backstab = atk_dir.dot(fwd) < -0.5;
+                                        player_backstab_by_id.insert(victim_id, is_backstab);
                                     }
                                 }
                                 EntityKind::Bot => {

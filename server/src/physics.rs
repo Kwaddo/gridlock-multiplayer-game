@@ -1,15 +1,16 @@
 use glam::Vec3;
 
 use crate::math::{from_vec3, to_vec3};
-use crate::maze::pathfinding::{cell_to_world, world_to_cell};
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct BotMovementState {
     pub velocity: Vec3,
     pub is_grounded: bool,
     pub height: f32,
 }
 
+#[allow(dead_code)]
 pub struct PhysicsConfig {
     pub walk_speed: f32,
     pub sprint_speed: f32,

@@ -11,7 +11,7 @@ pub const KNIFE_MISS_MOVE_SLOW_DURATION: f32 = 0.5;
 pub const KNIFE_SPEED_BONUS: f32 = 1.15;
 pub const KNIFE_SWITCH_TO_TIME: f32 = 0.15;
 pub const KNIFE_SWITCH_FROM_TIME: f32 = 0.40;
-pub const KNIFE_LIGHT_ANIM_DURATION: f32 = 0.66;
+pub const KNIFE_LIGHT_ANIM_DURATION: f32 = 0.35;
 
 
 pub const KNIFE: WeaponStats = WeaponStats {

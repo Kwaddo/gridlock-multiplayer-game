@@ -267,8 +267,8 @@ impl PlayingState {
                 text_bright
             } else {
                 // Try to color by team when available via connected_players
-                if let Some((_id, pname, _kills, _deaths, _gl, team, _wep, _is_bot)) =
-                    self.connected_players.iter().find(|(pid, n, ..)| n == name)
+                if let Some((_id, _pname, _kills, _deaths, _gl, team, _wep, _is_bot)) =
+                    self.connected_players.iter().find(|(_pid, n, ..)| n == name)
                 {
                     match *team {
                         1 => Color::from_rgba(230, 120, 120, 255),

@@ -62,7 +62,9 @@ const MINIGUN_SHOOT_LOOP_START_SEC: f32 = 0.01;
 const MINIGUN_SHOOT_LOOP_END_SEC: f32 = 1.17;
 const MINIGUN_RELOAD_START_SEC: f32 = 2.06;
 const MINIGUN_RELOAD_END_SEC: f32 = 4.29;
+#[allow(dead_code)]
 const MINIGUN_EQUIP_START_SEC: f32 = 4.73;
+#[allow(dead_code)]
 const MINIGUN_EQUIP_END_SEC: f32 = 5.30;
 
 // Sawnoff hand clip segments (sawnoff_animated.glb)
@@ -74,7 +76,9 @@ const SAWNOFF_SHOT_START_SEC: f32 = 0.01;
 const SAWNOFF_SHOT_END_SEC: f32 = 0.41;
 const SAWNOFF_RELOAD_START_SEC: f32 = 0.47;
 const SAWNOFF_RELOAD_END_SEC: f32 = 3.57;
+#[allow(dead_code)]
 const SAWNOFF_EQUIP_START_SEC: f32 = 6.88;
+#[allow(dead_code)]
 const SAWNOFF_EQUIP_END_SEC: f32 = 7.30;
 // Carbine all-in-one clip segments (fps_animated_carbine.glb).
 #[allow(dead_code)]

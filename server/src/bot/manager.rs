@@ -29,12 +29,9 @@ impl BotManager {
     }
     pub fn virtual_addr(index: u16) -> SocketAddr {
         // generate unique virtual SocketAddr for each bot based on index
-        SocketAddr::from(([127, 0, 0, 1], 50000 + index))
+        SocketAddr::from(([127, 0, 0, 1], (50000u32 + (index % 15000) as u32) as u16))
     }
 
-    pub fn is_bot(&self, addr: &SocketAddr) -> bool {
-        self.bot_states.contains_key(addr) || self.bot_addrs.contains(addr)
-    }
     pub fn bot_states_mut(&mut self) -> &mut HashMap<SocketAddr, BotState> {
         &mut self.bot_states
     }
@@ -58,11 +55,6 @@ impl BotManager {
         addr
     }
 
-    pub fn despawn_bot(&mut self, players: &mut HashMap<SocketAddr, Player>, addr: SocketAddr) {
-        players.remove(&addr);
-        self.bot_states.remove(&addr);
-        self.bot_addrs.retain(|&a| a != addr);
-    }
     pub fn despawn_all(&mut self, players: &mut HashMap<SocketAddr, Player>) {
         for addr in &self.bot_addrs {
             players.remove(addr);

@@ -11,7 +11,7 @@ use crate::weapons::WeaponInventory;
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
 use rodio::{OutputStream, OutputStreamHandle};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
@@ -132,7 +132,7 @@ pub struct PlayingState {
     pub damage_numbers: Vec<DamageNumber>,
     pub tracers: Vec<BulletTracer>,
     pub world_muzzle_flashes: Vec<WorldMuzzleFlash>,
-    pub bullet_holes: Vec<BulletHole>,
+    pub bullet_holes: VecDeque<BulletHole>,
 
     pub hit_marker_pellet_mask: u16,
 
@@ -298,7 +298,7 @@ impl PlayingState {
             damage_numbers: Vec::with_capacity(Self::INIT_DAMAGE_NUMBERS),
             tracers: Vec::with_capacity(Self::INIT_TRACERS),
             world_muzzle_flashes: Vec::new(),
-            bullet_holes: Vec::with_capacity(Self::INIT_BULLET_HOLES),
+            bullet_holes: VecDeque::with_capacity(Self::INIT_BULLET_HOLES),
             hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
             practice_bots: Vec::with_capacity(Self::INIT_PRACTICE_BOTS),

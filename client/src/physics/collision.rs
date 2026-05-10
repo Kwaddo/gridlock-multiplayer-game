@@ -224,7 +224,7 @@ pub fn resolve_horizontal(
 }
 
 /// Resolve maze wall collision using maze's built-in collision detection
-pub fn resolve_maze(position: &mut Vec3, velocity: &mut Vec3, maze: &Maze) {
+pub fn resolve_maze(position: &mut Vec3, velocity: &mut Vec3, maze: &Maze, dt: f32) {
     if !maze.is_blocked(*position, PLAYER_RADIUS) {
         return;
     }
@@ -233,7 +233,7 @@ pub fn resolve_maze(position: &mut Vec3, velocity: &mut Vec3, maze: &Maze) {
     let original = *position;
 
     // Try keeping X, reverting Z
-    position.z -= velocity.z * 0.016;
+    position.z -= velocity.z * dt;
     if !maze.is_blocked(*position, PLAYER_RADIUS) {
         velocity.z = 0.0;
         return;
@@ -241,15 +241,15 @@ pub fn resolve_maze(position: &mut Vec3, velocity: &mut Vec3, maze: &Maze) {
 
     // Try keeping Z, reverting X
     *position = original;
-    position.x -= velocity.x * 0.016;
+    position.x -= velocity.x * dt;
     if !maze.is_blocked(*position, PLAYER_RADIUS) {
         velocity.x = 0.0;
         return;
     }
 
     // Both failed, revert both
-    position.x -= velocity.x * 0.016;
-    position.z -= velocity.z * 0.016;
+    position.x -= velocity.x * dt;
+    position.z -= velocity.z * dt;
     velocity.x = 0.0;
     velocity.z = 0.0;
 }

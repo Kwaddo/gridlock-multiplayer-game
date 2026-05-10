@@ -3,6 +3,7 @@
     they will have different names so you can associate them with their difficulty, and they will have different strategies for playing the game, which will be defined in the bot module
 */
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub struct BotPersonality {
     pub name: &'static str, // static because we want to have a predefined set of personalities, and we don't want to allocate memory for the name of the personality every time we create a bot
     pub archetype: BotArchetype,
@@ -152,6 +153,7 @@ pub enum BotPersonalityId {
     Overwatch, // angle-holding specialist
 }
 
+#[allow(dead_code)]
 impl BotPersonalityId {
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {

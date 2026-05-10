@@ -24,7 +24,7 @@ pub fn run() -> std::io::Result<()> {
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
     println!("UDP server started on port 7878");
 
-    let mut buffer: [u8; 512] = [0; 512];
+    let mut buffer: [u8; 8192] = [0; 8192];
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
 
     let mut bot_manager = BotManager::new();
@@ -70,6 +70,9 @@ pub fn run() -> std::io::Result<()> {
         last_tick = now_tick;
         match socket.recv_from(&mut buffer) {
             Ok((bytes_rcv, src_addr)) => {
+                if bytes_rcv == 0 {
+                    continue;
+                }
                 let msg_type = buffer[0];
                 let payload = &buffer[1..bytes_rcv];
 
@@ -126,6 +129,12 @@ pub fn run() -> std::io::Result<()> {
                                 match_mode = requested;
                             }
                         }
+                        // parse duration: payload[1]=dur_hi, payload[2]=dur_lo (big-endian u16; 0=default, 65535=unlimited)
+                        let dur_code: u16 = if payload.len() >= 3 {
+                            ((payload[1] as u16) << 8) | (payload[2] as u16)
+                        } else {
+                            0
+                        };
                         // parse auto-fill settings: payload[3]=bots_per_team, payload[4]=diff_mask
                         if payload.len() >= 5 {
                             autofill_bots_per_team = payload[3].min(8);
@@ -134,17 +143,23 @@ pub fn run() -> std::io::Result<()> {
                             autofill_bots_per_team = 0;
                             autofill_diff_mask = 0b11111;
                         }
-                        // Duration is fixed per mode: TDM = 15 min, S&D = None (round-based), Gun Game = default
-                        let requested_duration: Option<Duration> = match match_mode {
-                            MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
-                            MODE_SEARCH_AND_DESTROY => None,
-                            _ => game::MATCH_DURATION,
+                        // Duration: client-provided value overrides mode default when non-zero
+                        let requested_duration: Option<Duration> = if dur_code == u16::MAX {
+                            None // unlimited
+                        } else if dur_code > 0 {
+                            Some(Duration::from_secs(dur_code as u64))
+                        } else {
+                            match match_mode {
+                                MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
+                                MODE_SEARCH_AND_DESTROY => None,
+                                _ => game::MATCH_DURATION,
+                            }
                         };
                         handlers::handle_start_game(
                             &socket,
                             &mut players,
                             &mut maze,
-                            match_running,
+                            &mut match_running,
                             &mut match_start_time,
                             &mut match_warmup_end,
                             &mut match_end_pending,
@@ -389,9 +404,6 @@ pub fn run() -> std::io::Result<()> {
         game::process_lobby_regen(&mut players);
         broadcast::broadcast_state(&socket, &players);
 
-        // Always attempt to auto-respawn dead players; maze may be None if no
-        // match is currently generated but players still need respawn handling.
-        game::process_auto_respawns(&socket, maze.as_ref(), &mut players, match_mode);
         if game::cleanup_inactive_players(&mut players) {
             // players were removed — broadcast so other clients drop their characters
             broadcast::broadcast_state(&socket, &players);

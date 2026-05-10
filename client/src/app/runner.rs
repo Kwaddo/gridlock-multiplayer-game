@@ -24,6 +24,7 @@ use super::world_sync::sync_world;
 // `resolve_asset_path_for_quality`, which currently just uses it when
 // choosing between `Compressed`/`Full` folders; defaults to `High`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 enum ModelQuality {
     Low,
     Medium,
@@ -61,7 +62,7 @@ pub async fn run() {
 
     // currently we always use high quality; eventually this could be
     // user-configurable via the settings screen.
-    let mut model_quality = ModelQuality::default();
+    let model_quality = ModelQuality::default();
 
     // connection heartbeat / last seen from server
     let mut last_server_contact: Option<Instant> = None;
@@ -84,6 +85,9 @@ pub async fn run() {
 
         match state {
             GameState::Login => {
+                if macroquad::input::is_key_pressed(macroquad::input::KeyCode::Escape) {
+                    state = GameState::Exit;
+                }
                 if let Some((s, name, id)) = login_screen.update() {
                     socket = Some(s);
                     username = name;
@@ -560,7 +564,7 @@ fn resolve_asset_entries_for_quality(
         .collect()
 }
 
-fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> String {
+fn resolve_asset_path_for_quality(path: &str, _model_quality: ModelQuality) -> String {
     // avoid allocating a normalized copy unless we know it's a player GLB file
     if !path.ends_with(".glb") || !path.starts_with("assets/models/player/") {
         return path.to_string();

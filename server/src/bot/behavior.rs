@@ -75,7 +75,7 @@ pub fn decide_behavior(
         });
 
     // check if bot should retreat (health below threshold)
-    let health_ratio = (bot.health as f32) / 100.0;
+    let health_ratio = (bot.health as f32) / 125.0;
     if health_ratio < state.personality.retreat_health_threshold {
         if !matches!(state.behavior, BotBehavior::Retreat { .. }) {
             return retreat_from_enemy(bot_cell, nearest_enemy, maze);
@@ -173,8 +173,8 @@ pub fn decide_behavior(
 
         BotBehavior::Static => {}
 
-        // Patrol/PatrolJump are only used in shooting range, don't override
-        BotBehavior::Patrol { .. } | BotBehavior::PatrolJump { .. } => {
+        // Patrol is only used in shooting range, don't override
+        BotBehavior::Patrol { .. } => {
             return None;
         }
     }
@@ -393,7 +393,6 @@ fn pick_hold_angle(
     if target == bot_cell {
         // already at the position — hold immediately
         return Some(BotBehavior::HoldAngle {
-            position: target,
             face_direction: (face_dx, face_dz),
             hold_timer: 0.0,
             max_hold_time: state.personality.reposition_interval,

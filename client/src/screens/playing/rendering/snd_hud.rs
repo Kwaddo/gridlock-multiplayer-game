@@ -35,7 +35,7 @@ impl PlayingState {
         let red_score = format!("RED {}", self.snd_red_wins);
         let blue_score = format!("{} BLUE", self.snd_blue_wins);
         let red_w = crate::ui::fonts::measure_game_text(&red_score, 18);
-        let blue_w = crate::ui::fonts::measure_game_text(&blue_score, 18);
+        let _blue_w = crate::ui::fonts::measure_game_text(&blue_score, 18);
         draw_text_ex(
             &red_score,
             sw / 2.0 - round_w / 2.0 - red_w - 16.0,

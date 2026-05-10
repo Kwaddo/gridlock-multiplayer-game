@@ -139,6 +139,15 @@ impl PlayingState {
 
             if hovered && clicked {
                 self.pending_start_gamemode = *val;
+                if *val == MODE_GUN_GAME {
+                    // Default to 15 min when entering Gun Game so a time is always selected
+                    if config.match_time_override_secs.is_none() {
+                        config.match_time_override_secs = Some(900);
+                    }
+                } else {
+                    // Clear Gun Game time override so it doesn't leak into other modes
+                    config.match_time_override_secs = None;
+                }
                 if *val != MODE_GUN_GAME {
                     let mut red_count = 0usize;
                     let mut blue_count = 0usize;
@@ -572,6 +581,73 @@ impl PlayingState {
             }
         }
 
+        // ── time limit selector (Gun Game) ────────────────────────────────────
+        if self.pending_start_gamemode == MODE_GUN_GAME {
+            let tl_top = desc_y + 44.0;
+            let section_x = panel_x + 24.0;
+            let section_w = panel_w - 48.0;
+
+            draw_text_ex(
+                "TIME LIMIT",
+                section_x,
+                tl_top,
+                text_params(12, TEXT_DIM),
+            );
+
+            let btn_y = tl_top + 8.0;
+            let btn_h = 38.0;
+            let durations: [(&str, u32); 4] = [
+                ("10 MIN",    600),
+                ("15 MIN",    900),
+                ("30 MIN",    1800),
+                ("UNLIMITED", u16::MAX as u32),
+            ];
+            let btn_w = section_w / durations.len() as f32;
+
+            for (i, (label, secs)) in durations.iter().enumerate() {
+                let bx = section_x + i as f32 * btn_w;
+                let selected = config.match_time_override_secs == Some(*secs);
+                let hovered = mouse.0 >= bx
+                    && mouse.0 <= bx + btn_w
+                    && mouse.1 >= btn_y
+                    && mouse.1 <= btn_y + btn_h;
+
+                let bg = if selected {
+                    ACCENT_DIM
+                } else if hovered {
+                    Color::new(0.12, 0.14, 0.24, 1.0)
+                } else {
+                    Color::new(0.0, 0.0, 0.0, 0.0)
+                };
+                draw_rectangle(bx, btn_y, btn_w, btn_h, bg);
+                if selected {
+                    draw_rectangle(bx, btn_y + btn_h - 2.0, btn_w, 2.0, ACCENT);
+                }
+
+                let lc = if selected {
+                    WHITE
+                } else if hovered {
+                    TEXT_LABEL
+                } else {
+                    Color::new(0.42, 0.44, 0.56, 1.0)
+                };
+                let lw = measure_game_text(label, 15);
+                draw_text_ex(
+                    label,
+                    bx + (btn_w - lw) / 2.0,
+                    btn_y + 26.0,
+                    text_params(15, lc),
+                );
+
+                if hovered && clicked {
+                    config.match_time_override_secs = Some(*secs);
+                    config.hide_match_timer = false;
+                }
+            }
+
+            draw_rectangle(section_x, btn_y + btn_h, section_w, 1.0, SEP);
+        }
+
         // ── console feedback message ───────────────────────────────────────────
         if let Some(msg) = &self.lobby_console_message {
             let msg_y = panel_y + panel_h - 76.0;
@@ -663,8 +739,6 @@ impl PlayingState {
             text_params(12, TEXT_DIM),
         );
 
-        // suppress unused warning (time buttons removed — duration is server-side now)
-        let _ = config;
     }
 
     /// Draws the in-world prompt for the lobby console ("[E] USE CONSOLE").

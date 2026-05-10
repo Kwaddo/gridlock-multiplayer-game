@@ -76,7 +76,7 @@ fn level_1_config(_behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.30, 
                 reaction_time: 1.55,
                 detection_range: Some(18.0),
-                aim_threshold: 5.7, // ~5.7 degrees
+                aim_threshold: 0.1, // ~5.7 degrees
             }),
         },
         ShootingRangeBotConfig {
@@ -91,7 +91,7 @@ fn level_1_config(_behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.36, 
                 reaction_time: 1.75,
                 detection_range: Some(15.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -106,7 +106,7 @@ fn level_1_config(_behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.28, 
                 reaction_time: 1.45,
                 detection_range: Some(20.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -121,7 +121,7 @@ fn level_1_config(_behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.24, 
                 reaction_time: 1.35,
                 detection_range: Some(22.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -136,7 +136,7 @@ fn level_1_config(_behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.20, 
                 reaction_time: 1.25,
                 detection_range: Some(24.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -151,7 +151,7 @@ fn level_1_config(_behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.18, 
                 reaction_time: 1.15,
                 detection_range: Some(26.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
     ];
@@ -165,7 +165,7 @@ fn level_1_config(_behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
             angular_offset: 0.30,
             reaction_time: 1.5,
             detection_range: Some(22.0),
-            aim_threshold: 5.7,
+            aim_threshold: 0.1,
         },
         time_limit_secs: None,
         bots,
@@ -234,7 +234,7 @@ fn level_2_config(behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.08, 
                 reaction_time: 0.95,
                 detection_range: Some(32.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -249,7 +249,7 @@ fn level_2_config(behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.12, 
                 reaction_time: 1.00,
                 detection_range: Some(32.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -264,7 +264,7 @@ fn level_2_config(behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.16, 
                 reaction_time: 1.10,
                 detection_range: Some(32.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -279,7 +279,7 @@ fn level_2_config(behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.09, 
                 reaction_time: 0.95,
                 detection_range: Some(32.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -294,7 +294,7 @@ fn level_2_config(behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.22, 
                 reaction_time: 1.15,
                 detection_range: Some(32.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
         ShootingRangeBotConfig {
@@ -309,7 +309,7 @@ fn level_2_config(behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
                 angular_offset: 0.14, 
                 reaction_time: 1.05,
                 detection_range: Some(32.0),
-                aim_threshold: 5.7,
+                aim_threshold: 0.1,
             }),
         },
     ];
@@ -323,7 +323,7 @@ fn level_2_config(behavior_override: Option<u8>) -> ShootingRangeLevelConfig {
             angular_offset: 0.12,
             reaction_time: 1.0,
             detection_range: Some(32.0),
-            aim_threshold: 5.7,
+            aim_threshold: 0.1,
         },
         time_limit_secs: None,
         bots,
@@ -373,7 +373,7 @@ fn level_3_config() -> ShootingRangeLevelConfig {
             angular_offset: 0.0,
             reaction_time: 999.0,
             detection_range: Some(0.0),
-            aim_threshold: 5.7,
+            aim_threshold: 0.1,
         },
         time_limit_secs: Some(LEVEL_3_TIME_LIMIT_SECS),
         bots,

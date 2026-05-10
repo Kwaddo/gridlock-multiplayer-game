@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use macroquad::material::{load_material, MaterialParams};
 use macroquad::prelude::{Material, ShaderSource};
 
