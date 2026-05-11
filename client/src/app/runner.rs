@@ -37,7 +37,21 @@ impl Default for ModelQuality {
     }
 }
 
+fn set_cwd_to_assets_root() {
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(|p| p.to_path_buf());
+        while let Some(d) = dir {
+            if d.join("assets").is_dir() {
+                let _ = std::env::set_current_dir(&d);
+                return;
+            }
+            dir = d.parent().map(|p| p.to_path_buf());
+        }
+    }
+}
+
 pub async fn run() {
+    set_cwd_to_assets_root();
     set_default_filter_mode(FilterMode::Nearest);
     gl_set_drawcall_buffer_capacity(200_000, 300_000);
 
