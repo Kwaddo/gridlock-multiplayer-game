@@ -397,8 +397,11 @@ pub fn sync_world(
                 }
             }
         }
-        if let Some((damage, attacker_id)) = updates.damage_taken {
+        if let Some((damage, attacker_id, is_stun)) = updates.damage_taken {
             playing_state.take_damage(damage, attacker_id);
+            if is_stun {
+                playing_state.movement_state.stamina = 0.0;
+            }
             // also show a short announcement so hits appear in the feed
             let ann = if let Some(aid) = attacker_id {
                 playing_state
