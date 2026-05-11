@@ -11,6 +11,7 @@ serde_json = "1"
 gltf = { version = "1.4", features = ["KHR_materials_pbrSpecularGlossiness"] }
 rodio = "0.20"
 glam = "0.29"
+cross = "0.2.5"
 
 [profile.dev]
 opt-level = 2
