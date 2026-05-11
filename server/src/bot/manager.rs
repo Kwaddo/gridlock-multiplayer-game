@@ -271,7 +271,7 @@ impl BotManager {
                         state.movement.velocity.z = 0.0;
                         continue;
                     }
-                    let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height));
+                    let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height, m.props.as_slice()));
                     ai::tick_bot(bot, state, dt, &PhysicsConfig::default(), maze_cells);
                     if let Some(target_pos) = target_pos {
                         // remember last known enemy position for investigation behavior

@@ -55,6 +55,14 @@ pub fn handle_start_game(
 
     // only accept start requests when not already running or scheduled
     if !*match_running && match_warmup_end.is_none() && match_end_pending.is_none() {
+        // Only the lobby leader (first-joined human lobby player) may start a new match.
+        let leader_addr = game::lobby_leader_addr(players);
+        if leader_addr != Some(src_addr) {
+            let _ = socket.send_to(&[MSG_START_DENIED, 1], src_addr);
+            println!("Start-game request from {} rejected: not the lobby leader.", src_addr);
+            return;
+        }
+
         // honour requested duration when scheduling new match
         *match_duration = requested_duration;
         // require minimal number of players in lobby

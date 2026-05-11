@@ -227,6 +227,9 @@ pub struct PlayingState {
     pub fps_display: i32,
     pub fps_frame_count: u32,
     pub fps_time_acc: f32,
+
+    // lobby leader player ID — only this player may start a match
+    pub lobby_leader_id: Option<u32>,
 }
 
 pub struct KillFeedEntry {
@@ -389,6 +392,7 @@ impl PlayingState {
             fps_display: 0,
             fps_frame_count: 0,
             fps_time_acc: 0.0,
+            lobby_leader_id: None,
         }
     }
 }

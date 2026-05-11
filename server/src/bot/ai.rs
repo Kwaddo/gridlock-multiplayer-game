@@ -71,7 +71,7 @@ pub fn tick_bot(
     state: &mut BotState,
     dt: f32,
     physics: &PhysicsConfig,
-    maze_cells: Option<(&[u8], u8, u8)>
+    maze_cells: Option<(&[u8], u8, u8, &[crate::maze::types::Prop])>,
 ) {
     let mut desired_dir = Vec3::ZERO; // movement we intend to apply every tick
     let want_jump = false; // whether we want to jump this tick
@@ -184,8 +184,8 @@ pub fn tick_bot(
         physics
     );
 
-    // axis-separated wall sliding with radius-based corner checks
-    if let Some((cells, width, height)) = maze_cells {
+    // axis-separated wall + prop sliding with radius-based corner checks
+    if let Some((cells, width, height, props)) = maze_cells {
         // Direct cell lookup — no fallback search so walls are always detected.
         let cell_is_wall = |x: f32, z: f32| -> bool {
             let cx = (x / MAZE_CELL_SIZE).floor() as i16;
@@ -198,11 +198,26 @@ pub fn tick_bot(
 
         // Check all 4 corners of the bot's footprint so body width is respected.
         const BOT_RADIUS: f32 = 0.28;
+
+        let hits_prop = |x: f32, z: f32| -> bool {
+            for prop in props {
+                let px = prop.x as f32 * MAZE_CELL_SIZE;
+                let pz = prop.y as f32 * MAZE_CELL_SIZE;
+                if x + BOT_RADIUS > px && x - BOT_RADIUS < px + MAZE_CELL_SIZE
+                    && z + BOT_RADIUS > pz && z - BOT_RADIUS < pz + MAZE_CELL_SIZE
+                {
+                    return true;
+                }
+            }
+            false
+        };
+
         let hits_wall = |x: f32, z: f32| -> bool {
             cell_is_wall(x - BOT_RADIUS, z - BOT_RADIUS)
                 || cell_is_wall(x + BOT_RADIUS, z - BOT_RADIUS)
                 || cell_is_wall(x - BOT_RADIUS, z + BOT_RADIUS)
                 || cell_is_wall(x + BOT_RADIUS, z + BOT_RADIUS)
+                || hits_prop(x, z)
         };
 
         if hits_wall(bot.position.0, bot.position.2) {
@@ -210,7 +225,7 @@ pub fn tick_bot(
             bot.position.0 = old_pos.0;
             state.movement.velocity.x = 0.0;
 
-            // if Z alone also puts us in a wall it's a corner — full stop
+            // if Z alone also puts us in a wall/prop it's a corner — full stop
             if hits_wall(bot.position.0, bot.position.2) {
                 bot.position.2 = old_pos.2;
                 state.movement.velocity.z = 0.0;
@@ -268,7 +283,7 @@ pub fn tick_bot(
 
     // Unstick: if stuck for >1s, teleport to nearest adjacent open cell
     if state.stuck_timer > 2.5 {
-        if let Some((cells, width, height)) = maze_cells {
+        if let Some((cells, width, height, _props)) = maze_cells {
             if let Some(cell) = world_to_cell(
                 bot.position.0, bot.position.2,
                 MAZE_CELL_SIZE, cells, width, height,

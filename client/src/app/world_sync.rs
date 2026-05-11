@@ -14,6 +14,7 @@ pub struct SyncResult {
     pub assets: Option<Vec<(String, String)>>,
     pub server_seen: bool, // true if we received at least one packet during poll
     pub removed_by_server: bool, // true if server no longer lists our player id (timed-out/removed)
+    pub returned_to_lobby: bool, // true when a world-change back to Lobby was applied this poll
 }
 
 #[inline(always)]
@@ -28,6 +29,7 @@ pub fn sync_world(
         assets: None,
         server_seen: false,
         removed_by_server: false,
+        returned_to_lobby: false,
     };
 
     if let Some(ref sock) = socket {
@@ -339,6 +341,7 @@ pub fn sync_world(
                 playing_state.weapons.set_locked_slot(None);
                 playing_state.weapons.knife_locked = false;
                 playing_state.pending_forced_weapon_slot = None;
+                result.returned_to_lobby = true;
 
                 // Reset local player state when returning to lobby
                 playing_state.is_dead = false;
@@ -632,6 +635,11 @@ pub fn sync_world(
             playing_state.snd_plant_progress = snd.plant_progress;
             playing_state.snd_defuse_progress = snd.defuse_progress;
             playing_state.snd_phase_timer = snd.phase_timer;
+        }
+
+        // Lobby leader update
+        if let Some(leader_id) = updates.lobby_leader_id {
+            playing_state.lobby_leader_id = if leader_id == 0 { None } else { Some(leader_id) };
         }
 
         // Global connected player list (for Tab / scoreboard)
