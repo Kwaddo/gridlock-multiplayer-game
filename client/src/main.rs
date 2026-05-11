@@ -5,7 +5,7 @@ use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "Multiplayer FPS".to_owned(),
+        window_title: "Gridlock".to_owned(),
         fullscreen: true,
         ..Default::default()
     }

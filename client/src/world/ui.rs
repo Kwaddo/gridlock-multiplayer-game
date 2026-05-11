@@ -3,7 +3,7 @@ use macroquad::prelude::*;
 use crate::types::player::OtherPlayer;
 
 pub fn draw_ui(username: &str, player_id: u32, position: Vec3, others: &[OtherPlayer]) {
-    draw_text("Multiplayer FPS", 20.0, 20.0, 30.0, WHITE);
+    draw_text("Gridlock", 20.0, 20.0, 30.0, WHITE);
     draw_text(
         &format!("Player: {} (ID: {})", username, player_id),
         20.0,
