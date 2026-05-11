@@ -150,11 +150,16 @@ pub fn try_shoot(
         let distance_penalty = (target_dist / max_range).clamp(0.0, 1.0);
         let accuracy_from_offset = (1.0 - bot_state.shooting_config.angular_offset * 1.8).clamp(0.05, 0.98);
         let hit_chance = (accuracy_from_offset - 0.35 * distance_penalty).clamp(0.05, 0.98);
-        let hit = rng.gen::<f32>() <= hit_chance;
+
+        // Roll each pellet independently so shotgun damage naturally falls off with distance.
+        let total_damage: u32 = (0..weapon_stats.pellet_count)
+            .filter(|_| rng.gen::<f32>() <= hit_chance)
+            .map(|_| weapon_stats.damage)
+            .sum();
 
         Some(ShotDecision {
             target_id: new_target,
-            damage: if hit { Some(weapon_stats.damage) } else { None },
+            damage: if total_damage > 0 { Some(total_damage) } else { None },
         })
 }
 
