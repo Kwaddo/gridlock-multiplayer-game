@@ -162,7 +162,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     } else if is_sound {
-        match std::fs::read(path) {
+        match std::fs::read(&resolved_path) {
             Ok(bytes) => {
                 playing_state
                     .sound_samples
@@ -180,7 +180,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     } else {
-        match load_texture(path).await {
+        match load_texture(&resolved_path).await {
             Ok(tex) => {
                 tex.set_filter(FilterMode::Nearest);
                 playing_state.assets.insert(key_string.clone(), tex);
