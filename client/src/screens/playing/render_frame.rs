@@ -180,7 +180,7 @@ impl PlayingState {
         self.draw_shooting_range_prompt();
 
         // Lobby console (Start Game) overlay
-        self.draw_lobby_console(config);
+        self.draw_lobby_console(config, player_id);
 
         // Don't draw viewmodel while dead or when lobby console is open
         if !self.is_dead && !self.lobby_console_open {

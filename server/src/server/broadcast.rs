@@ -35,8 +35,10 @@ pub fn send_player_list(
     let _ = socket.send_to(&msg, dest);
 }
 
-/// Broadcast updated player list to every connected client
+/// Broadcast updated player list to every connected client.
+/// Also broadcasts the current lobby leader so clients can update the host indicator.
 pub fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<std::net::SocketAddr, Player>) {
+    broadcast_lobby_leader(socket, players);
     // build a single buffer and reuse; send_player_list currently allocates each time,
     // inline the logic here for efficiency.
     let mut msg: Vec<u8> = Vec::with_capacity(1024);
@@ -64,6 +66,23 @@ pub fn broadcast_player_list(socket: &UdpSocket, players: &HashMap<std::net::Soc
             msg.push(wbytes.len() as u8);
             msg.extend_from_slice(wbytes);
             msg.push(if player.is_bot { 1u8 } else { 0u8 });
+        }
+        let _ = socket.send_to(&msg, p.socket_addr);
+    }
+}
+
+/// Broadcast the current lobby leader's player ID to every connected client.
+/// Called alongside broadcast_player_list whenever the lobby changes.
+pub fn broadcast_lobby_leader(socket: &UdpSocket, players: &HashMap<std::net::SocketAddr, Player>) {
+    let leader_id: u32 = crate::server::game::lobby_leader_addr(players)
+        .and_then(|addr| players.get(&addr))
+        .map(|p| p.id)
+        .unwrap_or(0);
+    let mut msg = vec![MSG_LOBBY_LEADER];
+    msg.extend_from_slice(&leader_id.to_be_bytes());
+    for p in players.values() {
+        if p.is_bot {
+            continue;
         }
         let _ = socket.send_to(&msg, p.socket_addr);
     }

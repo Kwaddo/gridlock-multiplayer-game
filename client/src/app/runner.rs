@@ -327,6 +327,10 @@ pub async fn run() {
                     }
                 }
 
+                if sync.returned_to_lobby {
+                    playing_state.weapons = WeaponInventory::from_loadout(&loadout);
+                }
+
                 if let Some(new_state) = playing_state.process_local_input(&config, maze.as_mut()) {
                     state = new_state;
                     if matches!(state, GameState::Paused) {
@@ -370,6 +374,10 @@ pub async fn run() {
                         merge_manifest_entries(&mut existing, entries);
                         save_cached_manifest(&asset_cache_key, &existing);
                     }
+                }
+
+                if sync.returned_to_lobby {
+                    playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                 }
 
                 playing_state.simulate(&config, maze.as_ref());

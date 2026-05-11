@@ -19,6 +19,7 @@ pub const MSG_WORLD_CHANGE: u8 = 9; // server -> client: bi-directional world tr
 
 // client -> server: active weapon changed (UTF‑8 name length + bytes)
 pub const MSG_WEAPON_CHANGE: u8 = 33;
+pub const MSG_LOBBY_LEADER: u8 = 34; // server -> all: current lobby leader player id [MSG_LOBBY_LEADER][id:4] (0 = no leader)
 pub const MSG_ASSETS: u8 = 10; // server -> client: asset manifest per world
 pub const MSG_DISCOVER: u8 = 11; // client -> server: LAN discovery broadcast
 pub const MSG_WALL_BROKEN: u8 = 12; // client <-> server: breakable wall destroyed (x, y)

@@ -4,10 +4,10 @@ use macroquad::prelude::*;
 
 use crate::net::protocols::{
     EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_IS_BOT, FLAG_PRONE,
-    FLAG_SILENT, FLAG_SLIDING, FLAG_SPRINTING, MSG_ASSETS, MSG_BOT_SHOT, MSG_DAMAGE, MSG_DEATH, MSG_KILL_FEED,
-    MSG_MATCH_COUNTDOWN, MSG_MATCH_END, MSG_MATCH_JOINED, MSG_MATCH_TIMER, MSG_MAZE,
-    MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN, MSG_SND_ROUND_STATE, MSG_START_DENIED, MSG_STATE,
-    MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
+    FLAG_SILENT, FLAG_SLIDING, FLAG_SPRINTING, MSG_ASSETS, MSG_BOT_SHOT, MSG_DAMAGE, MSG_DEATH,
+    MSG_KILL_FEED, MSG_LOBBY_LEADER, MSG_MATCH_COUNTDOWN, MSG_MATCH_END, MSG_MATCH_JOINED,
+    MSG_MATCH_TIMER, MSG_MAZE, MSG_PLAYER_LIST, MSG_POSITION, MSG_RESPAWN, MSG_SND_ROUND_STATE,
+    MSG_START_DENIED, MSG_STATE, MSG_WALL_BROKEN, MSG_WORLD_CHANGE,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::player::OtherPlayer;
@@ -43,6 +43,7 @@ pub struct NetUpdate {
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
     pub bot_shots: Option<Vec<(Vec3, Vec3)>>, // (start, end)
+    pub lobby_leader_id: Option<u32>,         // current lobby leader player ID (0 = none)
     pub death: bool,                          // You died
     pub death_killer_id: Option<u32>,         // who killed us (from MSG_DEATH)
     pub death_weapon: Option<String>,         // weapon used to kill us (from MSG_DEATH)
@@ -110,6 +111,7 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
         received_any: false,
         self_freeze_secs: None,
         bot_shots: None,
+        lobby_leader_id: None,
     };
 
     let mut recv_buf: [u8; 8192] = [0; 8192];
@@ -434,8 +436,21 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                 }
             }
             MSG_START_DENIED => {
-                // server says: match running and full (or otherwise deny start)
-                update.lobby_console_message = Some("Match already running and full".to_string());
+                let reason = if size >= 2 { recv_buf[1] } else { 0 };
+                let msg = if reason == 1 {
+                    "Only the host can start the game"
+                } else {
+                    "Match already running and full"
+                };
+                update.lobby_console_message = Some(msg.to_string());
+            }
+            MSG_LOBBY_LEADER => {
+                if size >= 5 {
+                    let id = u32::from_be_bytes([
+                        recv_buf[1], recv_buf[2], recv_buf[3], recv_buf[4],
+                    ]);
+                    update.lobby_leader_id = Some(id);
+                }
             }
             MSG_MATCH_JOINED => {
                 // format: [MSG_MATCH_JOINED][player_id:4][name_len:1][name bytes]

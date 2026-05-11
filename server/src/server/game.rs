@@ -63,6 +63,16 @@ pub const TEAM_LOADOUT_BLUE: [&str; 5] =
 
 use crate::player::Team;
 
+/// Return the SocketAddr of the current lobby leader — the human lobby player with the
+/// lowest player ID (i.e. first to join). Returns None when the lobby is empty.
+pub fn lobby_leader_addr(players: &HashMap<SocketAddr, Player>) -> Option<SocketAddr> {
+    players
+        .iter()
+        .filter(|(_, p)| !p.is_bot && p.world == WorldId::Lobby)
+        .min_by_key(|(_, p)| p.id)
+        .map(|(addr, _)| *addr)
+}
+
 /// Auto-assign balanced teams (Red/Blue) to all players currently in the lobby.
 /// Uses a deterministic ordering (player ID ascending) and alternates assignments
 /// so all clients can predict the same result.

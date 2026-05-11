@@ -25,7 +25,7 @@ const BTN_CLOSE_HOVER: Color = Color::new(0.18, 0.20, 0.32, 1.0);
 
 impl PlayingState {
     /// Modal lobby console UI. Blocks gameplay input while open.
-    pub(super) fn draw_lobby_console(&mut self, config: &mut crate::core::GameConfig) {
+    pub(super) fn draw_lobby_console(&mut self, config: &mut crate::core::GameConfig, player_id: u32) {
         use crate::ui::fonts::{measure_game_text, text_params};
 
         if self.current_world != WorldId::Lobby || !self.lobby_console_open {
@@ -669,37 +669,59 @@ impl PlayingState {
         let total_btn_w = start_btn_w + 12.0 + close_btn_w;
         let btn_start_x = panel_x + (panel_w - total_btn_w) / 2.0;
 
-        // Start Match — orange accent (matches login CONNECT button)
-        let s_hov = mouse.0 >= btn_start_x
-            && mouse.0 <= btn_start_x + start_btn_w
-            && mouse.1 >= btn_area_y
-            && mouse.1 <= btn_area_y + btn_h;
-        draw_rectangle(
-            btn_start_x,
-            btn_area_y,
-            start_btn_w,
-            btn_h,
-            if s_hov { ACCENT_HOVER } else { ACCENT },
-        );
-        let start_label = match self.pending_start_gamemode {
-            MODE_GUN_GAME => "START  GUN GAME",
-            MODE_TEAM_DEATHMATCH => "START  TEAM DEATHMATCH",
-            MODE_SEARCH_AND_DESTROY => "START  SEARCH & DESTROY",
-            _ => "START MATCH",
-        };
-        let slw = measure_game_text(start_label, 17);
-        draw_text_ex(
-            start_label,
-            btn_start_x + (start_btn_w - slw) / 2.0,
-            btn_area_y + 27.0,
-            text_params(17, Color::new(0.05, 0.05, 0.05, 1.0)),
-        );
-        if s_hov && clicked {
-            self.pending_start_request = true;
-            self.lobby_console_open = false;
-            set_cursor_grab(true);
-            show_mouse(false);
-            self.last_mouse_pos = mouse_position();
+        let is_leader = self.lobby_leader_id == Some(player_id);
+
+        if is_leader {
+            // Start Match — orange accent (matches login CONNECT button)
+            let s_hov = mouse.0 >= btn_start_x
+                && mouse.0 <= btn_start_x + start_btn_w
+                && mouse.1 >= btn_area_y
+                && mouse.1 <= btn_area_y + btn_h;
+            draw_rectangle(
+                btn_start_x,
+                btn_area_y,
+                start_btn_w,
+                btn_h,
+                if s_hov { ACCENT_HOVER } else { ACCENT },
+            );
+            let start_label = match self.pending_start_gamemode {
+                MODE_GUN_GAME => "START  GUN GAME",
+                MODE_TEAM_DEATHMATCH => "START  TEAM DEATHMATCH",
+                MODE_SEARCH_AND_DESTROY => "START  SEARCH & DESTROY",
+                _ => "START MATCH",
+            };
+            let slw = measure_game_text(start_label, 17);
+            draw_text_ex(
+                start_label,
+                btn_start_x + (start_btn_w - slw) / 2.0,
+                btn_area_y + 27.0,
+                text_params(17, Color::new(0.05, 0.05, 0.05, 1.0)),
+            );
+            if s_hov && clicked {
+                self.pending_start_request = true;
+                self.lobby_console_open = false;
+                set_cursor_grab(true);
+                show_mouse(false);
+                self.last_mouse_pos = mouse_position();
+            }
+        } else {
+            // Non-leader: show disabled "Waiting for host..." button
+            draw_rectangle(
+                btn_start_x,
+                btn_area_y,
+                start_btn_w,
+                btn_h,
+                Color::new(0.10, 0.11, 0.20, 1.0),
+            );
+            draw_rectangle_lines(btn_start_x, btn_area_y, start_btn_w, btn_h, 1.0, PANEL_BORDER);
+            let wait_label = "WAITING FOR HOST...";
+            let wlw = measure_game_text(wait_label, 17);
+            draw_text_ex(
+                wait_label,
+                btn_start_x + (start_btn_w - wlw) / 2.0,
+                btn_area_y + 27.0,
+                text_params(17, TEXT_DIM),
+            );
         }
 
         // Close — muted dark button
