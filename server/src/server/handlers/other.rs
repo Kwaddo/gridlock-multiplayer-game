@@ -45,7 +45,7 @@ pub fn handle_discover(
     resp.push(MSG_DISCOVER);
     resp.push(players.len() as u8);
     resp.push(game::MATCH_MAX_PLAYERS as u8);
-    let name = "Multiplayer FPS";
+    let name = "Gridlock";
     let name_bytes = name.as_bytes();
     resp.push(name_bytes.len() as u8);
     resp.extend_from_slice(name_bytes);
