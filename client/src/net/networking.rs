@@ -25,7 +25,7 @@ pub struct NetUpdate {
     pub world_change: Option<(WorldId, Vec3, Option<u8>, Option<u16>)>,
     pub assets: Option<Vec<(String, String)>>, // (key, path)
     pub broken_walls: Option<Vec<(u8, u8)>>,
-    pub damage_taken: Option<(f32, Option<u32>)>, // (damage amount, attacker_id)
+    pub damage_taken: Option<(f32, Option<u32>, bool)>, // (damage amount, attacker_id)
     pub kill_feed: Option<Vec<(u32, u32, String)>>, // (killer_id, victim_id, weapon)
     pub respawn_pos: Option<Vec3>,                // (x, y, z)
     pub respawn_fallback: Option<bool>,           // true if server fell back to teleporter
@@ -609,7 +609,8 @@ pub fn poll_updates(socket: &UdpSocket, player_id: u32) -> NetUpdate {
                     } else {
                         None
                     };
-                    update.damage_taken = Some((damage, attacker_id));
+                    let is_stun = size >= 10 && recv_buf[9] != 0;
+                    update.damage_taken = Some((damage, attacker_id, is_stun));
                 }
             }
             MSG_KILL_FEED => {

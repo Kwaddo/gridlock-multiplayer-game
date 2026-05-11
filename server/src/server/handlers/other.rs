@@ -478,6 +478,10 @@ pub fn apply_damage(
             dmg_msg.extend_from_slice(&0u32.to_be_bytes());
         }
 
+        // stun when punched
+        let is_punch = weapon_name.eq_ignore_ascii_case("punch") || weapon_name.eq_ignore_ascii_case("knife"); 
+        dmg_msg.push(if is_punch { 1u8 } else { 0u8 });
+
         if let Some(victim) = players.get(&victim_addr) {
             if !victim.is_bot {
                 let _ = socket.send_to(&dmg_msg, victim_addr);
