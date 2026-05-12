@@ -34,9 +34,9 @@ pub fn handle_join(
     let requested_username = String::from_utf8_lossy(payload).trim().to_string();
     let assigned_username = utils::handle_username(players, &requested_username);
     let id = players.values().map(|p| p.id).max().unwrap_or(0) + 1;
-    let new_player = Player::new(id, assigned_username.clone(), src_addr);
+    let new_player = Player::new(id, assigned_username.clone());
 
-    println!(
+    log!(
         "Player '{}' connected (requested '{}'). Total players: {}",
         assigned_username, requested_username, id
     );

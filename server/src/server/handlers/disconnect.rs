@@ -11,7 +11,7 @@ pub fn handle_disconnect(
     src_addr: SocketAddr,
 ) {
     if let Some(p) = players.remove(&src_addr) {
-        println!(
+        log!(
             "Player '{}' disconnected. Total players: {}",
             p.username,
             players.len()

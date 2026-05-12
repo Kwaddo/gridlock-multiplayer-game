@@ -146,7 +146,7 @@ impl SndState {
         // Give bomb to first player on attacking team
         let mut first_attacker: Option<u32> = None;
 
-        for player in players.values_mut() {
+        for (addr, player) in players.iter_mut() {
             if player.world != WorldId::Maze {
                 continue;
             }
@@ -154,31 +154,27 @@ impl SndState {
             player.health = player.max_health;
             player.death_time = None;
 
-            // Spawn at team position
             match player.team {
                 Team::Red => player.position = self.red_spawn,
                 Team::Blue => player.position = self.blue_spawn,
                 _ => {}
             }
 
-            self.round_alive.insert(player.socket_addr, true);
+            self.round_alive.insert(*addr, true);
 
-            // Track first attacker to give them the bomb
             if player.team == self.attacking_team && first_attacker.is_none() {
                 first_attacker = Some(player.id);
             }
 
-            // Apply freeze
             player.post_teleport_freeze_until =
                 Some(Instant::now() + std::time::Duration::from_secs(SND_FREEZE_TIME as u64));
 
-            // Send respawn to all players
             let mut respawn_msg = vec![MSG_RESPAWN];
             respawn_msg.extend_from_slice(&player.position.0.to_be_bytes());
             respawn_msg.extend_from_slice(&player.position.1.to_be_bytes());
             respawn_msg.extend_from_slice(&player.position.2.to_be_bytes());
-            respawn_msg.push(0u8); // spawn kind
-            let _ = socket.send_to(&respawn_msg, player.socket_addr);
+            respawn_msg.push(0u8);
+            let _ = socket.send_to(&respawn_msg, *addr);
         }
 
         // Assign bomb to first attacker
@@ -486,8 +482,8 @@ impl SndState {
         // Phase timer
         msg.extend_from_slice(&self.phase_timer.to_be_bytes());
 
-        for p in players.values() {
-            let _ = socket.send_to(&msg, p.socket_addr);
+        for (addr, _p) in players.iter() {
+            let _ = socket.send_to(&msg, *addr);
         }
     }
 

@@ -45,7 +45,7 @@ pub fn handle_start_game(
             .filter(|p| p.world == WorldId::Maze)
             .count();
         if maze_count == 0 {
-            println!("Stale match detected (no players) — clearing match state");
+            log!("Stale match detected (no players) — clearing match state");
             *match_running = false;
             *match_start_time = None;
             *match_duration = game::MATCH_DURATION;
@@ -59,7 +59,7 @@ pub fn handle_start_game(
         let leader_addr = game::lobby_leader_addr(players);
         if leader_addr != Some(src_addr) {
             let _ = socket.send_to(&[MSG_START_DENIED, 1], src_addr);
-            println!("Start-game request from {} rejected: not the lobby leader.", src_addr);
+            log!("Start-game request from {} rejected: not the lobby leader.", src_addr);
             return;
         }
 
@@ -76,10 +76,9 @@ pub fn handle_start_game(
             *match_warmup_end =
                 Some(Instant::now() + Duration::from_secs(MATCH_START_COUNTDOWN_SECS as u64));
 
-            // broadcast countdown to all connected clients (include selected gamemode)
             let cd: [u8; 3] = [MSG_MATCH_COUNTDOWN, MATCH_START_COUNTDOWN_SECS, match_mode];
-            for p in players.values() {
-                let _ = socket.send_to(&cd, p.socket_addr);
+            for (addr, _) in players.iter() {
+                let _ = socket.send_to(&cd, *addr);
             }
 
             let dur_desc = if requested_duration == game::MATCH_DURATION {
@@ -87,14 +86,14 @@ pub fn handle_start_game(
             } else if requested_duration.is_none() {
                 "infinite".to_string()
             } else {
-                format!("{}s", requested_duration.unwrap().as_secs())
+                requested_duration.map_or_else(|| "?".to_string(), |d| format!("{}s", d.as_secs()))
             };
-            println!(
+            log!(
                 "Match start requested by {} — mode {} — duration {} — countdown {}s",
                 src_addr, match_mode, dur_desc, MATCH_START_COUNTDOWN_SECS
             );
         } else {
-            println!(
+            log!(
                 "Start-game request ignored: not enough players ({}).",
                 lobby_count
             );
@@ -181,13 +180,12 @@ pub fn handle_start_game(
                     };
                     response.push((timer_secs >> 8) as u8);
                     response.push((timer_secs & 0xFF) as u8);
-                    let _ = socket.send_to(&response, req_player.socket_addr);
+                    let _ = socket.send_to(&response, src_addr);
 
-                    // send maze data to the joining client
-                    current_maze.send(&socket, req_player.socket_addr);
+                    current_maze.send(&socket, src_addr);
 
                     *match_total_maze_entries += 1;
-                    println!(
+                    log!(
                         "Player '{}' joined running match (vacant slot)",
                         req_player.username
                     );
@@ -198,8 +196,8 @@ pub fn handle_start_game(
                     ann.extend_from_slice(&req_player.id.to_be_bytes());
                     ann.push(name_bytes.len() as u8);
                     ann.extend_from_slice(name_bytes);
-                    for p in players.values() {
-                        let _ = socket.send_to(&ann, p.socket_addr);
+                    for (addr, _) in players.iter() {
+                        let _ = socket.send_to(&ann, *addr);
                     }
 
                     // After assigning team and moving the player, broadcast
@@ -211,7 +209,7 @@ pub fn handle_start_game(
         } else {
             // Inform the requester the match is running and full
             let _ = socket.send_to(&[MSG_START_DENIED], src_addr);
-            println!("Start-game request rejected: match already running and full.");
+            log!("Start-game request rejected: match already running and full.");
         }
     }
 }
@@ -238,7 +236,7 @@ pub fn maybe_start_match(
         if Instant::now() >= end {
             // start the match now (generate maze, move lobby players into Maze)
             *maze = Some(MazeData::new(MAZE_WIDTH, MAZE_HEIGHT));
-            let current_maze = maze.as_ref().unwrap();
+            let Some(current_maze) = maze.as_ref() else { return; };
             let lobby_count = players
                 .values()
                 .filter(|p| p.world == WorldId::Lobby)
@@ -247,7 +245,7 @@ pub fn maybe_start_match(
                 Some(d) => format!("{}s", d.as_secs()),
                 None => "infinite".to_string(),
             };
-            println!(
+            log!(
                 "Match warmup complete — starting {} match with seed {} (moving {} players)",
                 dur_desc, current_maze.seed, lobby_count
             );
@@ -397,9 +395,9 @@ pub fn maybe_start_match(
                     };
                     response.push((initial_secs >> 8) as u8);
                     response.push((initial_secs & 0xFF) as u8);
-                    let _ = socket.send_to(&response, player.socket_addr);
+                    let _ = socket.send_to(&response, *addr);
 
-                    current_maze.send(&socket, player.socket_addr);
+                    current_maze.send(&socket, *addr);
                 }
             }
 
@@ -480,11 +478,7 @@ pub fn maybe_start_match(
                             .iter()
                             .filter(|p| !used_personalities.contains(p))
                             .collect();
-                        let pid = if remaining.is_empty() {
-                            break;
-                        } else {
-                            **remaining.choose(&mut rng).unwrap()
-                        };
+                        let Some(&&pid) = remaining.choose(&mut rng) else { break; };
                         used_personalities.push(pid);
 
                         let (pers, _) = crate::bot::personality::get_personality(pid);
@@ -535,10 +529,10 @@ pub fn maybe_start_match(
                     }
 
                     if bots_to_spawn > 0 {
-                        println!("Auto-filled {} bots into match ({} per team)", bots_to_spawn, bots_to_spawn / 2);
+                        log!("Auto-filled {} bots into match ({} per team)", bots_to_spawn, bots_to_spawn / 2);
                     }
                 } else {
-                    println!("Auto-fill: no eligible bot personalities (diff mask {:05b})", autofill_diff_mask);
+                    log!("Auto-fill: no eligible bot personalities (diff mask {:05b})", autofill_diff_mask);
                 }
             }
 
@@ -588,7 +582,7 @@ pub fn check_early_end_conditions(
     }
 
     if maze_count == 0 {
-        println!("No players remain in match — ending match early");
+        log!("No players remain in match — ending match early");
         *match_running = false;
         *match_start_time = None;
         *maze = None;
@@ -601,10 +595,10 @@ pub fn check_early_end_conditions(
         // entered the maze during this match (not just a solo player). For
         // team-based modes (TDM, S&D) we don't end the match on a single
         // player's death — team scoring determines match end.
-        let winner = last_alive.unwrap();
+        let Some(winner) = last_alive else { return; };
         let winner_id = winner.id;
         let winner_name = winner.username.clone();
-        println!("Last player standing: '{}' wins the match", winner_name);
+        log!("Last player standing: '{}' wins the match", winner_name);
 
         // Broadcast MSG_MATCH_END (include countdown byte so clients can display timer)
         let mut end_msg = vec![MSG_MATCH_END];
@@ -613,8 +607,8 @@ pub fn check_early_end_conditions(
         end_msg.push(name_bytes.len() as u8);
         end_msg.extend_from_slice(name_bytes);
         end_msg.push(MATCH_END_COUNTDOWN_SECS);
-        for p in players.values() {
-            let _ = socket.send_to(&end_msg, p.socket_addr);
+        for (addr, _) in players.iter() {
+            let _ = socket.send_to(&end_msg, *addr);
         }
 
         *match_end_pending = Some((
@@ -648,7 +642,7 @@ pub fn check_early_end_conditions(
                 .map(|p| p.id)
                 .unwrap_or(0);
 
-            println!(
+            log!(
                 "Team Deathmatch win: {} reached {} kills",
                 winner_team_name, MATCH_SCORE_TO_WIN
             );
@@ -659,8 +653,8 @@ pub fn check_early_end_conditions(
             end_msg.push(name_bytes.len() as u8);
             end_msg.extend_from_slice(name_bytes);
             end_msg.push(MATCH_END_COUNTDOWN_SECS);
-            for p in players.values() {
-                let _ = socket.send_to(&end_msg, p.socket_addr);
+            for (addr, _) in players.iter() {
+                let _ = socket.send_to(&end_msg, *addr);
             }
 
             *match_end_pending = Some((
@@ -709,7 +703,7 @@ pub fn update_match_timer(
 
         // timeout -> show match-end screen then return to lobby after countdown
         if match_end_pending.is_none() && match_duration.map_or(false, |dur| elapsed >= dur) {
-            println!("Match duration elapsed — showing end screen");
+            log!("Match duration elapsed — showing end screen");
             *match_running = false;
 
             // For TDM: determine winner by team total kills
@@ -753,8 +747,8 @@ pub fn update_match_timer(
             end_msg.push(name_bytes.len() as u8);
             end_msg.extend_from_slice(name_bytes);
             end_msg.push(MATCH_END_COUNTDOWN_SECS);
-            for p in players.values() {
-                let _ = socket.send_to(&end_msg, p.socket_addr);
+            for (addr, _) in players.iter() {
+                let _ = socket.send_to(&end_msg, *addr);
             }
 
             *match_end_pending = Some((
@@ -782,7 +776,7 @@ pub fn execute_scheduled_match_end(
     snd_state: &mut Option<crate::server::snd::SndState>,
     bot_manager: &mut BotManager,
 ) {
-    println!(
+    log!(
         "Match end countdown expired — returning players to Lobby (winner {})",
         winner_name
     );

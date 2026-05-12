@@ -6,11 +6,9 @@ use crate::player::Player;
 use crate::player::WorldId;
 use crate::protocols::*;
 
-use crate::server::broadcast;
-
 /// Handler for movement updates sent by clients.
 pub fn handle_position(
-    socket: &UdpSocket,
+    _socket: &UdpSocket,
     players: &mut HashMap<SocketAddr, Player>,
     src_addr: SocketAddr,
     payload: &[u8],
@@ -61,5 +59,4 @@ pub fn handle_position(
         }
     }
 
-    broadcast::broadcast_state(socket, players);
 }
