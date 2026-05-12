@@ -47,33 +47,68 @@ impl PlayingState {
             && self.snd_round > 0
         {
             let cam_pos = self.position;
-            let (site_x, _site_y, site_z) = self.snd_bomb_site;
+            let (site_x, site_y, site_z) = self.snd_bomb_site;
             let site_dist =
                 ((cam_pos.x - site_x).powi(2) + (cam_pos.z - site_z).powi(2)).sqrt();
 
-            // Bomb site marker — always visible to dead spectators, distance-gated for live players
-            if self.is_dead || site_dist <= 8.0 {
-                let alpha = if self.is_dead || site_dist <= 5.0 {
-                    1.0
+            // Bomb site marker — always visible (fade at very close range to avoid clutter)
+            {
+                let alpha = if site_dist <= 30.0 {
+                    1.0f32
                 } else {
-                    1.0 - ((site_dist - 5.0) / 3.0).clamp(0.0, 1.0)
+                    1.0 - ((site_dist - 30.0) / 10.0).clamp(0.0, 1.0)
                 };
+                let pulse = ((get_time() as f32 * (if self.snd_bomb_planted { 4.0 } else { 1.5 })).sin() * 0.5 + 0.5) as f32;
                 let site_color = if self.snd_bomb_planted {
-                    Color::from_rgba(255, 50, 50, (180.0 * alpha) as u8)
+                    Color::from_rgba(255, 50, 50, (220.0 * alpha) as u8)
                 } else {
-                    Color::from_rgba(255, 200, 50, (120.0 * alpha) as u8)
+                    Color::from_rgba(255, 200, 50, ((160.0 + 60.0 * pulse) * alpha) as u8)
                 };
-                // Draw bomb site as flat markers on the ground
-                let r = 1.5;
-                let steps = 24;
+                // Outer ring
+                let r_outer = 2.0;
+                let steps = 32;
                 for i in 0..steps {
                     let a1 = (i as f32 / steps as f32) * std::f32::consts::TAU;
                     let a2 = ((i + 1) as f32 / steps as f32) * std::f32::consts::TAU;
                     draw_line_3d(
-                        vec3(site_x + a1.cos() * r, 0.02, site_z + a1.sin() * r),
-                        vec3(site_x + a2.cos() * r, 0.02, site_z + a2.sin() * r),
+                        vec3(site_x + a1.cos() * r_outer, 0.02, site_z + a1.sin() * r_outer),
+                        vec3(site_x + a2.cos() * r_outer, 0.02, site_z + a2.sin() * r_outer),
                         site_color,
                     );
+                }
+                // Inner ring
+                let r_inner = 1.0;
+                for i in 0..steps {
+                    let a1 = (i as f32 / steps as f32) * std::f32::consts::TAU;
+                    let a2 = ((i + 1) as f32 / steps as f32) * std::f32::consts::TAU;
+                    draw_line_3d(
+                        vec3(site_x + a1.cos() * r_inner, 0.02, site_z + a1.sin() * r_inner),
+                        vec3(site_x + a2.cos() * r_inner, 0.02, site_z + a2.sin() * r_inner),
+                        site_color,
+                    );
+                }
+                // Cross lines through center
+                draw_line_3d(
+                    vec3(site_x - r_outer, 0.02, site_z),
+                    vec3(site_x + r_outer, 0.02, site_z),
+                    site_color,
+                );
+                draw_line_3d(
+                    vec3(site_x, 0.02, site_z - r_outer),
+                    vec3(site_x, 0.02, site_z + r_outer),
+                    site_color,
+                );
+                // Vertical pillar so the site is visible over obstacles
+                let pillar_alpha = (alpha * 180.0) as u8;
+                let pillar_color = if self.snd_bomb_planted {
+                    Color::from_rgba(255, 50, 50, pillar_alpha)
+                } else {
+                    Color::from_rgba(255, 200, 50, pillar_alpha)
+                };
+                for seg in 0..8u32 {
+                    let y0 = site_y + seg as f32 * 0.4;
+                    let y1 = site_y + (seg + 1) as f32 * 0.4;
+                    draw_line_3d(vec3(site_x, y0, site_z), vec3(site_x, y1, site_z), pillar_color);
                 }
             }
 
