@@ -21,8 +21,17 @@ cp "$SCRIPT_DIR/server/target/x86_64-pc-windows-gnu/release/server.exe" "$DIST/"
 cp -r "$SCRIPT_DIR/client/assets" "$DIST/assets"
 cp -r "$SCRIPT_DIR/server/assets/." "$DIST/assets/"
 
-echo ""
-echo "Done. Distribution package at: dist/windows/"
-echo "  client.exe"
-echo "  server.exe"
-echo "  assets/"
+echo "==> Building installer..."
+cd "$SCRIPT_DIR"
+if command -v makensis &>/dev/null; then
+    makensis installer.nsi
+    echo ""
+    echo "Done."
+    echo "  Installer: dist/Gridlock-Setup.exe"
+    echo "  Raw files: dist/windows/"
+else
+    echo "Warning: makensis not found — skipping installer. Install with: sudo apt install nsis"
+    echo ""
+    echo "Done."
+    echo "  Raw files: dist/windows/"
+fi
