@@ -26,11 +26,11 @@ pub fn handle_wall_broken(
 
     if maze.break_wall(x, y) {
         let msg = [MSG_WALL_BROKEN, x, y];
-        for p in players.values() {
+        for (addr, p) in players.iter() {
             if p.is_bot {
                 continue;
             }
-            let _ = socket.send_to(&msg, p.socket_addr);
+            let _ = socket.send_to(&msg, *addr);
         }
     }
 }
@@ -98,16 +98,12 @@ pub fn handle_hit(
         false
     };
 
-    // find victim by id (we iterate; could use map index if available)
     let victim_addr_opt = players
-        .values()
-        .find(|p| p.id == victim_id)
-        .map(|p| p.socket_addr);
+        .iter()
+        .find(|(_, p)| p.id == victim_id)
+        .map(|(addr, _)| *addr);
 
-    if victim_addr_opt.is_none() {
-        return;
-    }
-    let victim_addr = victim_addr_opt.unwrap();
+    let Some(victim_addr) = victim_addr_opt else { return; };
 
     // avoid holding multiple simultaneous mutable borrows of `players` by doing
     // short-lived immutable checks, then separate mutable borrows for victim and
@@ -272,19 +268,16 @@ pub fn apply_damage(
             {
                 return;
             }
-            (a.socket_addr, a.world, a.is_bot)
+            (attacker_addr, a.world, a.is_bot)
         }
         None => return,
     };
 
-    let victim_addr = match players
-        .values()
-        .find(|p| p.id == victim_id)
-        .map(|p| p.socket_addr)
-    {
-        Some(addr) => addr,
-        None => return,
-    };
+    let Some(victim_addr) = players
+        .iter()
+        .find(|(_, p)| p.id == victim_id)
+        .map(|(addr, _)| *addr)
+    else { return; };
 
     {
         let victim_ref = match players.get(&victim_addr) {
@@ -421,11 +414,11 @@ pub fn apply_damage(
             end_msg.extend_from_slice(name_bytes);
             end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
 
-            for p in players.values() {
+            for (addr, p) in players.iter() {
                 if p.is_bot {
                     continue;
                 }
-                let _ = socket.send_to(&end_msg, p.socket_addr);
+                let _ = socket.send_to(&end_msg, *addr);
             }
 
             *match_end_pending = Some((
@@ -455,11 +448,11 @@ pub fn apply_damage(
         feed.push(wbytes.len() as u8);
         feed.extend_from_slice(wbytes);
 
-        for p in players.values() {
+        for (addr, p) in players.iter() {
             if p.is_bot {
                 continue;
             }
-            let _ = socket.send_to(&feed, p.socket_addr);
+            let _ = socket.send_to(&feed, *addr);
         }
     } else {
         // apply non-lethal damage

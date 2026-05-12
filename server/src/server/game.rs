@@ -18,7 +18,6 @@ pub const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 pub const MATCH_DURATION: Option<Duration> = Some(Duration::from_secs(900)); // TDM default: 15 minutes
 pub const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
 pub const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
-#[allow(dead_code)]
 pub const MATCH_SCORE_TO_WIN: u32 = 100; // kills required to win the match (used for TDM)
 
 pub const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts // seconds shown to players before a match actually starts
@@ -207,7 +206,7 @@ pub fn process_auto_respawns(
             player.death_time = None;
             player.position = (sx, sy, sz);
             to_respawn.push((
-                player.socket_addr,
+                addr,
                 sx,
                 sy,
                 sz,
@@ -219,7 +218,7 @@ pub fn process_auto_respawns(
 
     // third pass: send respawn packets and update weapons
     for (socket_addr, sx, sy, sz, used_fallback, username) in to_respawn.iter() {
-        println!(
+        log!(
             "Player '{}' auto-respawned in {:?}",
             username,
             WorldId::Maze
@@ -311,7 +310,7 @@ pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) -> bo
     let removed_any = !to_remove.is_empty();
     for addr in to_remove {
         if let Some(p) = players.remove(&addr) {
-            println!(
+            log!(
                 "Player '{}' timed out. Total players: {}",
                 p.username,
                 players.len()

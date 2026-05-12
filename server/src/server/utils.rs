@@ -6,7 +6,7 @@ use crate::player::Player;
 /// Returns a unique, valid username based on the requested string and existing players.
 pub fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
     let mut candidate = if requested.is_empty() || requested.len() > 20 {
-        println!("Invalid username '{}'. Assigning default.", requested);
+        log!("Invalid username '{}'. Assigning default.", requested);
         "Player".to_string()
     } else {
         requested.to_string()
@@ -31,7 +31,7 @@ pub fn send_assets(socket: &UdpSocket, addr: SocketAddr, manifest_opt: Option<&s
     let manifest = match manifest_opt {
         Some(m) => m,
         None => {
-            println!("Warning: could not read assets/manifest.json");
+            log!("Warning: could not read assets/manifest.json");
             return;
         }
     };
@@ -57,7 +57,7 @@ pub fn send_assets(socket: &UdpSocket, addr: SocketAddr, manifest_opt: Option<&s
                     msg.extend_from_slice(path_bytes);
                 }
             }
-            println!(
+            log!(
                 "Sending {} asset(s) for world '{}'",
                 assets.len(),
                 world_name

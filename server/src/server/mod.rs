@@ -20,9 +20,14 @@ use crate::protocols::*;
 /// Entry point for the server logic; previously lived in `main.rs`.
 /// This function handles socket setup and contains the main loop.
 pub fn run() -> std::io::Result<()> {
-    let socket = UdpSocket::bind("0.0.0.0:7878")?;
+    let port = std::env::var("PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(7878);
+    let bind_addr = format!("0.0.0.0:{}", port);
+    let socket = UdpSocket::bind(&bind_addr)?;
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
-    println!("UDP server started on port 7878");
+    log!("UDP server started on {}", bind_addr);
 
     let mut buffer: [u8; 8192] = [0; 8192];
     let mut players: HashMap<SocketAddr, Player> = HashMap::new();
@@ -63,6 +68,8 @@ pub fn run() -> std::io::Result<()> {
     let mut autofill_diff_mask: u8 = 0b11111; // all difficulties enabled by default
     // Track last tick time for delta-time calculation
     let mut last_tick = Instant::now();
+    // Regen fires at most once per second to avoid per-packet health spikes
+    let mut last_regen_tick = Instant::now();
 
     loop {
         let now_tick = Instant::now();
@@ -266,7 +273,6 @@ pub fn run() -> std::io::Result<()> {
                                     kills: 0,
                                     deaths: 0,
                                     gun_level: 1,
-                                    socket_addr: BotManager::virtual_addr(0), // manager will replace with generated addr
                                     last_activity: Instant::now(),
                                     death_time: None,
                                     world: WorldId::Lobby,
@@ -353,7 +359,7 @@ pub fn run() -> std::io::Result<()> {
                         broadcast::broadcast_player_list(&socket, &players);
                     }
 
-                    _ => println!("Unknown message type: {}", msg_type),
+                    _ => log!("Unknown message type: {}", msg_type),
                 }
             }
             Err(err)
@@ -375,15 +381,15 @@ pub fn run() -> std::io::Result<()> {
             if let Some(ref mut snd) = snd_state {
                 if let Some((winner_name, winner_id)) = snd.tick(dt, &socket, &mut players) {
                     // S&D match is over
-                    println!("S&D match over: {} wins", winner_name);
+                    log!("S&D match over: {} wins", winner_name);
                     let mut end_msg = vec![MSG_MATCH_END];
                     end_msg.extend_from_slice(&winner_id.to_be_bytes());
                     let name_bytes = winner_name.as_bytes();
                     end_msg.push(name_bytes.len() as u8);
                     end_msg.extend_from_slice(name_bytes);
                     end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
-                    for p in players.values() {
-                        let _ = socket.send_to(&end_msg, p.socket_addr);
+                    for (addr, _) in players.iter() {
+                        let _ = socket.send_to(&end_msg, *addr);
                     }
                     match_end_pending = Some((
                         Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
@@ -401,7 +407,10 @@ pub fn run() -> std::io::Result<()> {
             broadcast::broadcast_state(&socket, &players);
             broadcast::broadcast_player_list(&socket, &players);
         }
-        game::process_lobby_regen(&mut players);
+        if last_regen_tick.elapsed() >= Duration::from_secs(1) {
+            game::process_lobby_regen(&mut players);
+            last_regen_tick = Instant::now();
+        }
         broadcast::broadcast_state(&socket, &players);
 
         if game::cleanup_inactive_players(&mut players) {
@@ -417,7 +426,7 @@ pub fn run() -> std::io::Result<()> {
                 .filter(|p| p.world == WorldId::Maze)
                 .count();
             if maze_count == 0 {
-                println!("No players remain in match — ending match early");
+                log!("No players remain in match — ending match early");
                 match_running = false;
                 match_start_time = None;
                 maze = None;
@@ -457,8 +466,8 @@ pub fn run() -> std::io::Result<()> {
             };
             if last_warmup_sent != Some(secs) {
                 let cd: [u8; 3] = [MSG_MATCH_COUNTDOWN, secs, match_mode];
-                for p in players.values() {
-                    let _ = socket.send_to(&cd, p.socket_addr);
+                for (addr, _) in players.iter() {
+                    let _ = socket.send_to(&cd, *addr);
                 }
                 last_warmup_sent = Some(secs);
             }
@@ -498,30 +507,29 @@ pub fn run() -> std::io::Result<()> {
         }
 
         // If a match-end was scheduled (winner reached score or last-man-standing), execute it when the countdown expires
-        if let Some((when, _, winner_name)) = match_end_pending.clone() {
-            if Instant::now() >= when {
-                handlers::execute_scheduled_match_end(
-                    &socket,
-                    &mut players,
-                    &mut maze,
-                    &mut match_running,
-                    &mut match_start_time,
-                    &mut match_end_pending,
-                    &mut last_match_time_sent,
-                    &mut match_total_maze_entries,
-                    &mut match_duration,
-                    winner_name,
-                    &mut snd_state,
-                    &mut bot_manager,
-                );
-            }
+        if match_end_pending.as_ref().map_or(false, |(when, _, _)| Instant::now() >= *when) {
+            let winner_name = match_end_pending.as_ref().map(|(_, _, n)| n.clone()).unwrap_or_default();
+            handlers::execute_scheduled_match_end(
+                &socket,
+                &mut players,
+                &mut maze,
+                &mut match_running,
+                &mut match_start_time,
+                &mut match_end_pending,
+                &mut last_match_time_sent,
+                &mut match_total_maze_entries,
+                &mut match_duration,
+                winner_name,
+                &mut snd_state,
+                &mut bot_manager,
+            );
         }
 
         // Rebroadcast match-end countdown periodically so offscreen clients
         // display the remaining end-of-match timer even if they missed the
         // original MSG_MATCH_END packet.
-        if let Some((when, winner_id, winner_name)) = match_end_pending.clone() {
-            let secs = if Instant::now() >= when {
+        if let Some((when, winner_id, winner_name)) = match_end_pending.as_ref() {
+            let secs = if Instant::now() >= *when {
                 0u8
             } else {
                 when.saturating_duration_since(Instant::now())
@@ -535,8 +543,8 @@ pub fn run() -> std::io::Result<()> {
                 end_msg.push(name_bytes.len() as u8);
                 end_msg.extend_from_slice(name_bytes);
                 end_msg.push(secs);
-                for p in players.values() {
-                    let _ = socket.send_to(&end_msg, p.socket_addr);
+                for (addr, _) in players.iter() {
+                    let _ = socket.send_to(&end_msg, *addr);
                 }
                 last_end_countdown_sent = Some(secs);
             }

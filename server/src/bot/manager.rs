@@ -46,7 +46,6 @@ impl BotManager {
 
         player.is_bot = true;
         player.is_silent = false;
-        player.socket_addr = addr;
         players.insert(addr, player);
 
         self.bot_states.insert(addr, bot_state);
@@ -103,7 +102,6 @@ impl BotManager {
             kills: 0,
             deaths: 0,
             gun_level: 1,
-            socket_addr: Self::virtual_addr(0), // spawn_bot will overwrite
             last_activity: Instant::now(),
             death_time: None,
             world: WorldId::Maze,
@@ -162,7 +160,7 @@ impl BotManager {
         };
 
         let addr = self.spawn_bot(players, bot_player, bot_state);
-        println!("Spawned bot '{}' ({:?}) on {:?} with {}", pers.name, diff, team, weapon_override);
+        log!("Spawned bot '{}' ({:?}) on {:?} with {}", pers.name, diff, team, weapon_override);
         addr
     }
 
@@ -360,11 +358,11 @@ impl BotManager {
             shot_msg.extend_from_slice(&victim_pos.0.to_be_bytes());
             shot_msg.extend_from_slice(&(victim_pos.1 + 1.0).to_be_bytes());
             shot_msg.extend_from_slice(&victim_pos.2.to_be_bytes());
-            for p in players.values() {
+            for (addr, p) in players.iter() {
                 if p.is_bot {
                     continue;
                 }
-                let _ = socket.send_to(&shot_msg, p.socket_addr);
+                let _ = socket.send_to(&shot_msg, *addr);
             }
 
             if let Some(damage) = damage_opt {
