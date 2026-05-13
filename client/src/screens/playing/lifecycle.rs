@@ -18,9 +18,12 @@ impl PlayingState {
             return;
         }
 
-        self.hp = (self.hp - damage).max(0.0);
-
-        // brief damage flash and attacker info for HUD
+        // Visual feedback only. HP and death are server-authoritative:
+        // MSG_STATE drives `hp` and MSG_DEATH (or MSG_STATE alive=false) drives `die()`.
+        // Locally subtracting hp here would double-apply damage when MSG_STATE and
+        // MSG_DAMAGE arrive in the same poll, causing the client to flip to dead
+        // before the server does — which suppresses the death anim, "killed by"
+        // prompt, and kill credit on the attacker.
         self.damage_flash_timer = 0.6;
         self.last_damage_attacker = attacker_id.and_then(|aid| {
             self.connected_players
@@ -28,17 +31,7 @@ impl PlayingState {
                 .find(|(id, ..)| *id == aid)
                 .map(|(_, name, ..)| name.clone())
         });
-
-        if self.current_world == WorldId::Lobby {
-            self.hp = self.hp.max(1.0);
-            self.is_dead = false;
-            self.death_timer = 0.0;
-            return;
-        }
-
-        if self.hp <= 0.0 {
-            self.die(attacker_id)
-        }
+        let _ = damage;
     }
 
     pub fn die(&mut self, _killer_id: Option<u32>) {
@@ -109,8 +102,7 @@ impl PlayingState {
                 draw_text_ex(&timer_text, cx - tw / 2.0, cy + 20.0, text_params(24, GRAY));
             }
         } else if self.current_world == WorldId::Maze {
-            let is_snd = self.match_mode
-                == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY);
+            let is_snd = self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY);
             if self.death_timer <= 0.0 {
                 let respawn_text = if is_snd {
                     "Waiting for round to end..."
@@ -268,8 +260,8 @@ impl PlayingState {
                 text_bright
             } else {
                 // Try to color by team when available via connected_players
-                if let Some((_id, pname, _kills, _deaths, _gl, team, _wep, _is_bot)) =
-                    self.connected_players.iter().find(|(pid, n, ..)| n == name)
+                if let Some((_id, _pname, _kills, _deaths, _gl, team, _wep, _is_bot)) =
+                    self.connected_players.iter().find(|(_pid, n, ..)| n == name)
                 {
                     match *team {
                         1 => Color::from_rgba(230, 120, 120, 255),

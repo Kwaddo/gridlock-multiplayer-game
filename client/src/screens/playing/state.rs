@@ -11,7 +11,7 @@ use crate::weapons::WeaponInventory;
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
 use rodio::{OutputStream, OutputStreamHandle};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use super::super::dev_mode::DevModeState;
@@ -40,11 +40,6 @@ pub enum HandsPlaybackMode {
     IdleLoop,
     ReloadOnce,
     Stopped,
-    // Knife-specific states (knife_animated.glb replaces hands entirely)
-    KnifeIdle,
-    KnifeSwing, // playing one of the swing segments, returns to KnifeIdle when done
-    KnifeLower, // lowering animation when switching away from knife
-    KnifeEquip, // raising animation when switching to knife
     // Sawnoff-specific states (sawnoff_animated.glb includes hands)
     SawnoffIdle,
     SawnoffShot,   // playing shot animation, returns to SawnoffIdle when done
@@ -137,7 +132,7 @@ pub struct PlayingState {
     pub damage_numbers: Vec<DamageNumber>,
     pub tracers: Vec<BulletTracer>,
     pub world_muzzle_flashes: Vec<WorldMuzzleFlash>,
-    pub bullet_holes: Vec<BulletHole>,
+    pub bullet_holes: VecDeque<BulletHole>,
 
     pub hit_marker_pellet_mask: u16,
 
@@ -183,15 +178,11 @@ pub struct PlayingState {
     pub prev_was_sliding: bool,         // edge detection for slide start/end network events
     pub prev_any_slide_anim_active: bool, // edge detect for shared world slide clip playback
 
-    pub knife_swing_index: u8, // cycles 0..2 for light slashes (swings 1-3)
-    pub knife_swing_requested: bool, // set by input_processing when knife fires
-    pub knife_heavy_swing_requested: bool, // set by input_processing for right-click heavy slash
-    pub knife_anim_initialized: bool, // whether fp_hands_knife has been set up
-    pub knife_attack_locked: bool, // true during swing
+    pub knife_swing_requested: bool, // set by input_processing when punch fires
+    pub knife_attack_locked: bool, // true during punch animation
     pub knife_attack_lock_timer: f32, // seconds remaining in lock
-    pub knife_miss_slow_timer: f32, // movement slow after miss
-    pub knife_last_attack_was_heavy: bool, // for backstab tracking
-    pub prev_weapon_was_knife: bool, // track weapon switches to/from knife
+    pub knife_miss_slow_timer: f32, // movement slow after missed punch
+    pub punch_auto_return: bool, // when true: put knife away when lock expires
 
     pub sawnoff_shot_requested: bool, // set by input_processing when sawnoff fires
     pub sawnoff_anim_initialized: bool, // whether fp_hands_sawnoff has been set up
@@ -236,6 +227,9 @@ pub struct PlayingState {
     pub fps_display: i32,
     pub fps_frame_count: u32,
     pub fps_time_acc: f32,
+
+    // lobby leader player ID — only this player may start a match
+    pub lobby_leader_id: Option<u32>,
 }
 
 pub struct KillFeedEntry {
@@ -307,7 +301,7 @@ impl PlayingState {
             damage_numbers: Vec::with_capacity(Self::INIT_DAMAGE_NUMBERS),
             tracers: Vec::with_capacity(Self::INIT_TRACERS),
             world_muzzle_flashes: Vec::new(),
-            bullet_holes: Vec::with_capacity(Self::INIT_BULLET_HOLES),
+            bullet_holes: VecDeque::with_capacity(Self::INIT_BULLET_HOLES),
             hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
             practice_bots: Vec::with_capacity(Self::INIT_PRACTICE_BOTS),
@@ -349,15 +343,11 @@ impl PlayingState {
             prev_was_reloading: false,
             prev_was_sliding: false,
             prev_any_slide_anim_active: false,
-            knife_swing_index: 0,
             knife_swing_requested: false,
-            knife_heavy_swing_requested: false,
-            knife_anim_initialized: false,
             knife_attack_locked: false,
             knife_attack_lock_timer: 0.0,
             knife_miss_slow_timer: 0.0,
-            knife_last_attack_was_heavy: false,
-            prev_weapon_was_knife: false,
+            punch_auto_return: false,
             sawnoff_shot_requested: false,
             sawnoff_anim_initialized: false,
             prev_weapon_was_sawnoff: false,
@@ -402,6 +392,7 @@ impl PlayingState {
             fps_display: 0,
             fps_frame_count: 0,
             fps_time_acc: 0.0,
+            lobby_leader_id: None,
         }
     }
 }

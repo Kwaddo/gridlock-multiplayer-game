@@ -48,7 +48,7 @@ impl LoginScreen {
     pub fn draw_title(&self) {
         let sw = screen_width();
         let sh = screen_height();
-        let title = "MULTIPLAYER FPS";
+        let title = "GRIDLOCK";
         let ts: u16 = 52;
         let tw = measure_game_text(title, ts);
         let tx = (sw - tw) / 2.0;

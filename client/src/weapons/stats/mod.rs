@@ -241,6 +241,7 @@ impl WeaponId {
         WeaponId::HuntingRifle,
         WeaponId::SemiAutoSniper,
         WeaponId::Minigun,
+        WeaponId::Sawnoff,
     ];
 
     /// All weapon IDs belonging to a given category (excludes hidden weapons).

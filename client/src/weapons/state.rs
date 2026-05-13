@@ -147,6 +147,7 @@ impl WeaponState {
         } else {
             super::stats::pistols::apply_taurus_raging_pistol_mode(&mut self.stats_data);
         }
+        self.ammo = self.ammo.min(self.stats_data.magazine_size);
         self.fire_cooldown = 0.0;
         self.trigger_held = false;
         self.burst_remaining = 0;

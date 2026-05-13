@@ -110,17 +110,17 @@ impl SndState {
         socket: &UdpSocket,
         players: &mut HashMap<SocketAddr, Player>,
     ) -> bool {
-        self.current_round += 1;
-
         // Check if a team has won the match (first to 4 rounds in a best-of-7)
         let rounds_to_win = (self.max_rounds / 2) + 1; // 4
         if self.red_round_wins >= rounds_to_win || self.blue_round_wins >= rounds_to_win {
             return false; // match over
         }
 
-        if self.current_round > self.max_rounds {
+        if self.current_round + 1 > self.max_rounds {
             return false; // match over
         }
+
+        self.current_round += 1;
 
         // Alternate attacking team each round
         self.attacking_team = if self.current_round % 2 == 1 {
@@ -146,7 +146,7 @@ impl SndState {
         // Give bomb to first player on attacking team
         let mut first_attacker: Option<u32> = None;
 
-        for player in players.values_mut() {
+        for (addr, player) in players.iter_mut() {
             if player.world != WorldId::Maze {
                 continue;
             }
@@ -154,31 +154,27 @@ impl SndState {
             player.health = player.max_health;
             player.death_time = None;
 
-            // Spawn at team position
             match player.team {
                 Team::Red => player.position = self.red_spawn,
                 Team::Blue => player.position = self.blue_spawn,
                 _ => {}
             }
 
-            self.round_alive.insert(player.socket_addr, true);
+            self.round_alive.insert(*addr, true);
 
-            // Track first attacker to give them the bomb
             if player.team == self.attacking_team && first_attacker.is_none() {
                 first_attacker = Some(player.id);
             }
 
-            // Apply freeze
             player.post_teleport_freeze_until =
                 Some(Instant::now() + std::time::Duration::from_secs(SND_FREEZE_TIME as u64));
 
-            // Send respawn to all players
             let mut respawn_msg = vec![MSG_RESPAWN];
             respawn_msg.extend_from_slice(&player.position.0.to_be_bytes());
             respawn_msg.extend_from_slice(&player.position.1.to_be_bytes());
             respawn_msg.extend_from_slice(&player.position.2.to_be_bytes());
-            respawn_msg.push(0u8); // spawn kind
-            let _ = socket.send_to(&respawn_msg, player.socket_addr);
+            respawn_msg.push(0u8);
+            let _ = socket.send_to(&respawn_msg, *addr);
         }
 
         // Assign bomb to first attacker
@@ -363,24 +359,6 @@ impl SndState {
         }
     }
 
-    /// Handle a player death in S&D — drop bomb if they had it, mark as dead
-    pub fn on_player_death(
-        &mut self,
-        dead_player_id: u32,
-        dead_player_pos: (f32, f32, f32),
-    ) {
-        // If the dead player was carrying the bomb, drop it
-        if self.bomb_carrier == Some(dead_player_id) {
-            self.bomb_carrier = None;
-            self.bomb_dropped_pos = Some(dead_player_pos);
-            self.plant_progress = 0.0;
-            self.planter = None;
-        }
-
-        // If the dead player was defusing, cancel
-        // (defuser tracking is by SocketAddr, handled separately)
-    }
-
     /// Handle bomb pickup request
     pub fn try_pickup_bomb(
         &mut self,
@@ -504,8 +482,8 @@ impl SndState {
         // Phase timer
         msg.extend_from_slice(&self.phase_timer.to_be_bytes());
 
-        for p in players.values() {
-            let _ = socket.send_to(&msg, p.socket_addr);
+        for (addr, _p) in players.iter() {
+            let _ = socket.send_to(&msg, *addr);
         }
     }
 

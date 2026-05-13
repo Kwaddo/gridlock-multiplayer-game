@@ -35,11 +35,14 @@ pub fn handle_world_change(
 
     let (sx, sy, sz) = match target {
         WorldId::Lobby => (0.0_f32, 0.0_f32, 0.0_f32),
-        WorldId::Maze => maze.unwrap().teleporter_world(game::MAZE_CELL_SIZE),
+        WorldId::Maze => {
+            let Some(m) = maze else { return; };
+            m.teleporter_world(game::MAZE_CELL_SIZE)
+        }
     };
     player.position = (sx, sy, sz);
 
-    println!("Player '{}' moved to {:?}", player.username, target);
+    log!("Player '{}' moved to {:?}", player.username, target);
 
     // send world-change reply using stack buffer
     let mut response = [0u8; 14];

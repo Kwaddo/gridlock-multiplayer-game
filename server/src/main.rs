@@ -1,5 +1,5 @@
-use crate::bot::manager::BotManager;
-
+#[macro_use]
+mod log;
 mod maze;
 mod player;
 mod protocols;

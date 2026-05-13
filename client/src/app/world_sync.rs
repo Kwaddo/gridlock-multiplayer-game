@@ -14,6 +14,7 @@ pub struct SyncResult {
     pub assets: Option<Vec<(String, String)>>,
     pub server_seen: bool, // true if we received at least one packet during poll
     pub removed_by_server: bool, // true if server no longer lists our player id (timed-out/removed)
+    pub returned_to_lobby: bool, // true when a world-change back to Lobby was applied this poll
 }
 
 #[inline(always)]
@@ -28,6 +29,7 @@ pub fn sync_world(
         assets: None,
         server_seen: false,
         removed_by_server: false,
+        returned_to_lobby: false,
     };
 
     if let Some(ref sock) = socket {
@@ -220,7 +222,7 @@ pub fn sync_world(
             let current_mode = updates.match_mode.or(playing_state.match_mode);
             if current_mode == Some(MODE_GUN_GAME) {
                 // server sends 1 = first slot; convert to zero-based slot index
-                let slot = (gl as usize).saturating_sub(1);
+                let _slot = (gl as usize).saturating_sub(1);
 
                 // If we're already in the Maze, apply immediately. If the update also contains a
                 // pending world_change to Maze (same poll), apply immediately as well. Otherwise
@@ -339,6 +341,7 @@ pub fn sync_world(
                 playing_state.weapons.set_locked_slot(None);
                 playing_state.weapons.knife_locked = false;
                 playing_state.pending_forced_weapon_slot = None;
+                result.returned_to_lobby = true;
 
                 // Reset local player state when returning to lobby
                 playing_state.is_dead = false;
@@ -397,8 +400,11 @@ pub fn sync_world(
                 }
             }
         }
-        if let Some((damage, attacker_id)) = updates.damage_taken {
+        if let Some((damage, attacker_id, is_stun)) = updates.damage_taken {
             playing_state.take_damage(damage, attacker_id);
+            if is_stun {
+                playing_state.movement_state.stamina = 0.0;
+            }
             // also show a short announcement so hits appear in the feed
             let ann = if let Some(aid) = attacker_id {
                 playing_state
@@ -629,6 +635,11 @@ pub fn sync_world(
             playing_state.snd_plant_progress = snd.plant_progress;
             playing_state.snd_defuse_progress = snd.defuse_progress;
             playing_state.snd_phase_timer = snd.phase_timer;
+        }
+
+        // Lobby leader update
+        if let Some(leader_id) = updates.lobby_leader_id {
+            playing_state.lobby_leader_id = if leader_id == 0 { None } else { Some(leader_id) };
         }
 
         // Global connected player list (for Tab / scoreboard)

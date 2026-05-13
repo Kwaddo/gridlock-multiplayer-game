@@ -92,7 +92,7 @@ pub(super) fn draw_weapon_and_kill_feed(
     local_team: u8,
     config: &crate::core::GameConfig,
 ) {
-    // --- Valorant-style 3-slot weapon display (bottom-right) ---
+    // --- Valorant-style 2-slot weapon display (bottom-right) ---
     let hud_scale = 1.5;
     let slot_width = 180.0 * hud_scale;
     let slot_height = 46.0 * hud_scale;
@@ -100,15 +100,19 @@ pub(super) fn draw_weapon_and_kill_feed(
     let margin_right = 16.0 * hud_scale;
     let margin_bottom = 20.0 * hud_scale;
 
-    // Slots: Primary (0), Secondary (1), Knife
-    let slots: [(&crate::weapons::WeaponState, &str, bool); 3] = [
-        (&weapons.weapons[0], "1", !weapons.knife_active && weapons.active_slot == 0),
-        (&weapons.weapons[1], "2", !weapons.knife_active && weapons.active_slot == 1),
-        (&weapons.knife, "X", weapons.knife_active),
-    ];
+    // In Gun Game only slot 0 exists; hide slot 1 to avoid showing the default secondary.
+    let gun_game = weapons.locked_slot.is_some();
+    let slots: Vec<(&crate::weapons::WeaponState, &str, bool)> = if gun_game {
+        vec![(&weapons.weapons[0], "1", !weapons.knife_active)]
+    } else {
+        vec![
+            (&weapons.weapons[0], "1", !weapons.knife_active && weapons.active_slot == 0),
+            (&weapons.weapons[1], "2", !weapons.knife_active && weapons.active_slot == 1),
+        ]
+    };
 
     let base_x = screen_width() - slot_width - margin_right;
-    let total_height = 3.0 * slot_height + 2.0 * slot_gap;
+    let total_height = slots.len() as f32 * slot_height + (slots.len() as f32 - 1.0) * slot_gap;
     let base_y = screen_height() - total_height - margin_bottom;
 
     for (i, (weapon, key_label, is_active)) in slots.iter().enumerate() {
@@ -152,20 +156,13 @@ pub(super) fn draw_weapon_and_kill_feed(
             } else {
                 "REVOLVER"
             };
-            draw_text_ex(
-                mode_text,
-                base_x + 44.0,
-                y + 56.0,
-                text_params(22, Color::from_rgba(230, 210, 150, alpha)),
-            );
-
             let key_name = config.bind_taurus_toggle.display_name();
-            let toggle_hint = format!("Press '{}' to toggle", key_name);
+            let toggle_hint = format!("{} · {} to toggle", mode_text, key_name);
             draw_text_ex(
                 &toggle_hint,
                 base_x + 44.0,
-                y + slot_height - 8.0,
-                text_params(20, Color::from_rgba(190, 190, 200, alpha)),
+                y + 56.0,
+                text_params(18, Color::from_rgba(230, 210, 150, alpha)),
             );
         }
 

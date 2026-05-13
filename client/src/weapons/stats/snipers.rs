@@ -1,4 +1,4 @@
-use super::{CrosshairStyle, FireMode, WeaponStats, VM_BASE_POS, VM_BASE_ROT, VM_BASE_SCALE};
+use super::{CrosshairStyle, FireMode, WeaponStats};
 
 /// Bolt Action — classic sniper, one shot one kill
 pub const BOLT_ACTION: WeaponStats = WeaponStats {
@@ -56,20 +56,20 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
 
     viewmodel_model: Some("bolt_action_model"),
     viewmodel_asset_key: None,
-    viewmodel_scale: VM_BASE_SCALE,
-    viewmodel_ads_scale: VM_BASE_SCALE,
-    viewmodel_position: VM_BASE_POS,
-    viewmodel_rotation: VM_BASE_ROT,
-    viewmodel_muzzle_offset: (-1.20, 0.02, -0.28),
-    viewmodel_hands_scale: 1.93,
-    viewmodel_hands_offset: (0.0, 0.0, 0.0),
-    viewmodel_hands_rotation: (-0.15, 0.65, -0.05),
-    viewmodel_pair_offset_pos: (0.0, 0.0, 0.0),
-    viewmodel_pair_offset_rot: (0.0, 0.0, 0.0),
-    viewmodel_ads_pos_offset: (0.08, 0.03, 0.0),
-    viewmodel_ads_rot_offset: (0.0, 0.0, 0.0),
-    viewmodel_ads_hands_pos_offset: (0.0, 0.0, 0.0),
-    viewmodel_ads_hands_rot_offset: (0.0, 0.0, 0.0),
+    viewmodel_scale: 0.0030,
+    viewmodel_ads_scale: 0.0030,
+    viewmodel_position: (0.220, 0.082, -0.300),
+    viewmodel_rotation: (0.050, -1.680, 0.000),
+    viewmodel_muzzle_offset: (-1.000, 0.020, -0.250),
+    viewmodel_hands_scale: 0.130,
+    viewmodel_hands_offset: (-0.078, -0.085, -0.290),
+    viewmodel_hands_rotation: (-0.400, 0.695, -0.100),
+    viewmodel_pair_offset_pos: (0.000, 0.000, 0.050),
+    viewmodel_pair_offset_rot: (0.000, 0.100, 0.000),
+    viewmodel_ads_pos_offset: (0.132, 0.025, -0.151),
+    viewmodel_ads_rot_offset: (0.015, 0.195, -0.020),
+    viewmodel_ads_hands_pos_offset: (0.000, 0.000, -0.704),
+    viewmodel_ads_hands_rot_offset: (0.000, 0.000, 0.000),
 
     falloff_start: 1000.0,
     falloff_end: 10000.0,

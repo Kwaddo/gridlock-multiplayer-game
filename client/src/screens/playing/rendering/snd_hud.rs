@@ -35,7 +35,7 @@ impl PlayingState {
         let red_score = format!("RED {}", self.snd_red_wins);
         let blue_score = format!("{} BLUE", self.snd_blue_wins);
         let red_w = crate::ui::fonts::measure_game_text(&red_score, 18);
-        let blue_w = crate::ui::fonts::measure_game_text(&blue_score, 18);
+        let _blue_w = crate::ui::fonts::measure_game_text(&blue_score, 18);
         draw_text_ex(
             &red_score,
             sw / 2.0 - round_w / 2.0 - red_w - 16.0,
@@ -70,6 +70,53 @@ impl PlayingState {
             52.0,
             crate::ui::fonts::text_params(16, phase_color),
         );
+
+        // ── Phase timer (top center, below phase indicator) ──
+        {
+            let timer_secs = self.snd_phase_timer.max(0.0).ceil() as u32;
+            let mins = timer_secs / 60;
+            let secs = timer_secs % 60;
+            let timer_text = format!("{:01}:{:02}", mins, secs);
+
+            let (timer_color, timer_size) = match self.snd_phase {
+                2 => {
+                    // Bomb planted — show detonation countdown in red, pulse when low
+                    let urgent = self.snd_phase_timer < 10.0;
+                    let pulse_alpha = if urgent {
+                        let t = (get_time() as f32 * 5.0).sin() * 0.5 + 0.5;
+                        (180.0 + 75.0 * t) as u8
+                    } else {
+                        255
+                    };
+                    (Color::from_rgba(255, 60, 60, pulse_alpha), if urgent { 32 } else { 28 })
+                }
+                1 => (Color::from_rgba(220, 220, 220, 230), 22),
+                0 => (Color::from_rgba(150, 200, 255, 200), 20),
+                _ => (Color::from_rgba(180, 180, 180, 180), 18),
+            };
+
+            let tw = crate::ui::fonts::measure_game_text(&timer_text, timer_size);
+
+            // Background pill
+            let pad_x = 12.0;
+            let pad_y = 6.0;
+            let bg_x = (sw - tw) / 2.0 - pad_x;
+            let bg_y = 58.0;
+            let bg_h = timer_size as f32 + pad_y * 2.0;
+            draw_rectangle(
+                bg_x,
+                bg_y,
+                tw + pad_x * 2.0,
+                bg_h,
+                Color::from_rgba(0, 0, 0, 160),
+            );
+            draw_text_ex(
+                &timer_text,
+                (sw - tw) / 2.0,
+                bg_y + bg_h - pad_y - 2.0,
+                crate::ui::fonts::text_params(timer_size, timer_color),
+            );
+        }
 
         // ── Bomb status indicator (bottom center) ──
         let local_team = self

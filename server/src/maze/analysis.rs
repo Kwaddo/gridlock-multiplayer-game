@@ -1,5 +1,4 @@
 use crate::maze::types::Room;
-use crate::maze::pathfinding::*;
 
 pub struct MazeAnalysis {
     pub chokepoints: Vec<(u8, u8)>, // chokepoints are pairs of room that are connected by a single path
@@ -8,35 +7,14 @@ pub struct MazeAnalysis {
     pub room_entrances: Vec<(u8, u8)>, 
 }
 
-pub struct Sightline {
-    pub cells: Vec<(u8, u8)>,
-    pub direction: (i8, i8), // Horizontal: (1, 0), Vertical: (0, 1), 
-}
-
 fn is_open(cells: &[u8], width: u8, x: u8, y: u8) -> bool {
-    if x >= width || y >= cells.len() as u8 / width {
+    if x >= width || y >= (cells.len() / width as usize) as u8 {
         return false;
     }
     let index = (y as usize) * (width as usize) + (x as usize);
     cells[index] == 1
 }
 
-fn in_bounds(width: u8, height: u8, x: u8, y: u8) -> bool {
-    x < width && y < height
-}
-
-fn is_inside_room(x: u8, y: u8, room: &Room) -> bool {
-    x >= room.x
-        && x < room.x.saturating_add(room.w)
-        && y >= room.y
-        && y < room.y.saturating_add(room.h)
-}
-
-fn is_inside_any_room(x: u8, y: u8, rooms: &[Room]) -> bool {
-    rooms.iter().any(|room| is_inside_room(x, y, room))
-}
-
- 
 pub fn compute(cells: &[u8], width: u8, height: u8, rooms: &[Room]) -> MazeAnalysis {
     let mut chokepoints = Vec::new();
     let mut intersections = Vec::new();
@@ -47,7 +25,7 @@ pub fn compute(cells: &[u8], width: u8, height: u8, rooms: &[Room]) -> MazeAnaly
     /* 
     find chokepoints and intersections
     */
-    for y in 1..height - 1 {
+    for y in 1..height.saturating_sub(1) {
         for x in 1..width - 1 {
             // if cell is not open, then it can't be a chokepoint or intersection
             if !is_open(cells, width, x, y) {

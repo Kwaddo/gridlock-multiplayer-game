@@ -59,8 +59,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
         // try animated loader first, but if the returned mesh has no texture we
         // fall back to static loader. some static weapon GLBs are exported with
         // a skin/animation placeholder which confuses the animated loader.
-        let keep_unskinned_primitives = key == "fp_hands_knife"
-            || key == "fp_hands_sawnoff"
+        let keep_unskinned_primitives = key == "fp_hands_sawnoff"
             || key == "fp_hands_minigun";
         let animated_result = if keep_unskinned_primitives {
             load_gltf_animated_model_with_unskinned(&resolved_path, true)
@@ -163,7 +162,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     } else if is_sound {
-        match std::fs::read(path) {
+        match std::fs::read(&resolved_path) {
             Ok(bytes) => {
                 playing_state
                     .sound_samples
@@ -181,7 +180,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     } else {
-        match load_texture(path).await {
+        match load_texture(&resolved_path).await {
             Ok(tex) => {
                 tex.set_filter(FilterMode::Nearest);
                 playing_state.assets.insert(key_string.clone(), tex);
@@ -200,10 +199,30 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
     }
 }
 
-fn resolve_runtime_asset_path(path: &str) -> String {
+pub fn resolve_asset_path(path: &str) -> String {
+    // 1. As-is (works when CWD is the right place, e.g. `cargo run`)
     if Path::new(path).exists() {
         return path.to_string();
     }
+
+    // 2. Relative to the executable's directory — handles double-clicking the binary
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let candidate = exe_dir.join(path);
+            if candidate.exists() {
+                return candidate.to_string_lossy().into_owned();
+            }
+            // Also try exe_dir/assets/... when path is bare (e.g. "fonts/Pixel Game.otf")
+            if !path.starts_with("assets/") {
+                let candidate = exe_dir.join("assets").join(path);
+                if candidate.exists() {
+                    return candidate.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+
+    // 3. client/ or server/ prefix — works when CWD is the workspace root
     if path.starts_with("assets/") {
         let client_path = format!("client/{}", path);
         if Path::new(&client_path).exists() {
@@ -214,7 +233,12 @@ fn resolve_runtime_asset_path(path: &str) -> String {
             return server_path;
         }
     }
+
     path.to_string()
+}
+
+fn resolve_runtime_asset_path(path: &str) -> String {
+    resolve_asset_path(path)
 }
 
 fn is_asset_cached(

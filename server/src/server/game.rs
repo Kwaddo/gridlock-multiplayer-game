@@ -18,12 +18,11 @@ pub const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 pub const MATCH_DURATION: Option<Duration> = Some(Duration::from_secs(900)); // TDM default: 15 minutes
 pub const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
 pub const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
-#[allow(dead_code)]
 pub const MATCH_SCORE_TO_WIN: u32 = 100; // kills required to win the match (used for TDM)
 
 pub const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts // seconds shown to players before a match actually starts
 pub const MATCH_END_COUNTDOWN_SECS: u8 = 6; // seconds to wait after a win before returning players to lobby
-pub const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 10; // seconds players cannot move right after teleport into Maze
+pub const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 3; // seconds players cannot move right after teleport into Maze
 
 // --- Gun Game configuration (single-mode for now)
 // Customize this progression to change the sequence of weapons for Gun Game.
@@ -62,6 +61,16 @@ pub const TEAM_LOADOUT_BLUE: [&str; 5] =
     ["AK-47", "P90", "SPAS-12", "Revolver", "Bolt Action"];
 
 use crate::player::Team;
+
+/// Return the SocketAddr of the current lobby leader — the human lobby player with the
+/// lowest player ID (i.e. first to join). Returns None when the lobby is empty.
+pub fn lobby_leader_addr(players: &HashMap<SocketAddr, Player>) -> Option<SocketAddr> {
+    players
+        .iter()
+        .filter(|(_, p)| !p.is_bot && p.world == WorldId::Lobby)
+        .min_by_key(|(_, p)| p.id)
+        .map(|(addr, _)| *addr)
+}
 
 /// Auto-assign balanced teams (Red/Blue) to all players currently in the lobby.
 /// Uses a deterministic ordering (player ID ascending) and alternates assignments
@@ -135,7 +144,7 @@ pub fn random_spawn_far(
     let min2 = min_dist * min_dist;
     for _ in 0..8 {
         let cand = maze.random_spawn_world(MAZE_CELL_SIZE);
-        let (cx, _cy, cz, used) = cand;
+        let (cx, _cy, cz, _used) = cand;
         // check squared distance to every live player
         let ok = players.values().all(|p| {
             let dx = p.position.0 - cx;
@@ -197,7 +206,7 @@ pub fn process_auto_respawns(
             player.death_time = None;
             player.position = (sx, sy, sz);
             to_respawn.push((
-                player.socket_addr,
+                addr,
                 sx,
                 sy,
                 sz,
@@ -209,7 +218,7 @@ pub fn process_auto_respawns(
 
     // third pass: send respawn packets and update weapons
     for (socket_addr, sx, sy, sz, used_fallback, username) in to_respawn.iter() {
-        println!(
+        log!(
             "Player '{}' auto-respawned in {:?}",
             username,
             WorldId::Maze
@@ -227,9 +236,9 @@ pub fn process_auto_respawns(
                 if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
                     GUN_GAME_PROGRESSION[gl - 1].to_string()
                 } else if gl > GUN_GAME_PROGRESSION.len() {
-                    "Knife".to_string()
+                    "Punch".to_string()
                 } else {
-                    "Knife".to_string()
+                    GUN_GAME_PROGRESSION[0].to_string()
                 }
             } else if pref.team != Team::Spectator {
                 // TDM/S&D: keep current weapon, or pick from team loadout
@@ -301,7 +310,7 @@ pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) -> bo
     let removed_any = !to_remove.is_empty();
     for addr in to_remove {
         if let Some(p) = players.remove(&addr) {
-            println!(
+            log!(
                 "Player '{}' timed out. Total players: {}",
                 p.username,
                 players.len()

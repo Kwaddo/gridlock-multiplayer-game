@@ -5,7 +5,6 @@ pub const MSG_JOIN: u8 = 1; // client -> server: username
 pub const MSG_WELCOME: u8 = 2; // server -> client: player id, username
 pub const MSG_POSITION: u8 = 3; // client -> server: x, y, yaw
 pub const MSG_STATE: u8 = 4; // server -> client: all player positions
-pub const MSG_SHOOT: u8 = 5; // client -> server: shot fired
 pub const MSG_HIT: u8 = 6; // server -> client: you got hit
 pub const MSG_DISCONNECT: u8 = 7; // client -> server: leaving
 pub const MSG_MAZE: u8 = 8; // server -> client: maze layout
@@ -18,6 +17,7 @@ pub const MSG_WORLD_CHANGE: u8 = 9; // server -> client: bi-directional world tr
 
 // client -> server: active weapon changed (UTF‑8 name length + bytes)
 pub const MSG_WEAPON_CHANGE: u8 = 33;
+pub const MSG_LOBBY_LEADER: u8 = 34; // server -> all: current lobby leader player id [MSG_LOBBY_LEADER][id:4] (0 = no leader)
 pub const MSG_ASSETS: u8 = 10; // server -> client: asset manifest per world
 pub const MSG_DISCOVER: u8 = 11; // client -> server: LAN discovery broadcast
 pub const MSG_WALL_BROKEN: u8 = 12; // client <-> server: breakable wall destroyed (x, y)
@@ -72,5 +72,3 @@ pub const FLAG_SLIDING: u8 = 1 << 5;
 // Event flags for the state message
 pub const EVT_JUMP_START: u8 = 1 << 0;
 pub const EVT_LANDED: u8 = 1 << 1;
-pub const EVT_SLIDE_START: u8 = 1 << 2;
-pub const EVT_SLIDE_END: u8 = 1 << 3;

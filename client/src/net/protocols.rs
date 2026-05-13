@@ -44,6 +44,7 @@ pub const MSG_SND_DEFUSE_STOP: u8 = 32; // client -> server: stop defusing bomb
 
 // when client switches active weapon; payload = [len:1][UTF8 name]
 pub const MSG_WEAPON_CHANGE: u8 = 33; // client -> server: notify active weapon
+pub const MSG_LOBBY_LEADER: u8 = 34; // server -> all: current lobby leader [MSG_LOBBY_LEADER][id:4]
 
 
 // bot bulshit

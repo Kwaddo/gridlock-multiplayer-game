@@ -25,7 +25,7 @@ const BTN_CLOSE_HOVER: Color = Color::new(0.18, 0.20, 0.32, 1.0);
 
 impl PlayingState {
     /// Modal lobby console UI. Blocks gameplay input while open.
-    pub(super) fn draw_lobby_console(&mut self, config: &mut crate::core::GameConfig) {
+    pub(super) fn draw_lobby_console(&mut self, config: &mut crate::core::GameConfig, player_id: u32) {
         use crate::ui::fonts::{measure_game_text, text_params};
 
         if self.current_world != WorldId::Lobby || !self.lobby_console_open {
@@ -139,6 +139,15 @@ impl PlayingState {
 
             if hovered && clicked {
                 self.pending_start_gamemode = *val;
+                if *val == MODE_GUN_GAME {
+                    // Default to 15 min when entering Gun Game so a time is always selected
+                    if config.match_time_override_secs.is_none() {
+                        config.match_time_override_secs = Some(900);
+                    }
+                } else {
+                    // Clear Gun Game time override so it doesn't leak into other modes
+                    config.match_time_override_secs = None;
+                }
                 if *val != MODE_GUN_GAME {
                     let mut red_count = 0usize;
                     let mut blue_count = 0usize;
@@ -572,6 +581,73 @@ impl PlayingState {
             }
         }
 
+        // ── time limit selector (Gun Game) ────────────────────────────────────
+        if self.pending_start_gamemode == MODE_GUN_GAME {
+            let tl_top = desc_y + 44.0;
+            let section_x = panel_x + 24.0;
+            let section_w = panel_w - 48.0;
+
+            draw_text_ex(
+                "TIME LIMIT",
+                section_x,
+                tl_top,
+                text_params(12, TEXT_DIM),
+            );
+
+            let btn_y = tl_top + 8.0;
+            let btn_h = 38.0;
+            let durations: [(&str, u32); 4] = [
+                ("10 MIN",    600),
+                ("15 MIN",    900),
+                ("30 MIN",    1800),
+                ("UNLIMITED", u16::MAX as u32),
+            ];
+            let btn_w = section_w / durations.len() as f32;
+
+            for (i, (label, secs)) in durations.iter().enumerate() {
+                let bx = section_x + i as f32 * btn_w;
+                let selected = config.match_time_override_secs == Some(*secs);
+                let hovered = mouse.0 >= bx
+                    && mouse.0 <= bx + btn_w
+                    && mouse.1 >= btn_y
+                    && mouse.1 <= btn_y + btn_h;
+
+                let bg = if selected {
+                    ACCENT_DIM
+                } else if hovered {
+                    Color::new(0.12, 0.14, 0.24, 1.0)
+                } else {
+                    Color::new(0.0, 0.0, 0.0, 0.0)
+                };
+                draw_rectangle(bx, btn_y, btn_w, btn_h, bg);
+                if selected {
+                    draw_rectangle(bx, btn_y + btn_h - 2.0, btn_w, 2.0, ACCENT);
+                }
+
+                let lc = if selected {
+                    WHITE
+                } else if hovered {
+                    TEXT_LABEL
+                } else {
+                    Color::new(0.42, 0.44, 0.56, 1.0)
+                };
+                let lw = measure_game_text(label, 15);
+                draw_text_ex(
+                    label,
+                    bx + (btn_w - lw) / 2.0,
+                    btn_y + 26.0,
+                    text_params(15, lc),
+                );
+
+                if hovered && clicked {
+                    config.match_time_override_secs = Some(*secs);
+                    config.hide_match_timer = false;
+                }
+            }
+
+            draw_rectangle(section_x, btn_y + btn_h, section_w, 1.0, SEP);
+        }
+
         // ── console feedback message ───────────────────────────────────────────
         if let Some(msg) = &self.lobby_console_message {
             let msg_y = panel_y + panel_h - 76.0;
@@ -593,37 +669,59 @@ impl PlayingState {
         let total_btn_w = start_btn_w + 12.0 + close_btn_w;
         let btn_start_x = panel_x + (panel_w - total_btn_w) / 2.0;
 
-        // Start Match — orange accent (matches login CONNECT button)
-        let s_hov = mouse.0 >= btn_start_x
-            && mouse.0 <= btn_start_x + start_btn_w
-            && mouse.1 >= btn_area_y
-            && mouse.1 <= btn_area_y + btn_h;
-        draw_rectangle(
-            btn_start_x,
-            btn_area_y,
-            start_btn_w,
-            btn_h,
-            if s_hov { ACCENT_HOVER } else { ACCENT },
-        );
-        let start_label = match self.pending_start_gamemode {
-            MODE_GUN_GAME => "START  GUN GAME",
-            MODE_TEAM_DEATHMATCH => "START  TEAM DEATHMATCH",
-            MODE_SEARCH_AND_DESTROY => "START  SEARCH & DESTROY",
-            _ => "START MATCH",
-        };
-        let slw = measure_game_text(start_label, 17);
-        draw_text_ex(
-            start_label,
-            btn_start_x + (start_btn_w - slw) / 2.0,
-            btn_area_y + 27.0,
-            text_params(17, Color::new(0.05, 0.05, 0.05, 1.0)),
-        );
-        if s_hov && clicked {
-            self.pending_start_request = true;
-            self.lobby_console_open = false;
-            set_cursor_grab(true);
-            show_mouse(false);
-            self.last_mouse_pos = mouse_position();
+        let is_leader = self.lobby_leader_id == Some(player_id);
+
+        if is_leader {
+            // Start Match — orange accent (matches login CONNECT button)
+            let s_hov = mouse.0 >= btn_start_x
+                && mouse.0 <= btn_start_x + start_btn_w
+                && mouse.1 >= btn_area_y
+                && mouse.1 <= btn_area_y + btn_h;
+            draw_rectangle(
+                btn_start_x,
+                btn_area_y,
+                start_btn_w,
+                btn_h,
+                if s_hov { ACCENT_HOVER } else { ACCENT },
+            );
+            let start_label = match self.pending_start_gamemode {
+                MODE_GUN_GAME => "START  GUN GAME",
+                MODE_TEAM_DEATHMATCH => "START  TEAM DEATHMATCH",
+                MODE_SEARCH_AND_DESTROY => "START  SEARCH & DESTROY",
+                _ => "START MATCH",
+            };
+            let slw = measure_game_text(start_label, 17);
+            draw_text_ex(
+                start_label,
+                btn_start_x + (start_btn_w - slw) / 2.0,
+                btn_area_y + 27.0,
+                text_params(17, Color::new(0.05, 0.05, 0.05, 1.0)),
+            );
+            if s_hov && clicked {
+                self.pending_start_request = true;
+                self.lobby_console_open = false;
+                set_cursor_grab(true);
+                show_mouse(false);
+                self.last_mouse_pos = mouse_position();
+            }
+        } else {
+            // Non-leader: show disabled "Waiting for host..." button
+            draw_rectangle(
+                btn_start_x,
+                btn_area_y,
+                start_btn_w,
+                btn_h,
+                Color::new(0.10, 0.11, 0.20, 1.0),
+            );
+            draw_rectangle_lines(btn_start_x, btn_area_y, start_btn_w, btn_h, 1.0, PANEL_BORDER);
+            let wait_label = "WAITING FOR HOST...";
+            let wlw = measure_game_text(wait_label, 17);
+            draw_text_ex(
+                wait_label,
+                btn_start_x + (start_btn_w - wlw) / 2.0,
+                btn_area_y + 27.0,
+                text_params(17, TEXT_DIM),
+            );
         }
 
         // Close — muted dark button
@@ -663,8 +761,6 @@ impl PlayingState {
             text_params(12, TEXT_DIM),
         );
 
-        // suppress unused warning (time buttons removed — duration is server-side now)
-        let _ = config;
     }
 
     /// Draws the in-world prompt for the lobby console ("[E] USE CONSOLE").

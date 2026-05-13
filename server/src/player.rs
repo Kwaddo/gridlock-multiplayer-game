@@ -1,4 +1,3 @@
-pub use std::net::SocketAddr;
 use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +53,6 @@ pub struct Player {
     pub kills: u32,
     pub deaths: u32,
     pub gun_level: u32,
-    pub socket_addr: SocketAddr,
     pub last_activity: Instant,
     pub death_time: Option<Instant>,
     pub world: WorldId, // where is this player right now? lobby, maze, etc
@@ -87,7 +85,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(id: u32, username: String, addr: SocketAddr) -> Player {
+    pub fn new(id: u32, username: String) -> Player {
         Player {
             id,
             username,
@@ -100,7 +98,6 @@ impl Player {
             kills: 0,
             deaths: 0,
             gun_level: 1,
-            socket_addr: addr,
             last_activity: Instant::now(),
             death_time: None,
             world: WorldId::Lobby, // start in the lobby by default

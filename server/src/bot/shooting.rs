@@ -15,6 +15,7 @@ pub struct BotShootingConfig {
     pub angular_offset: f32, // max angle offset in degrees for inaccuracy
     pub reaction_time: f32, // time in seconds before bot starts shooting after seeing target
     pub detection_range: Option<f32>, // override weapon range for target detection (None = use weapon range)
+    pub aim_threshold: f32, // max angular error before bot is allowed to fire
 }
 
 pub struct BotShootingState {
@@ -102,6 +103,29 @@ pub fn try_shoot(
             return None; // still reacting, can't shoot yet
         }
 
+        // gate fire on aim alignment — bot must actually be looking at the target, this is to guard against bot firing when target is not visually in sight
+        {
+            let dx = target.position.0 - bot.position.0;
+            let dy = target.position.1 - bot.position.1;
+            let dz = target.position.2 - bot.position.2;
+            let horiz = (dx * dx + dz * dz).sqrt();
+            let target_yaw = dz.atan2(dx);
+            let target_pitch = -(dy / horiz.max(0.001)).atan();
+
+            let yaw_err = {
+                let d = target_yaw - bot_state.current_yaw;
+                ((d + std::f32::consts::PI).rem_euclid(2.0 * std::f32::consts::PI)
+                    - std::f32::consts::PI).abs()
+            };
+            let pitch_err = (target_pitch - bot_state.current_pitch).abs();
+
+            if yaw_err > bot_state.shooting_config.aim_threshold
+                || pitch_err > bot_state.shooting_config.aim_threshold * 1.5
+            {
+                return None; // still tracking, not on target yet
+            }
+        }
+
         if bot_state.shooting.fire_rate > 0.0 {
             return None; // still cooling down, can't shoot
         }
@@ -126,11 +150,16 @@ pub fn try_shoot(
         let distance_penalty = (target_dist / max_range).clamp(0.0, 1.0);
         let accuracy_from_offset = (1.0 - bot_state.shooting_config.angular_offset * 1.8).clamp(0.05, 0.98);
         let hit_chance = (accuracy_from_offset - 0.35 * distance_penalty).clamp(0.05, 0.98);
-        let hit = rng.gen::<f32>() <= hit_chance;
+
+        // Roll each pellet independently so shotgun damage naturally falls off with distance.
+        let total_damage: u32 = (0..weapon_stats.pellet_count)
+            .filter(|_| rng.gen::<f32>() <= hit_chance)
+            .map(|_| weapon_stats.damage)
+            .sum();
 
         Some(ShotDecision {
             target_id: new_target,
-            damage: if hit { Some(weapon_stats.damage) } else { None },
+            damage: if total_damage > 0 { Some(total_damage) } else { None },
         })
 }
 

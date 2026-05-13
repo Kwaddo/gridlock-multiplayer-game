@@ -15,3 +15,10 @@ glam = "0.29"
 [profile.dev]
 opt-level = 2
 debug = 1
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

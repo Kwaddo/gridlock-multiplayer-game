@@ -24,6 +24,7 @@ use super::world_sync::sync_world;
 // `resolve_asset_path_for_quality`, which currently just uses it when
 // choosing between `Compressed`/`Full` folders; defaults to `High`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 enum ModelQuality {
     Low,
     Medium,
@@ -36,7 +37,21 @@ impl Default for ModelQuality {
     }
 }
 
+fn set_cwd_to_assets_root() {
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(|p| p.to_path_buf());
+        while let Some(d) = dir {
+            if d.join("assets").is_dir() {
+                let _ = std::env::set_current_dir(&d);
+                return;
+            }
+            dir = d.parent().map(|p| p.to_path_buf());
+        }
+    }
+}
+
 pub async fn run() {
+    set_cwd_to_assets_root();
     set_default_filter_mode(FilterMode::Nearest);
     gl_set_drawcall_buffer_capacity(200_000, 300_000);
 
@@ -61,7 +76,7 @@ pub async fn run() {
 
     // currently we always use high quality; eventually this could be
     // user-configurable via the settings screen.
-    let mut model_quality = ModelQuality::default();
+    let model_quality = ModelQuality::default();
 
     // connection heartbeat / last seen from server
     let mut last_server_contact: Option<Instant> = None;
@@ -84,6 +99,9 @@ pub async fn run() {
 
         match state {
             GameState::Login => {
+                if macroquad::input::is_key_pressed(macroquad::input::KeyCode::Escape) {
+                    state = GameState::Exit;
+                }
                 if let Some((s, name, id)) = login_screen.update() {
                     socket = Some(s);
                     username = name;
@@ -309,6 +327,10 @@ pub async fn run() {
                     }
                 }
 
+                if sync.returned_to_lobby {
+                    playing_state.weapons = WeaponInventory::from_loadout(&loadout);
+                }
+
                 if let Some(new_state) = playing_state.process_local_input(&config, maze.as_mut()) {
                     state = new_state;
                     if matches!(state, GameState::Paused) {
@@ -352,6 +374,10 @@ pub async fn run() {
                         merge_manifest_entries(&mut existing, entries);
                         save_cached_manifest(&asset_cache_key, &existing);
                     }
+                }
+
+                if sync.returned_to_lobby {
+                    playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
@@ -560,7 +586,7 @@ fn resolve_asset_entries_for_quality(
         .collect()
 }
 
-fn resolve_asset_path_for_quality(path: &str, model_quality: ModelQuality) -> String {
+fn resolve_asset_path_for_quality(path: &str, _model_quality: ModelQuality) -> String {
     // avoid allocating a normalized copy unless we know it's a player GLB file
     if !path.ends_with(".glb") || !path.starts_with("assets/models/player/") {
         return path.to_string();

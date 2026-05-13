@@ -3,8 +3,6 @@
     "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
     "fp_hands_pistol": "assets/models/hand/fps_pistol_animated.glb",
 
-    "fp_hands_knife": "assets/models/hand/knife_animated.glb",
-
     "pistol_shot": "assets/sounds/pew.ogg",
     "smg_shot": "assets/sounds/pew.ogg",
     "shotgun_shot": "assets/sounds/pew.ogg",
@@ -78,7 +76,10 @@
     "anim_walk_back": "assets/models/player/Walk_Back.glb",
     "anim_walk_forward": "assets/models/player/Walk_Forward.glb",
     "anim_walk_left": "assets/models/player/Walk_Left.glb",
-    "anim_walk_right": "assets/models/player/Walk_Right.glb"
+    "anim_walk_right": "assets/models/player/Walk_Right.glb",
+    "punch1": "assets/images/weapons/FPS Weapon Sprites/frames/punch1.png",
+    "punch2": "assets/images/weapons/FPS Weapon Sprites/frames/punch2.png",
+    "punch3": "assets/images/weapons/FPS Weapon Sprites/frames/punch3.png"
   },
   "lobby": {
     "floor_texture": "assets/images/textures/rocks.png"

@@ -1,4 +1,5 @@
 use std::{ collections::HashMap, net::{ SocketAddr, UdpSocket }, time::{ Duration, Instant } };
+use std::f32::consts::PI;
 use crate::{ bot::ai::{ self, BotState, BotBehavior }, physics::PhysicsConfig };
 use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
@@ -28,12 +29,9 @@ impl BotManager {
     }
     pub fn virtual_addr(index: u16) -> SocketAddr {
         // generate unique virtual SocketAddr for each bot based on index
-        SocketAddr::from(([127, 0, 0, 1], 50000 + index))
+        SocketAddr::from(([127, 0, 0, 1], (50000u32 + (index % 15000) as u32) as u16))
     }
 
-    pub fn is_bot(&self, addr: &SocketAddr) -> bool {
-        self.bot_states.contains_key(addr) || self.bot_addrs.contains(addr)
-    }
     pub fn bot_states_mut(&mut self) -> &mut HashMap<SocketAddr, BotState> {
         &mut self.bot_states
     }
@@ -48,7 +46,6 @@ impl BotManager {
 
         player.is_bot = true;
         player.is_silent = false;
-        player.socket_addr = addr;
         players.insert(addr, player);
 
         self.bot_states.insert(addr, bot_state);
@@ -57,11 +54,6 @@ impl BotManager {
         addr
     }
 
-    pub fn despawn_bot(&mut self, players: &mut HashMap<SocketAddr, Player>, addr: SocketAddr) {
-        players.remove(&addr);
-        self.bot_states.remove(&addr);
-        self.bot_addrs.retain(|&a| a != addr);
-    }
     pub fn despawn_all(&mut self, players: &mut HashMap<SocketAddr, Player>) {
         for addr in &self.bot_addrs {
             players.remove(addr);
@@ -110,7 +102,6 @@ impl BotManager {
             kills: 0,
             deaths: 0,
             gun_level: 1,
-            socket_addr: Self::virtual_addr(0), // spawn_bot will overwrite
             last_activity: Instant::now(),
             death_time: None,
             world: WorldId::Maze,
@@ -152,6 +143,7 @@ impl BotManager {
                 angular_offset: runtime.aim_offset_mult,
                 reaction_time: runtime.reaction_time_mult,
                 detection_range: Some(pers.range_max),
+                aim_threshold: (runtime.aim_offset_mult * 0.5).clamp(0.03, 0.20), // around 1.7 for nightmare to 11 degrees for recruit
             },
             target_id: None,
             reaction_timer: 0.0,
@@ -163,10 +155,12 @@ impl BotManager {
             behavior_decision_timer: 0.0,
             stuck_timer: 0.0,
             idle_look_timer: 0.0,
+            current_yaw: 0.0,
+            current_pitch: 0.0,
         };
 
         let addr = self.spawn_bot(players, bot_player, bot_state);
-        println!("Spawned bot '{}' ({:?}) on {:?} with {}", pers.name, diff, team, weapon_override);
+        log!("Spawned bot '{}' ({:?}) on {:?} with {}", pers.name, diff, team, weapon_override);
         addr
     }
 
@@ -275,15 +269,36 @@ impl BotManager {
                         state.movement.velocity.z = 0.0;
                         continue;
                     }
-                    let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height));
+                    let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height, m.props.as_slice()));
                     ai::tick_bot(bot, state, dt, &PhysicsConfig::default(), maze_cells);
                     if let Some(target_pos) = target_pos {
                         // remember last known enemy position for investigation behavior
                         state.last_known_enemy_pos = Some(target_pos);
                         let dx = target_pos.0 - bot.position.0;
+                        let dy = target_pos.1 - bot.position.1;
                         let dz = target_pos.2 - bot.position.2;
-                        if dx * dx + dz * dz > 0.0001 {
-                            bot.yaw = dz.atan2(dx);
+                        let horiz_dist = (dx * dx + dz * dz).sqrt(); // for FOV and yaw calculations
+                        if horiz_dist > 0.01 {
+                            let target_yaw = dz.atan2(dx); // atan2 is a method that returns the angle between the positive x-axis and the point (dx, dz)
+                            let target_pitch = -(dy / horiz_dist.max(0.001)).atan(); // negative because in most FPS coordinate systems, looking up is negative pitch
+                            
+                            // Smoothly rotate towards target based on personality turn_rate
+                            let turn_rate = state.personality.base_turn_rate * personality::difficulty_mods(state.difficulty).turn_rate_mult;
+                            
+                            // lerp yaw
+                            let yaw_diff = {
+                                let d = target_yaw - state.current_yaw;
+                                ((d + PI).rem_euclid(2.0 * PI)) - PI // shortest angle difference
+                            };
+
+                            let max_turn = turn_rate * dt;
+                            state.current_yaw += yaw_diff.clamp(-max_turn, max_turn);
+
+                            let pitch_diff = target_pitch - state.current_pitch;
+                            state.current_pitch += pitch_diff.clamp(-max_turn * 0.6, max_turn * 0.6);
+
+                            bot.yaw = state.current_yaw;
+                            bot.pitch = state.current_pitch;
                         }
                     }
                 }
@@ -343,11 +358,11 @@ impl BotManager {
             shot_msg.extend_from_slice(&victim_pos.0.to_be_bytes());
             shot_msg.extend_from_slice(&(victim_pos.1 + 1.0).to_be_bytes());
             shot_msg.extend_from_slice(&victim_pos.2.to_be_bytes());
-            for p in players.values() {
+            for (addr, p) in players.iter() {
                 if p.is_bot {
                     continue;
                 }
-                let _ = socket.send_to(&shot_msg, p.socket_addr);
+                let _ = socket.send_to(&shot_msg, *addr);
             }
 
             if let Some(damage) = damage_opt {

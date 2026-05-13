@@ -1,30 +1,25 @@
 use super::{ CrosshairStyle, FireMode, WeaponStats };
 
-/// Knife — fast melee weapon, no ammo, no reload.
-/// Left click = quick slash (cycles 3 swings), right click = heavy stab (one-shot).
-/// All gun-specific fields (bullet, tracer, spread, etc.) are zeroed out since
-/// melee doesn't use the hitscan/projectile pipeline.
+/// Punch — dedicated melee action, no ammo, no reload.
+/// Bound to a dedicated key (default G). Fires instantly and auto-returns to gun.
+/// All gun-specific fields are zeroed since melee doesn't use the hitscan pipeline.
 
-pub const KNIFE_LIGHT_DAMAGE: f32 = 40.0;
-pub const KNIFE_HEAVY_DAMAGE: f32 = 80.0;
+pub const PUNCH_DAMAGE: f32 = 43.75; // 35% of base player HP (125)
 pub const KNIFE_MISS_PENALTY_SECS: f32 = 0.25;
 pub const KNIFE_MISS_MOVE_SLOW: f32 = 0.6;
 pub const KNIFE_MISS_MOVE_SLOW_DURATION: f32 = 0.5;
 pub const KNIFE_SPEED_BONUS: f32 = 1.15;
 pub const KNIFE_SWITCH_TO_TIME: f32 = 0.15;
 pub const KNIFE_SWITCH_FROM_TIME: f32 = 0.40;
-pub const KNIFE_LIGHT_ANIM_DURATION: f32 = 0.66;
-pub const KNIFE_HEAVY_ANIM_DURATION: f32 = 0.69;
-pub const BACKSTAB_CONE_DOT: f32 = 0.5;  // 0.5 cos(60) = 120 degree total cone
-// pub const BACKSTAB_CONE_DOT: f32 = 0.0;  // 90 degrees
+pub const KNIFE_LIGHT_ANIM_DURATION: f32 = 0.35;
 
 
 pub const KNIFE: WeaponStats = WeaponStats {
-    name: "Knife",
+    name: "Punch",
     fire_mode: FireMode::SemiAuto,
 
-    // --- Damage (light slash — heavy stab is handled separately in simulation)
-    damage: 40.0,
+    // --- Damage (35% of base HP — no heavy attack)
+    damage: 43.75,
     headshot_mult: 1.0, // melee doesn't headshot
     pellet_count: 1,
     pellet_spread: None,
@@ -82,15 +77,13 @@ pub const KNIFE: WeaponStats = WeaponStats {
     icon_height: 40.0,
     icon_flip_x: false,
 
-    // --- Viewmodel: knife replaces hands entirely (drawn as fp_hands_knife)
-    // viewmodel_model is None because the knife isn't drawn as a separate weapon
-    // on top of hands — it IS the hands model.
-    viewmodel_model: Some("fp_hands_knife"),
-    viewmodel_asset_key: None,
+    // Punch uses 2D sprite frames (punch1/punch2/punch3 cycled by viewmodel renderer).
+    // No 3D model — the frame is selected based on knife_attack_lock_timer in draw_viewmodel.
+    viewmodel_model: None,
+    viewmodel_asset_key: Some("punch1"),
 
-    // draw_3d_viewmodel multiplies by 28.0; this keeps knife close to previous size.
-    viewmodel_scale: 0.0035,
-    viewmodel_ads_scale: 0.0035,
+    viewmodel_scale: 1.0,
+    viewmodel_ads_scale: 1.0,
     viewmodel_position: (0.345, 0.1, -0.37),
     viewmodel_rotation: (-0.15, 0.0, 0.0),
     viewmodel_muzzle_offset: (0.0, 0.0, 0.0),
