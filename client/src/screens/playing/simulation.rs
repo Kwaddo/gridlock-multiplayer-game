@@ -88,6 +88,31 @@ const SLIDE_CLIP_START_SEC: f32 = 0.0;
 const SLIDE_CLIP_END_SEC: f32 = 30.0 / 30.0; // frame 0..30 at 30 FPS
 
 impl PlayingState {
+    /// Player animations something is drawing now: other players, practice
+    /// bots, and our own corpse during the death camera. Only these need
+    /// skinning; their joints also drive those players' hitboxes.
+    fn player_anims_in_use(&self) -> std::collections::HashSet<&'static str> {
+        let skins = self
+            .other_players
+            .iter()
+            .map(|p| p.skin_type)
+            .chain(self.practice_bots.iter().map(|b| b.player.skin_type));
+        let mut keys: std::collections::HashSet<&'static str> = skins
+            .filter_map(|skin| skin.model_key())
+            .map(|key| if self.animated_models.contains_key(key) { key } else { "anim_rifle_idle" })
+            .collect();
+        // Players drawn with a missing model fall back to the idle clip.
+        keys.insert("anim_rifle_idle");
+        if !matches!(self.death_camera_phase, super::state::DeathCameraPhase::None) {
+            keys.extend(
+                [PlayerSkin::StandDeath, PlayerSkin::CrouchDeath, PlayerSkin::ProneDeath]
+                    .into_iter()
+                    .filter_map(|skin| skin.model_key()),
+            );
+        }
+        keys
+    }
+
     fn preferred_hands_key_for_weapon(id: WeaponId) -> &'static str {
         if id == WeaponId::Minigun {
             return "fp_hands_minigun";
@@ -223,9 +248,12 @@ impl PlayingState {
             for p in &mut self.other_players {
                 p.update(delta);
             }
+            let in_use = self.player_anims_in_use();
             for (key, model) in self.animated_models.iter_mut() {
-                if key.starts_with("anim_") {
+                if in_use.contains(key.as_str()) {
                     model.update(delta);
+                } else if key.starts_with("anim_") {
+                    model.advance(delta);
                 }
             }
             for bot in &mut self.practice_bots {
@@ -510,7 +538,14 @@ impl PlayingState {
             }
         };
 
+        let in_use = self.player_anims_in_use();
         for (key, model) in self.animated_models.iter_mut() {
+            // Player animations nobody shows right now only keep time (skinning
+            // all of them was most of the frame).
+            if key.starts_with("anim_") && !in_use.contains(key.as_str()) {
+                model.advance(delta);
+                continue;
+            }
             let should_update = if key.starts_with("anim_") {
                 true
             } else if key == "fp_hands_sawnoff" {
