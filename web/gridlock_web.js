@@ -141,8 +141,10 @@
                         if (resp.status === 410 || resp.status === 403 || resp.status === 404) return this.shutdown();
                         if (resp.ok) {
                             for (const msg of await resp.json()) {
-                                if (this.closed || seen.has(msg.id)) continue;
-                                seen.add(msg.id);
+                                // Messages carry ids (repeated until they expire);
+                                // a registry without ids sends each one once.
+                                if (this.closed || (msg.id !== undefined && seen.has(msg.id))) continue;
+                                if (msg.id !== undefined) seen.add(msg.id);
                                 this.onSignal(msg);
                             }
                         }
