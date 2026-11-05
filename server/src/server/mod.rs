@@ -56,6 +56,9 @@ pub struct Server {
     last_tick: Instant,
     // Regen fires at most once per second to avoid per-packet health spikes
     last_regen_tick: Instant,
+    last_state_broadcast: Option<Instant>,
+    /// Player count at the last state broadcast: a join or leave sends at once.
+    last_broadcast_players: usize,
 }
 
 impl Server {
@@ -82,6 +85,8 @@ impl Server {
             autofill_diff_mask: 0b11111,
             last_tick: Instant::now(),
             last_regen_tick: Instant::now(),
+            last_state_broadcast: None,
+            last_broadcast_players: 0,
         }
     }
 
@@ -441,7 +446,20 @@ impl Server {
             game::process_lobby_regen(&mut self.players);
             self.last_regen_tick = Instant::now();
         }
-        broadcast::broadcast_state(&self.outbox, &self.players);
+        let due = self
+            .last_state_broadcast
+            .map_or(true, |t| t.elapsed() >= game::STATE_BROADCAST_INTERVAL);
+        if due || self.players.len() != self.last_broadcast_players {
+            self.last_state_broadcast = Some(Instant::now());
+            self.last_broadcast_players = self.players.len();
+            broadcast::broadcast_state(&self.outbox, &self.players);
+            // One-shot movement events have now gone out; they stay set until
+            // then, however many position updates arrive in between.
+            for player in self.players.values_mut() {
+                player.evt_jump_start = false;
+                player.evt_landed = false;
+            }
+        }
 
         if game::cleanup_inactive_players(&mut self.players) {
             // players were removed — broadcast so other clients drop their characters
