@@ -104,7 +104,12 @@ jobs:
       - name: Build the browser version
         env:
           GRIDLOCK_MODELS_URL: ${{ env.REGISTRY_URL }}/models
-        run: ./build_web.sh
+        run: |
+          ./build_web.sh
+          # Name the build in the page, so the last step can tell when this
+          # deploy (not an earlier one) is the one being served.
+          sed -i "s#</head>#    <meta name=\"gridlock-build\" content=\"$GITHUB_SHA\">\n</head>#" dist/web/index.html
+          grep -q "content=\"$GITHUB_SHA\"" dist/web/index.html
 
       - name: Publish to gridlock-web
         env:
@@ -129,10 +134,13 @@ jobs:
 
       - name: Wait until the site serves this build
         run: |
-          want=$(sha256sum dist/web/gridlock.wasm | cut -d' ' -f1)
+          # The page carries this commit (see the build step); Dilmune swaps the
+          # whole site at once, so once the page has it, every file is live.
           for i in $(seq 1 60); do
-            got=$(curl -sf "$SITE_URL/gridlock.wasm?ci=$GITHUB_RUN_ID-$i" | sha256sum | cut -d' ' -f1)
-            if [ "$got" = "$want" ]; then echo "Live at $SITE_URL"; exit 0; fi
+            if curl -sf "$SITE_URL/?ci=$GITHUB_RUN_ID-$i" | grep -q "content=\"$GITHUB_SHA\""; then
+              echo "Live at $SITE_URL"
+              exit 0
+            fi
             sleep 10
           done
           echo "the site still serves an older build after 10 minutes" >&2
