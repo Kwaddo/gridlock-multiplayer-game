@@ -87,6 +87,9 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.DCS_S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.DCS_S3_SECRET_ACCESS_KEY }}
           AWS_REGION: auto
+          # Dilmune's S3 does not understand the CLI's aws-chunked checksums.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
           # Everything but the models, which the page loads from the registry.
           aws s3 sync "s3://$ASSETS_BUCKET/" client/assets/ --endpoint-url "$S3_ENDPOINT" \

@@ -2,13 +2,85 @@ use client::screens::PlayingState;
 use client::types::animated_model::{
     load_gltf_animated_model, load_gltf_animated_model_with_unskinned,
 };
+use macroquad::experimental::coroutines::{start_coroutine, Coroutine};
 use macroquad::prelude::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use super::obj_loader::{
     load_gltf_static_mesh, load_gltf_static_mesh_lit, load_obj_mesh_with_materials,
 };
+
+/// How many assets [`Prefetcher`] downloads ahead of the one being loaded.
+pub const PREFETCH_AHEAD: usize = 4;
+
+thread_local! {
+    /// Bytes [`Prefetcher`] downloaded, by resolved path, until the loader takes them.
+    static PREFETCHED: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
+}
+
+/// Downloads assets in the background (macroquad coroutines), so the loading
+/// screen keeps drawing, and a game hosted in this tab keeps answering
+/// players, while a large model downloads. Only files read as raw bytes
+/// (models and sounds) go through it; textures and OBJs are small.
+#[derive(Default)]
+pub struct Prefetcher {
+    pending: HashMap<String, Coroutine<Result<Vec<u8>, String>>>,
+}
+
+impl Prefetcher {
+    /// Start downloading `path` unless it is already on its way.
+    pub fn start(&mut self, path: &str) {
+        let resolved = resolve_runtime_asset_path(path);
+        if !reads_bytes(&resolved) || self.pending.contains_key(&resolved) {
+            return;
+        }
+        let file = resolved.clone();
+        let download = start_coroutine(async move { load_file(&file).await.map_err(|e| format!("{e:?}")) });
+        self.pending.insert(resolved, download);
+    }
+
+    /// Whether `path` can be loaded now without waiting on the network.
+    /// Starts its download if nothing has yet.
+    pub fn ready(&mut self, path: &str) -> bool {
+        let resolved = resolve_runtime_asset_path(path);
+        if !reads_bytes(&resolved) {
+            return true;
+        }
+        self.start(path);
+        let download = &self.pending[&resolved];
+        if !download.is_done() {
+            return false;
+        }
+        // On failure the loader tries again itself and reports the error.
+        if let Some(Ok(bytes)) = download.retrieve() {
+            PREFETCHED.with(|p| p.borrow_mut().insert(resolved.clone(), bytes));
+        }
+        self.pending.remove(&resolved);
+        true
+    }
+
+    /// Forget downloads in flight and anything not yet taken.
+    pub fn clear(&mut self) {
+        self.pending.clear();
+        PREFETCHED.with(|p| p.borrow_mut().clear());
+    }
+}
+
+fn reads_bytes(resolved_path: &str) -> bool {
+    let lower = resolved_path.to_lowercase();
+    [".glb", ".gltf", ".ogg", ".wav", ".mp3"].iter().any(|ext| lower.ends_with(ext))
+}
+
+/// The file's bytes: downloaded already by [`Prefetcher`], or read now.
+async fn read_bytes(resolved_path: &str) -> Result<Vec<u8>, String> {
+    if let Some(bytes) = PREFETCHED.with(|p| p.borrow_mut().remove(resolved_path)) {
+        return Ok(bytes);
+    }
+    load_file(resolved_path).await.map_err(|e| format!("{e:?}"))
+}
 
 pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut PlayingState) {
     // try to resolve the path relative to client/ or server/ if needed; the
@@ -49,7 +121,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                 );
             }
             Err(e) => {
-                println!(
+                warn!(
                     "Failed to load model {} from {}: {:?}",
                     key_string, path_string, e
                 );
@@ -62,10 +134,10 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
         let keep_unskinned_primitives = key == "fp_hands_sawnoff"
             || key == "fp_hands_minigun";
         // Read once; works from disk natively and over HTTP in the browser.
-        let bytes = match load_file(&resolved_path).await {
+        let bytes = match read_bytes(&resolved_path).await {
             Ok(bytes) => bytes,
             Err(e) => {
-                println!("Failed to read {} from {}: {:?}", key_string, path_string, e);
+                warn!("Failed to read {} from {}: {}", key_string, path_string, e);
                 return;
             }
         };
@@ -161,7 +233,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                         );
                     }
                     Err(static_err) => {
-                        println!(
+                        warn!(
                             "Failed GLTF load {} from {}. animated_err={:?} static_err={:?}",
                             key_string, path_string, anim_err, static_err
                         );
@@ -170,10 +242,10 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     } else if is_sound {
-        match load_file(&resolved_path).await.map_err(|e| format!("{e:?}")) {
+        match read_bytes(&resolved_path).await {
             Ok(bytes) => {
                 if let Err(e) = playing_state.audio.insert(key_string.clone(), bytes).await {
-                    println!("Failed to decode sound {} from {}: {}", key_string, path_string, e);
+                    warn!("Failed to decode sound {} from {}: {}", key_string, path_string, e);
                     return;
                 }
                 playing_state
@@ -182,7 +254,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                 println!("Loaded sound bytes: {} from {}", key_string, path_string);
             }
             Err(e) => {
-                println!(
+                warn!(
                     "Failed to load sound bytes {} from {}: {:?}",
                     key_string, path_string, e
                 );
@@ -199,7 +271,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                 println!("Loaded texture: {} from {}", key_string, path_string);
             }
             Err(e) => {
-                println!(
+                warn!(
                     "Failed to load texture {} from {}: {:?}",
                     key_string, path_string, e
                 );

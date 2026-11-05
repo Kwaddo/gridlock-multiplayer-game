@@ -16,7 +16,7 @@ use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
 use super::asset_cache::{ load_cached_manifest, save_cached_manifest };
-use super::asset_loader::load_asset_entry;
+use super::asset_loader::{ load_asset_entry, Prefetcher, PREFETCH_AHEAD };
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
 
@@ -92,6 +92,7 @@ pub async fn run() {
     let mut loading_current: String = String::new();
     let mut loading_stable_frames: u8 = 0;
     let mut loading_started: bool = false;
+    let mut prefetcher = Prefetcher::default();
 
     loop {
         if config.bind_fullscreen.is_pressed() {
@@ -122,6 +123,7 @@ pub async fn run() {
                     loading_current.clear();
                     loading_stable_frames = 0;
                     loading_started = !loading_assets.is_empty();
+                    prefetcher.clear();
                     state = GameState::Loading;
                 }
                 login_screen.draw();
@@ -189,8 +191,12 @@ pub async fn run() {
                 }
 
                 if let Some(entries) = sync.assets {
+                    // Queue them for the loop below, which loads one per frame,
+                    // so the screen keeps drawing while they download.
                     for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
-                        load_asset_entry(&key, &path, &mut playing_state).await;
+                        if !loading_assets.iter().any(|(k, p)| *k == key && *p == path) {
+                            loading_assets.push((key, path));
+                        }
                     }
                     if !asset_cache_key.is_empty() {
                         let mut existing = load_cached_manifest(&asset_cache_key);
@@ -210,10 +216,18 @@ pub async fn run() {
                 }
 
                 if loading_started && loading_index < loading_assets.len() {
-                    let (ref key, ref path) = loading_assets[loading_index];
+                    // Download a few ahead in the background; load the next
+                    // one only once its bytes are here, so no frame waits on
+                    // the network.
+                    for (_, path) in loading_assets.iter().skip(loading_index).take(PREFETCH_AHEAD) {
+                        prefetcher.start(path);
+                    }
+                    let (key, path) = loading_assets[loading_index].clone();
                     loading_current = key.clone();
-                    load_asset_entry(key, path, &mut playing_state).await;
-                    loading_index += 1;
+                    if prefetcher.ready(&path) {
+                        load_asset_entry(&key, &path, &mut playing_state).await;
+                        loading_index += 1;
+                    }
                 }
 
                 if loading_started && loading_index >= loading_assets.len() {
