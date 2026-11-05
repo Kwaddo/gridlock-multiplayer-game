@@ -1,6 +1,7 @@
 use crate::weapons::combat::HitZone;
 
 use macroquad::prelude::*;
+use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
 use macroquad::window::get_internal_gl;
 
 use super::super::PlayingState;
@@ -57,32 +58,21 @@ impl PlayingState {
                     * Mat4::from_scale(vec3(s, s, s));
                 let gl = unsafe { get_internal_gl() };
                 gl.quad_gl.push_model_matrix(transform);
-                // Tint model by player color when a skin texture isn't used.
-                // Clone vertices and modulate vertex colors by `p.color` so
-                // textured and untextured meshes both receive the tint.
+                // Tint model by player color when a skin texture isn't used, on
+                // the GPU, so textured and untextured meshes both receive it
+                // without copying the whole mesh every frame.
+                let tinted = p.color != WHITE;
+                if tinted {
+                    TINT_MATERIAL.with(|material| {
+                        material.set_uniform("Tint", [p.color.r, p.color.g, p.color.b, 1.0f32]);
+                        gl_use_material(material);
+                    });
+                }
                 for base_mesh in anim.meshes() {
-                    if p.color != WHITE {
-                        let mut verts = base_mesh.vertices.clone();
-                        for v in &mut verts {
-                            // v.color is [u8;4] in macroquad Vertex
-                            let r = (v.color[0] as f32 / 255.0) * p.color.r;
-                            let g = (v.color[1] as f32 / 255.0) * p.color.g;
-                            let b = (v.color[2] as f32 / 255.0) * p.color.b;
-                            let a = v.color[3];
-                            v.color[0] = (r.clamp(0.0, 1.0) * 255.0) as u8;
-                            v.color[1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
-                            v.color[2] = (b.clamp(0.0, 1.0) * 255.0) as u8;
-                            v.color[3] = a;
-                        }
-                        let temp = macroquad::models::Mesh {
-                            vertices: verts,
-                            indices: base_mesh.indices.clone(),
-                            texture: base_mesh.texture.clone(),
-                        };
-                        draw_mesh(&temp);
-                    } else {
-                        draw_mesh(base_mesh);
-                    }
+                    draw_mesh(base_mesh);
+                }
+                if tinted {
+                    gl_use_default_material();
                 }
                 gl.quad_gl.pop_model_matrix();
 
@@ -388,3 +378,55 @@ impl PlayingState {
         }
     }
 }
+
+thread_local! {
+    /// macroquad's default mesh shader times a `Tint` colour, with its 3D
+    /// depth and blending settings.
+    static TINT_MATERIAL: Material = load_material(
+        ShaderSource::Glsl { vertex: TINT_VERTEX, fragment: TINT_FRAGMENT },
+        MaterialParams {
+            uniforms: vec![UniformDesc::new("Tint", UniformType::Float4)],
+            pipeline_params: PipelineParams {
+                depth_write: true,
+                depth_test: Comparison::LessOrEqual,
+                color_blend: Some(BlendState::new(
+                    Equation::Add,
+                    BlendFactor::Value(BlendValue::SourceAlpha),
+                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .expect("player tint shader failed to compile");
+}
+
+const TINT_VERTEX: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+attribute vec4 normal;
+
+varying lowp vec2 uv;
+varying lowp vec4 color;
+
+uniform mat4 Model;
+uniform mat4 Projection;
+
+void main() {
+    gl_Position = Projection * Model * vec4(position, 1);
+    color = color0 / 255.0;
+    uv = texcoord;
+}"#;
+
+const TINT_FRAGMENT: &str = r#"#version 100
+varying lowp vec4 color;
+varying lowp vec2 uv;
+
+uniform sampler2D Texture;
+uniform lowp vec4 Tint;
+
+void main() {
+    gl_FragColor = color * texture2D(Texture, uv) * Tint;
+}"#;

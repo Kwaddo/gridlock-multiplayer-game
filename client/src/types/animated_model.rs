@@ -115,7 +115,19 @@ impl AnimatedModel {
         self.parts.iter().map(|p| p.mesh.vertices.len()).sum()
     }
 
+    /// Advance the clip and re-skin it (at most ~30 times a second).
     pub fn update(&mut self, dt: f32) {
+        self.advance(dt);
+        if self.skin_accum >= SKIN_INTERVAL {
+            self.skin_accum = 0.0;
+            self.skin();
+        }
+    }
+
+    /// Advance the clip's clock without re-skinning: cheap, for a model nobody
+    /// is drawing right now. The next `update` re-skins it at once.
+    pub fn advance(&mut self, dt: f32) {
+        self.skin_accum += dt;
         if self.duration > 0.0 && !self.playback_paused {
             let start = self.playback_start.clamp(0.0, self.duration);
             let end = self.playback_end.clamp(start, self.duration);
@@ -142,14 +154,10 @@ impl AnimatedModel {
                 }
             }
         }
+    }
 
-        // Only reskin vertices at ~30fps to save CPU
-        self.skin_accum += dt;
-        if self.skin_accum < SKIN_INTERVAL {
-            return;
-        }
-        self.skin_accum = 0.0;
-
+    /// Pose the skeleton at the current time and skin the mesh on the CPU.
+    fn skin(&mut self) {
         for (i, pose) in self.node_pose.iter_mut().enumerate() {
             let mut p = self.node_rest[i];
             if let Some(track) = &self.node_tracks[i].translation {
@@ -214,7 +222,8 @@ impl AnimatedModel {
 
         // Rigid (unskinned) primitives still follow node animation transforms.
         for part_idx in 0..self.parts.len() {
-            let rigid_vertices = self.parts[part_idx].rigid_vertices.clone();
+            // Taken out for the loop (global_for_node borrows self), put back after.
+            let rigid_vertices = std::mem::take(&mut self.parts[part_idx].rigid_vertices);
             let skinned_vertex_count = self.parts[part_idx].skinned_vertex_count;
             for (i, vtx) in rigid_vertices.iter().enumerate() {
                 let out_idx = skinned_vertex_count + i;
@@ -229,6 +238,7 @@ impl AnimatedModel {
                 self.parts[part_idx].mesh.vertices[out_idx].position = out_p;
                 self.parts[part_idx].mesh.vertices[out_idx].normal = out_n.extend(0.0);
             }
+            self.parts[part_idx].rigid_vertices = rigid_vertices;
         }
     }
 
