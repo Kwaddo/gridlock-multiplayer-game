@@ -97,6 +97,34 @@ pub async fn run() {
     let mut viewmodels_queued = false;
 
     loop {
+        // In a hidden browser tab these frames come from a background timer
+        // (web/gridlock_web.js) and only keep the game going: step a game we
+        // host, take in what the server sent, send keepalives. Nothing is
+        // simulated or drawn. (Asset lists only arrive while loading, which
+        // still runs in full.)
+        if platform::page_hidden() && session.is_some() && !matches!(state, GameState::Loading) {
+            let sync = sync_world(link_of(&mut session), player_id, &username, &mut playing_state, &mut maze);
+            if sync.removed_by_server {
+                session = None;
+                login_screen.returned_with("Timed out / disconnected by server.");
+                state = GameState::Login;
+                last_server_contact = None;
+                continue;
+            }
+            if sync.server_seen {
+                last_server_contact = Some(Instant::now());
+            }
+            if let Some(host) = session.as_mut().and_then(|s| s.host.as_mut()) {
+                host.update();
+            }
+            if last_keepalive.map_or(true, |t| t.elapsed() > Duration::from_secs(4)) {
+                playing_state.send_network(link_of(&mut session), &config);
+                last_keepalive = Some(Instant::now());
+            }
+            next_frame().await;
+            continue;
+        }
+
         if config.bind_fullscreen.is_pressed() {
             is_fullscreen = !is_fullscreen;
             set_fullscreen(is_fullscreen);
