@@ -69,6 +69,13 @@ impl LoginScreen {
         draw_rectangle(lx, ly, lw, 2.0, ACCENT);
     }
 
+    /// A quiet note in the corner while models download in the background.
+    pub fn draw_preload(&self, done: u32, total: u32) {
+        let text = format!("Downloading game assets {done} / {total}");
+        let w = measure_game_text(&text, 13);
+        draw_text_ex(&text, screen_width() - w - 16.0, screen_height() - 16.0, text_params(13, TEXT_DIM));
+    }
+
     /// `download` is how far the asset being waited on has downloaded, as
     /// (received, total) bytes, when that is known.
     pub fn draw_loading(

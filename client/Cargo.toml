@@ -13,6 +13,8 @@ transport = { path = "../transport" }
 server = { path = "../server" }
 platform = { path = "../platform" }
 gltf = { version = "1.4", features = ["KHR_materials_pbrSpecularGlossiness"] }
+# The version gltf uses, for decoding its embedded textures ourselves.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 glam = "0.29"
 
 # Native only: audio through rodio, and online play (host list over HTTP,

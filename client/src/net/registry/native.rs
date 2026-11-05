@@ -120,13 +120,17 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
                 created
             }
             Some(created) => {
-                let alive = agent
+                let beat = agent
                     .put(&format!("{base}/servers/{}", created.id))
                     .header("Authorization", &format!("Bearer {}", created.token))
-                    .send_json(heartbeat_body(players()))
-                    .is_ok();
-                // A failed heartbeat (registry restarted, listing expired) re-registers.
-                alive.then_some(created)
+                    .send_json(heartbeat_body(players()));
+                // Only a 404 means the listing is gone (it expired, or the
+                // registry lost it): register again. Other failures keep it and
+                // retry, so a passing error never lists the game twice.
+                match beat {
+                    Err(ureq::Error::StatusCode(404)) => None,
+                    _ => Some(created),
+                }
             }
         };
         let wait = if listed.is_some() { HEARTBEAT_SECS } else { RETRY_SECS };

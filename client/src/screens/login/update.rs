@@ -83,9 +83,10 @@ impl LoginScreen {
 
     /// The server name to host under; defaults to "<username>'s game".
     pub(super) fn host_name(&self) -> String {
-        match self.server_name_input.trim() {
-            "" => format!("{}'s game", self.username_input.trim()),
-            name => name.to_string(),
+        match (self.server_name_input.trim(), self.username_input.trim()) {
+            ("", "") => "Gridlock game".to_string(),
+            ("", username) => format!("{username}'s game"),
+            (name, _) => name.to_string(),
         }
     }
 

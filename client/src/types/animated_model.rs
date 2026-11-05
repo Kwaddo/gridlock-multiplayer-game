@@ -344,40 +344,6 @@ fn sample_quat(track: &KeyframesQuat, t: f32) -> Quat {
     track.values[i0].slerp(track.values[i1], a)
 }
 
-fn gltf_image_to_rgba8(image: &gltf::image::Data) -> Result<Vec<u8>, String> {
-    use gltf::image::Format;
-
-    let pixels = &image.pixels;
-    let out = match image.format {
-        Format::R8G8B8A8 => pixels.clone(),
-        Format::R8G8B8 => {
-            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
-            for chunk in pixels.chunks_exact(3) {
-                out.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
-            }
-            out
-        }
-        Format::R8G8 => {
-            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
-            for chunk in pixels.chunks_exact(2) {
-                out.extend_from_slice(&[chunk[0], chunk[1], 0, 255]);
-            }
-            out
-        }
-        Format::R8 => {
-            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
-            for &v in pixels {
-                out.extend_from_slice(&[v, v, v, 255]);
-            }
-            out
-        }
-        other => {
-            return Err(format!("unsupported gltf image format: {:?}", other));
-        }
-    };
-    Ok(out)
-}
-
 /*
     this function is to hard lock specific gltf files to known-good animation clip indexes when a file has multiple clips.
     before implementing this we had a lot of animations where auto selection could pick an idle/t-pose/incorrect clip due to generic clip names,
@@ -720,21 +686,7 @@ Add one in animation_override_index_for_stem().",
             .material()
             .pbr_metallic_roughness()
             .base_color_texture()
-            .and_then(|base_color| {
-                let image_index = base_color.texture().source().index();
-                images.get(image_index)
-            })
-            .map(|image| {
-                let rgba = gltf_image_to_rgba8(image).ok()?;
-                if image.width <= u16::MAX as u32 && image.height <= u16::MAX as u32 {
-                    let tex = Texture2D::from_rgba8(image.width as u16, image.height as u16, &rgba);
-                    tex.set_filter(FilterMode::Nearest);
-                    Some(tex)
-                } else {
-                    None
-                }
-            })
-            .flatten();
+            .and_then(|base_color| images.texture(base_color.texture().source().index()));
 
         let f = sp.material().pbr_metallic_roughness().base_color_factor();
         let mat_color = [
@@ -836,21 +788,7 @@ Add one in animation_override_index_for_stem().",
             .material()
             .pbr_metallic_roughness()
             .base_color_texture()
-            .and_then(|base_color| {
-                let image_index = base_color.texture().source().index();
-                images.get(image_index)
-            })
-            .map(|image| {
-                let rgba = gltf_image_to_rgba8(image).ok()?;
-                if image.width <= u16::MAX as u32 && image.height <= u16::MAX as u32 {
-                    let tex = Texture2D::from_rgba8(image.width as u16, image.height as u16, &rgba);
-                    tex.set_filter(FilterMode::Nearest);
-                    Some(tex)
-                } else {
-                    None
-                }
-            })
-            .flatten();
+            .and_then(|base_color| images.texture(base_color.texture().source().index()));
 
         let f = rp.material().pbr_metallic_roughness().base_color_factor();
         let mat_color = [
@@ -1083,10 +1021,66 @@ Add one in animation_override_index_for_stem().",
 
 /// Parse a self-contained `.glb` from memory. The bytes are read up front with
 /// macroquad's `load_file`, which works on native builds and in the browser
-/// alike; `path` is only for error messages.
+/// alike; `path` is only for error messages. Images are left encoded until a
+/// mesh asks for one (see [`GlbImages`]).
 pub fn import_glb(
     path: &str,
     bytes: &[u8],
-) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, Vec<gltf::image::Data>), String> {
-    gltf::import_slice(bytes).map_err(|e| format!("failed to import gltf '{}': {e}", path))
+) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, GlbImages), String> {
+    let fail = |e: gltf::Error| format!("failed to import gltf '{}': {e}", path);
+    let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes).map_err(fail)?;
+    let buffers = gltf::import_buffers(&document, None, blob).map_err(fail)?;
+    // Only images stored in the binary chunk are supported; the game's GLBs
+    // embed all of theirs that way.
+    let encoded = document
+        .images()
+        .map(|image| match image.source() {
+            gltf::image::Source::View { view, .. } => {
+                let data = &buffers[view.buffer().index()];
+                data.get(view.offset()..view.offset() + view.length()).map(<[u8]>::to_vec)
+            }
+            gltf::image::Source::Uri { .. } => None,
+        })
+        .collect();
+    Ok((document, buffers, GlbImages { encoded }))
+}
+
+/// A GLB's embedded images (PNG or JPEG), decoded when a mesh uses one.
+/// Decoded textures are shared by content: the player's animation files each
+/// embed the same textures, and decoding and uploading those once instead of
+/// once per file saves most of the load time and GPU memory.
+pub struct GlbImages {
+    encoded: Vec<Option<Vec<u8>>>,
+}
+
+thread_local! {
+    /// Textures by a hash of their encoded bytes; `None` if one failed to decode.
+    static TEXTURES: std::cell::RefCell<HashMap<u64, Option<Texture2D>>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+impl GlbImages {
+    /// The image at `index` as a texture (nearest filtering), decoded at most
+    /// once per distinct image.
+    pub fn texture(&self, index: usize) -> Option<Texture2D> {
+        use std::hash::{Hash, Hasher};
+        let bytes = self.encoded.get(index)?.as_ref()?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        let key = hasher.finish();
+        TEXTURES.with(|textures| {
+            textures.borrow_mut().entry(key).or_insert_with(|| decode_texture(bytes)).clone()
+        })
+    }
+}
+
+fn decode_texture(bytes: &[u8]) -> Option<Texture2D> {
+    let image = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (width, height) = image.dimensions();
+    if width > u16::MAX as u32 || height > u16::MAX as u32 {
+        return None;
+    }
+    let texture = Texture2D::from_rgba8(width as u16, height as u16, &image);
+    texture.set_filter(FilterMode::Nearest);
+    Some(texture)
 }

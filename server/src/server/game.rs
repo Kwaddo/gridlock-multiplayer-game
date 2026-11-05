@@ -8,7 +8,9 @@ use crate::player::Player;
 use crate::player::WorldId;
 
 // configuration constants replicated from original main.rs
-pub const PLAYER_TIMEOUT: Duration = Duration::from_secs(30);
+// Clients send at least a keepalive every 4 s (client/src/app/runner.rs), so a
+// player silent this long is gone (e.g. a force-closed browser).
+pub const PLAYER_TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAZE_CELL_SIZE: f32 = 1.8;
 pub const MAZE_WIDTH: u8 = 35;
 pub const MAZE_HEIGHT: u8 = 35;
