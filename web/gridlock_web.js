@@ -27,6 +27,7 @@
     const POLL_CONNECTING_MS = 500;
     const POLL_IDLE_MS = 5000;
     const SEND_BATCH_MS = 50;
+    const DISCONNECT_GRACE_MS = 3000;
 
     const decoder = new TextDecoder();
     const sockets = new Map(); // handle -> RtcSocket
@@ -186,7 +187,16 @@
                 if (e.candidate) this.signal({ Signal: { receiver: remoteId, data: { candidate: e.candidate.toJSON() } } });
             };
             pc.onconnectionstatechange = () => {
-                if (pc.connectionState === "failed" || pc.connectionState === "closed") this.drop(id);
+                const state = pc.connectionState;
+                if (state === "failed" || state === "closed") this.drop(id);
+                // A closed or crashed browser shows up as "disconnected" within
+                // seconds, but "failed" only after ~30 s; brief network blips
+                // recover well within this grace.
+                if (state === "disconnected") {
+                    setTimeout(() => {
+                        if (pc.connectionState === "disconnected") this.drop(id);
+                    }, DISCONNECT_GRACE_MS);
+                }
             };
 
             if (offerer) {
@@ -323,10 +333,59 @@
     // Bytes received so far per model path, for the loading screen
     // (gridlock_download_received / gridlock_download_total).
     const downloads = new Map(); // path -> { received, total }
+    // One download per model at a time: the game asking for a model that is
+    // being preloaded waits for that download instead of starting another.
+    const inflight = new Map(); // path -> Promise<Uint8Array | null>
 
-    async function loadModel(path) {
+    function modelUrl(path) {
         const file = path.slice(MODELS_PREFIX.length).split("/").map(encodeURIComponent).join("/");
-        const url = MODELS_URL.replace(/\/$/, "") + "/" + file + "?v=" + (window.GRIDLOCK_MODELS_VERSION || "dev");
+        return MODELS_URL.replace(/\/$/, "") + "/" + file + "?v=" + (window.GRIDLOCK_MODELS_VERSION || "dev");
+    }
+
+    function loadModel(path) {
+        if (!inflight.has(path)) {
+            const download = fetchModel(path).finally(() => inflight.delete(path));
+            inflight.set(path, download);
+        }
+        return inflight.get(path);
+    }
+
+    // ---- preloading: from the title screen on, download the models the game
+    // will need into Cache Storage (gridlock_preload), so joining a game only
+    // reads them from disk. Stops starting new downloads once the game loads
+    // models itself, so the two do not compete for bandwidth.
+    const PRELOAD_PARALLEL = 3;
+    const preloadQueue = [];
+    let preloadActive = 0;
+    let preloadDone = 0;
+    let preloadTotal = 0;
+    let preloadPaused = false;
+
+    function pumpPreload() {
+        while (!preloadPaused && preloadActive < PRELOAD_PARALLEL && preloadQueue.length) {
+            const path = preloadQueue.shift();
+            preloadActive++;
+            preloadModel(path)
+                .catch(() => {})
+                .finally(() => {
+                    preloadActive--;
+                    preloadDone++;
+                    pumpPreload();
+                });
+        }
+    }
+
+    // Like loadModel, but a model already cached is not read back.
+    async function preloadModel(path) {
+        if (!inflight.has(path)) {
+            const cache = await openModelsCache();
+            if (cache && (await cache.match(modelUrl(path)))) return;
+        }
+        await loadModel(path);
+    }
+
+    async function fetchModel(path) {
+        const url = modelUrl(path);
         const cache = await openModelsCache();
         const cached = cache && (await cache.match(url));
         if (cached) {
@@ -402,6 +461,7 @@
                 const path = UTF8ToString(ptr, len);
                 if (!path.startsWith(MODELS_PREFIX)) return loadFromPage(ptr, len);
                 const id = FS.unique_id++;
+                preloadPaused = true;
                 loadModel(path)
                     .catch(() => null)
                     .then((bytes) => {
@@ -414,6 +474,19 @@
 
         // ---- client: download progress of one model, for the loading screen
         // (client/src/app/asset_loader.rs). -1 when it is not being downloaded.
+
+        env.gridlock_preload = function (ptr, len) {
+            const path = UTF8ToString(ptr, len);
+            if (!MODELS_URL || !path.startsWith(MODELS_PREFIX) || preloadQueue.includes(path)) return;
+            preloadQueue.push(path);
+            preloadTotal++;
+            pumpPreload();
+        };
+        // Preloaded models so far and in all, as two u32s at out_ptr.
+        env.gridlock_preload_status = function (outPtr) {
+            writeU32(outPtr, preloadDone);
+            writeU32(outPtr + 4, preloadTotal);
+        };
 
         env.gridlock_download_received = function (ptr, len) {
             return downloads.get(UTF8ToString(ptr, len))?.received ?? -1;
