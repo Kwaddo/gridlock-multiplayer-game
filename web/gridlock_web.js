@@ -13,7 +13,7 @@
 "use strict";
 
 (function () {
-    const PLUGIN_VERSION = 1;
+    const PLUGIN_VERSION = 2;
 
     // Event kinds shared with transport/src/web.rs.
     const EV_PEER_JOINED = 1;
@@ -320,21 +320,47 @@
         return modelsCache;
     }
 
+    // Bytes received so far per model path, for the loading screen
+    // (gridlock_download_received / gridlock_download_total).
+    const downloads = new Map(); // path -> { received, total }
+
     async function loadModel(path) {
         const file = path.slice(MODELS_PREFIX.length).split("/").map(encodeURIComponent).join("/");
         const url = MODELS_URL.replace(/\/$/, "") + "/" + file + "?v=" + (window.GRIDLOCK_MODELS_VERSION || "dev");
         const cache = await openModelsCache();
-        let resp = cache && (await cache.match(url));
-        if (!resp) {
-            resp = await fetch(url);
-            if (!resp.ok) return null;
-            if (cache) {
-                try {
-                    await cache.put(url, resp.clone());
-                } catch {} // quota full: still use this copy
-            }
+        const cached = cache && (await cache.match(url));
+        if (cached) {
+            const bytes = new Uint8Array(await cached.arrayBuffer());
+            downloads.set(path, { received: bytes.length, total: bytes.length });
+            return bytes;
         }
-        return new Uint8Array(await resp.arrayBuffer());
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const progress = { received: 0, total: Number(resp.headers.get("Content-Length")) || 0 };
+        downloads.set(path, progress);
+        // Read in chunks so the loading screen can show how far along it is.
+        const chunks = [];
+        const reader = resp.body.getReader();
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            progress.received += value.length;
+        }
+        const bytes = new Uint8Array(progress.received);
+        let at = 0;
+        for (const c of chunks) {
+            bytes.set(c, at);
+            at += c.length;
+        }
+        progress.total = bytes.length;
+        if (cache) {
+            const headers = { "Content-Type": resp.headers.get("Content-Type") || "application/octet-stream" };
+            try {
+                await cache.put(url, new Response(bytes, { headers }));
+            } catch {} // quota full: still use this copy
+        }
+        return bytes;
     }
 
     // ------------------------------------------------------------ imports
@@ -359,6 +385,16 @@
                 return id;
             };
         }
+
+        // ---- client: download progress of one model, for the loading screen
+        // (client/src/app/asset_loader.rs). -1 when it is not being downloaded.
+
+        env.gridlock_download_received = function (ptr, len) {
+            return downloads.get(UTF8ToString(ptr, len))?.received ?? -1;
+        };
+        env.gridlock_download_total = function (ptr, len) {
+            return downloads.get(UTF8ToString(ptr, len))?.total ?? -1;
+        };
 
         // ---- platform crate: clocks and randomness (platform/src/lib.rs)
 

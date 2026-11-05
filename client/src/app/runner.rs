@@ -16,7 +16,7 @@ use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
 use super::asset_cache::{ load_cached_manifest, save_cached_manifest };
-use super::asset_loader::{ load_asset_entry, Prefetcher, PREFETCH_AHEAD };
+use super::asset_loader::{ download_progress, load_asset_entry, Prefetcher, PREFETCH_AHEAD };
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
 
@@ -93,6 +93,8 @@ pub async fn run() {
     let mut loading_stable_frames: u8 = 0;
     let mut loading_started: bool = false;
     let mut prefetcher = Prefetcher::default();
+    // Whether the viewmodel assets missing from the server's list were queued.
+    let mut viewmodels_queued = false;
 
     loop {
         if config.bind_fullscreen.is_pressed() {
@@ -124,6 +126,7 @@ pub async fn run() {
                     loading_stable_frames = 0;
                     loading_started = !loading_assets.is_empty();
                     prefetcher.clear();
+                    viewmodels_queued = false;
                     state = GameState::Loading;
                 }
                 login_screen.draw();
@@ -230,8 +233,14 @@ pub async fn run() {
                     }
                 }
 
+                // The game needs these whether or not the server listed them; load
+                // them through the same queue so nothing waits on the network.
+                if loading_started && loading_index >= loading_assets.len() && !viewmodels_queued {
+                    loading_assets.extend(missing_viewmodel_assets(&playing_state));
+                    viewmodels_queued = true;
+                }
+
                 if loading_started && loading_index >= loading_assets.len() {
-                    ensure_essential_viewmodel_assets(&mut playing_state).await;
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                     state = GameState::Playing;
                     // Loading paused this loop, so time spent there is not silence from the server.
@@ -241,11 +250,15 @@ pub async fn run() {
                     playing_state.last_mouse_pos = mouse_position();
                 }
 
+                let download = loading_assets
+                    .get(loading_index)
+                    .and_then(|(_, path)| download_progress(path));
                 login_screen.draw_loading(
                     loading_assets.len(),
                     loading_index,
                     &loading_current,
-                    loading_started
+                    loading_started,
+                    download
                 );
             }
 
@@ -679,7 +692,9 @@ fn resolve_asset_path_for_quality(path: &str, _model_quality: ModelQuality) -> S
     path.to_string()
 }
 
-async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
+/// Viewmodel assets (first-person hands and weapons) the game needs that are
+/// not loaded yet.
+fn missing_viewmodel_assets(playing_state: &PlayingState) -> Vec<(String, String)> {
     let required = [
         ("fp_hands", "assets/models/hand/fps_animated_carbine.glb"),
         ("fp_hands_pistol", "assets/models/hand/fps_pistol_animated.glb"),
@@ -697,15 +712,14 @@ async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
         ("minigun_model", "assets/models/weapons/Other/minigun.glb"),
     ];
 
-    for (key, path) in required {
-        if
-            playing_state.models.contains_key(key) ||
-            playing_state.animated_models.contains_key(key)
-        {
-            continue;
-        }
-        load_asset_entry(key, path, playing_state).await;
-    }
+    required
+        .into_iter()
+        .filter(|(key, _)| {
+            !playing_state.models.contains_key(*key) &&
+                !playing_state.animated_models.contains_key(*key)
+        })
+        .map(|(key, path)| (key.to_string(), path.to_string()))
+        .collect()
 }
 
 /// The live connection, for code that only sends and receives.

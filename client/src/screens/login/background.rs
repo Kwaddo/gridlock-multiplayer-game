@@ -69,7 +69,16 @@ impl LoginScreen {
         draw_rectangle(lx, ly, lw, 2.0, ACCENT);
     }
 
-    pub fn draw_loading(&self, total: usize, loaded: usize, current: &str, started: bool) {
+    /// `download` is how far the asset being waited on has downloaded, as
+    /// (received, total) bytes, when that is known.
+    pub fn draw_loading(
+        &self,
+        total: usize,
+        loaded: usize,
+        current: &str,
+        started: bool,
+        download: Option<(f64, f64)>,
+    ) {
         self.draw_background();
         self.draw_title();
 
@@ -87,6 +96,8 @@ impl LoginScreen {
             "Receiving asset manifest..."
         } else if total == 0 {
             "Joining server..."
+        } else if download.is_some_and(|(received, size)| received < size) {
+            "Downloading assets..."
         } else {
             "Loading assets..."
         };
@@ -101,7 +112,9 @@ impl LoginScreen {
         draw_rectangle(bx, by, bw, bh, super::INPUT_BG);
         draw_rectangle_lines(bx, by, bw, bh, 1.0, PANEL_BORDER);
         if total > 0 {
-            let frac = loaded as f32 / total as f32;
+            // The asset in progress counts for the part already downloaded.
+            let partial = download.map_or(0.0, |(received, size)| (received / size) as f32);
+            let frac = ((loaded as f32 + partial.clamp(0.0, 1.0)) / total as f32).min(1.0);
             let fw = (bw - 4.0) * frac;
             draw_rectangle(bx + 2.0, by + 2.0, fw, bh - 4.0, ACCENT);
         } else if !started {
@@ -128,7 +141,16 @@ impl LoginScreen {
         }
 
         if !current.is_empty() {
-            draw_text_ex(current, bx, by + bh + 18.0, text_params(13, TEXT_DIM));
+            let line = match download {
+                Some((received, size)) if received < size => format!(
+                    "{}  {:.1} / {:.1} MB",
+                    current,
+                    received / 1_048_576.0,
+                    size / 1_048_576.0
+                ),
+                _ => current.to_string(),
+            };
+            draw_text_ex(&line, bx, by + bh + 18.0, text_params(13, TEXT_DIM));
         }
     }
 }
