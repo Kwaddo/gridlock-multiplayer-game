@@ -1,0 +1,559 @@
+// Browser networking for Gridlock, as a miniquad plugin (no wasm-bindgen).
+//
+// WebRTC: one data channel per peer, negotiated through the HTTP signalling
+// mailboxes of the Gridlock registry (registry/dcs/index.js). The host is the
+// offerer for every player; players only ever connect to the host. ICE servers
+// (STUN, plus TURN relay credentials when configured) come from the registry's
+// /ice route.
+//
+// HTTP: fetch() for the host list.
+//
+// Rust drives everything by polling (transport/src/web.rs). Load this file
+// after mq_js_bundle.js and before calling load().
+"use strict";
+
+(function () {
+    const PLUGIN_VERSION = 1;
+
+    // Event kinds shared with transport/src/web.rs.
+    const EV_PEER_JOINED = 1;
+    const EV_PEER_LEFT = 2;
+    const EV_PACKET = 3;
+    const EV_CLOSED = 4;
+
+    const FORCE_RELAY = new URLSearchParams(location.search).has("relay");
+    const STUN_FALLBACK = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
+    const POLL_HOST_MS = 1000;
+    const POLL_CONNECTING_MS = 500;
+    const POLL_IDLE_MS = 5000;
+    const SEND_BATCH_MS = 50;
+
+    const decoder = new TextDecoder();
+    const sockets = new Map(); // handle -> RtcSocket
+    const requests = new Map(); // id -> { done, status, body }
+    const sounds = new Map(); // id -> AudioBuffer
+    let nextHandle = 1;
+
+    // Browsers keep audio suspended until the user interacts with the page.
+    let audioContext = null;
+    function audio() {
+        if (!audioContext) {
+            audioContext = new AudioContext();
+            const resume = () => audioContext.resume();
+            for (const ev of ["pointerdown", "keydown", "touchstart"]) {
+                window.addEventListener(ev, resume, { capture: true });
+            }
+        }
+        return audioContext;
+    }
+
+    function readString(ptr, len) {
+        return decoder.decode(new Uint8Array(wasm_memory.buffer, ptr, len));
+    }
+
+    function readBytes(ptr, len) {
+        return new Uint8Array(wasm_memory.buffer, ptr, len).slice();
+    }
+
+    function writeU32(ptr, value) {
+        new Uint32Array(wasm_memory.buffer, ptr, 1)[0] = value >>> 0;
+    }
+
+    function writeBytes(ptr, bytes) {
+        new Uint8Array(wasm_memory.buffer, ptr, bytes.length).set(bytes);
+    }
+
+    // ------------------------------------------------------------ WebRTC
+
+    class RtcSocket {
+        constructor(roomUrl, isHost) {
+            this.isHost = isHost;
+            this.events = [];
+            this.taken = null; // payload of the event last returned by next()
+            this.peers = new Map(); // small id -> { remoteId, pc, channel, pending }
+            this.byRemote = new Map(); // signalling id -> small id
+            this.nextPeer = 1;
+            this.closed = false;
+            this.me = null; // { id, token } from the room's join
+            this.outbox = []; // signals waiting for the next send
+            this.flushing = false;
+            this.start(roomUrl);
+        }
+
+        // Signalling goes through HTTP mailboxes on the registry (registry/dcs/index.js):
+        // join the room, then poll it for messages and post signals to it.
+        async start(roomUrl) {
+            this.room = roomHttpUrl(roomUrl);
+            this.iceServers = await fetchIceServers(this.room);
+            if (this.closed) return;
+            try {
+                const resp = await fetch(this.room + "/join" + (this.isHost ? "?host" : ""), { method: "POST" });
+                if (!resp.ok) throw new Error("join refused: " + resp.status);
+                this.me = await resp.json();
+            } catch (e) {
+                console.warn("gridlock_web: could not join room", e);
+                return this.shutdown();
+            }
+            if (this.closed) return this.leave();
+            this.onPageHide = () => this.leave();
+            window.addEventListener("pagehide", this.onPageHide);
+            this.poll();
+        }
+
+        async poll() {
+            while (!this.closed) {
+                try {
+                    const q = `?id=${encodeURIComponent(this.me.id)}&token=${encodeURIComponent(this.me.token)}`;
+                    const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
+                    // 410: the host left; 403/404: this room is gone for us.
+                    if (resp.status === 410 || resp.status === 403 || resp.status === 404) return this.shutdown();
+                    if (resp.ok) for (const msg of await resp.json()) if (!this.closed) this.onSignal(msg);
+                } catch {} // network blip: try again on the next poll
+                await new Promise((r) => setTimeout(r, this.pollDelay()));
+            }
+        }
+
+        // Poll fast while a connection is being negotiated. Otherwise the host
+        // still polls often enough to notice newcomers, and a connected player
+        // polls slowly, only to learn that the room closed.
+        pollDelay() {
+            const peers = [...this.peers.values()];
+            if (peers.some((p) => !p.open)) return POLL_CONNECTING_MS;
+            if (this.isHost) return POLL_HOST_MS;
+            return peers.length ? POLL_IDLE_MS : POLL_CONNECTING_MS;
+        }
+
+        signal(msg) {
+            if (!msg.Signal || this.closed) return;
+            this.outbox.push(msg.Signal);
+            // ICE candidates come in bursts; send each burst as one request.
+            if (!this.flushing) {
+                this.flushing = true;
+                setTimeout(() => this.flush(), SEND_BATCH_MS);
+            }
+        }
+
+        async flush() {
+            const signals = this.outbox.splice(0);
+            try {
+                if (signals.length && this.me && !this.closed) {
+                    await fetch(this.room + "/send", {
+                        method: "POST",
+                        body: JSON.stringify({ id: this.me.id, token: this.me.token, signals }),
+                    });
+                }
+            } catch {}
+            this.flushing = this.outbox.length > 0;
+            if (this.flushing) setTimeout(() => this.flush(), SEND_BATCH_MS);
+        }
+
+        leave() {
+            if (!this.me || this.left) return;
+            this.left = true;
+            const body = JSON.stringify({ id: this.me.id, token: this.me.token });
+            // sendBeacon still goes out while the tab is closing.
+            if (!navigator.sendBeacon(this.room + "/leave", body)) {
+                fetch(this.room + "/leave", { method: "POST", body, keepalive: true }).catch(() => {});
+            }
+        }
+
+        onSignal(msg) {
+            if (msg.NewPeer) {
+                this.connect(msg.NewPeer, true);
+            } else if (msg.PeerLeft) {
+                const id = this.byRemote.get(msg.PeerLeft);
+                if (id !== undefined) this.drop(id);
+            } else if (msg.Signal) {
+                const { sender, data } = msg.Signal;
+                const id = this.byRemote.get(sender) ?? this.connect(sender, false);
+                this.onPeerSignal(this.peers.get(id), data);
+            }
+            // IdAssigned needs no action: we never address ourselves.
+        }
+
+        connect(remoteId, offerer) {
+            const id = this.nextPeer++;
+            const pc = new RTCPeerConnection({
+                iceServers: this.iceServers,
+                // ?relay in the page URL forces every connection through TURN (for testing the relay).
+                iceTransportPolicy: FORCE_RELAY ? "relay" : "all",
+            });
+            const peer = { remoteId, pc, channel: null, pending: [], open: false };
+            this.peers.set(id, peer);
+            this.byRemote.set(remoteId, id);
+
+            pc.onicecandidate = (e) => {
+                if (e.candidate) this.signal({ Signal: { receiver: remoteId, data: { candidate: e.candidate.toJSON() } } });
+            };
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === "failed" || pc.connectionState === "closed") this.drop(id);
+            };
+
+            if (offerer) {
+                // Game traffic is UDP-like: unordered, no retransmits.
+                this.attach(id, pc.createDataChannel("gridlock", { ordered: false, maxRetransmits: 0 }));
+                pc.createOffer()
+                    .then((offer) => pc.setLocalDescription(offer))
+                    .then(() => this.signal({ Signal: { receiver: remoteId, data: { sdp: pc.localDescription.toJSON() } } }))
+                    .catch(() => this.drop(id));
+            } else {
+                pc.ondatachannel = (e) => this.attach(id, e.channel);
+            }
+            return id;
+        }
+
+        async onPeerSignal(peer, data) {
+            if (!peer) return;
+            const pc = peer.pc;
+            try {
+                if (data.sdp) {
+                    await pc.setRemoteDescription(data.sdp);
+                    for (const c of peer.pending) await pc.addIceCandidate(c);
+                    peer.pending = [];
+                    if (data.sdp.type === "offer") {
+                        await pc.setLocalDescription(await pc.createAnswer());
+                        this.signal({ Signal: { receiver: peer.remoteId, data: { sdp: pc.localDescription.toJSON() } } });
+                    }
+                } else if (data.candidate) {
+                    // Candidates can arrive before the description they belong to.
+                    if (pc.remoteDescription) await pc.addIceCandidate(data.candidate);
+                    else peer.pending.push(data.candidate);
+                }
+            } catch (e) {
+                console.warn("gridlock_web: signalling error", e);
+            }
+        }
+
+        attach(id, channel) {
+            const peer = this.peers.get(id);
+            if (!peer) return;
+            peer.channel = channel;
+            channel.binaryType = "arraybuffer";
+            channel.onopen = () => {
+                peer.open = true;
+                this.events.push({ kind: EV_PEER_JOINED, peer: id, data: null });
+            };
+            channel.onmessage = (e) => {
+                if (e.data instanceof ArrayBuffer) {
+                    this.events.push({ kind: EV_PACKET, peer: id, data: new Uint8Array(e.data) });
+                }
+            };
+            channel.onclose = () => this.drop(id);
+        }
+
+        send(id, bytes) {
+            const peer = this.peers.get(id);
+            if (peer && peer.open && peer.channel.readyState === "open") {
+                try {
+                    peer.channel.send(bytes);
+                } catch {
+                    // send buffer full: drop the packet, like UDP would
+                }
+            }
+        }
+
+        drop(id) {
+            const peer = this.peers.get(id);
+            if (!peer) return;
+            this.peers.delete(id);
+            this.byRemote.delete(peer.remoteId);
+            try {
+                peer.pc.close();
+            } catch {}
+            if (peer.open) this.events.push({ kind: EV_PEER_LEFT, peer: id, data: null });
+        }
+
+        shutdown() {
+            if (this.closed) return;
+            this.closed = true;
+            for (const id of [...this.peers.keys()]) this.drop(id);
+            if (this.onPageHide) window.removeEventListener("pagehide", this.onPageHide);
+            this.leave();
+            this.events.push({ kind: EV_CLOSED, peer: 0, data: null });
+        }
+    }
+
+    // The game passes wss://<registry>/room/<code>; signalling now runs over
+    // https://<registry>/room/<code>/..., and ICE servers live at https://<registry>/ice.
+    function roomHttpUrl(roomUrl) {
+        const url = new URL(roomUrl);
+        url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+        url.search = "";
+        return url.toString().replace(/\/$/, "");
+    }
+
+    async function fetchIceServers(room) {
+        try {
+            const url = new URL(room);
+            url.pathname = "/ice";
+            const resp = await fetch(url);
+            const body = await resp.json();
+            if (Array.isArray(body.iceServers) && body.iceServers.length) return body.iceServers;
+        } catch {}
+        return STUN_FALLBACK;
+    }
+
+    // Models are too big to ship with the page, so build_web.sh can host them
+    // elsewhere and set GRIDLOCK_MODELS_URL (plus a version) in index.html. They
+    // are downloaded once and kept in Cache Storage; a new version starts a new
+    // cache and drops the old one. Every other file loads from the page as usual.
+    const MODELS_PREFIX = "assets/models/";
+    const MODELS_URL = window.GRIDLOCK_MODELS_URL || "";
+    const MODELS_CACHE = "gridlock-models-" + (window.GRIDLOCK_MODELS_VERSION || "dev");
+
+    let modelsCache = null;
+    function openModelsCache() {
+        if (!modelsCache) {
+            modelsCache = (async () => {
+                if (!("caches" in window)) return null;
+                try {
+                    for (const name of await caches.keys()) {
+                        if (name.startsWith("gridlock-models-") && name !== MODELS_CACHE) caches.delete(name);
+                    }
+                    navigator.storage?.persist?.();
+                    return await caches.open(MODELS_CACHE);
+                } catch {
+                    return null; // private windows can refuse storage; download every time
+                }
+            })();
+        }
+        return modelsCache;
+    }
+
+    async function loadModel(path) {
+        const file = path.slice(MODELS_PREFIX.length).split("/").map(encodeURIComponent).join("/");
+        const url = MODELS_URL.replace(/\/$/, "") + "/" + file + "?v=" + (window.GRIDLOCK_MODELS_VERSION || "dev");
+        const cache = await openModelsCache();
+        let resp = cache && (await cache.match(url));
+        if (!resp) {
+            resp = await fetch(url);
+            if (!resp.ok) return null;
+            if (cache) {
+                try {
+                    await cache.put(url, resp.clone());
+                } catch {} // quota full: still use this copy
+            }
+        }
+        return new Uint8Array(await resp.arrayBuffer());
+    }
+
+    // ------------------------------------------------------------ imports
+
+    function register(importObject) {
+        const env = importObject.env;
+
+        // ---- file loading: models from GRIDLOCK_MODELS_URL, through Cache Storage
+
+        if (MODELS_URL) {
+            const loadFromPage = env.fs_load_file;
+            env.fs_load_file = function (ptr, len) {
+                const path = UTF8ToString(ptr, len);
+                if (!path.startsWith(MODELS_PREFIX)) return loadFromPage(ptr, len);
+                const id = FS.unique_id++;
+                loadModel(path)
+                    .catch(() => null)
+                    .then((bytes) => {
+                        FS.loaded_files[id] = bytes;
+                        wasm_exports.file_loaded(id);
+                    });
+                return id;
+            };
+        }
+
+        // ---- platform crate: clocks and randomness (platform/src/lib.rs)
+
+        env.gridlock_now_ms = () => performance.now();
+        env.gridlock_unix_ms = () => Date.now();
+        env.gridlock_random_fill = function (ptr, len) {
+            // getRandomValues fills at most 65536 bytes per call.
+            for (let off = 0; off < len; off += 65536) {
+                crypto.getRandomValues(new Uint8Array(wasm_memory.buffer, ptr + off, Math.min(65536, len - off)));
+            }
+        };
+
+        // ---- platform::storage: settings and presets in localStorage
+
+        const STORAGE_PREFIX = "gridlock:";
+        const encoder = new TextEncoder();
+        let storageTaken = null;
+        env.gridlock_storage_get = function (keyPtr, keyLen, lenOut) {
+            let value = null;
+            try {
+                value = localStorage.getItem(STORAGE_PREFIX + readString(keyPtr, keyLen));
+            } catch {} // storage disabled (e.g. some private modes)
+            if (value === null) return 0;
+            storageTaken = encoder.encode(value);
+            writeU32(lenOut, storageTaken.length);
+            return 1;
+        };
+        env.gridlock_storage_take = function (ptr) {
+            if (storageTaken) writeBytes(ptr, storageTaken);
+            storageTaken = null;
+        };
+        env.gridlock_storage_set = function (keyPtr, keyLen, valuePtr, valueLen) {
+            try {
+                localStorage.setItem(STORAGE_PREFIX + readString(keyPtr, keyLen), readString(valuePtr, valueLen));
+                return 1;
+            } catch {
+                return 0; // quota exceeded or storage disabled
+            }
+        };
+
+        // ---- pointer lock (replaces miniquad's version)
+        // The game re-asserts the grab often. Browsers grant pointer lock only from
+        // a user gesture and reject rapid repeats, so remember what the game wants,
+        // try once when that changes, and otherwise lock on the next click.
+
+        let wantLock = false;
+        const lock = () => {
+            if (wantLock && document.pointerLockElement !== canvas) {
+                try {
+                    const p = canvas.requestPointerLock();
+                    if (p && p.catch) p.catch(() => {});
+                } catch {}
+            }
+        };
+        canvas.addEventListener("mousedown", lock);
+        env.sapp_set_cursor_grab = function (grab) {
+            const want = grab !== 0;
+            if (want === wantLock) return;
+            wantLock = want;
+            if (want) lock();
+            else if (document.pointerLockElement === canvas) document.exitPointerLock();
+        };
+
+        // ---- client audio (client/src/audio.rs): Web Audio, with pitch via playbackRate
+
+        env.gridlock_audio_load = function (ptr, len) {
+            const id = nextHandle++;
+            const bytes = readBytes(ptr, len);
+            audio()
+                .decodeAudioData(bytes.buffer)
+                .then((buffer) => sounds.set(id, buffer))
+                .catch((e) => console.warn("gridlock_web: could not decode sound", e));
+            return id;
+        };
+
+        // Plays nothing until decoding finishes (it is fast for short effects).
+        env.gridlock_audio_play = function (id, speed, volume) {
+            const buffer = sounds.get(id);
+            if (!buffer) return;
+            const ctx = audio();
+            const source = ctx.createBufferSource();
+            const gain = ctx.createGain();
+            source.buffer = buffer;
+            source.playbackRate.value = speed;
+            gain.gain.value = volume;
+            source.connect(gain).connect(ctx.destination);
+            source.start();
+        };
+
+        // ---- transport crate: WebRTC and fetch (transport/src/web.rs)
+
+        env.gridlock_rtc_open = function (urlPtr, urlLen, isHost) {
+            const handle = nextHandle++;
+            sockets.set(handle, new RtcSocket(readString(urlPtr, urlLen), isHost !== 0));
+            return handle;
+        };
+
+        env.gridlock_rtc_send = function (handle, peer, ptr, len) {
+            const socket = sockets.get(handle);
+            if (socket) socket.send(peer, readBytes(ptr, len));
+        };
+
+        // Returns the next event kind (0 = none) and writes its peer and payload
+        // length; the payload is then copied out with gridlock_rtc_take.
+        env.gridlock_rtc_next = function (handle, peerOut, lenOut) {
+            const socket = sockets.get(handle);
+            const ev = socket && socket.events.shift();
+            if (!ev) return 0;
+            socket.taken = ev.data;
+            writeU32(peerOut, ev.peer);
+            writeU32(lenOut, ev.data ? ev.data.length : 0);
+            return ev.kind;
+        };
+
+        env.gridlock_rtc_take = function (handle, ptr) {
+            const socket = sockets.get(handle);
+            if (socket && socket.taken) writeBytes(ptr, socket.taken);
+            if (socket) socket.taken = null;
+        };
+
+        env.gridlock_rtc_close = function (handle) {
+            const socket = sockets.get(handle);
+            if (socket) socket.shutdown();
+            sockets.delete(handle);
+        };
+
+        env.gridlock_http_start = function (methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, authPtr, authLen) {
+            const id = nextHandle++;
+            const req = { done: false, status: 0, body: new Uint8Array(0) };
+            requests.set(id, req);
+            const headers = { "Content-Type": "application/json" };
+            if (authLen > 0) headers.Authorization = readString(authPtr, authLen);
+            const method = readString(methodPtr, methodLen);
+            fetch(readString(urlPtr, urlLen), {
+                method,
+                headers,
+                body: bodyLen > 0 ? readBytes(bodyPtr, bodyLen) : undefined,
+            })
+                .then(async (resp) => {
+                    req.body = new Uint8Array(await resp.arrayBuffer());
+                    req.status = resp.status;
+                })
+                .catch(() => {
+                    req.status = 0; // network error
+                })
+                .finally(() => {
+                    req.done = true;
+                });
+            return id;
+        };
+
+        // 0 while in flight; 1 when done, with status (0 = network error) and body length written.
+        env.gridlock_http_poll = function (id, statusOut, lenOut) {
+            const req = requests.get(id);
+            if (!req || !req.done) return 0;
+            writeU32(statusOut, req.status);
+            writeU32(lenOut, req.body.length);
+            return 1;
+        };
+
+        env.gridlock_http_take = function (id, ptr) {
+            const req = requests.get(id);
+            if (req) writeBytes(ptr, req.body);
+            requests.delete(id);
+        };
+
+        env.gridlock_http_cancel = function (id) {
+            requests.delete(id);
+        };
+    }
+
+    // Debugging aid: how each WebRTC connection is routed. From the browser console:
+    //   await gridlockConnections()  ->  [{ peer, role, path: "direct" | "stun" | "relay", remote }]
+    window.gridlockConnections = async function () {
+        const result = [];
+        for (const socket of sockets.values()) {
+            for (const [peer, p] of socket.peers) {
+                const stats = await p.pc.getStats();
+                let pair = null;
+                stats.forEach((s) => {
+                    if (s.type === "candidate-pair" && s.nominated && s.state === "succeeded") pair = s;
+                });
+                const local = pair && stats.get(pair.localCandidateId);
+                const remote = pair && stats.get(pair.remoteCandidateId);
+                const types = [local?.candidateType, remote?.candidateType];
+                const path = !pair ? "none" : types.includes("relay") ? "relay" : types.includes("srflx") || types.includes("prflx") ? "stun" : "direct";
+                result.push({ peer, role: socket.isHost ? "host" : "player", path, remote: remote ? `${remote.address}:${remote.port}` : null });
+            }
+        }
+        return result;
+    };
+
+    miniquad_add_plugin({
+        name: "gridlock_web",
+        version: PLUGIN_VERSION,
+        register_plugin: register,
+    });
+})();

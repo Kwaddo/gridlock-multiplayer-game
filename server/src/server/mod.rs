@@ -1,8 +1,7 @@
 use rand::Rng;
 use std::collections::HashMap;
-use std::fs;
-use std::net::{SocketAddr, UdpSocket};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use platform::Instant;
 
 pub mod broadcast;
 pub mod game;
@@ -13,450 +12,481 @@ pub mod utils;
 use crate::bot::ai::BotState;
 use crate::bot::manager::BotManager;
 use crate::maze::MazeData;
+use crate::net::{Outbox, PeerId};
 use crate::player::Player;
 use crate::player::WorldId;
 use crate::protocols::*;
 
-/// Entry point for the server logic; previously lived in `main.rs`.
-/// This function handles socket setup and contains the main loop.
-pub fn run() -> std::io::Result<()> {
-    let port = std::env::var("PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(7878);
-    let bind_addr = format!("0.0.0.0:{}", port);
-    let socket = UdpSocket::bind(&bind_addr)?;
-    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
-    log!("UDP server started on {}", bind_addr);
-
-    let mut buffer: [u8; 8192] = [0; 8192];
-    let mut players: HashMap<SocketAddr, Player> = HashMap::new();
-
-    let mut bot_manager = BotManager::new();
-
-    // cache assets manifest to avoid hitting the filesystem on every join
-    let asset_manifest: Option<serde_json::Value> = fs::read_to_string("assets/manifest.json")
-        .ok()
-        .and_then(|data| serde_json::from_str(&data).ok());
-
+/// Authoritative game state. Previously the locals of a blocking `run()` loop;
+/// now driven by whichever host owns the transport.
+pub struct Server {
+    outbox: Outbox,
+    players: HashMap<PeerId, Player>,
+    bot_manager: BotManager,
+    // cached assets manifest, sent to each client on join
+    asset_manifest: Option<serde_json::Value>,
+    // shown to clients browsing for games
+    name: String,
     // Do not generate a full gameplay maze at server start — create per-match instead.
-    let mut maze: Option<MazeData> = None; // Some(...) when a match is running
-
-    // Basic match state for a future game loop
-    let mut match_running: bool = false;
-    let mut match_start_time: Option<Instant> = None;
+    maze: Option<MazeData>, // Some(...) when a match is running
+    match_running: bool,
+    match_start_time: Option<Instant>,
     // current running match length (None=infinite); initially use the default
-    let mut match_duration: Option<Duration> = game::MATCH_DURATION;
+    match_duration: Option<Duration>,
     // warmup / countdown before match actually begins
-    let mut match_warmup_end: Option<Instant> = None;
+    match_warmup_end: Option<Instant>,
     // scheduled match end (winner, delayed return-to-lobby)
-    let mut match_end_pending: Option<(Instant, u32, String)> = None;
+    match_end_pending: Option<(Instant, u32, String)>,
     // last sent authoritative match timer (to avoid spamming identical values)
-    let mut last_match_time_sent: Option<u16> = None;
+    last_match_time_sent: Option<u16>,
     // last sent warmup countdown (MSG_MATCH_COUNTDOWN)
-    let mut last_warmup_sent: Option<u8> = None;
+    last_warmup_sent: Option<u8>,
     // last sent match-end countdown (MSG_MATCH_END countdown byte)
-    let mut last_end_countdown_sent: Option<u8> = None;
+    last_end_countdown_sent: Option<u8>,
     // current match mode (defaults to Team Deathmatch)
-    let mut match_mode: u8 = MODE_TEAM_DEATHMATCH;
+    match_mode: u8,
     // how many players entered the maze during this match (for last-man-standing detection)
-    let mut match_total_maze_entries: usize = 0;
+    match_total_maze_entries: usize,
     // Search & Destroy state (only Some when S&D mode is active)
-    let mut snd_state: Option<snd::SndState> = None;
+    snd_state: Option<snd::SndState>,
     // Auto-fill bot settings (set by the client that starts the match)
-    let mut autofill_bots_per_team: u8 = 0; // 0=disabled, 1-8=per team
-    let mut autofill_diff_mask: u8 = 0b11111; // all difficulties enabled by default
+    autofill_bots_per_team: u8, // 0=disabled, 1-8=per team
+    autofill_diff_mask: u8,     // all difficulties enabled by default
     // Track last tick time for delta-time calculation
-    let mut last_tick = Instant::now();
+    last_tick: Instant,
     // Regen fires at most once per second to avoid per-packet health spikes
-    let mut last_regen_tick = Instant::now();
+    last_regen_tick: Instant,
+}
 
-    loop {
-        let now_tick = Instant::now();
-        let dt = now_tick.duration_since(last_tick).as_secs_f32();
-        last_tick = now_tick;
-        match socket.recv_from(&mut buffer) {
-            Ok((bytes_rcv, src_addr)) => {
-                if bytes_rcv == 0 {
-                    continue;
-                }
-                let msg_type = buffer[0];
-                let payload = &buffer[1..bytes_rcv];
-
-                match msg_type {
-                    MSG_JOIN => handlers::handle_join(
-                        &socket,
-                        &mut players,
-                        maze.as_ref(),
-                        match_running,
-                        src_addr,
-                        payload,
-                        asset_manifest.as_ref(),
-                    ),
-                    MSG_DISCONNECT => handlers::handle_disconnect(&socket, &mut players, src_addr),
-                    MSG_POSITION => {
-                        handlers::handle_position(&socket, &mut players, src_addr, payload);
-                    },
-
-                    // client-requested world change (teleporter)
-                    MSG_WORLD_CHANGE => {
-                        handlers::handle_world_change(
-                            &socket,
-                            maze.as_ref(),
-                            &mut players,
-                            src_addr,
-                            payload,
-                        );
-                    },
-                    MSG_WEAPON_CHANGE => {
-                        // client tells us which weapon they're now holding; update
-                        // player state and broadcast to everyone so world models
-                        // stay in sync.
-                        if let Some(p) = players.get_mut(&src_addr) {
-                            if !payload.is_empty() {
-                                let len = payload[0] as usize;
-                                if payload.len() >= 1 + len {
-                                    if let Ok(name) = std::str::from_utf8(&payload[1..1 + len]) {
-                                        p.current_weapon = name.to_string();
-                                        broadcast::broadcast_state(&socket, &players);
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    // client requests to start a match from the lobby
-                    MSG_START_GAME => {
-                        // read the requested game mode from the payload
-                        if !payload.is_empty() {
-                            let requested = payload[0];
-                            if requested == MODE_GUN_GAME
-                                || requested == MODE_TEAM_DEATHMATCH
-                                || requested == MODE_SEARCH_AND_DESTROY
-                            {
-                                match_mode = requested;
-                            }
-                        }
-                        // parse duration: payload[1]=dur_hi, payload[2]=dur_lo (big-endian u16; 0=default, 65535=unlimited)
-                        let dur_code: u16 = if payload.len() >= 3 {
-                            ((payload[1] as u16) << 8) | (payload[2] as u16)
-                        } else {
-                            0
-                        };
-                        // parse auto-fill settings: payload[3]=bots_per_team, payload[4]=diff_mask
-                        if payload.len() >= 5 {
-                            autofill_bots_per_team = payload[3].min(8);
-                            autofill_diff_mask = payload[4] & 0b11111;
-                        } else {
-                            autofill_bots_per_team = 0;
-                            autofill_diff_mask = 0b11111;
-                        }
-                        // Duration: client-provided value overrides mode default when non-zero
-                        let requested_duration: Option<Duration> = if dur_code == u16::MAX {
-                            None // unlimited
-                        } else if dur_code > 0 {
-                            Some(Duration::from_secs(dur_code as u64))
-                        } else {
-                            match match_mode {
-                                MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
-                                MODE_SEARCH_AND_DESTROY => None,
-                                _ => game::MATCH_DURATION,
-                            }
-                        };
-                        handlers::handle_start_game(
-                            &socket,
-                            &mut players,
-                            &mut maze,
-                            &mut match_running,
-                            &mut match_start_time,
-                            &mut match_warmup_end,
-                            &mut match_end_pending,
-                            &mut match_total_maze_entries,
-                            match_mode,
-                            &mut match_duration,
-                            requested_duration,
-                            src_addr,
-                        );
-                    }
-                    MSG_WALL_BROKEN => {
-                        if let Some(ref mut m) = maze {
-                            handlers::handle_wall_broken(&socket, m, &players, src_addr, payload);
-                        }
-                    }
-                    MSG_DISCOVER => handlers::handle_discover(&socket, &players, src_addr),
-                    MSG_HIT => handlers::handle_hit(
-                        &socket,
-                        &mut players,
-                        src_addr,
-                        payload,
-                        &mut maze,
-                        &mut match_running,
-                        &mut match_start_time,
-                        &mut match_end_pending,
-                        match_mode,
-                        &mut snd_state,
-                        bot_manager.bot_states_mut(),
-                    ),
-                    MSG_RESPAWN_REQUEST => {
-                        handlers::handle_respawn_request(
-                            &socket,
-                            maze.as_ref(),
-                            &mut players,
-                            src_addr,
-                            match_mode,
-                            &snd_state,
-                        );
-                    }
-                    MSG_SET_TEAM => {
-                        handlers::handle_set_team(&socket, &mut players, src_addr, payload);
-                    }
-                    MSG_SND_BOMB_PICKUP => {
-                        if let Some(ref mut snd) = snd_state {
-                            snd.try_pickup_bomb(src_addr, &players);
-                        }
-                    }
-                    MSG_SND_PLANT_START => {
-                        if let Some(ref mut snd) = snd_state {
-                            snd.try_start_plant(src_addr, &players);
-                        }
-                    }
-                    MSG_SND_PLANT_STOP => {
-                        if let Some(ref mut snd) = snd_state {
-                            snd.stop_plant(src_addr);
-                        }
-                    }
-                    MSG_SND_DEFUSE_START => {
-                        if let Some(ref mut snd) = snd_state {
-                            snd.try_start_defuse(src_addr, &players);
-                        }
-                    }
-                    MSG_SND_DEFUSE_STOP => {
-                        if let Some(ref mut snd) = snd_state {
-                            snd.stop_defuse(src_addr);
-                        }
-                    }
-                    MSG_BOT_SPAWN => {
-                        if payload.len() >= 2 {
-                            let mut rng = rand::thread_rng();
-                            let behavior_code = payload[0];
-                            let level = payload[1];
-                            let behavior_override = if behavior_code <= 2 {
-                                Some(behavior_code)
-                            } else {
-                                None
-                            };
-                            let preset =
-                                crate::bot::shooting_range::level_config(level, behavior_override);
-                            let range_deadline = preset
-                                .time_limit_secs
-                                .map(|secs| Instant::now() + Duration::from_secs(secs));
-                            bot_manager.set_range_challenge_deadline(range_deadline);
-                            let base_bot_count = players.values().filter(|p| p.is_bot).count();
-                            for (i, bot_cfg) in preset.bots.iter().enumerate() {
-                                let bot_index = base_bot_count + i;
-                                let bot_id = 9000u32 + (bot_index as u32);
-                                let bot_name = format!("Bot{}", bot_index + 1);
-                                let shooting_cfg =
-                                    bot_cfg.shooting.unwrap_or(preset.default_shooting);
-                                let weapon = bot_cfg.weapon.unwrap_or(preset.default_weapon);
-                                let hp = bot_cfg.health.unwrap_or(preset.default_health);
-                                let can_shoot =
-                                    bot_cfg.can_shoot.unwrap_or(preset.default_can_shoot);
-                                let bot_player = Player {
-                                    id: bot_id,
-                                    username: bot_name,
-                                    position: bot_cfg.position,
-                                    yaw: std::f32::consts::PI,
-                                    pitch: 0.0,
-                                    health: hp,
-                                    max_health: hp,
-                                    is_alive: true,
-                                    kills: 0,
-                                    deaths: 0,
-                                    gun_level: 1,
-                                    last_activity: Instant::now(),
-                                    death_time: None,
-                                    world: WorldId::Lobby,
-                                    post_teleport_freeze_until: None,
-                                    is_sprinting: false,
-                                    is_ads: false,
-                                    is_crouched: false,
-                                    is_airborne: false,
-                                    is_prone: false,
-                                    is_sliding: false,
-                                    evt_jump_start: false,
-                                    evt_landed: false,
-                                    team: bot_cfg.team,
-                                    current_weapon: weapon.to_string(),
-                                    is_bot: true,
-                                    is_silent: false,
-                                    auto_respawn: false,
-                                    regen_resume_at: None,
-
-                                };
-
-                                let bot_state = BotState {
-                                    movement: crate::physics::BotMovementState {
-                                        velocity: glam::Vec3::ZERO,
-                                        is_grounded: true,
-                                        height: 1.6,
-                                    },
-                                    behavior: bot_cfg.behavior.clone(),
-                                    can_shoot,
-                                    shooting: crate::bot::shooting::BotShootingState {
-                                        // Start each bot with slight offset so they don't sync-fire.
-                                        fire_rate: rng
-                                            .gen_range(0.0f32..shooting_cfg.fire_rate.max(0.01)),
-                                        has_target: false,
-                                        reaction_remaining: shooting_cfg.reaction_time
-                                            + rng.gen_range(0.0f32..0.35),
-                                    },
-                                    shooting_config: shooting_cfg,
-                                    target_id: None,
-                                    reaction_timer: 0.0,
-                                    // new fields required by BotState
-                                    personality: crate::bot::personality::BotPersonality {
-                                        name: "range", // generic
-                                        archetype:
-                                            crate::bot::personality::BotArchetype::AllRounder,
-                                        weapon,
-                                        range_min: 0.0,
-                                        range_max: 100.0,
-                                        aggression: 0.5,
-                                        flank_weight: 0.5,
-                                        hold_angle_weight: 0.5,
-                                        push_weight: 0.5,
-                                        retreat_health_threshold: 0.5,
-                                        peek_time: 1.0,
-                                        reposition_interval: 3.0,
-                                        noise_investigation_weight: 0.5,
-                                        base_aim_offset: 0.0,
-                                        base_reaction_time: shooting_cfg.reaction_time,
-                                        base_fov_degrees: 90.0,
-                                        base_repath_interval: 2.0,
-                                        base_turn_rate: 4.0,
-                                    },
-                                    difficulty: crate::bot::personality::BotDifficulty::Normal,
-                                    archetype: crate::bot::personality::BotArchetype::AllRounder,
-                                    personality_id: None,
-                                    last_known_enemy_pos: None,
-                                    behavior_decision_timer: 0.0,
-                                    stuck_timer: 0.0,
-                                    idle_look_timer: 0.0,
-                                    current_yaw: 0.0,
-                                    current_pitch: 0.0,
-                                };
-
-                                bot_manager.spawn_bot(&mut players, bot_player, bot_state);
-                            }
-                            broadcast::broadcast_state(&socket, &players);
-                            broadcast::broadcast_player_list(&socket, &players);
-                        }
-                    }
-
-                    MSG_BOT_DESPAWN_ALL => {
-                        bot_manager.despawn_all(&mut players);
-                        broadcast::broadcast_state(&socket, &players);
-                        broadcast::broadcast_player_list(&socket, &players);
-                    }
-
-                    _ => log!("Unknown message type: {}", msg_type),
-                }
-            }
-            Err(err)
-                if err.kind() == std::io::ErrorKind::WouldBlock
-                    || err.kind() == std::io::ErrorKind::TimedOut
-                    || err.kind() == std::io::ErrorKind::ConnectionReset => {}
-            Err(err) => {
-                return Err(err);
-            }
+impl Server {
+    pub fn new(asset_manifest: Option<serde_json::Value>) -> Self {
+        Server {
+            outbox: Outbox::default(),
+            players: HashMap::new(),
+            bot_manager: BotManager::new(),
+            asset_manifest,
+            name: "Gridlock".to_string(),
+            maze: None,
+            match_running: false,
+            match_start_time: None,
+            match_duration: game::MATCH_DURATION,
+            match_warmup_end: None,
+            match_end_pending: None,
+            last_match_time_sent: None,
+            last_warmup_sent: None,
+            last_end_countdown_sent: None,
+            match_mode: MODE_TEAM_DEATHMATCH,
+            match_total_maze_entries: 0,
+            snd_state: None,
+            autofill_bots_per_team: 0,
+            autofill_diff_mask: 0b11111,
+            last_tick: Instant::now(),
+            last_regen_tick: Instant::now(),
         }
+    }
+
+    /// Name shown to clients browsing for games.
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+
+    /// Connected players, bots included (the same count discovery reports).
+    pub fn player_count(&self) -> usize {
+        self.players.len()
+    }
+
+    /// Packets queued since the last call, as `(destination, bytes)`.
+    pub fn drain_outbox(&mut self) -> Vec<(PeerId, Vec<u8>)> {
+        self.outbox.drain()
+    }
+
+    /// Whether `peer` currently owns a player (joined and not timed out).
+    pub fn has_peer(&self, peer: PeerId) -> bool {
+        self.players.contains_key(&peer)
+    }
+
+    /// Transport reported the peer gone (e.g. WebRTC channel closed).
+    pub fn peer_disconnected(&mut self, src_addr: PeerId) {
+        handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr);
+    }
+
+    /// Process one inbound packet (`[msg_type][payload]`) from `src_addr`.
+    pub fn handle_packet(&mut self, src_addr: PeerId, packet: &[u8]) {
+        let Some(msg) = ClientMsg::decode(packet) else {
+            if let Some(msg_type) = packet.first() {
+                log!("Unknown or malformed message type: {}", msg_type);
+            }
+            return;
+        };
+
+        match msg {
+            ClientMsg::Join { username } => handlers::handle_join(
+                &self.outbox,
+                &mut self.players,
+                self.maze.as_ref(),
+                self.match_running,
+                src_addr,
+                &username,
+                self.asset_manifest.as_ref(),
+            ),
+            ClientMsg::Disconnect => {
+                handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr)
+            }
+            ClientMsg::Position { position, yaw, state_flags, event_flags } => {
+                handlers::handle_position(
+                    &self.outbox,
+                    &mut self.players,
+                    src_addr,
+                    position,
+                    yaw,
+                    state_flags,
+                    event_flags,
+                );
+            },
+
+            // client-requested world change (teleporter)
+            ClientMsg::WorldChange { target } => {
+                handlers::handle_world_change(
+                    &self.outbox,
+                    self.maze.as_ref(),
+                    &mut self.players,
+                    src_addr,
+                    target,
+                );
+            },
+            ClientMsg::WeaponChange { name } => {
+                // client tells us which weapon they're now holding; update
+                // player state and broadcast to everyone so world models
+                // stay in sync.
+                if let Some(p) = self.players.get_mut(&src_addr) {
+                    p.current_weapon = name;
+                    broadcast::broadcast_state(&self.outbox, &self.players);
+                }
+            },
+            // client requests to start a match from the lobby
+            ClientMsg::StartGame { mode, duration, autofill } => {
+                // read the requested game mode from the payload
+                if let Some(requested) = mode {
+                    if requested == MODE_GUN_GAME
+                        || requested == MODE_TEAM_DEATHMATCH
+                        || requested == MODE_SEARCH_AND_DESTROY
+                    {
+                        self.match_mode = requested;
+                    }
+                }
+                // duration code: 0=default, 65535=unlimited
+                let dur_code: u16 = duration.unwrap_or(0);
+                // auto-fill settings: bots_per_team, diff_mask
+                if let Some((bots_per_team, diff_mask)) = autofill {
+                    self.autofill_bots_per_team = bots_per_team.min(8);
+                    self.autofill_diff_mask = diff_mask & 0b11111;
+                } else {
+                    self.autofill_bots_per_team = 0;
+                    self.autofill_diff_mask = 0b11111;
+                }
+                // Duration: client-provided value overrides mode default when non-zero
+                let requested_duration: Option<Duration> = if dur_code == u16::MAX {
+                    None // unlimited
+                } else if dur_code > 0 {
+                    Some(Duration::from_secs(dur_code as u64))
+                } else {
+                    match self.match_mode {
+                        MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
+                        MODE_SEARCH_AND_DESTROY => None,
+                        _ => game::MATCH_DURATION,
+                    }
+                };
+                handlers::handle_start_game(
+                    &self.outbox,
+                    &mut self.players,
+                    &mut self.maze,
+                    &mut self.match_running,
+                    &mut self.match_start_time,
+                    &mut self.match_warmup_end,
+                    &mut self.match_end_pending,
+                    &mut self.match_total_maze_entries,
+                    self.match_mode,
+                    &mut self.match_duration,
+                    requested_duration,
+                    src_addr,
+                );
+            }
+            ClientMsg::WallBroken { x, y } => {
+                if let Some(ref mut m) = self.maze {
+                    handlers::handle_wall_broken(&self.outbox, m, &self.players, src_addr, x, y);
+                }
+            }
+            ClientMsg::Discover => handlers::handle_discover(&self.outbox, &self.players, &self.name, src_addr),
+            ClientMsg::Hit { victim_id, damage, weapon, backstab } => handlers::handle_hit(
+                &self.outbox,
+                &mut self.players,
+                src_addr,
+                victim_id,
+                damage,
+                weapon,
+                backstab,
+                &mut self.maze,
+                &mut self.match_running,
+                &mut self.match_start_time,
+                &mut self.match_end_pending,
+                self.match_mode,
+                &mut self.snd_state,
+                self.bot_manager.bot_states_mut(),
+            ),
+            ClientMsg::RespawnRequest => {
+                handlers::handle_respawn_request(
+                    &self.outbox,
+                    self.maze.as_ref(),
+                    &mut self.players,
+                    src_addr,
+                    self.match_mode,
+                    &self.snd_state,
+                );
+            }
+            ClientMsg::SetTeam { team } => {
+                handlers::handle_set_team(&self.outbox, &mut self.players, src_addr, team);
+            }
+            ClientMsg::SndBombPickup => {
+                if let Some(ref mut snd) = self.snd_state {
+                    snd.try_pickup_bomb(src_addr, &self.players);
+                }
+            }
+            ClientMsg::SndPlantStart => {
+                if let Some(ref mut snd) = self.snd_state {
+                    snd.try_start_plant(src_addr, &self.players);
+                }
+            }
+            ClientMsg::SndPlantStop => {
+                if let Some(ref mut snd) = self.snd_state {
+                    snd.stop_plant(src_addr);
+                }
+            }
+            ClientMsg::SndDefuseStart => {
+                if let Some(ref mut snd) = self.snd_state {
+                    snd.try_start_defuse(src_addr, &self.players);
+                }
+            }
+            ClientMsg::SndDefuseStop => {
+                if let Some(ref mut snd) = self.snd_state {
+                    snd.stop_defuse(src_addr);
+                }
+            }
+            ClientMsg::BotSpawn { behavior: behavior_code, level } => {
+                let mut rng = rand::thread_rng();
+                let behavior_override = if behavior_code <= 2 {
+                    Some(behavior_code)
+                } else {
+                    None
+                };
+                let preset =
+                    crate::bot::shooting_range::level_config(level, behavior_override);
+                let range_deadline = preset
+                    .time_limit_secs
+                    .map(|secs| Instant::now() + Duration::from_secs(secs));
+                self.bot_manager.set_range_challenge_deadline(range_deadline);
+                let base_bot_count = self.players.values().filter(|p| p.is_bot).count();
+                for (i, bot_cfg) in preset.bots.iter().enumerate() {
+                    let bot_index = base_bot_count + i;
+                    let bot_id = 9000u32 + (bot_index as u32);
+                    let bot_name = format!("Bot{}", bot_index + 1);
+                    let shooting_cfg =
+                        bot_cfg.shooting.unwrap_or(preset.default_shooting);
+                    let weapon = bot_cfg.weapon.unwrap_or(preset.default_weapon);
+                    let hp = bot_cfg.health.unwrap_or(preset.default_health);
+                    let can_shoot =
+                        bot_cfg.can_shoot.unwrap_or(preset.default_can_shoot);
+                    let bot_player = Player {
+                        id: bot_id,
+                        username: bot_name,
+                        position: bot_cfg.position,
+                        yaw: std::f32::consts::PI,
+                        pitch: 0.0,
+                        health: hp,
+                        max_health: hp,
+                        is_alive: true,
+                        kills: 0,
+                        deaths: 0,
+                        gun_level: 1,
+                        last_activity: Instant::now(),
+                        death_time: None,
+                        world: WorldId::Lobby,
+                        post_teleport_freeze_until: None,
+                        is_sprinting: false,
+                        is_ads: false,
+                        is_crouched: false,
+                        is_airborne: false,
+                        is_prone: false,
+                        is_sliding: false,
+                        evt_jump_start: false,
+                        evt_landed: false,
+                        team: bot_cfg.team,
+                        current_weapon: weapon.to_string(),
+                        is_bot: true,
+                        is_silent: false,
+                        auto_respawn: false,
+                        regen_resume_at: None,
+
+                    };
+
+                    let bot_state = BotState {
+                        movement: crate::physics::BotMovementState {
+                            velocity: glam::Vec3::ZERO,
+                            is_grounded: true,
+                            height: 1.6,
+                        },
+                        behavior: bot_cfg.behavior.clone(),
+                        can_shoot,
+                        shooting: crate::bot::shooting::BotShootingState {
+                            // Start each bot with slight offset so they don't sync-fire.
+                            fire_rate: rng
+                                .gen_range(0.0f32..shooting_cfg.fire_rate.max(0.01)),
+                            has_target: false,
+                            reaction_remaining: shooting_cfg.reaction_time
+                                + rng.gen_range(0.0f32..0.35),
+                        },
+                        shooting_config: shooting_cfg,
+                        target_id: None,
+                        reaction_timer: 0.0,
+                        // new fields required by BotState
+                        personality: crate::bot::personality::BotPersonality {
+                            name: "range", // generic
+                            archetype:
+                                crate::bot::personality::BotArchetype::AllRounder,
+                            weapon,
+                            range_min: 0.0,
+                            range_max: 100.0,
+                            aggression: 0.5,
+                            flank_weight: 0.5,
+                            hold_angle_weight: 0.5,
+                            push_weight: 0.5,
+                            retreat_health_threshold: 0.5,
+                            peek_time: 1.0,
+                            reposition_interval: 3.0,
+                            noise_investigation_weight: 0.5,
+                            base_aim_offset: 0.0,
+                            base_reaction_time: shooting_cfg.reaction_time,
+                            base_fov_degrees: 90.0,
+                            base_repath_interval: 2.0,
+                            base_turn_rate: 4.0,
+                        },
+                        difficulty: crate::bot::personality::BotDifficulty::Normal,
+                        archetype: crate::bot::personality::BotArchetype::AllRounder,
+                        personality_id: None,
+                        last_known_enemy_pos: None,
+                        behavior_decision_timer: 0.0,
+                        stuck_timer: 0.0,
+                        idle_look_timer: 0.0,
+                        current_yaw: 0.0,
+                        current_pitch: 0.0,
+                    };
+
+                    self.bot_manager.spawn_bot(&mut self.players, bot_player, bot_state);
+                }
+                broadcast::broadcast_state(&self.outbox, &self.players);
+                broadcast::broadcast_player_list(&self.outbox, &self.players);
+            }
+
+            ClientMsg::BotDespawnAll => {
+                self.bot_manager.despawn_all(&mut self.players);
+                broadcast::broadcast_state(&self.outbox, &self.players);
+                broadcast::broadcast_player_list(&self.outbox, &self.players);
+            }
+
+        }
+    }
+
+    /// Periodic simulation step; call after each packet and at least every 100ms.
+    pub fn tick(&mut self) {
+        let now_tick = Instant::now();
+        let dt = now_tick.duration_since(self.last_tick).as_secs_f32();
+        self.last_tick = now_tick;
 
         // Auto-respawn dead players EXCEPT in Search & Destroy mode (one life per round)
-        if match_mode != MODE_SEARCH_AND_DESTROY {
-            game::process_auto_respawns(&socket, maze.as_ref(), &mut players, match_mode);
+        if self.match_mode != MODE_SEARCH_AND_DESTROY {
+            game::process_auto_respawns(&self.outbox, self.maze.as_ref(), &mut self.players, self.match_mode);
         }
 
         // S&D tick: advance round state
-        if match_running && match_mode == MODE_SEARCH_AND_DESTROY {
-            if let Some(ref mut snd) = snd_state {
-                if let Some((winner_name, winner_id)) = snd.tick(dt, &socket, &mut players) {
+        if self.match_running && self.match_mode == MODE_SEARCH_AND_DESTROY {
+            if let Some(ref mut snd) = self.snd_state {
+                if let Some((winner_name, winner_id)) = snd.tick(dt, &self.outbox, &mut self.players) {
                     // S&D match is over
                     log!("S&D match over: {} wins", winner_name);
-                    let mut end_msg = vec![MSG_MATCH_END];
-                    end_msg.extend_from_slice(&winner_id.to_be_bytes());
-                    let name_bytes = winner_name.as_bytes();
-                    end_msg.push(name_bytes.len() as u8);
-                    end_msg.extend_from_slice(name_bytes);
-                    end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
-                    for (addr, _) in players.iter() {
-                        let _ = socket.send_to(&end_msg, *addr);
+                    let end_msg = ServerMsg::MatchEnd {
+                        winner_id: winner_id,
+                        winner_name: winner_name.to_string(),
+                        countdown: Some(game::MATCH_END_COUNTDOWN_SECS),
                     }
-                    match_end_pending = Some((
+                    .encode();
+                    for (addr, _) in self.players.iter() {
+                        let _ = self.outbox.send_to(&end_msg, *addr);
+                    }
+                    self.match_end_pending = Some((
                         Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
                         winner_id,
                         winner_name,
                     ));
-                    match_running = false;
-                    snd_state = None;
+                    self.match_running = false;
+                    self.snd_state = None;
                 }
             }
         }
         // tick bots
-        bot_manager.tick(&socket, &mut players, &mut match_end_pending, match_mode, maze.as_ref());
-        if bot_manager.handle_range_challenge_timeout(&mut players) {
-            broadcast::broadcast_state(&socket, &players);
-            broadcast::broadcast_player_list(&socket, &players);
+        self.bot_manager.tick(&self.outbox, &mut self.players, &mut self.match_end_pending, self.match_mode, self.maze.as_ref());
+        if self.bot_manager.handle_range_challenge_timeout(&mut self.players) {
+            broadcast::broadcast_state(&self.outbox, &self.players);
+            broadcast::broadcast_player_list(&self.outbox, &self.players);
         }
-        if last_regen_tick.elapsed() >= Duration::from_secs(1) {
-            game::process_lobby_regen(&mut players);
-            last_regen_tick = Instant::now();
+        if self.last_regen_tick.elapsed() >= Duration::from_secs(1) {
+            game::process_lobby_regen(&mut self.players);
+            self.last_regen_tick = Instant::now();
         }
-        broadcast::broadcast_state(&socket, &players);
+        broadcast::broadcast_state(&self.outbox, &self.players);
 
-        if game::cleanup_inactive_players(&mut players) {
+        if game::cleanup_inactive_players(&mut self.players) {
             // players were removed — broadcast so other clients drop their characters
-            broadcast::broadcast_state(&socket, &players);
-            broadcast::broadcast_player_list(&socket, &players);
+            broadcast::broadcast_state(&self.outbox, &self.players);
+            broadcast::broadcast_player_list(&self.outbox, &self.players);
         }
 
         // If a match is running but there are no players left in the Maze, end it immediately
-        if match_running {
-            let maze_count = players
+        if self.match_running {
+            let maze_count = self.players
                 .values()
                 .filter(|p| p.world == WorldId::Maze)
                 .count();
             if maze_count == 0 {
-                log!("No players remain in match — ending match early");
-                match_running = false;
-                match_start_time = None;
-                maze = None;
-                match_total_maze_entries = 0;
+                log!("No self.players remain in match — ending match early");
+                self.match_running = false;
+                self.match_start_time = None;
+                self.maze = None;
+                self.match_total_maze_entries = 0;
             }
         }
 
         // Warmup expiry: actually start the match when the warmup countdown ends
-        if match_warmup_end.is_some() && !match_running {
+        if self.match_warmup_end.is_some() && !self.match_running {
             handlers::maybe_start_match(
-                &socket,
-                &mut players,
-                &mut maze,
-                &mut match_running,
-                &mut match_start_time,
-                &mut match_warmup_end,
-                &mut last_match_time_sent,
-                &mut match_total_maze_entries,
-                match_mode,
-                &mut snd_state,
-                match_duration,
-                &mut bot_manager,
-                autofill_bots_per_team,
-                autofill_diff_mask,
+                &self.outbox,
+                &mut self.players,
+                &mut self.maze,
+                &mut self.match_running,
+                &mut self.match_start_time,
+                &mut self.match_warmup_end,
+                &mut self.last_match_time_sent,
+                &mut self.match_total_maze_entries,
+                self.match_mode,
+                &mut self.snd_state,
+                self.match_duration,
+                &mut self.bot_manager,
+                self.autofill_bots_per_team,
+                self.autofill_diff_mask,
             );
         }
 
         // Periodically rebroadcast warmup countdown so clients that missed
         // the original packet can catch up (helps offscreen/paused clients).
-        if let Some(end) = match_warmup_end {
+        if let Some(end) = self.match_warmup_end {
             let secs = if Instant::now() >= end {
                 0u8
             } else {
@@ -464,71 +494,71 @@ pub fn run() -> std::io::Result<()> {
                     .as_secs()
                     .min(255) as u8
             };
-            if last_warmup_sent != Some(secs) {
-                let cd: [u8; 3] = [MSG_MATCH_COUNTDOWN, secs, match_mode];
-                for (addr, _) in players.iter() {
-                    let _ = socket.send_to(&cd, *addr);
+            if self.last_warmup_sent != Some(secs) {
+                let cd = ServerMsg::MatchCountdown { secs, mode: Some(self.match_mode) }.encode();
+                for (addr, _) in self.players.iter() {
+                    let _ = self.outbox.send_to(&cd, *addr);
                 }
-                last_warmup_sent = Some(secs);
+                self.last_warmup_sent = Some(secs);
             }
         } else {
-            last_warmup_sent = None;
+            self.last_warmup_sent = None;
         }
 
         // If a match is running, check player counts for early end conditions (skip for S&D, it handles its own)
-        if match_running && match_end_pending.is_none() && match_mode != MODE_SEARCH_AND_DESTROY {
+        if self.match_running && self.match_end_pending.is_none() && self.match_mode != MODE_SEARCH_AND_DESTROY {
             handlers::check_early_end_conditions(
-                &socket,
-                &mut players,
-                &mut maze,
-                &mut match_running,
-                &mut match_end_pending,
-                &mut match_total_maze_entries,
-                &mut match_start_time,
-                match_mode,
-                &mut match_duration,
+                &self.outbox,
+                &mut self.players,
+                &mut self.maze,
+                &mut self.match_running,
+                &mut self.match_end_pending,
+                &mut self.match_total_maze_entries,
+                &mut self.match_start_time,
+                self.match_mode,
+                &mut self.match_duration,
             );
         }
 
         // Basic match timer: end match after MATCH_DURATION (skip for S&D, rounds handle timing)
-        if match_running && match_mode != MODE_SEARCH_AND_DESTROY {
+        if self.match_running && self.match_mode != MODE_SEARCH_AND_DESTROY {
             handlers::update_match_timer(
-                &socket,
-                &mut players,
-                &mut maze,
-                &mut match_running,
-                &mut match_start_time,
-                &mut last_match_time_sent,
-                &mut match_total_maze_entries,
-                &mut match_end_pending,
-                match_mode,
-                match_duration,
+                &self.outbox,
+                &mut self.players,
+                &mut self.maze,
+                &mut self.match_running,
+                &mut self.match_start_time,
+                &mut self.last_match_time_sent,
+                &mut self.match_total_maze_entries,
+                &mut self.match_end_pending,
+                self.match_mode,
+                self.match_duration,
             );
         }
 
         // If a match-end was scheduled (winner reached score or last-man-standing), execute it when the countdown expires
-        if match_end_pending.as_ref().map_or(false, |(when, _, _)| Instant::now() >= *when) {
-            let winner_name = match_end_pending.as_ref().map(|(_, _, n)| n.clone()).unwrap_or_default();
+        if self.match_end_pending.as_ref().map_or(false, |(when, _, _)| Instant::now() >= *when) {
+            let winner_name = self.match_end_pending.as_ref().map(|(_, _, n)| n.clone()).unwrap_or_default();
             handlers::execute_scheduled_match_end(
-                &socket,
-                &mut players,
-                &mut maze,
-                &mut match_running,
-                &mut match_start_time,
-                &mut match_end_pending,
-                &mut last_match_time_sent,
-                &mut match_total_maze_entries,
-                &mut match_duration,
+                &self.outbox,
+                &mut self.players,
+                &mut self.maze,
+                &mut self.match_running,
+                &mut self.match_start_time,
+                &mut self.match_end_pending,
+                &mut self.last_match_time_sent,
+                &mut self.match_total_maze_entries,
+                &mut self.match_duration,
                 winner_name,
-                &mut snd_state,
-                &mut bot_manager,
+                &mut self.snd_state,
+                &mut self.bot_manager,
             );
         }
 
         // Rebroadcast match-end countdown periodically so offscreen clients
         // display the remaining end-of-match timer even if they missed the
         // original MSG_MATCH_END packet.
-        if let Some((when, winner_id, winner_name)) = match_end_pending.as_ref() {
+        if let Some((when, winner_id, winner_name)) = self.match_end_pending.as_ref() {
             let secs = if Instant::now() >= *when {
                 0u8
             } else {
@@ -536,20 +566,20 @@ pub fn run() -> std::io::Result<()> {
                     .as_secs()
                     .min(255) as u8
             };
-            if last_end_countdown_sent != Some(secs) {
-                let mut end_msg = vec![MSG_MATCH_END];
-                end_msg.extend_from_slice(&winner_id.to_be_bytes());
-                let name_bytes = winner_name.as_bytes();
-                end_msg.push(name_bytes.len() as u8);
-                end_msg.extend_from_slice(name_bytes);
-                end_msg.push(secs);
-                for (addr, _) in players.iter() {
-                    let _ = socket.send_to(&end_msg, *addr);
+            if self.last_end_countdown_sent != Some(secs) {
+                let end_msg = ServerMsg::MatchEnd {
+                    winner_id: *winner_id,
+                    winner_name: winner_name.to_string(),
+                    countdown: Some(secs),
                 }
-                last_end_countdown_sent = Some(secs);
+                .encode();
+                for (addr, _) in self.players.iter() {
+                    let _ = self.outbox.send_to(&end_msg, *addr);
+                }
+                self.last_end_countdown_sent = Some(secs);
             }
         } else {
-            last_end_countdown_sent = None;
+            self.last_end_countdown_sent = None;
         }
     }
 }

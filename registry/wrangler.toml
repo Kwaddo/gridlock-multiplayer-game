@@ -1,0 +1,21 @@
+name = "gridlock-registry"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Host list (one global instance).
+[[durable_objects.bindings]]
+name = "REGISTRY"
+class_name = "Registry"
+
+# WebRTC signalling (one instance per room).
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# SQLite-backed classes are the ones available on the Workers Free plan.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Registry", "Room"]
+
+# Optional TURN relay for WebRTC players who cannot connect directly.
+# Set with: npx wrangler secret put TURN_KEY_ID / TURN_KEY_API_TOKEN

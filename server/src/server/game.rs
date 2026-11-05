@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::net::{SocketAddr, UdpSocket};
-use std::time::{Duration, Instant};
+use crate::net::{Outbox, PeerId};
+use std::time::Duration;
+use platform::Instant;
 
 use crate::maze::MazeData;
 use crate::player::Player;
@@ -62,9 +63,9 @@ pub const TEAM_LOADOUT_BLUE: [&str; 5] =
 
 use crate::player::Team;
 
-/// Return the SocketAddr of the current lobby leader — the human lobby player with the
+/// Return the PeerId of the current lobby leader — the human lobby player with the
 /// lowest player ID (i.e. first to join). Returns None when the lobby is empty.
-pub fn lobby_leader_addr(players: &HashMap<SocketAddr, Player>) -> Option<SocketAddr> {
+pub fn lobby_leader_addr(players: &HashMap<PeerId, Player>) -> Option<PeerId> {
     players
         .iter()
         .filter(|(_, p)| !p.is_bot && p.world == WorldId::Lobby)
@@ -75,8 +76,8 @@ pub fn lobby_leader_addr(players: &HashMap<SocketAddr, Player>) -> Option<Socket
 /// Auto-assign balanced teams (Red/Blue) to all players currently in the lobby.
 /// Uses a deterministic ordering (player ID ascending) and alternates assignments
 /// so all clients can predict the same result.
-pub fn auto_assign_lobby_teams(players: &mut HashMap<SocketAddr, Player>) {
-    let mut lobby_pairs: Vec<(SocketAddr, u32)> = players
+pub fn auto_assign_lobby_teams(players: &mut HashMap<PeerId, Player>) {
+    let mut lobby_pairs: Vec<(PeerId, u32)> = players
         .iter()
         .filter_map(|(addr, p)| {
             if p.world == WorldId::Lobby && !p.is_bot {
@@ -98,7 +99,7 @@ pub fn auto_assign_lobby_teams(players: &mut HashMap<SocketAddr, Player>) {
 /// Choose a weapon for `player` from their team's loadout attempting to avoid
 /// duplicates currently assigned to teammates when possible.
 pub fn choose_team_weapon_for_player(
-    players: &std::collections::HashMap<std::net::SocketAddr, crate::player::Player>,
+    players: &std::collections::HashMap<PeerId, crate::player::Player>,
     player: &crate::player::Player,
 ) -> String {
     let pool: &[&str] = match player.team {
@@ -136,7 +137,7 @@ pub fn choose_team_weapon_for_player(
 /// suitable spot is found after a few tries.
 pub fn random_spawn_far(
     maze: &MazeData,
-    players: &HashMap<SocketAddr, Player>,
+    players: &HashMap<PeerId, Player>,
     min_dist: f32,
 ) -> (f32, f32, f32, bool) {
     // repeatedly sample candidate locations and test distance
@@ -160,18 +161,18 @@ pub fn random_spawn_far(
 }
 
 pub fn process_auto_respawns(
-    socket: &UdpSocket,
+    socket: &Outbox,
     maze: Option<&MazeData>,
-    players: &mut HashMap<SocketAddr, Player>,
+    players: &mut HashMap<PeerId, Player>,
     match_mode: u8,
 ) {
     let now = Instant::now();
     // include a bool indicating whether the teleporter fallback was used
-    let mut to_respawn: Vec<(SocketAddr, f32, f32, f32, bool, String)> =
+    let mut to_respawn: Vec<(PeerId, f32, f32, f32, bool, String)> =
         Vec::with_capacity(players.len());
 
     // first pass: gather respawn candidates without mutating `players`
-    let mut spawn_info: Vec<(SocketAddr, (f32, f32, f32, bool))> = Vec::new();
+    let mut spawn_info: Vec<(PeerId, (f32, f32, f32, bool))> = Vec::new();
     for (addr, player) in players.iter() {
         if !player.auto_respawn || player.is_alive {
             continue;
@@ -223,12 +224,12 @@ pub fn process_auto_respawns(
             username,
             WorldId::Maze
         );
-        let mut respawn_msg = vec![crate::protocols::MSG_RESPAWN];
-        respawn_msg.extend_from_slice(&sx.to_be_bytes());
-        respawn_msg.extend_from_slice(&sy.to_be_bytes());
-        respawn_msg.extend_from_slice(&sz.to_be_bytes());
         // extra byte: 0 = random spawn, 1 = teleporter fallback
-        respawn_msg.push(if *used_fallback { 1u8 } else { 0u8 });
+        let respawn_msg = crate::protocols::ServerMsg::Respawn {
+            position: (*sx, *sy, *sz),
+            kind: Some(*used_fallback as u8),
+        }
+        .encode();
         // choose weapon for the respawned player based on mode
         let chosen_weapon = if let Some(pref) = players.get(socket_addr) {
             if match_mode == crate::protocols::MODE_GUN_GAME {
@@ -267,7 +268,7 @@ pub fn process_auto_respawns(
 
 /// Regenerate player health after 7 seconds out of combat.
 /// Applies to all worlds; combat resets the timer via regen_resume_at.
-pub fn process_lobby_regen(players: &mut HashMap<SocketAddr, Player>) {
+pub fn process_lobby_regen(players: &mut HashMap<PeerId, Player>) {
     let now = Instant::now();
     for player in players.values_mut() {
         if player.is_bot || !player.is_alive {
@@ -294,7 +295,7 @@ pub fn process_lobby_regen(players: &mut HashMap<SocketAddr, Player>) {
 
 /// Remove players whose last activity timestamp is older than the timeout constant.
 /// Returns true if any players were removed.
-pub fn cleanup_inactive_players(players: &mut HashMap<SocketAddr, Player>) -> bool {
+pub fn cleanup_inactive_players(players: &mut HashMap<PeerId, Player>) -> bool {
     let now = Instant::now();
     let mut to_remove = Vec::new();
 

@@ -3,8 +3,8 @@ use client::types::animated_model::{
     load_gltf_animated_model, load_gltf_animated_model_with_unskinned,
 };
 use macroquad::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
-use std::sync::Arc;
 
 use super::obj_loader::{
     load_gltf_static_mesh, load_gltf_static_mesh_lit, load_obj_mesh_with_materials,
@@ -61,20 +61,28 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
         // a skin/animation placeholder which confuses the animated loader.
         let keep_unskinned_primitives = key == "fp_hands_sawnoff"
             || key == "fp_hands_minigun";
+        // Read once; works from disk natively and over HTTP in the browser.
+        let bytes = match load_file(&resolved_path).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                println!("Failed to read {} from {}: {:?}", key_string, path_string, e);
+                return;
+            }
+        };
         let animated_result = if keep_unskinned_primitives {
-            load_gltf_animated_model_with_unskinned(&resolved_path, true)
+            load_gltf_animated_model_with_unskinned(&resolved_path, &bytes, true)
         } else {
-            load_gltf_animated_model(&resolved_path)
+            load_gltf_animated_model(&resolved_path, &bytes)
         };
         match animated_result {
             Ok(animated) => {
                 if !animated.has_any_texture() {
                     // animated model produced but no texture; try static loader
-                    match load_gltf_static_mesh(&resolved_path).await {
+                    match load_gltf_static_mesh(&resolved_path, &bytes).await {
                         Ok(mut meshes) => {
                             let all_untextured = meshes.iter().all(|m| m.texture.is_none());
                             if all_untextured {
-                                if let Ok(lit) = load_gltf_static_mesh_lit(&resolved_path).await {
+                                if let Ok(lit) = load_gltf_static_mesh_lit(&resolved_path, &bytes).await {
                                     meshes = lit;
                                 }
                             }
@@ -125,13 +133,13 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                 }
             }
             Err(anim_err) => {
-                match load_gltf_static_mesh(&resolved_path).await {
+                match load_gltf_static_mesh(&resolved_path, &bytes).await {
                     Ok(mut meshes) => {
                         // if no primitive had a texture, try the lit variant to give
                         // the user some built‑in shading
                         let all_untextured = meshes.iter().all(|m| m.texture.is_none());
                         if all_untextured {
-                            if let Ok(lit) = load_gltf_static_mesh_lit(&resolved_path).await {
+                            if let Ok(lit) = load_gltf_static_mesh_lit(&resolved_path, &bytes).await {
                                 meshes = lit;
                             }
                         }
@@ -162,11 +170,12 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     } else if is_sound {
-        match std::fs::read(&resolved_path) {
+        match load_file(&resolved_path).await.map_err(|e| format!("{e:?}")) {
             Ok(bytes) => {
-                playing_state
-                    .sound_samples
-                    .insert(key_string.clone(), Arc::from(bytes.into_boxed_slice()));
+                if let Err(e) = playing_state.audio.insert(key_string.clone(), bytes).await {
+                    println!("Failed to decode sound {} from {}: {}", key_string, path_string, e);
+                    return;
+                }
                 playing_state
                     .asset_source_paths
                     .insert(key_string.clone(), path_string.clone());
@@ -199,6 +208,13 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
     }
 }
 
+/// In the browser, paths are URLs relative to the page; nothing to probe.
+#[cfg(target_arch = "wasm32")]
+pub fn resolve_asset_path(path: &str) -> String {
+    path.to_string()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn resolve_asset_path(path: &str) -> String {
     // 1. As-is (works when CWD is the right place, e.g. `cargo run`)
     if Path::new(path).exists() {
@@ -263,7 +279,7 @@ fn is_asset_cached(
             return true;
         }
     } else if is_sound {
-        if playing_state.sound_samples.contains_key(key) {
+        if playing_state.audio.has(key) {
             println!("Asset cache hit: {} ({})", key, path);
             return true;
         }

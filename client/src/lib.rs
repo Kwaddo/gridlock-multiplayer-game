@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod core;
 pub mod net;
 pub mod physics;

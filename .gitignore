@@ -23,3 +23,10 @@ client/cache/
 
 client/assets/
 dist/
+
+# Cloudflare Worker local state
+registry/.wrangler/
+registry/node_modules/
+
+# Per-player settings saved by the game
+client/settings.json
