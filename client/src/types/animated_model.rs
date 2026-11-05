@@ -2,8 +2,10 @@ use gltf::animation::util::ReadOutputs;
 use gltf::mesh::util::ReadIndices;
 use macroquad::models::{Mesh, Vertex};
 use macroquad::prelude::*;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::env;
+use std::rc::{Rc, Weak};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClipSelectionMode {
@@ -62,7 +64,15 @@ struct RigidVertex {
 }
 
 pub struct AnimatedModel {
-    parts: Vec<AnimatedPart>,
+    /// Bind-pose mesh, skin weights and textures, shared by every clip of the
+    /// same character (the player's 25 animation files hold one mesh).
+    geometry: Rc<SharedGeometry>,
+    /// This clip's CPU-skinned meshes, made the first time it is skinned on
+    /// the CPU; clips drawn by the GPU, or not drawn at all, never need them.
+    skinned: Option<Vec<Mesh>>,
+    /// Whether the last draw skinned on the GPU (see `draw_gpu`); then only
+    /// the joint matrices are updated here, every frame.
+    gpu_drawn: Cell<bool>,
     node_rest: Vec<LocalTransform>,
     node_pose: Vec<LocalTransform>,
     node_parents: Vec<Option<usize>>,
@@ -92,35 +102,92 @@ pub struct AnimatedModel {
 const SKIN_INTERVAL: f32 = 1.0 / 30.0; // skin at 30fps max
 
 struct AnimatedPart {
+    /// Bind pose; also the mesh drawn until the clip is first skinned.
     mesh: Mesh,
     skin_vertices: Vec<SkinVertex>,
     rigid_vertices: Vec<RigidVertex>,
     skinned_vertex_count: usize,
 }
 
+/// The parts of an animated model that do not depend on its clip.
+struct SharedGeometry {
+    parts: Vec<AnimatedPart>,
+    /// GPU buffers for skinning in a shader, made on first use.
+    gpu: RefCell<GpuGeometry>,
+}
+
+thread_local! {
+    /// Geometry by a hash of its content, so identical meshes are kept once.
+    static GEOMETRY: RefCell<HashMap<u64, Weak<SharedGeometry>>> = RefCell::new(HashMap::new());
+}
+
+impl SharedGeometry {
+    /// The geometry already loaded with the same content as `parts`, or
+    /// `parts` as new shared geometry.
+    fn shared(parts: Vec<AnimatedPart>) -> Rc<SharedGeometry> {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for part in &parts {
+            part.mesh.indices.hash(&mut hasher);
+            for v in &part.mesh.vertices {
+                for f in [v.position.x, v.position.y, v.position.z, v.uv.x, v.uv.y] {
+                    f.to_bits().hash(&mut hasher);
+                }
+                v.color.hash(&mut hasher);
+            }
+            for v in &part.skin_vertices {
+                v.joints.hash(&mut hasher);
+                for w in v.weights {
+                    w.to_bits().hash(&mut hasher);
+                }
+            }
+            part.rigid_vertices.iter().for_each(|v| v.node_idx.hash(&mut hasher));
+            part.skinned_vertex_count.hash(&mut hasher);
+            format!("{:?}", part.mesh.texture.as_ref().map(|t| t.raw_miniquad_id())).hash(&mut hasher);
+        }
+        let key = hasher.finish();
+        GEOMETRY.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if let Some(existing) = cache.get(&key).and_then(Weak::upgrade) {
+                return existing;
+            }
+            let geometry = Rc::new(SharedGeometry { parts, gpu: RefCell::new(GpuGeometry::Untried) });
+            cache.insert(key, Rc::downgrade(&geometry));
+            geometry
+        })
+    }
+}
+
 impl AnimatedModel {
     pub fn mesh(&self) -> &Mesh {
-        &self.parts[0].mesh
+        self.meshes().next().expect("an animated model has at least one part")
     }
 
     pub fn meshes(&self) -> impl Iterator<Item = &Mesh> {
-        self.parts.iter().map(|p| &p.mesh)
+        let skinned = self.skinned.as_deref();
+        let bind = self.geometry.parts.iter().map(|p| &p.mesh);
+        skinned.into_iter().flatten().chain(bind.filter(move |_| skinned.is_none()))
     }
 
     pub fn has_any_texture(&self) -> bool {
-        self.parts.iter().any(|p| p.mesh.texture.is_some())
+        self.geometry.parts.iter().any(|p| p.mesh.texture.is_some())
     }
 
     pub fn total_vertex_count(&self) -> usize {
-        self.parts.iter().map(|p| p.mesh.vertices.len()).sum()
+        self.geometry.parts.iter().map(|p| p.mesh.vertices.len()).sum()
     }
 
-    /// Advance the clip and re-skin it (at most ~30 times a second).
+    /// Advance the clip and bring its pose up to date: every frame when the
+    /// GPU skins it, otherwise re-skinning on the CPU at most ~30 times a second.
     pub fn update(&mut self, dt: f32) {
         self.advance(dt);
-        if self.skin_accum >= SKIN_INTERVAL {
+        if self.gpu_drawn.get() {
             self.skin_accum = 0.0;
-            self.skin();
+            self.pose();
+        } else if self.skin_accum >= SKIN_INTERVAL {
+            self.skin_accum = 0.0;
+            self.pose();
+            self.skin_on_cpu();
         }
     }
 
@@ -156,8 +223,9 @@ impl AnimatedModel {
         }
     }
 
-    /// Pose the skeleton at the current time and skin the mesh on the CPU.
-    fn skin(&mut self) {
+    /// Pose the skeleton at the current time: joint matrices for skinning and
+    /// joint positions for hitboxes. Cheap (one matrix per joint).
+    fn pose(&mut self) {
         for (i, pose) in self.node_pose.iter_mut().enumerate() {
             let mut p = self.node_rest[i];
             if let Some(track) = &self.node_tracks[i].translation {
@@ -180,8 +248,16 @@ impl AnimatedModel {
             self.joint_positions[i] = global.transform_point3(Vec3::ZERO);
             self.skin_mats[i] = global * self.inverse_bind[i];
         }
+    }
 
-        for part in &mut self.parts {
+    /// Skin the mesh on the CPU with the current pose.
+    fn skin_on_cpu(&mut self) {
+        let geometry = Rc::clone(&self.geometry);
+        let skinned = self
+            .skinned
+            .get_or_insert_with(|| geometry.parts.iter().map(|p| clone_mesh(&p.mesh)).collect());
+
+        for (part, mesh) in geometry.parts.iter().zip(skinned.iter_mut()) {
             for (i, vtx) in part.skin_vertices.iter().enumerate() {
                 let mut p = Vec3::ZERO;
                 let mut n = Vec3::ZERO;
@@ -214,31 +290,27 @@ impl AnimatedModel {
                 } else {
                     vtx.bind_normal
                 };
-                part.mesh.vertices[i].position = out_p;
-                part.mesh.vertices[i].normal = out_n.extend(0.0);
+                mesh.vertices[i].position = out_p;
+                mesh.vertices[i].normal = out_n.extend(0.0);
             }
-
         }
 
         // Rigid (unskinned) primitives still follow node animation transforms.
-        for part_idx in 0..self.parts.len() {
-            // Taken out for the loop (global_for_node borrows self), put back after.
-            let rigid_vertices = std::mem::take(&mut self.parts[part_idx].rigid_vertices);
-            let skinned_vertex_count = self.parts[part_idx].skinned_vertex_count;
-            for (i, vtx) in rigid_vertices.iter().enumerate() {
-                let out_idx = skinned_vertex_count + i;
-                if out_idx >= self.parts[part_idx].mesh.vertices.len() {
-                    continue;
-                }
+        for part_idx in 0..geometry.parts.len() {
+            let part = &geometry.parts[part_idx];
+            for (i, vtx) in part.rigid_vertices.iter().enumerate() {
+                let out_idx = part.skinned_vertex_count + i;
                 let global = self.global_for_node(vtx.node_idx);
                 let out_p = global.transform_point3(vtx.bind_position);
                 let out_n = (global * vtx.bind_normal.extend(0.0))
                     .truncate()
                     .normalize_or_zero();
-                self.parts[part_idx].mesh.vertices[out_idx].position = out_p;
-                self.parts[part_idx].mesh.vertices[out_idx].normal = out_n.extend(0.0);
+                let Some(out) = self.skinned.as_mut().and_then(|m| m[part_idx].vertices.get_mut(out_idx)) else {
+                    continue;
+                };
+                out.position = out_p;
+                out.normal = out_n.extend(0.0);
             }
-            self.parts[part_idx].rigid_vertices = rigid_vertices;
         }
     }
 
@@ -996,7 +1068,9 @@ Add one in animation_override_index_for_stem().",
     let y_offset = -min_y * normalize_scale; // shift feet to y=0
 
     let mut model = AnimatedModel {
-        parts,
+        geometry: SharedGeometry::shared(parts),
+        skinned: None,
+        gpu_drawn: Cell::new(false),
         node_pose: node_rest.clone(),
         node_rest,
         node_parents,
@@ -1019,7 +1093,9 @@ Add one in animation_override_index_for_stem().",
         normalize_scale,
         y_offset,
     };
-    model.update(0.0);
+    // Joint positions (hitboxes) are valid from the start; vertices are skinned
+    // the first time the clip is drawn.
+    model.pose();
 
     println!(
         "[anim] {} raw_height={:.1} scale={:.4} y_offset={:.2}",
@@ -1093,4 +1169,232 @@ fn decode_texture(bytes: &[u8]) -> Option<Texture2D> {
     let texture = Texture2D::from_rgba8(width as u16, height as u16, &image);
     texture.set_filter(FilterMode::Nearest);
     Some(texture)
+}
+
+fn clone_mesh(mesh: &Mesh) -> Mesh {
+    Mesh { vertices: mesh.vertices.clone(), indices: mesh.indices.clone(), texture: mesh.texture.clone() }
+}
+
+// ---------------------------------------------------------------- GPU skinning
+
+/// The most joints the skinning shader takes. Each costs 4 of the vertex
+/// shader's uniform vectors; WebGL only guarantees 128, but desktop and most
+/// mobile GPUs offer 1024 or more. A GPU that cannot fit the shader falls
+/// back to skinning on the CPU.
+const MAX_GPU_JOINTS: usize = 80;
+
+enum GpuGeometry {
+    Untried,
+    /// One vertex and index buffer per part, uploaded once.
+    Ready(Vec<GpuPart>),
+    /// Rigid parts, too many joints, or no shader: skinned on the CPU instead.
+    Unavailable,
+}
+
+struct GpuPart {
+    vertices: miniquad::BufferId,
+    indices: miniquad::BufferId,
+    index_count: i32,
+    texture: Option<Texture2D>,
+    color: [f32; 4],
+}
+
+/// Pipeline and a 1x1 white texture for untextured parts; `None` if the GPU
+/// cannot compile the shader.
+struct GpuSkinning {
+    pipeline: miniquad::Pipeline,
+    white: miniquad::TextureId,
+}
+
+thread_local! {
+    static GPU_SKINNING: std::cell::OnceCell<Option<GpuSkinning>> = const { std::cell::OnceCell::new() };
+}
+
+#[repr(C)]
+struct GpuSkinUniforms {
+    mvp: Mat4,
+    color: [f32; 4],
+    tint: [f32; 4],
+    joints: [Mat4; MAX_GPU_JOINTS],
+}
+
+/// Per vertex: position, uv, joint indices and weights.
+#[repr(C)]
+struct GpuSkinVertex {
+    position: [f32; 3],
+    uv: [f32; 2],
+    joints: [f32; 4],
+    weights: [f32; 4],
+}
+
+const GPU_SKIN_VERTEX: &str = r#"#version 100
+attribute vec3 in_position;
+attribute vec2 in_uv;
+attribute vec4 in_joints;
+attribute vec4 in_weights;
+
+uniform mat4 Mvp;
+uniform mat4 Joints[80];
+
+varying lowp vec2 uv;
+
+void main() {
+    mat4 skin = Joints[int(in_joints.x)] * in_weights.x
+        + Joints[int(in_joints.y)] * in_weights.y
+        + Joints[int(in_joints.z)] * in_weights.z
+        + Joints[int(in_joints.w)] * in_weights.w;
+    gl_Position = Mvp * skin * vec4(in_position, 1.0);
+    uv = in_uv;
+}"#;
+
+const GPU_SKIN_FRAGMENT: &str = r#"#version 100
+precision mediump float;
+varying lowp vec2 uv;
+
+uniform sampler2D Texture;
+uniform lowp vec4 Color;
+uniform lowp vec4 Tint;
+
+void main() {
+    gl_FragColor = Color * texture2D(Texture, uv) * Tint;
+}"#;
+
+fn gpu_skinning_setup(ctx: &mut dyn miniquad::RenderingBackend) -> Option<GpuSkinning> {
+    use miniquad::*;
+    let shader = ctx
+        .new_shader(
+            ShaderSource::Glsl { vertex: GPU_SKIN_VERTEX, fragment: GPU_SKIN_FRAGMENT },
+            ShaderMeta {
+                images: vec!["Texture".to_string()],
+                uniforms: UniformBlockLayout {
+                    uniforms: vec![
+                        UniformDesc::new("Mvp", UniformType::Mat4),
+                        UniformDesc::new("Color", UniformType::Float4),
+                        UniformDesc::new("Tint", UniformType::Float4),
+                        UniformDesc::new("Joints", UniformType::Mat4).array(MAX_GPU_JOINTS),
+                    ],
+                },
+            },
+        )
+        .map_err(|e| macroquad::logging::warn!("GPU skinning unavailable, skinning on the CPU: {e:?}"))
+        .ok()?;
+    let pipeline = ctx.new_pipeline(
+        &[BufferLayout::default()],
+        &[
+            VertexAttribute::new("in_position", VertexFormat::Float3),
+            VertexAttribute::new("in_uv", VertexFormat::Float2),
+            VertexAttribute::new("in_joints", VertexFormat::Float4),
+            VertexAttribute::new("in_weights", VertexFormat::Float4),
+        ],
+        shader,
+        PipelineParams {
+            depth_test: Comparison::LessOrEqual,
+            depth_write: true,
+            color_blend: Some(BlendState::new(
+                Equation::Add,
+                BlendFactor::Value(BlendValue::SourceAlpha),
+                BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
+            )),
+            ..Default::default()
+        },
+    );
+    let white = ctx.new_texture_from_rgba8(1, 1, &[255, 255, 255, 255]);
+    Some(GpuSkinning { pipeline, white })
+}
+
+fn gpu_parts(ctx: &mut dyn miniquad::RenderingBackend, parts: &[AnimatedPart]) -> Option<Vec<GpuPart>> {
+    use miniquad::*;
+    let mut out = Vec::with_capacity(parts.len());
+    for part in parts {
+        if !part.rigid_vertices.is_empty() || part.skin_vertices.len() != part.mesh.vertices.len() {
+            return None;
+        }
+        if part.skin_vertices.iter().any(|v| v.joints.iter().any(|&j| j as usize >= MAX_GPU_JOINTS)) {
+            return None;
+        }
+        let vertices: Vec<GpuSkinVertex> = part
+            .mesh
+            .vertices
+            .iter()
+            .zip(&part.skin_vertices)
+            .map(|(v, s)| GpuSkinVertex {
+                position: s.bind_position.to_array(),
+                uv: v.uv.to_array(),
+                joints: s.joints.map(|j| j as f32),
+                weights: s.weights,
+            })
+            .collect();
+        let color = part.mesh.vertices.first().map_or([255; 4], |v| v.color).map(|c| c as f32 / 255.0);
+        out.push(GpuPart {
+            vertices: ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Immutable, BufferSource::slice(&vertices)),
+            indices: ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Immutable, BufferSource::slice(&part.mesh.indices)),
+            index_count: part.mesh.indices.len() as i32,
+            texture: part.mesh.texture.clone(),
+            color,
+        });
+    }
+    Some(out)
+}
+
+impl AnimatedModel {
+    /// Draw the model skinned by the GPU at `model` (its world transform),
+    /// multiplied by `tint`, from buffers uploaded once. Returns false when
+    /// this model or GPU cannot (rigid parts, too many joints, no shader);
+    /// draw `meshes()` then, which `update` keeps skinned on the CPU.
+    pub fn draw_gpu(&self, model: Mat4, tint: Color) -> bool {
+        if self.skin_mats.len() > MAX_GPU_JOINTS {
+            self.gpu_drawn.set(false);
+            return false;
+        }
+        let mut gl = unsafe { get_internal_gl() };
+        let Some(skinning) = GPU_SKINNING.with(|s| {
+            s.get_or_init(|| gpu_skinning_setup(gl.quad_context))
+                .as_ref()
+                .map(|s| (s.pipeline, s.white))
+        }) else {
+            self.gpu_drawn.set(false);
+            return false;
+        };
+        let mut gpu = self.geometry.gpu.borrow_mut();
+        if matches!(*gpu, GpuGeometry::Untried) {
+            *gpu = match gpu_parts(gl.quad_context, &self.geometry.parts) {
+                Some(parts) => GpuGeometry::Ready(parts),
+                None => GpuGeometry::Unavailable,
+            };
+        }
+        let GpuGeometry::Ready(parts) = &*gpu else {
+            self.gpu_drawn.set(false);
+            return false;
+        };
+        // From now on `update` only poses this clip, every frame.
+        self.gpu_drawn.set(true);
+
+        let mut uniforms = GpuSkinUniforms {
+            mvp: gl.quad_gl.get_projection_matrix() * model,
+            color: [1.0; 4],
+            tint: [tint.r, tint.g, tint.b, tint.a],
+            joints: [Mat4::IDENTITY; MAX_GPU_JOINTS],
+        };
+        uniforms.joints[..self.skin_mats.len()].copy_from_slice(&self.skin_mats);
+
+        // Draw in macroquad's current pass, after what it has batched so far.
+        gl.flush();
+        let pass = gl.quad_gl.get_active_render_pass();
+        let ctx = gl.quad_context;
+        ctx.begin_pass(pass, miniquad::PassAction::Nothing);
+        ctx.apply_pipeline(&skinning.0);
+        for part in parts {
+            uniforms.color = part.color;
+            let texture = part.texture.as_ref().map_or(skinning.1, |t| t.raw_miniquad_id());
+            ctx.apply_bindings(&miniquad::Bindings {
+                vertex_buffers: vec![part.vertices],
+                index_buffer: part.indices,
+                images: vec![texture],
+            });
+            ctx.apply_uniforms(miniquad::UniformsSource::table(&uniforms));
+            ctx.draw(0, part.index_count, 1);
+        }
+        ctx.end_render_pass();
+        true
+    }
 }
