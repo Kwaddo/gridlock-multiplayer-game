@@ -1177,6 +1177,22 @@ fn clone_mesh(mesh: &Mesh) -> Mesh {
 
 // ---------------------------------------------------------------- GPU skinning
 
+/// `?cpuskin` in the page URL turns GPU skinning off (browser build only).
+fn force_cpu_skinning() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        extern "C" {
+            fn gridlock_force_cpu_skinning() -> u32;
+        }
+        thread_local! {
+            static FORCED: bool = unsafe { gridlock_force_cpu_skinning() } != 0;
+        }
+        FORCED.with(|f| *f)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    false
+}
+
 /// The most joints the skinning shader takes. Each costs 4 of the vertex
 /// shader's uniform vectors; WebGL only guarantees 128, but desktop and most
 /// mobile GPUs offer 1024 or more. A GPU that cannot fit the shader falls
@@ -1342,7 +1358,7 @@ impl AnimatedModel {
     /// this model or GPU cannot (rigid parts, too many joints, no shader);
     /// draw `meshes()` then, which `update` keeps skinned on the CPU.
     pub fn draw_gpu(&self, model: Mat4, tint: Color) -> bool {
-        if self.skin_mats.len() > MAX_GPU_JOINTS {
+        if self.skin_mats.len() > MAX_GPU_JOINTS || force_cpu_skinning() {
             self.gpu_drawn.set(false);
             return false;
         }
