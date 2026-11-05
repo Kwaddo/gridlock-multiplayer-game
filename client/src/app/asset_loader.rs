@@ -23,8 +23,9 @@ thread_local! {
 
 /// Downloads assets in the background (macroquad coroutines), so the loading
 /// screen keeps drawing, and a game hosted in this tab keeps answering
-/// players, while a large model downloads. Only files read as raw bytes
-/// (models and sounds) go through it; textures and OBJs are small.
+/// players, while a large model downloads. Every file the loader reads goes
+/// through it except OBJs, whose loader fetches their materials itself (the
+/// browser build has none).
 #[derive(Default)]
 pub struct Prefetcher {
     pending: HashMap<String, Coroutine<Result<Vec<u8>, String>>>,
@@ -34,7 +35,7 @@ impl Prefetcher {
     /// Start downloading `path` unless it is already on its way.
     pub fn start(&mut self, path: &str) {
         let resolved = resolve_runtime_asset_path(path);
-        if !reads_bytes(&resolved) || self.pending.contains_key(&resolved) {
+        if !prefetchable(&resolved) || self.pending.contains_key(&resolved) {
             return;
         }
         let file = resolved.clone();
@@ -46,7 +47,7 @@ impl Prefetcher {
     /// Starts its download if nothing has yet.
     pub fn ready(&mut self, path: &str) -> bool {
         let resolved = resolve_runtime_asset_path(path);
-        if !reads_bytes(&resolved) {
+        if !prefetchable(&resolved) {
             return true;
         }
         self.start(path);
@@ -69,9 +70,38 @@ impl Prefetcher {
     }
 }
 
-fn reads_bytes(resolved_path: &str) -> bool {
-    let lower = resolved_path.to_lowercase();
-    [".glb", ".gltf", ".ogg", ".wav", ".mp3"].iter().any(|ext| lower.ends_with(ext))
+fn prefetchable(resolved_path: &str) -> bool {
+    !resolved_path.to_lowercase().ends_with(".obj")
+}
+
+/// How much of `path` has downloaded, as (received, total) bytes, while the
+/// browser build fetches it from the models host. `None` when nothing is
+/// known (native builds read from disk).
+pub fn download_progress(path: &str) -> Option<(f64, f64)> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let resolved = resolve_runtime_asset_path(path);
+        let (received, total) = unsafe {
+            (
+                web::gridlock_download_received(resolved.as_ptr(), resolved.len() as u32),
+                web::gridlock_download_total(resolved.as_ptr(), resolved.len() as u32),
+            )
+        };
+        (received >= 0.0 && total > 0.0).then_some((received, total))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod web {
+    extern "C" {
+        pub fn gridlock_download_received(ptr: *const u8, len: u32) -> f64;
+        pub fn gridlock_download_total(ptr: *const u8, len: u32) -> f64;
+    }
 }
 
 /// The file's bytes: downloaded already by [`Prefetcher`], or read now.
@@ -261,7 +291,13 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     } else {
-        match load_texture(&resolved_path).await {
+        // Decoded from bytes so a prefetched file is used without waiting.
+        let texture = read_bytes(&resolved_path).await.and_then(|bytes| {
+            Image::from_file_with_format(&bytes, None)
+                .map(|image| Texture2D::from_image(&image))
+                .map_err(|e| format!("{e:?}"))
+        });
+        match texture {
             Ok(tex) => {
                 tex.set_filter(FilterMode::Nearest);
                 playing_state.assets.insert(key_string.clone(), tex);
