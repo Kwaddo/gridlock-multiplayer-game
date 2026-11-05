@@ -92,8 +92,15 @@ impl Listing {
             State::Beating { id, token, mut request } => match request.poll() {
                 None => State::Beating { id, token, request },
                 Some((204, _)) => State::Listed { id, token, next_beat: beat_at },
-                // Listing expired or the registry restarted: register again.
-                Some(_) => State::Idle { at: now },
+                // Listing expired or the registry lost it: register again.
+                Some((404, _)) => State::Idle { at: now },
+                // Anything else may pass; keep the listing and retry soon, so a
+                // passing error never lists the game twice.
+                Some(_) => State::Listed {
+                    id,
+                    token,
+                    next_beat: now + Duration::from_secs(RETRY_SECS),
+                },
             },
             other => other,
         };
