@@ -4,6 +4,22 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Gridlock</title>
+    <meta name="description" content="Multiplayer FPS in your browser. Host or join in seconds - no install.">
+    <meta name="theme-color" content="#ff6b36">
+    <!-- the preview chat apps and social sites show for a shared link -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Gridlock">
+    <meta property="og:title" content="Gridlock">
+    <meta property="og:description" content="Multiplayer FPS in your browser. Host or join in seconds - no install.">
+    <meta property="og:url" content="https://gridlock.kwaddo.dev/">
+    <meta property="og:image" content="https://gridlock.kwaddo.dev/og-image.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Gridlock: an in-game view with the title over it">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Gridlock">
+    <meta name="twitter:description" content="Multiplayer FPS in your browser. Host or join in seconds - no install.">
+    <meta name="twitter:image" content="https://gridlock.kwaddo.dev/og-image.jpg">
     <!-- the G from the title screen -->
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -18,16 +34,70 @@
             background: #0f0f1f;
             z-index: 0;
         }
+        @font-face {
+            font-family: "Pixel";
+            src: url("assets/fonts/Pixel Game.otf");
+        }
+        #unsupported {
+            display: none;
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+            padding: 24px;
+            box-sizing: border-box;
+            text-align: center;
+            color: #d8d8e0;
+            font-family: "Pixel", monospace;
+            font-size: 18px;
+            line-height: 1.5;
+        }
+        #unsupported h1 {
+            margin: 0;
+            color: #e0e0e0;
+            font-size: 44px;
+            font-weight: normal;
+            letter-spacing: 1px;
+        }
+        #unsupported .bar {
+            width: 120px;
+            height: 3px;
+            background: #ff6b36;
+        }
+        #unsupported p {
+            margin: 0;
+            max-width: 420px;
+        }
     </style>
 </head>
 <body>
     <!-- right click aims down sights, so no context menu -->
     <canvas id="glcanvas" tabindex="1" oncontextmenu="event.preventDefault()"></canvas>
+    <div id="unsupported">
+        <h1>GRIDLOCK</h1>
+        <div class="bar"></div>
+        <p>Gridlock is played with a keyboard and mouse.</p>
+        <p>Open gridlock.kwaddo.dev on a computer to play.</p>
+    </div>
     <!-- where models are hosted when they are not next to the page (build_web.sh fills these in) -->
     <script>window.GRIDLOCK_MODELS_URL = ""; window.GRIDLOCK_MODELS_VERSION = "";</script>
     <!-- miniquad/macroquad loader, then Gridlock's plugin (network, audio, clock) -->
     <script src="mq_js_bundle.js"></script>
     <script src="gridlock_web.js"></script>
-    <script>load("gridlock.wasm");</script>
+    <script>
+        // The game needs a keyboard and a mouse (or trackpad). Browsers cannot
+        // report a keyboard, but they do report precise pointers: devices with
+        // only a touchscreen (phones, most tablets) get a note instead of the
+        // game, and download none of it.
+        if (matchMedia("(any-pointer: fine)").matches) {
+            load("gridlock.wasm");
+        } else {
+            document.getElementById("glcanvas").remove();
+            document.getElementById("unsupported").style.display = "flex";
+        }
+    </script>
 </body>
 </html>
