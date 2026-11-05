@@ -7,12 +7,13 @@
 //   signalling messages waiting in it. Nothing else is ever created there.
 //   Reading is one GET; polls only read. Writes happen on joins, offers and
 //   answers, leaves, heartbeats and a host's claim renewal.
-// - The bucket has no conditional writes, so two writes at once can lose one.
-//   That is kept rare (one complete offer and one complete answer per
-//   connection, written in turn) and harmless: a player still not connected
-//   re-announces itself every few seconds, which makes the host resend its
-//   offer and the player its answer; a host whose listing went missing gets
-//   404 on its next heartbeat and registers again.
+// - The bucket has no conditional writes, so two writes at once can overwrite
+//   each other. Every change is checked after a moment and applied again on
+//   top of the other one if it went missing (commit). Few writes happen at
+//   all (one complete offer and one complete answer per connection, in turn),
+//   and the clients heal what still slips through: a player not connected
+//   yet re-announces itself every few seconds, and a host whose listing went
+//   missing gets 404 on its next heartbeat and registers again.
 // - WebRTC signalling uses these mailboxes instead of WebSocket rooms, since
 //   two sockets can land in different isolates and never meet. Players stop
 //   polling once connected; the host polls every few seconds when idle.
@@ -104,8 +105,19 @@ async function loadState(store) {
   return { listings, rooms };
 }
 
-function saveState(store, state) {
-  return store.put(STATE_KEY, state);
+// Apply a change to state.json and make sure it stuck: a write made at the
+// same moment can overwrite ours, so read back after a moment and apply the
+// change again on top of what is there if it is missing. `apply` must be
+// safe to repeat; `applied` tells whether a state has the change.
+async function commit(store, apply, applied) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const state = await loadState(store);
+    if (attempt > 0 && applied(state)) return;
+    apply(state);
+    await store.put(STATE_KEY, state);
+    await new Promise((r) => setTimeout(r, 100 + Math.random() * 200));
+    if (applied(await loadState(store))) return;
+  }
 }
 
 // ---------------------------------------------------------------- host list
@@ -144,8 +156,7 @@ async function createListing(request, store) {
   // heartbeat) replaces what it had, so the game is never listed twice.
   // Only the machine that listed a room may replace that listing: anyone else
   // could otherwise take over (or rename) another host's game.
-  const state = await loadState(store);
-  const { listings } = state;
+  const { listings } = await loadState(store);
   for (const [other, l] of Object.entries(listings)) {
     if (room ? l.entry.room !== room : l.entry.addr !== entry.addr) continue;
     if (l.ip !== ip) return json({ error: "room already listed" }, 409);
@@ -158,28 +169,40 @@ async function createListing(request, store) {
 
   const id = crypto.randomUUID();
   const token = crypto.randomUUID();
-  listings[id] = { tokenHash: await sha256Hex(token), ip, expires: Date.now() + TTL_SECONDS * 1000, entry };
-  await saveState(store, state);
+  const listing = { tokenHash: await sha256Hex(token), ip, expires: Date.now() + TTL_SECONDS * 1000, entry };
+  const replaced = (l) => (room ? l.entry.room === room : l.entry.addr === entry.addr) && l.ip === ip;
+  await commit(
+    store,
+    (s) => {
+      for (const [other, l] of Object.entries(s.listings)) if (replaced(l)) delete s.listings[other];
+      s.listings[id] = listing;
+    },
+    (s) => Boolean(s.listings[id]),
+  );
   // Echo the address back so a host can tell whether it is reachable as listed.
   return json({ id, token, ttl: TTL_SECONDS, ...(entry.addr ? { addr: entry.addr } : {}) }, 201);
 }
 
 async function heartbeat(request, store, id) {
-  const state = await loadState(store);
-  const listing = await authorized(request, state.listings, id);
-  if (!listing) return json({ error: "unknown listing" }, 404);
+  const { listings } = await loadState(store);
+  if (!(await authorized(request, listings, id))) return json({ error: "unknown listing" }, 404);
   const players = int((await readJson(request))?.players, 0, 255);
-  if (players !== null) listing.entry.players = Math.min(players, listing.entry.max_players);
-  listing.expires = Date.now() + TTL_SECONDS * 1000;
-  await saveState(store, state);
+  const expires = Date.now() + TTL_SECONDS * 1000;
+  await commit(
+    store,
+    (s) => {
+      const l = (s.listings[id] ??= listings[id]);
+      if (players !== null) l.entry.players = Math.min(players, l.entry.max_players);
+      l.expires = expires;
+    },
+    (s) => s.listings[id]?.expires >= expires,
+  );
   return new Response(null, { status: 204 });
 }
 
 async function removeListing(request, store, id) {
-  const state = await loadState(store);
-  if (!(await authorized(request, state.listings, id))) return json({ error: "unknown listing" }, 404);
-  delete state.listings[id];
-  await saveState(store, state);
+  if (!(await authorized(request, (await loadState(store)).listings, id))) return json({ error: "unknown listing" }, 404);
+  await commit(store, (s) => delete s.listings[id], (s) => !s.listings[id]);
   return new Response(null, { status: 204 });
 }
 
@@ -229,7 +252,17 @@ async function room(request, env, ctx, code, action) {
   const store = new Store(env);
   const url = new URL(request.url);
   const now = Date.now();
-  const send = (room, to, body) => room.messages.push({ id: crypto.randomUUID(), to, at: now, body });
+  // A message is made once, so re-applying it after a lost write adds no copy.
+  const message = (to, body) => ({ id: crypto.randomUUID(), to, at: now, body });
+  const deliver = (messages) =>
+    commit(
+      store,
+      (s) => {
+        const r = s.rooms[code];
+        if (r) for (const m of messages) if (!r.messages.some((x) => x.id === m.id)) r.messages.push(m);
+      },
+      (s) => !s.rooms[code] || messages.every((m) => s.rooms[code].messages.some((x) => x.id === m.id)),
+    );
 
   if (action === "join" && request.method === "POST") {
     const asHost = url.searchParams.has("host");
@@ -239,13 +272,13 @@ async function room(request, env, ctx, code, action) {
     const token = await peerToken(env, code, id, asHost);
     if (asHost) {
       if (room) return json({ error: "room already has a host" }, 409);
-      state.rooms[code] = { host: id, expires: now + HOST_TTL_SECONDS * 1000, messages: [] };
+      const claim = { host: id, expires: now + HOST_TTL_SECONDS * 1000, messages: [] };
+      await commit(store, (s) => (s.rooms[code] ??= claim), (s) => s.rooms[code]?.host === id);
     } else {
       if (!room) return json({ error: "no host in this room" }, 404);
       // The host is the offerer for every player, so only it hears about newcomers.
-      send(room, room.host, { NewPeer: id });
+      await deliver([message(room.host, { NewPeer: id })]);
     }
-    await saveState(store, state);
     return json({ id, token });
   }
 
@@ -260,8 +293,9 @@ async function room(request, env, ctx, code, action) {
     if (!room || (asHost && room.host !== id)) return json({ error: "room closed" }, 410);
     // The host renews its claim now and then; every other poll only reads.
     if (asHost && url.searchParams.has("keep")) {
-      room.expires = now + HOST_TTL_SECONDS * 1000;
-      ctx.waitUntil(saveState(store, state).catch(() => {}));
+      const expires = now + HOST_TTL_SECONDS * 1000;
+      const renew = (s) => s.rooms[code]?.host === id && (s.rooms[code].expires = expires);
+      ctx.waitUntil(commit(store, renew, (s) => s.rooms[code]?.expires >= expires).catch(() => {}));
     }
     return json(room.messages.filter((m) => m.to === id).map((m) => ({ id: m.id, ...m.body })));
   }
@@ -271,31 +305,35 @@ async function room(request, env, ctx, code, action) {
     const id = typeof body?.id === "string" ? body.id : "";
     const asHost = Boolean(body?.host);
     if (!(await validPeer(env, code, id, body?.token, asHost))) return json({ error: "bad token" }, 403);
-    const state = await loadState(store);
-    const room = state.rooms[code];
+    const room = (await loadState(store)).rooms[code];
     if (!room) return action === "leave" ? new Response(null, { status: 204 }) : json({ error: "room closed" }, 410);
 
     if (action === "hello" && !asHost) {
-      send(room, room.host, { NewPeer: id });
+      await deliver([message(room.host, { NewPeer: id })]);
     } else if (action === "send") {
       // Signals only flow between the host and a player: the host addresses
       // players; a player's signals always go to the host.
       const signals = Array.isArray(body?.signals) ? body.signals.slice(0, MAX_SIGNALS) : [];
+      const messages = [];
       for (const s of signals) {
         const receiver = asHost ? s?.receiver : room.host;
         if (typeof receiver !== "string" || !PEER_ID.test(receiver) || receiver === id) continue;
-        send(room, receiver, { Signal: { sender: id, data: s.data } });
+        messages.push(message(receiver, { Signal: { sender: id, data: s.data } }));
       }
+      if (messages.length) await deliver(messages);
     } else if (action === "leave") {
       if (asHost && room.host === id) {
         // A leaving host closes the room, and takes its listing off the host list.
-        delete state.rooms[code];
-        for (const [lid, l] of Object.entries(state.listings)) if (l.entry.room === code) delete state.listings[lid];
+        const close = (s) => {
+          if (s.rooms[code]?.host === id) delete s.rooms[code];
+          for (const [lid, l] of Object.entries(s.listings)) if (l.entry.room === code) delete s.listings[lid];
+        };
+        const closed = (s) => s.rooms[code]?.host !== id && !Object.values(s.listings).some((l) => l.entry.room === code);
+        await commit(store, close, closed);
       } else if (!asHost) {
-        send(room, room.host, { PeerLeft: id });
+        await deliver([message(room.host, { PeerLeft: id })]);
       }
     }
-    await saveState(store, state);
     return new Response(null, { status: 204 });
   }
 
