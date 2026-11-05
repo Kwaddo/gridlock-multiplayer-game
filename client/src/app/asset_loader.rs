@@ -98,6 +98,30 @@ pub fn download_progress(path: &str) -> Option<(f64, f64)> {
     }
 }
 
+/// Every asset in the game's manifest, `assets/manifest.json`: one list for all
+/// games, kept with the assets themselves (`{ world: { key: path } }`).
+pub async fn load_manifest() -> Vec<(String, String)> {
+    let path = resolve_asset_path("assets/manifest.json");
+    let manifest: serde_json::Value = match load_file(&path).await {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            warn!("Bad asset manifest {}: {}", path, e);
+            serde_json::Value::Null
+        }),
+        Err(e) => {
+            warn!("No asset manifest at {}: {:?}", path, e);
+            serde_json::Value::Null
+        }
+    };
+    manifest
+        .as_object()
+        .into_iter()
+        .flat_map(|worlds| worlds.values())
+        .filter_map(|world| world.as_object())
+        .flat_map(|world| world.iter())
+        .filter_map(|(key, path)| Some((key.clone(), path.as_str()?.to_string())))
+        .collect()
+}
+
 /// Start downloading `path` into the browser's cache in the background, for a
 /// game the player has not joined yet (models only; a no-op natively).
 pub fn preload(path: &str) {
@@ -153,6 +177,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
     let is_sound = lower.ends_with(".ogg") || lower.ends_with(".wav") || lower.ends_with(".mp3");
 
     if is_asset_cached(playing_state, key, path, is_obj, is_gltf, is_sound) {
+        println!("Asset cache hit: {} ({})", key, path);
         return;
     }
 
@@ -418,20 +443,10 @@ fn is_asset_cached(
     }
 
     if is_obj || is_gltf {
-        if playing_state.models.contains_key(key) || playing_state.animated_models.contains_key(key)
-        {
-            println!("Asset cache hit: {} ({})", key, path);
-            return true;
-        }
+        playing_state.models.contains_key(key) || playing_state.animated_models.contains_key(key)
     } else if is_sound {
-        if playing_state.audio.has(key) {
-            println!("Asset cache hit: {} ({})", key, path);
-            return true;
-        }
-    } else if playing_state.assets.contains_key(key) {
-        println!("Asset cache hit: {} ({})", key, path);
-        return true;
+        playing_state.audio.has(key)
+    } else {
+        playing_state.assets.contains_key(key)
     }
-
-    false
 }

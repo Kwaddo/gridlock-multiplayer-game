@@ -26,5 +26,3 @@ pub use net::{PeerId, BOT_PEER_BASE};
 pub use server::Server;
 pub use server::game::MATCH_MAX_PLAYERS as MAX_PLAYERS;
 
-/// Manifest bundled at compile time, for hosts without a filesystem.
-pub const EMBEDDED_MANIFEST: &str = include_str!("../assets/manifest.json");

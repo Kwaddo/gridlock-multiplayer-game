@@ -11,7 +11,6 @@ use client::types::animation_state::{AnimState, MoveDir};
 use client::types::maze::Maze;
 
 pub struct SyncResult {
-    pub assets: Option<Vec<(String, String)>>,
     pub server_seen: bool, // true if we received at least one packet during poll
     pub removed_by_server: bool, // true if server no longer lists our player id (timed-out/removed)
     pub returned_to_lobby: bool, // true when a world-change back to Lobby was applied this poll
@@ -26,7 +25,6 @@ pub fn sync_world(
     maze: &mut Option<Maze>,
 ) -> SyncResult {
     let mut result = SyncResult {
-        assets: None,
         server_seen: false,
         removed_by_server: false,
         returned_to_lobby: false,
@@ -712,8 +710,6 @@ pub fn sync_world(
                 p.color = client::types::player::OtherPlayer::color_for_id(p.id);
             }
         }
-
-        result.assets = updates.assets;
     }
 
     result

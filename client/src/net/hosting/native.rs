@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr};
 
 use gridlock_server::udp_host::{HostHandle, DEFAULT_PORT};
-use gridlock_server::{Server, EMBEDDED_MANIFEST, MAX_PLAYERS};
+use gridlock_server::{Server, MAX_PLAYERS};
 use platform::{Duration, Instant};
 use transport::Link;
 
@@ -34,7 +34,7 @@ struct Online {
 impl LocalHost {
     /// Start a server on the standard port, so LAN discovery finds it.
     pub fn start(name: &str, list_online: bool) -> Result<Self, String> {
-        let mut server = Server::new(serde_json::from_str(EMBEDDED_MANIFEST).ok());
+        let mut server = Server::new();
         server.set_name(name);
         let handle = HostHandle::spawn(DEFAULT_PORT, server).map_err(|e| match e.kind() {
             ErrorKind::AddrInUse => format!("Port {DEFAULT_PORT} is already in use."),
