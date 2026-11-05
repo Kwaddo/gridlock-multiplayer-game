@@ -38,9 +38,10 @@ Secrets on the function (`set_app_secrets`, then redeploy):
 
 ## Deploying
 
-Pushing to `main` deploys it: the Deploy workflow
-(`.github/workflows/deploy.yml`) sends `index.js` to the Dilmune API whenever
-it changed, before it publishes the browser build. To deploy by hand, paste
+Pushing to `main` deploys it when the repository has a `DCS_API_KEY` secret:
+the Deploy workflow (`.github/workflows/deploy.yml`) sends `index.js` to the
+Dilmune API whenever it changed, before it publishes the browser build.
+Without the key the workflow only warns. To deploy by hand, paste
 `index.js` into `deploy_app` (DCS MCP) or the portal editor. Then check it:
 
 ```bash

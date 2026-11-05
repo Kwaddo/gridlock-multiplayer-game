@@ -8,9 +8,10 @@ name: Deploy
 # client/assets is not in git: the build takes it from the gridlock-assets
 # bucket, which upload_assets.sh fills (and then runs this workflow by hand).
 #
-# Secrets: DCS_API_KEY (dcs_..., Dilmune Settings > API Keys),
-# DCS_S3_ACCESS_KEY_ID + DCS_S3_SECRET_ACCESS_KEY (read access to gridlock-assets),
-# GRIDLOCK_WEB_DEPLOY_KEY (private half of a write deploy key on gridlock-web).
+# Secrets: DCS_S3_ACCESS_KEY_ID + DCS_S3_SECRET_ACCESS_KEY (read access to
+# gridlock-assets), GRIDLOCK_WEB_DEPLOY_KEY (private half of a write deploy key
+# on gridlock-web), and optionally DCS_API_KEY (dcs_..., Dilmune Settings >
+# API Keys); without it, registry changes are flagged and deployed by hand.
 
 on:
   push:
@@ -52,6 +53,10 @@ jobs:
         env:
           DCS_API_KEY: ${{ secrets.DCS_API_KEY }}
         run: |
+          if [ -z "$DCS_API_KEY" ]; then
+            echo "::warning::registry/dcs/index.js changed but DCS_API_KEY is not set; deploy it by hand (registry/dcs/README.md)."
+            exit 0
+          fi
           jq -n --rawfile code registry/dcs/index.js '{sourceType: "inline", code: $code}' > body.json
           curl --fail-with-body -sS -X POST "https://api.dilmune.com/api/v1/apps/$REGISTRY_APP_ID/deploy" \
             -H "Authorization: Bearer $DCS_API_KEY" -H "Content-Type: application/json" \
