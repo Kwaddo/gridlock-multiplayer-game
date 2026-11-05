@@ -22,12 +22,19 @@
     const EV_CLOSED = 4;
 
     const FORCE_RELAY = new URLSearchParams(location.search).has("relay");
+    // ?nodirect makes the direct attempt fail, to check the fallback to TURN.
+    const NO_DIRECT = new URLSearchParams(location.search).has("nodirect");
     const STUN_FALLBACK = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
-    const POLL_HOST_MS = 1000;
+    const POLL_HOST_MS = 2000;
     const POLL_CONNECTING_MS = 500;
-    const POLL_IDLE_MS = 5000;
+    const POLL_CONNECTED_MS = 1000; // a connected player only checks whether to resume
+    const HOST_KEEP_MS = 20000; // how often the host renews its claim on the room
     const SEND_BATCH_MS = 50;
     const DISCONNECT_GRACE_MS = 3000;
+    // TURN is the last resort: a connection first tries direct paths only
+    // (STUN), and the host starts over with the relay when no direct path
+    // opened this long after the answer arrived, or the attempt failed.
+    const DIRECT_ATTEMPT_MS = 4000;
 
     const decoder = new TextDecoder();
     const sockets = new Map(); // handle -> RtcSocket
@@ -102,26 +109,37 @@
         }
 
         async poll() {
+            let lastKeep = Date.now();
             while (!this.closed) {
-                try {
-                    const q = `?id=${encodeURIComponent(this.me.id)}&token=${encodeURIComponent(this.me.token)}`;
-                    const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
-                    // 410: the host left; 403/404: this room is gone for us.
-                    if (resp.status === 410 || resp.status === 403 || resp.status === 404) return this.shutdown();
-                    if (resp.ok) for (const msg of await resp.json()) if (!this.closed) this.onSignal(msg);
-                } catch {} // network blip: try again on the next poll
-                await new Promise((r) => setTimeout(r, this.pollDelay()));
+                // A connected player needs no signalling: if the host goes,
+                // the WebRTC connection itself reports it.
+                const connected = !this.isHost && [...this.peers.values()].some((p) => p.open);
+                if (!connected) {
+                    try {
+                        let q = `?id=${encodeURIComponent(this.me.id)}&token=${encodeURIComponent(this.me.token)}`;
+                        if (this.isHost) {
+                            q += "&host";
+                            if (Date.now() - lastKeep >= HOST_KEEP_MS) {
+                                q += "&keep";
+                                lastKeep = Date.now();
+                            }
+                        }
+                        const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
+                        // 410: the host left; 403/404: this room is gone for us.
+                        if (resp.status === 410 || resp.status === 403 || resp.status === 404) return this.shutdown();
+                        if (resp.ok) for (const msg of await resp.json()) if (!this.closed) this.onSignal(msg);
+                    } catch {} // network blip: try again on the next poll
+                }
+                await sleep(this.pollDelay(connected));
             }
         }
 
-        // Poll fast while a connection is being negotiated. Otherwise the host
-        // still polls often enough to notice newcomers, and a connected player
-        // polls slowly, only to learn that the room closed.
-        pollDelay() {
-            const peers = [...this.peers.values()];
-            if (peers.some((p) => !p.open)) return POLL_CONNECTING_MS;
+        // Poll fast while a connection is being negotiated; an idle host polls
+        // just often enough to notice newcomers.
+        pollDelay(connected) {
+            if ([...this.peers.values()].some((p) => !p.open)) return POLL_CONNECTING_MS;
             if (this.isHost) return POLL_HOST_MS;
-            return peers.length ? POLL_IDLE_MS : POLL_CONNECTING_MS;
+            return connected ? POLL_CONNECTED_MS : POLL_CONNECTING_MS;
         }
 
         signal(msg) {
@@ -140,7 +158,7 @@
                 if (signals.length && this.me && !this.closed) {
                     await fetch(this.room + "/send", {
                         method: "POST",
-                        body: JSON.stringify({ id: this.me.id, token: this.me.token, signals }),
+                        body: JSON.stringify({ id: this.me.id, token: this.me.token, host: this.isHost, signals }),
                     });
                 }
             } catch {}
@@ -151,7 +169,7 @@
         leave() {
             if (!this.me || this.left) return;
             this.left = true;
-            const body = JSON.stringify({ id: this.me.id, token: this.me.token });
+            const body = JSON.stringify({ id: this.me.id, token: this.me.token, host: this.isHost });
             // sendBeacon still goes out while the tab is closing.
             if (!navigator.sendBeacon(this.room + "/leave", body)) {
                 fetch(this.room + "/leave", { method: "POST", body, keepalive: true }).catch(() => {});
@@ -166,28 +184,41 @@
                 if (id !== undefined) this.drop(id);
             } else if (msg.Signal) {
                 const { sender, data } = msg.Signal;
-                const id = this.byRemote.get(sender) ?? this.connect(sender, false);
+                let id = this.byRemote.get(sender);
+                // A newer offer (the host retrying through the relay) replaces
+                // an attempt that never opened.
+                const gen = data?.gen ?? 0;
+                if (id !== undefined && data?.sdp?.type === "offer" && gen > this.peers.get(id).gen && !this.peers.get(id).open) {
+                    this.discard(id);
+                    id = undefined;
+                }
+                id ??= this.connect(sender, false, gen);
                 this.onPeerSignal(this.peers.get(id), data);
             }
             // IdAssigned needs no action: we never address ourselves.
         }
 
-        connect(remoteId, offerer) {
+        // `gen` counts attempts for this peer: 0 is direct only, 1 adds the
+        // TURN relay. Signals carry it, so ones from an abandoned attempt are
+        // ignored.
+        connect(remoteId, offerer, gen = 0) {
             const id = this.nextPeer++;
+            const relay = gen > 0 || FORCE_RELAY;
             const pc = new RTCPeerConnection({
-                iceServers: this.iceServers,
+                iceServers: relay ? this.iceServers : this.iceServers.filter(isStunOnly),
                 // ?relay in the page URL forces every connection through TURN (for testing the relay).
-                iceTransportPolicy: FORCE_RELAY ? "relay" : "all",
+                iceTransportPolicy: FORCE_RELAY || (NO_DIRECT && !relay) ? "relay" : "all",
             });
-            const peer = { remoteId, pc, channel: null, pending: [], open: false };
+            const peer = { remoteId, pc, channel: null, pending: [], open: false, gen, offerer };
             this.peers.set(id, peer);
             this.byRemote.set(remoteId, id);
 
             pc.onicecandidate = (e) => {
-                if (e.candidate) this.signal({ Signal: { receiver: remoteId, data: { candidate: e.candidate.toJSON() } } });
+                if (e.candidate) this.signal({ Signal: { receiver: remoteId, data: { candidate: e.candidate.toJSON(), gen } } });
             };
             pc.onconnectionstatechange = () => {
                 const state = pc.connectionState;
+                if (state === "failed" && this.retryWithRelay(id)) return;
                 if (state === "failed" || state === "closed") this.drop(id);
                 // A closed or crashed browser shows up as "disconnected" within
                 // seconds, but "failed" only after ~30 s; brief network blips
@@ -204,7 +235,7 @@
                 this.attach(id, pc.createDataChannel("gridlock", { ordered: false, maxRetransmits: 0 }));
                 pc.createOffer()
                     .then((offer) => pc.setLocalDescription(offer))
-                    .then(() => this.signal({ Signal: { receiver: remoteId, data: { sdp: pc.localDescription.toJSON() } } }))
+                    .then(() => this.signal({ Signal: { receiver: remoteId, data: { sdp: pc.localDescription.toJSON(), gen } } }))
                     .catch(() => this.drop(id));
             } else {
                 pc.ondatachannel = (e) => this.attach(id, e.channel);
@@ -212,8 +243,28 @@
             return id;
         }
 
-        async onPeerSignal(peer, data) {
+        // The host's direct attempt failed: start over with the TURN relay.
+        retryWithRelay(id) {
+            const peer = this.peers.get(id);
+            if (!peer || !peer.offerer || peer.open || peer.gen > 0 || FORCE_RELAY || this.closed) return false;
+            this.discard(id);
+            this.connect(peer.remoteId, true, 1);
+            return true;
+        }
+
+        // Forget a peer that never opened, without telling the game.
+        discard(id) {
+            const peer = this.peers.get(id);
             if (!peer) return;
+            this.peers.delete(id);
+            this.byRemote.delete(peer.remoteId);
+            try {
+                peer.pc.close();
+            } catch {}
+        }
+
+        async onPeerSignal(peer, data) {
+            if (!peer || (data.gen ?? 0) !== peer.gen) return;
             const pc = peer.pc;
             try {
                 if (data.sdp) {
@@ -222,7 +273,13 @@
                     peer.pending = [];
                     if (data.sdp.type === "offer") {
                         await pc.setLocalDescription(await pc.createAnswer());
-                        this.signal({ Signal: { receiver: peer.remoteId, data: { sdp: pc.localDescription.toJSON() } } });
+                        this.signal({ Signal: { receiver: peer.remoteId, data: { sdp: pc.localDescription.toJSON(), gen: peer.gen } } });
+                    } else if (peer.offerer && peer.gen === 0) {
+                        // The answer is in: give the direct attempt a few seconds.
+                        const id = this.byRemote.get(peer.remoteId);
+                        setTimeout(() => {
+                            if (this.peers.get(id) === peer && !peer.open) this.retryWithRelay(id);
+                        }, DIRECT_ATTEMPT_MS);
                     }
                 } else if (data.candidate) {
                     // Candidates can arrive before the description they belong to.
@@ -283,6 +340,33 @@
         }
     }
 
+    // Timers in hidden tabs are throttled (to once a minute after a while),
+    // which would leave a hidden host deaf to newcomers; a worker's timers are
+    // not, so polling waits on those.
+    let timerWorker = null;
+    const timerCallbacks = new Map();
+    let nextTimer = 1;
+    function sleep(ms) {
+        if (!timerWorker && typeof Worker !== "undefined") {
+            try {
+                const source = "onmessage = (e) => setTimeout(() => postMessage(e.data.id), e.data.ms);";
+                timerWorker = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
+                timerWorker.onmessage = (e) => {
+                    timerCallbacks.get(e.data)?.();
+                    timerCallbacks.delete(e.data);
+                };
+            } catch {
+                timerWorker = false;
+            }
+        }
+        if (!timerWorker) return new Promise((r) => setTimeout(r, ms));
+        return new Promise((r) => {
+            const id = nextTimer++;
+            timerCallbacks.set(id, r);
+            timerWorker.postMessage({ id, ms });
+        });
+    }
+
     // The game passes wss://<registry>/room/<code>; signalling now runs over
     // https://<registry>/room/<code>/..., and ICE servers live at https://<registry>/ice.
     function roomHttpUrl(roomUrl) {
@@ -290,6 +374,10 @@
         url.protocol = url.protocol === "wss:" ? "https:" : "http:";
         url.search = "";
         return url.toString().replace(/\/$/, "");
+    }
+
+    function isStunOnly(server) {
+        return [].concat(server.urls).every((u) => u.startsWith("stun:"));
     }
 
     async function fetchIceServers(room) {

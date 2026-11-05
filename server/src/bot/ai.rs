@@ -241,8 +241,9 @@ pub fn tick_bot(
 
     // update replicated movement flags for client animation state
     bot.is_airborne = !state.movement.is_grounded;
-    bot.evt_jump_start = evt_jump_start;
-    bot.evt_landed = evt_jump_land;
+    // Kept until the next state broadcast sends them (see Server::tick).
+    bot.evt_jump_start |= evt_jump_start;
+    bot.evt_landed |= evt_jump_land;
     bot.is_sprinting = false;
     bot.is_crouched = false;
     bot.is_prone = false;

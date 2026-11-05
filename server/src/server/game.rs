@@ -11,6 +11,10 @@ use crate::player::WorldId;
 // Clients send at least a keepalive every 4 s (client/src/app/runner.rs), so a
 // player silent this long is gone (e.g. a force-closed browser).
 pub const PLAYER_TIMEOUT: Duration = Duration::from_secs(10);
+// World state goes out at most this often (30 a second), however fast the
+// server is ticked: the browser host ticks every frame (up to 144 a second)
+// and the native host after every packet. Rarer events still send at once.
+pub const STATE_BROADCAST_INTERVAL: Duration = Duration::from_millis(33);
 pub const MAZE_CELL_SIZE: f32 = 1.8;
 pub const MAZE_WIDTH: u8 = 35;
 pub const MAZE_HEIGHT: u8 = 35;
