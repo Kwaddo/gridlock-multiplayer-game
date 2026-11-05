@@ -17,8 +17,9 @@ use super::obj_loader::{
 pub const PREFETCH_AHEAD: usize = 4;
 
 thread_local! {
-    /// Bytes [`Prefetcher`] downloaded, by resolved path, until the loader takes them.
-    static PREFETCHED: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
+    /// What [`Prefetcher`] downloaded (or why it could not), by resolved path,
+    /// until the loader takes it.
+    static PREFETCHED: RefCell<HashMap<String, Result<Vec<u8>, String>>> = RefCell::new(HashMap::new());
 }
 
 /// Downloads assets in the background (macroquad coroutines), so the loading
@@ -55,9 +56,10 @@ impl Prefetcher {
         if !download.is_done() {
             return false;
         }
-        // On failure the loader tries again itself and reports the error.
-        if let Some(Ok(bytes)) = download.retrieve() {
-            PREFETCHED.with(|p| p.borrow_mut().insert(resolved.clone(), bytes));
+        // A failure is handed over too: retrying inline would wait on the
+        // network inside a frame (a black flash on the loading screen).
+        if let Some(result) = download.retrieve() {
+            PREFETCHED.with(|p| p.borrow_mut().insert(resolved.clone(), result));
         }
         self.pending.remove(&resolved);
         true
@@ -132,8 +134,8 @@ mod web {
 
 /// The file's bytes: downloaded already by [`Prefetcher`], or read now.
 async fn read_bytes(resolved_path: &str) -> Result<Vec<u8>, String> {
-    if let Some(bytes) = PREFETCHED.with(|p| p.borrow_mut().remove(resolved_path)) {
-        return Ok(bytes);
+    if let Some(result) = PREFETCHED.with(|p| p.borrow_mut().remove(resolved_path)) {
+        return result;
     }
     load_file(resolved_path).await.map_err(|e| format!("{e:?}"))
 }

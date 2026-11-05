@@ -46,8 +46,9 @@ pub fn handle_position(
     }
     if let Some(event_flags) = event_flags {
         if let Some(player) = players.get_mut(&src_addr) {
-            player.evt_jump_start = (event_flags & EVT_JUMP_START) != 0;
-            player.evt_landed = (event_flags & EVT_LANDED) != 0;
+            // Kept until the next state broadcast sends them (see Server::tick).
+            player.evt_jump_start |= (event_flags & EVT_JUMP_START) != 0;
+            player.evt_landed |= (event_flags & EVT_LANDED) != 0;
         }
     }
 
