@@ -499,6 +499,15 @@
 
         env.gridlock_now_ms = () => performance.now();
         env.gridlock_page_hidden = () => (document.hidden ? 1 : 0);
+
+        // miniquad's loader uploads only the first matrix of a uniform array
+        // (it ignores `count`), which the GPU skinning shader's joint array
+        // needs whole (client/src/types/animated_model.rs).
+        env.glUniformMatrix4fv = function (location, count, transpose, value) {
+            const data = new Float32Array(wasm_memory.buffer, value, 16 * count);
+            gl.uniformMatrix4fv(GL.uniforms[location], !!transpose, data);
+        };
+        env.gridlock_force_cpu_skinning = () => (new URLSearchParams(location.search).has("cpuskin") ? 1 : 0);
         env.gridlock_unix_ms = () => Date.now();
         env.gridlock_random_fill = function (ptr, len) {
             // getRandomValues fills at most 65536 bytes per call.
