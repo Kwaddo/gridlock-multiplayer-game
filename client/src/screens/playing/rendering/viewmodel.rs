@@ -83,8 +83,10 @@ impl PlayingState {
         let draw_hands = !matches!(weapon.id, WeaponId::Sawnoff | WeaponId::Minigun);
 
         if let Some(model_key) = stats.viewmodel_model {
+            // Hands and muzzle flash go with the first mesh only: a weapon
+            // made of many meshes used to redraw the hands for every one.
             if let Some(meshes) = self.models.get(model_key) {
-                for mesh in meshes {
+                for (i, mesh) in meshes.iter().enumerate() {
                     self.draw_3d_viewmodel(
                         mesh,
                         1.0,
@@ -94,11 +96,12 @@ impl PlayingState {
                         weapon,
                         stats,
                         draw_hands,
+                        i == 0,
                     );
                 }
                 return;
             } else if let Some(animated_model) = self.animated_models.get(model_key) {
-                for mesh in animated_model.meshes() {
+                for (i, mesh) in animated_model.meshes().enumerate() {
                     self.draw_3d_viewmodel(
                         mesh,
                         animated_model.normalize_scale,
@@ -108,6 +111,7 @@ impl PlayingState {
                         weapon,
                         stats,
                         draw_hands,
+                        i == 0,
                     );
                 }
                 return;
@@ -146,6 +150,7 @@ impl PlayingState {
         weapon: &crate::weapons::WeaponState,
         stats: &crate::weapons::stats::WeaponStats,
         should_draw_hands: bool,
+        first_mesh: bool,
     ) {
         let force_ads_preview = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
         if stats.crosshair_style == CrosshairStyle::Scope
@@ -267,7 +272,7 @@ impl PlayingState {
             DRAWING ANIMATED HANDS HERE
         */
 
-        let draw_hands = |hands_mesh: &Mesh, normalize_scale: f32, y_offset: f32| {
+        let mut draw_hands = |hands_mesh: &Mesh, normalize_scale: f32, y_offset: f32| {
             // Keep hands scale independent from weapon scale so tiny weapon tuning
             // does not make hands disappear.
             let hands_scale = HANDS_BASE_SCALE * stats.viewmodel_hands_scale.max(0.01);
@@ -296,21 +301,26 @@ impl PlayingState {
             let hands_transform =
                 hands_trans * hands_rot_mat * hands_scale_mat * hands_normalize_mat;
 
-            let mut hands_verts = hands_mesh.vertices.clone();
-            for v in &mut hands_verts {
-                v.position = hands_transform.transform_point3(v.position);
-                // Viewmodel hands should be fully opaque regardless of source material alpha.
-                v.color[3] = 255;
+            // Viewmodel hands should be fully opaque regardless of source material
+            // alpha; only a mesh that is not needs its own copy.
+            gl.quad_gl.push_model_matrix(hands_transform);
+            if hands_mesh.vertices.iter().all(|v| v.color[3] == 255) {
+                draw_mesh(hands_mesh);
+            } else {
+                let mut hands_verts = hands_mesh.vertices.clone();
+                for v in &mut hands_verts {
+                    v.color[3] = 255;
+                }
+                draw_mesh(&Mesh {
+                    vertices: hands_verts,
+                    indices: hands_mesh.indices.clone(),
+                    texture: hands_mesh.texture.clone(),
+                });
             }
-            let hands_temp = Mesh {
-                vertices: hands_verts,
-                indices: hands_mesh.indices.clone(),
-                texture: hands_mesh.texture.clone(),
-            };
-            draw_mesh(&hands_temp);
+            gl.quad_gl.pop_model_matrix();
         };
 
-        if should_draw_hands {
+        if should_draw_hands && first_mesh {
             if let Some(hands_model) = hands_anim {
                 for mesh in hands_model.meshes() {
                     draw_hands(mesh, hands_model.normalize_scale, hands_model.y_offset);
@@ -331,7 +341,7 @@ impl PlayingState {
 
         set_default_camera();
 
-        if weapon.muzzle_flash_timer > 0.0 {
+        if weapon.muzzle_flash_timer > 0.0 && first_mesh {
             if let Some((fx, fy)) = Self::project_to_screen(&vm_camera, muzzle_world) {
                 let t = (weapon.muzzle_flash_timer / 0.08).min(1.0);
                 let alpha = (220.0 * t) as u8;
