@@ -233,41 +233,6 @@ pub async fn load_obj_mesh_with_materials(obj_path: &str) -> Result<Mesh, String
     })
 }
 
-fn gltf_image_to_rgba8(image: &gltf::image::Data) -> Result<Vec<u8>, String> {
-    use gltf::image::Format;
-
-    let pixels = &image.pixels;
-    let out = match image.format {
-        Format::R8G8B8A8 => pixels.clone(),
-        Format::R8G8B8 => {
-            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
-            for chunk in pixels.chunks_exact(3) {
-                out.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
-            }
-            out
-        }
-        Format::R8G8 => {
-            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
-            for chunk in pixels.chunks_exact(2) {
-                out.extend_from_slice(&[chunk[0], chunk[1], 0, 255]);
-            }
-            out
-        }
-        Format::R8 => {
-            let mut out = Vec::with_capacity((image.width * image.height * 4) as usize);
-            for &v in pixels {
-                out.extend_from_slice(&[v, v, v, 255]);
-            }
-            out
-        }
-        other => {
-            return Err(format!("unsupported gltf image format: {:?}", other));
-        }
-    };
-
-    Ok(out)
-}
-
 fn linear_to_srgb(v: f32) -> u8 {
     let srgb = if v <= 0.0031308 {
         v * 12.92
@@ -386,21 +351,7 @@ async fn load_gltf_static_mesh_impl(path: &str, bytes: &[u8], bake_lighting: boo
             };
 
             // load texture for this primitive if we haven't already
-            let mut prim_texture: Option<Texture2D> = None;
-            if let Some(image_index) = base_tex_info {
-                if let Some(image) = images.get(image_index) {
-                    let rgba = gltf_image_to_rgba8(image)?;
-                    if image.width > u16::MAX as u32 || image.height > u16::MAX as u32 {
-                        return Err(format!(
-                            "texture too large for macroquad: {}x{}",
-                            image.width, image.height
-                        ));
-                    }
-                    let tex = Texture2D::from_rgba8(image.width as u16, image.height as u16, &rgba);
-                    tex.set_filter(FilterMode::Nearest);
-                    prim_texture = Some(tex);
-                }
-            }
+            let prim_texture: Option<Texture2D> = base_tex_info.and_then(|index| images.texture(index));
 
             let Some(pos_iter) = reader.read_positions() else {
                 continue;

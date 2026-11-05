@@ -126,17 +126,23 @@ async function createListing(request, store, ctx) {
   if (!ip || !name || maxPlayers === null || players === null || (port === null) === (room === null)) {
     return json({ error: "invalid listing" }, 400);
   }
+  const entry = { name, players: Math.min(players, maxPlayers), max_players: maxPlayers };
+  if (room) entry.room = room;
+  else entry.addr = ip.includes(":") ? `[${ip}]:${port}` : `${ip}:${port}`;
+
+  // One listing per game: a host registering again (its old listing lost a
+  // heartbeat) replaces what it had, so the game is never listed twice.
   const live = await liveListings(store, ctx);
-  const fromIp = live.filter(({ listing }) => listing.ip === ip).length;
-  if (fromIp >= MAX_PER_IP || live.length >= MAX_LISTINGS) {
+  const same = ({ listing }) => (room ? listing.entry.room === room : listing.entry.addr === entry.addr);
+  await Promise.all(live.filter(same).map(({ id }) => store.delete(`servers/${id}.json`)));
+  const others = live.filter((l) => !same(l));
+  const fromIp = others.filter(({ listing }) => listing.ip === ip).length;
+  if (fromIp >= MAX_PER_IP || others.length >= MAX_LISTINGS) {
     return json({ error: "too many listings" }, 429);
   }
 
   const id = crypto.randomUUID();
   const token = crypto.randomUUID();
-  const entry = { name, players: Math.min(players, maxPlayers), max_players: maxPlayers };
-  if (room) entry.room = room;
-  else entry.addr = ip.includes(":") ? `[${ip}]:${port}` : `${ip}:${port}`;
 
   await store.put(`servers/${id}.json`, {
     tokenHash: await sha256Hex(token),

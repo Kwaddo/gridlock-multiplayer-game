@@ -96,11 +96,37 @@ pub fn download_progress(path: &str) -> Option<(f64, f64)> {
     }
 }
 
+/// Start downloading `path` into the browser's cache in the background, for a
+/// game the player has not joined yet (models only; a no-op natively).
+pub fn preload(path: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let resolved = resolve_runtime_asset_path(path);
+        unsafe { web::gridlock_preload(resolved.as_ptr(), resolved.len() as u32) };
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = path;
+}
+
+/// Models preloaded so far and in all, while there are any.
+pub fn preload_status() -> Option<(u32, u32)> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut status = [0u32; 2];
+        unsafe { web::gridlock_preload_status(status.as_mut_ptr()) };
+        (status[1] > 0).then_some((status[0], status[1]))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    None
+}
+
 #[cfg(target_arch = "wasm32")]
 mod web {
     extern "C" {
         pub fn gridlock_download_received(ptr: *const u8, len: u32) -> f64;
         pub fn gridlock_download_total(ptr: *const u8, len: u32) -> f64;
+        pub fn gridlock_preload(ptr: *const u8, len: u32);
+        pub fn gridlock_preload_status(out: *mut u32);
     }
 }
 
@@ -363,6 +389,15 @@ pub fn resolve_asset_path(path: &str) -> String {
 
 fn resolve_runtime_asset_path(path: &str) -> String {
     resolve_asset_path(path)
+}
+
+/// Whether the asset `key` is already loaded from `path`.
+pub fn asset_loaded(playing_state: &PlayingState, key: &str, path: &str) -> bool {
+    let lower = resolve_runtime_asset_path(path).to_lowercase();
+    let is_obj = lower.ends_with(".obj");
+    let is_gltf = lower.ends_with(".glb") || lower.ends_with(".gltf");
+    let is_sound = lower.ends_with(".ogg") || lower.ends_with(".wav") || lower.ends_with(".mp3");
+    is_asset_cached(playing_state, key, path, is_obj, is_gltf, is_sound)
 }
 
 fn is_asset_cached(

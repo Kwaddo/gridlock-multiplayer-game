@@ -232,6 +232,7 @@ dependencies = [
  "glam 0.29.3",
  "gltf",
  "igd-next",
+ "image 0.25.10",
  "macroquad",
  "natpmp",
  "platform",
