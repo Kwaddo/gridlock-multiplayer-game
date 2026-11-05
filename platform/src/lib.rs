@@ -26,6 +26,15 @@ pub fn unix_time_ms() -> u64 {
     return unsafe { web::gridlock_unix_ms() } as u64;
 }
 
+/// Whether the page is in a hidden browser tab. Always false natively.
+pub fn page_hidden() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    return false;
+
+    #[cfg(target_arch = "wasm32")]
+    return unsafe { web::gridlock_page_hidden() } != 0;
+}
+
 /// Small text values kept between runs (settings, crosshair presets).
 ///
 /// Native builds keep a file named `key` in the working directory, which the
@@ -77,6 +86,7 @@ mod web {
         /// `performance.now()`: monotonic milliseconds.
         fn gridlock_now_ms() -> f64;
         pub(crate) fn gridlock_unix_ms() -> f64;
+        pub(crate) fn gridlock_page_hidden() -> u32;
         fn gridlock_random_fill(ptr: *mut u8, len: u32);
         /// 1 if `key` is stored; its UTF-8 length goes to `len_out`, bytes via `take`.
         pub(crate) fn gridlock_storage_get(key: *const u8, key_len: u32, len_out: *mut u32) -> u32;
