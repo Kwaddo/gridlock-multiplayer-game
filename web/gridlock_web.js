@@ -363,6 +363,32 @@
         return bytes;
     }
 
+    // ------------------------------------------------------------ hidden tabs
+
+    // The game advances once per animation frame, and browsers stop animation
+    // frames in hidden tabs, which would freeze a game hosted in one (players
+    // could connect but nobody would answer). While hidden with a game open,
+    // a worker's ticks run the frames instead: worker timers and the messages
+    // they post keep going in the background. Those frames only keep the game
+    // and its connections going, without drawing (see platform::page_hidden),
+    // so 20 a second is plenty.
+    const HIDDEN_FRAME_MS = 50;
+    let hiddenTicker = null;
+
+    function keepRunningWhenHidden() {
+        if (hiddenTicker || typeof Worker === "undefined") return;
+        const source = `setInterval(() => postMessage(0), ${HIDDEN_FRAME_MS});`;
+        try {
+            hiddenTicker = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
+        } catch {
+            return; // no workers (e.g. a strict content policy): the game pauses when hidden
+        }
+        hiddenTicker.onmessage = () => {
+            const inGame = [...sockets.values()].some((s) => !s.closed);
+            if (document.hidden && inGame && wasm_exports) wasm_exports.frame();
+        };
+    }
+
     // ------------------------------------------------------------ imports
 
     function register(importObject) {
@@ -399,6 +425,7 @@
         // ---- platform crate: clocks and randomness (platform/src/lib.rs)
 
         env.gridlock_now_ms = () => performance.now();
+        env.gridlock_page_hidden = () => (document.hidden ? 1 : 0);
         env.gridlock_unix_ms = () => Date.now();
         env.gridlock_random_fill = function (ptr, len) {
             // getRandomValues fills at most 65536 bytes per call.
@@ -489,6 +516,7 @@
         env.gridlock_rtc_open = function (urlPtr, urlLen, isHost) {
             const handle = nextHandle++;
             sockets.set(handle, new RtcSocket(readString(urlPtr, urlLen), isHost !== 0));
+            keepRunningWhenHidden();
             return handle;
         };
 
