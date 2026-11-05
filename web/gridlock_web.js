@@ -185,6 +185,9 @@
             } else if (msg.Signal) {
                 const { sender, data } = msg.Signal;
                 let id = this.byRemote.get(sender);
+                // The host offers to every player it learned of through NewPeer;
+                // a signal from anyone else is a leftover of a dropped peer.
+                if (id === undefined && this.isHost) return;
                 // A newer offer (the host retrying through the relay) replaces
                 // an attempt that never opened.
                 const gen = data?.gen ?? 0;
@@ -549,7 +552,13 @@
                 const path = UTF8ToString(ptr, len);
                 if (!path.startsWith(MODELS_PREFIX)) return loadFromPage(ptr, len);
                 const id = FS.unique_id++;
-                preloadPaused = true;
+                if (!preloadPaused) {
+                    preloadPaused = true;
+                    // The queued preloads will never start now; drop them from the
+                    // count so the title screen's progress note does not stay up.
+                    preloadTotal -= preloadQueue.length;
+                    preloadQueue.length = 0;
+                }
                 loadModel(path)
                     .catch(() => null)
                     .then((bytes) => {
@@ -565,7 +574,7 @@
 
         env.gridlock_preload = function (ptr, len) {
             const path = UTF8ToString(ptr, len);
-            if (!MODELS_URL || !path.startsWith(MODELS_PREFIX) || preloadQueue.includes(path)) return;
+            if (!MODELS_URL || preloadPaused || !path.startsWith(MODELS_PREFIX) || preloadQueue.includes(path)) return;
             preloadQueue.push(path);
             preloadTotal++;
             pumpPreload();

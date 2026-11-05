@@ -121,9 +121,13 @@ async function createListing(request, store) {
 
   // One listing per game: a host registering again (its old listing lost a
   // heartbeat) replaces what it had, so the game is never listed twice.
+  // Only the machine that listed a room may replace that listing: anyone else
+  // could otherwise take over (or rename) another host's game.
   const listings = await loadListings(store);
   for (const [other, l] of Object.entries(listings)) {
-    if (room ? l.entry.room === room : l.entry.addr === entry.addr) delete listings[other];
+    if (room ? l.entry.room !== room : l.entry.addr !== entry.addr) continue;
+    if (l.ip !== ip) return json({ error: "room already listed" }, 409);
+    delete listings[other];
   }
   const fromIp = Object.values(listings).filter((l) => l.ip === ip).length;
   if (fromIp >= MAX_PER_IP || Object.keys(listings).length >= MAX_LISTINGS) {

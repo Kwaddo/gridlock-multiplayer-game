@@ -133,6 +133,10 @@ pub async fn run() {
             if sync.server_seen {
                 last_server_contact = Some(Instant::now());
             }
+            // A match that ended while hidden still hands back the lobby loadout.
+            if sync.returned_to_lobby {
+                playing_state.weapons = WeaponInventory::from_loadout(&loadout);
+            }
             if let Some(host) = session.as_mut().and_then(|s| s.host.as_mut()) {
                 host.update();
             }
@@ -287,12 +291,15 @@ pub async fn run() {
                     // Download a few ahead in the background; load the next
                     // one only once its bytes are here, so no frame waits on
                     // the network.
-                    for (_, path) in loading_assets.iter().skip(loading_index).take(PREFETCH_AHEAD) {
-                        prefetcher.start(path);
+                    // Assets already loaded (e.g. joining a second game) need no download.
+                    for (key, path) in loading_assets.iter().skip(loading_index).take(PREFETCH_AHEAD) {
+                        if !asset_loaded(&playing_state, key, path) {
+                            prefetcher.start(path);
+                        }
                     }
                     let (key, path) = loading_assets[loading_index].clone();
                     loading_current = key.clone();
-                    if prefetcher.ready(&path) {
+                    if asset_loaded(&playing_state, &key, &path) || prefetcher.ready(&path) {
                         load_asset_entry(&key, &path, &mut playing_state).await;
                         loading_index += 1;
                     }
