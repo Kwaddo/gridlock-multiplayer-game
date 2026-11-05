@@ -1,30 +1,26 @@
 use crate::net::protocols::{
-    EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS, FLAG_AIRBORNE,
-    FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MSG_BOT_DESPAWN_ALL, MSG_BOT_SPAWN,
-    MSG_HIT, MSG_POSITION, MSG_SND_BOMB_PICKUP, MSG_SND_DEFUSE_START, MSG_SND_DEFUSE_STOP,
-    MSG_SND_PLANT_START, MSG_SND_PLANT_STOP, MSG_START_GAME, MSG_WALL_BROKEN, MSG_WEAPON_CHANGE,
-    MSG_WORLD_CHANGE,
+    ClientMsg, EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS,
+    FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING,
 };
-use std::net::UdpSocket;
+use transport::Link;
 
 use super::PlayingState;
 
 impl PlayingState {
     pub fn send_network(
         &mut self,
-        socket: &Option<UdpSocket>,
-        server_addr: &str,
+        link: Option<&mut dyn Link>,
         config: &crate::core::GameConfig,
     ) {
-        if let Some(ref s) = socket {
+        if let Some(s) = link {
             if self.pending_respawn {
                 self.pending_respawn = false;
-                self.request_respawn(s, server_addr);
+                self.request_respawn(s);
             }
 
             if let Some(target) = self.pending_world_change.take() {
-                let msg: Vec<u8> = vec![MSG_WORLD_CHANGE, target.as_u8()];
-                let _ = s.send_to(&msg, server_addr);
+                let msg = ClientMsg::WorldChange { target: target.as_u8() }.encode();
+                s.send(&msg);
             }
 
             // Lobby console: send start-game request to server (include selected gamemode)
@@ -44,13 +40,8 @@ impl PlayingState {
                 } else {
                     0
                 };
-                let mut msg = vec![MSG_START_GAME, mode];
-                // always append two bytes for the duration code so server can parse easily
-                msg.push((dur_code >> 8) as u8);
-                msg.push((dur_code & 0xFF) as u8);
                 // auto-fill: bots_per_team (0=disabled, 1-8=per team count)
                 let bpt = if self.autofill_enabled { self.autofill_bots_per_team } else { 0 };
-                msg.push(bpt);
                 // difficulty mask: bit0=Recruit, bit1=Easy, bit2=Normal, bit3=Hard, bit4=Nightmare
                 let mut diff_mask: u8 = 0;
                 if self.autofill_diff_recruit   { diff_mask |= 1 << 0; }
@@ -58,14 +49,20 @@ impl PlayingState {
                 if self.autofill_diff_normal    { diff_mask |= 1 << 2; }
                 if self.autofill_diff_hard      { diff_mask |= 1 << 3; }
                 if self.autofill_diff_nightmare { diff_mask |= 1 << 4; }
-                msg.push(diff_mask);
-                let _ = s.send_to(&msg, server_addr);
+                // always send duration and auto-fill so server can parse easily
+                let msg = ClientMsg::StartGame {
+                    mode: Some(mode),
+                    duration: Some(dur_code),
+                    autofill: Some((bpt, diff_mask)),
+                }
+                .encode();
+                s.send(&msg);
             }
 
             // Send requested team selection (from lobby console)
             if let Some(team) = self.pending_set_team.take() {
-                let msg = vec![crate::net::protocols::MSG_SET_TEAM, team];
-                let _ = s.send_to(&msg, server_addr);
+                let msg = ClientMsg::SetTeam { team }.encode();
+                s.send(&msg);
             }
 
             // Public shooting-range button: progresses phases with one start action.
@@ -74,7 +71,7 @@ impl PlayingState {
                 let started_phase = self.range_phase;
 
                 // Always reset range bots before loading the next phase.
-                let _ = s.send_to(&[MSG_BOT_DESPAWN_ALL], server_addr);
+                s.send(&ClientMsg::BotDespawnAll.encode());
 
                 // Public range button should use server preset paths/behaviors.
                 // 255 means "no override" (server maps >2 => None).
@@ -84,7 +81,7 @@ impl PlayingState {
                     3 => (255u8, 3u8),
                     _ => (255u8, 1u8),
                 };
-                let _ = s.send_to(&[MSG_BOT_SPAWN, behavior, level], server_addr);
+                s.send(&ClientMsg::BotSpawn { behavior, level }.encode());
 
                 self.range_phase = if self.range_phase >= 3 {
                     1
@@ -97,20 +94,20 @@ impl PlayingState {
             }
 
             while let Some((x, y)) = self.pending_broken_walls.pop() {
-                let msg = vec![MSG_WALL_BROKEN, x, y];
-                let _ = s.send_to(&msg, server_addr);
+                let msg = ClientMsg::WallBroken { x, y }.encode();
+                s.send(&msg);
             }
 
             while let Some((victim_id, damage, is_backstab)) = self.pending_hits.pop() {
-                let mut msg = vec![MSG_HIT];
-                msg.extend_from_slice(&victim_id.to_be_bytes());
-                msg.extend_from_slice(&damage.to_be_bytes());
-                // append active weapon name so server can include it in kill feed
-                let weapon_name = self.weapons.active().stats().name.as_bytes();
-                msg.push(weapon_name.len() as u8);
-                msg.extend_from_slice(weapon_name);
-                msg.push(if is_backstab { 1 } else { 0 });
-                let _ = s.send_to(&msg, server_addr);
+                // include active weapon name so server can include it in kill feed
+                let msg = ClientMsg::Hit {
+                    victim_id,
+                    damage,
+                    weapon: Some(self.weapons.active().stats().name.to_string()),
+                    backstab: Some(is_backstab),
+                }
+                .encode();
+                s.send(&msg);
             }
 
             // S&D interactions: bomb pickup, plant, defuse
@@ -121,7 +118,7 @@ impl PlayingState {
                         let dx = self.position.x - bx;
                         let dz = self.position.z - bz;
                         if (dx * dx + dz * dz).sqrt() <= 2.5 {
-                            let _ = s.send_to(&[MSG_SND_BOMB_PICKUP], server_addr);
+                            s.send(&ClientMsg::SndBombPickup.encode());
                         }
                     }
                 }
@@ -143,22 +140,22 @@ impl PlayingState {
                     && !self.is_dead
                 {
                     if !self.snd_is_planting {
-                        let _ = s.send_to(&[MSG_SND_PLANT_START], server_addr);
+                        s.send(&ClientMsg::SndPlantStart.encode());
                         self.snd_is_planting = true;
                     }
                 } else if self.snd_is_planting {
-                    let _ = s.send_to(&[MSG_SND_PLANT_STOP], server_addr);
+                    s.send(&ClientMsg::SndPlantStop.encode());
                     self.snd_is_planting = false;
                 }
 
                 // Defusing: bomb is planted, near site, hold E
                 if self.snd_bomb_planted && near_site && e_held && !self.is_dead {
                     if !self.snd_is_defusing {
-                        let _ = s.send_to(&[MSG_SND_DEFUSE_START], server_addr);
+                        s.send(&ClientMsg::SndDefuseStart.encode());
                         self.snd_is_defusing = true;
                     }
                 } else if self.snd_is_defusing {
-                    let _ = s.send_to(&[MSG_SND_DEFUSE_STOP], server_addr);
+                    s.send(&ClientMsg::SndDefuseStop.encode());
                     self.snd_is_defusing = false;
                 }
             }
@@ -202,33 +199,19 @@ impl PlayingState {
             // send weapon change if it differs from last sent
             let current_weapon_name = self.weapons.active().stats().name;
             if current_weapon_name != self.last_sent_weapon {
-                let bytes = current_weapon_name.as_bytes();
-                let mut msg = Vec::with_capacity(2 + bytes.len());
-                msg.push(MSG_WEAPON_CHANGE);
-                msg.push(bytes.len() as u8);
-                msg.extend_from_slice(bytes);
-                let _ = s.send_to(&msg, server_addr);
+                let msg = ClientMsg::WeaponChange { name: current_weapon_name.to_string() }.encode();
+                s.send(&msg);
                 self.last_sent_weapon = current_weapon_name.to_string();
             }
 
-            // pack position message into a small stack buffer to avoid per-frame heap allocations
-            let mut buf = [0u8; 32];
-            let mut p = 0usize;
-            buf[p] = MSG_POSITION;
-            p += 1;
-            buf[p..p + 4].copy_from_slice(&self.position.x.to_be_bytes());
-            p += 4;
-            buf[p..p + 4].copy_from_slice(&self.position.y.to_be_bytes());
-            p += 4;
-            buf[p..p + 4].copy_from_slice(&self.position.z.to_be_bytes());
-            p += 4;
-            buf[p..p + 4].copy_from_slice(&self.yaw.to_be_bytes());
-            p += 4;
-            buf[p] = state_flags;
-            p += 1;
-            buf[p] = event_flags;
-            p += 1;
-            let _ = s.send_to(&buf[..p], server_addr);
+            let msg = ClientMsg::Position {
+                position: (self.position.x, self.position.y, self.position.z),
+                yaw: self.yaw,
+                state_flags: Some(state_flags),
+                event_flags: Some(event_flags),
+            }
+            .encode();
+            s.send(&msg);
             self.prev_was_sliding = self.movement_state.is_sliding;
         }
     }

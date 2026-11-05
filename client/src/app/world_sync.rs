@@ -1,4 +1,4 @@
-use std::net::UdpSocket;
+use transport::Link;
 
 use client::types::world::WorldId;
 use client::ui::OtherPlayer;
@@ -19,7 +19,7 @@ pub struct SyncResult {
 
 #[inline(always)]
 pub fn sync_world(
-    socket: &Option<UdpSocket>,
+    link: Option<&mut dyn Link>,
     player_id: u32,
     username: &str,
     playing_state: &mut PlayingState,
@@ -32,8 +32,8 @@ pub fn sync_world(
         returned_to_lobby: false,
     };
 
-    if let Some(ref sock) = socket {
-        let updates = poll_updates(sock, player_id);
+    if let Some(link) = link {
+        let updates = poll_updates(link, player_id);
 
         // mark that we saw traffic from server during this poll
         result.server_seen = updates.received_any;

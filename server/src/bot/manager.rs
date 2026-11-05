@@ -1,15 +1,17 @@
-use std::{ collections::HashMap, net::{ SocketAddr, UdpSocket }, time::{ Duration, Instant } };
+use std::{ collections::HashMap, time::Duration };
+use platform::Instant;
+use crate::net::{ BOT_PEER_BASE, Outbox, PeerId };
 use std::f32::consts::PI;
 use crate::{ bot::ai::{ self, BotState, BotBehavior }, physics::PhysicsConfig };
 use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
 use crate::bot::personality::{ self, BotPersonalityId };
-use crate::protocols::{ MSG_BOT_SHOT, MODE_TEAM_DEATHMATCH };
+use crate::protocols::{ ServerMsg, MODE_TEAM_DEATHMATCH };
 use crate::server::handlers::other;
 pub struct BotManager {
-    bot_addrs: Vec<SocketAddr>,
-    bot_states: HashMap<SocketAddr, BotState>,
+    bot_addrs: Vec<PeerId>,
+    bot_states: HashMap<PeerId, BotState>,
     last_tick: Instant,
     tick_interval: Duration,
     next_bot_idx: u16,
@@ -27,20 +29,20 @@ impl BotManager {
             range_challenge_deadline: None,
         }
     }
-    pub fn virtual_addr(index: u16) -> SocketAddr {
-        // generate unique virtual SocketAddr for each bot based on index
-        SocketAddr::from(([127, 0, 0, 1], (50000u32 + (index % 15000) as u32) as u16))
+    pub fn virtual_addr(index: u16) -> PeerId {
+        // generate unique virtual PeerId for each bot based on index
+        PeerId(BOT_PEER_BASE + index as u32)
     }
 
-    pub fn bot_states_mut(&mut self) -> &mut HashMap<SocketAddr, BotState> {
+    pub fn bot_states_mut(&mut self) -> &mut HashMap<PeerId, BotState> {
         &mut self.bot_states
     }
     pub fn spawn_bot(
         &mut self,
-        players: &mut HashMap<SocketAddr, Player>,
+        players: &mut HashMap<PeerId, Player>,
         mut player: Player,
         bot_state: BotState
-    ) -> SocketAddr {
+    ) -> PeerId {
         let addr = Self::virtual_addr(self.next_bot_idx);
         self.next_bot_idx += 1;
 
@@ -54,7 +56,7 @@ impl BotManager {
         addr
     }
 
-    pub fn despawn_all(&mut self, players: &mut HashMap<SocketAddr, Player>) {
+    pub fn despawn_all(&mut self, players: &mut HashMap<PeerId, Player>) {
         for addr in &self.bot_addrs {
             players.remove(addr);
         }
@@ -64,8 +66,8 @@ impl BotManager {
     }
     /// Despawn only shooting-range bots (those without a personality_id).
     /// Game bots with personalities are left intact.
-    pub fn despawn_range_bots(&mut self, players: &mut HashMap<SocketAddr, Player>) {
-        let to_remove: Vec<SocketAddr> = self.bot_addrs.iter()
+    pub fn despawn_range_bots(&mut self, players: &mut HashMap<PeerId, Player>) {
+        let to_remove: Vec<PeerId> = self.bot_addrs.iter()
             .filter(|addr| self.bot_states.get(addr).map_or(false, |s| s.personality_id.is_none()))
             .copied()
             .collect();
@@ -77,15 +79,15 @@ impl BotManager {
         self.range_challenge_deadline = None;
     }
     /// Spawn a bot with a full personality into a match.
-    /// Returns the virtual SocketAddr assigned to the bot.
+    /// Returns the virtual PeerId assigned to the bot.
     pub fn spawn_personality_bot(
         &mut self,
-        players: &mut HashMap<SocketAddr, Player>,
+        players: &mut HashMap<PeerId, Player>,
         personality_id: BotPersonalityId,
         team: Team,
         weapon_override: &str,
         spawn_pos: (f32, f32, f32)
-    ) -> SocketAddr {
+    ) -> PeerId {
         let (pers, diff) = personality::get_personality(personality_id);
         let runtime = personality::compute_runtime(&pers, diff);
         let bot_id = 9000u32 + (self.next_bot_idx as u32);
@@ -169,7 +171,7 @@ impl BotManager {
     }
     pub fn handle_range_challenge_timeout(
         &mut self,
-        players: &mut HashMap<SocketAddr, Player>
+        players: &mut HashMap<PeerId, Player>
     ) -> bool {
         let Some(deadline) = self.range_challenge_deadline else {
             return false;
@@ -182,8 +184,8 @@ impl BotManager {
     }
     pub fn tick(
         &mut self,
-        socket: &UdpSocket,
-        players: &mut HashMap<SocketAddr, Player>,
+        socket: &Outbox,
+        players: &mut HashMap<PeerId, Player>,
         match_end_pending: &mut Option<(Instant, u32, String)>,
         match_mode: u8,
         maze: Option<&crate::maze::MazeData>
@@ -198,7 +200,7 @@ impl BotManager {
         // ── Brain: run decide_behavior for maze-world bots ──
         // Collect behavior changes first, then apply (avoids borrow conflicts).
         if let Some(m) = maze {
-            let mut behavior_changes: Vec<(SocketAddr, ai::BotBehavior)> = Vec::new();
+            let mut behavior_changes: Vec<(PeerId, ai::BotBehavior)> = Vec::new();
             for addr in &self.bot_addrs {
                 let bot = match players.get(addr) {
                     Some(p) if p.is_alive && p.world == WorldId::Maze => p,
@@ -306,7 +308,7 @@ impl BotManager {
         }
 
         // Run shooting logic after movement updates; collect first to avoid borrow conflicts.
-        let mut pending_shots: Vec<(SocketAddr, u32, Option<u32>, String)> = Vec::new();
+        let mut pending_shots: Vec<(PeerId, u32, Option<u32>, String)> = Vec::new();
         for addr in &self.bot_addrs {
             if !players.get(addr).map_or(false, |p| p.is_alive) {
                 continue;
@@ -349,15 +351,13 @@ impl BotManager {
                 .find(|p| p.id == victim_id)
                 .map(|p| p.position)
                 .unwrap_or((0.0, 0.0, 0.0));
-            let mut shot_msg = vec![MSG_BOT_SHOT];
-            shot_msg.extend_from_slice(&shooter_id.to_be_bytes());
-            shot_msg.extend_from_slice(&victim_id.to_be_bytes());
-            shot_msg.extend_from_slice(&shooter_pos.0.to_be_bytes());
-            shot_msg.extend_from_slice(&(shooter_pos.1 + 1.2).to_be_bytes());
-            shot_msg.extend_from_slice(&shooter_pos.2.to_be_bytes());
-            shot_msg.extend_from_slice(&victim_pos.0.to_be_bytes());
-            shot_msg.extend_from_slice(&(victim_pos.1 + 1.0).to_be_bytes());
-            shot_msg.extend_from_slice(&victim_pos.2.to_be_bytes());
+            let shot_msg = ServerMsg::BotShot {
+                shooter_id,
+                victim_id,
+                start: (shooter_pos.0, shooter_pos.1 + 1.2, shooter_pos.2),
+                end: (victim_pos.0, victim_pos.1 + 1.0, victim_pos.2),
+            }
+            .encode();
             for (addr, p) in players.iter() {
                 if p.is_bot {
                     continue;

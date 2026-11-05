@@ -1,8 +1,9 @@
 use macroquad::prelude::*;
 use macroquad::window::gl_set_drawcall_buffer_capacity;
-use std::net::UdpSocket;
+use client::net::Session;
+use transport::Link;
 use std::path::Path;
-use std::time::{ Duration, Instant };
+use platform::{Duration, Instant};
 
 use client::core::{ GameConfig, GameState };
 use client::screens::dev_mode::{ draw_dev_overlay, DevModeState };
@@ -38,6 +39,8 @@ impl Default for ModelQuality {
 }
 
 fn set_cwd_to_assets_root() {
+    // The browser build fetches assets relative to the page instead.
+    #[cfg(not(target_arch = "wasm32"))]
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent().map(|p| p.to_path_buf());
         while let Some(d) = dir {
@@ -62,12 +65,11 @@ pub async fn run() {
     let mut settings_screen = SettingsScreen::new();
     let mut playing_state = PlayingState::new().await;
 
-    let mut socket: Option<UdpSocket> = None;
+    let mut session: Option<Session> = None;
     let mut player_id: u32 = 0;
     let mut username = String::new();
-    let mut server_addr = String::new();
     let mut asset_cache_key = String::new();
-    let mut config = GameConfig::new();
+    let mut config = GameConfig::load();
     let mut preset_manager = CrosshairPresetManager::new("");
     let mut maze: Option<Maze> = None;
     let mut is_fullscreen = true;
@@ -102,12 +104,11 @@ pub async fn run() {
                 if macroquad::input::is_key_pressed(macroquad::input::KeyCode::Escape) {
                     state = GameState::Exit;
                 }
-                if let Some((s, name, id)) = login_screen.update() {
-                    socket = Some(s);
-                    username = name;
-                    player_id = id;
-                    server_addr = login_screen.ip_input.clone();
-                    asset_cache_key = server_addr.clone();
+                if let Some(joined) = login_screen.update() {
+                    username = joined.username.clone();
+                    player_id = joined.player_id;
+                    asset_cache_key = joined.address.clone();
+                    session = Some(joined);
                     // mark server contact as fresh on connect
                     last_server_contact = Some(Instant::now());
 
@@ -127,10 +128,10 @@ pub async fn run() {
             }
 
             GameState::LobbyInventory => {
-                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
+                let sync = sync_world(link_of(&mut session), player_id, &username, &mut playing_state, &mut maze);
                 if sync.removed_by_server {
-                    socket = None;
-                    login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                    session = None;
+                    login_screen.returned_with("Timed out / disconnected by server.");
                     state = GameState::Login;
                     set_cursor_grab(false);
                     show_mouse(true);
@@ -171,11 +172,11 @@ pub async fn run() {
             GameState::Loading => {
                 login_screen.update_background();
 
-                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
+                let sync = sync_world(link_of(&mut session), player_id, &username, &mut playing_state, &mut maze);
                 if sync.removed_by_server {
                     // server removed our player (timed out) — go back to connection page
-                    socket = None;
-                    login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                    session = None;
+                    login_screen.returned_with("Timed out / disconnected by server.");
                     state = GameState::Login;
                     set_cursor_grab(false);
                     show_mouse(true);
@@ -219,6 +220,8 @@ pub async fn run() {
                     ensure_essential_viewmodel_assets(&mut playing_state).await;
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                     state = GameState::Playing;
+                    // Loading paused this loop, so time spent there is not silence from the server.
+                    last_server_contact = Some(Instant::now());
                     set_cursor_grab(true);
                     show_mouse(false);
                     playing_state.last_mouse_pos = mouse_position();
@@ -249,15 +252,15 @@ pub async fn run() {
                     set_cursor_grab(false);
                     show_mouse(true);
                     let sync = sync_world(
-                        &socket,
+                        link_of(&mut session),
                         player_id,
                         &username,
                         &mut playing_state,
                         &mut maze
                     );
                     if sync.removed_by_server {
-                        socket = None;
-                        login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                        session = None;
+                        login_screen.returned_with("Timed out / disconnected by server.");
                         state = GameState::Login;
                         set_cursor_grab(false);
                         show_mouse(true);
@@ -300,11 +303,11 @@ pub async fn run() {
                     continue;
                 }
 
-                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
+                let sync = sync_world(link_of(&mut session), player_id, &username, &mut playing_state, &mut maze);
 
                 if sync.removed_by_server {
-                    socket = None;
-                    login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                    session = None;
+                    login_screen.returned_with("Timed out / disconnected by server.");
                     state = GameState::Login;
                     set_cursor_grab(false);
                     show_mouse(true);
@@ -344,16 +347,16 @@ pub async fn run() {
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
-                playing_state.send_network(&socket, &server_addr, &config);
+                playing_state.send_network(link_of(&mut session), &config);
                 playing_state.render(&mut config, &username, player_id, maze.as_ref());
             }
 
             GameState::Paused => {
-                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
+                let sync = sync_world(link_of(&mut session), player_id, &username, &mut playing_state, &mut maze);
 
                 if sync.removed_by_server {
-                    socket = None;
-                    login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                    session = None;
+                    login_screen.returned_with("Timed out / disconnected by server.");
                     state = GameState::Login;
                     set_cursor_grab(false);
                     show_mouse(true);
@@ -404,10 +407,10 @@ pub async fn run() {
             }
 
             GameState::Settings => {
-                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
+                let sync = sync_world(link_of(&mut session), player_id, &username, &mut playing_state, &mut maze);
                 if sync.removed_by_server {
-                    socket = None;
-                    login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                    session = None;
+                    login_screen.returned_with("Timed out / disconnected by server.");
                     state = GameState::Login;
                     set_cursor_grab(false);
                     show_mouse(true);
@@ -470,10 +473,10 @@ pub async fn run() {
                     continue;
                 }
 
-                let sync = sync_world(&socket, player_id, &username, &mut playing_state, &mut maze);
+                let sync = sync_world(link_of(&mut session), player_id, &username, &mut playing_state, &mut maze);
                 if sync.removed_by_server {
-                    socket = None;
-                    login_screen.error_msg = "Timed out / disconnected by server.".to_string();
+                    session = None;
+                    login_screen.returned_with("Timed out / disconnected by server.");
                     state = GameState::Login;
                     set_cursor_grab(false);
                     show_mouse(true);
@@ -514,33 +517,52 @@ pub async fn run() {
             }
 
             GameState::Exit => {
-                if let Some(ref s) = socket {
-                    let disconnect_msg = vec![client::net::protocols::MSG_DISCONNECT];
-                    let _ = s.send_to(&disconnect_msg, &server_addr);
+                if let Some(s) = link_of(&mut session) {
+                    s.send(&client::net::protocols::ClientMsg::Disconnect.encode());
                 }
+                // process::exit skips destructors: stop a hosted server cleanly first
+                // (its online listing, if any, expires by itself)
+                drop(session.take());
+                // A page cannot quit itself; go back to the menu instead.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    state = GameState::Login;
+                }
+                #[cfg(not(target_arch = "wasm32"))]
                 std::process::exit(0);
+            }
+        }
+
+        // A game we host: step it (the browser runs the server in this loop), and
+        // pass on what the host should know, e.g. whether outsiders can reach it.
+        if let Some(host) = session.as_mut().and_then(|s| s.host.as_mut()) {
+            host.update();
+            if let Some(notice) = host.take_notice() {
+                playing_state.announcements.push((notice, 8.0));
             }
         }
 
         // Keepalive: if connected, periodically send a lightweight position update so the
         // server treats us as active even when idle/paused. Interval is less than server timeout.
-        if socket.is_some() {
+        if session.is_some() {
             if
                 last_keepalive
                     .map(|t| Instant::now().duration_since(t) > Duration::from_secs(4))
                     .unwrap_or(true)
             {
-                playing_state.send_network(&socket, &server_addr, &config);
+                playing_state.send_network(link_of(&mut session), &config);
                 last_keepalive = Some(Instant::now());
             }
         }
 
-        // Global: if we haven't heard from the server for a while, treat as disconnected
-        if socket.is_some() {
+        // Global: if we haven't heard from the server for a while, treat as disconnected.
+        // Not while loading: each asset load is awaited inside this loop, and a large
+        // model on a first visit to the browser build can take longer than the timeout.
+        if session.is_some() && !matches!(state, GameState::Loading) {
             if let Some(last) = last_server_contact {
                 if Instant::now().duration_since(last) > CLIENT_CONNECTION_LOST_TIMEOUT {
-                    socket = None;
-                    login_screen.error_msg = "Connection to server lost.".to_string();
+                    session = None;
+                    login_screen.returned_with("Connection to server lost.");
                     state = GameState::Login;
                     set_cursor_grab(false);
                     show_mouse(true);
@@ -592,6 +614,13 @@ fn resolve_asset_path_for_quality(path: &str, _model_quality: ModelQuality) -> S
         return path.to_string();
     }
     let normalized = if path.contains('\\') { path.replace('\\', "/") } else { path.to_string() };
+
+    // The browser cannot probe which variants exist; the web build ships the
+    // compressed set.
+    #[cfg(target_arch = "wasm32")]
+    if let Some(file_name) = normalized.rsplit('/').next() {
+        return format!("assets/models/player/Compressed/{}", file_name);
+    }
 
     if Path::new(&normalized).exists() {
         return normalized;
@@ -662,5 +691,13 @@ async fn ensure_essential_viewmodel_assets(playing_state: &mut PlayingState) {
             continue;
         }
         load_asset_entry(key, path, playing_state).await;
+    }
+}
+
+/// The live connection, for code that only sends and receives.
+fn link_of(session: &mut Option<Session>) -> Option<&mut dyn Link> {
+    match session {
+        Some(s) => Some(s.link.as_mut()),
+        None => None,
     }
 }

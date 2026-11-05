@@ -1,0 +1,9 @@
+# The browser build gets its imports (miniquad's gl.js and web/gridlock_web.js)
+# from JavaScript at load time, so the linker must leave them undefined.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--allow-undefined"]
+
+# Online services (registry/dcs/README.md), baked into every build. Setting
+# GRIDLOCK_REGISTRY in the environment still wins (e.g. a local test registry).
+[env]
+GRIDLOCK_REGISTRY = "https://gridlock-registry.fn.dilmune.app"

@@ -1,0 +1,136 @@
+name: Deploy
+
+# Rolls main out to https://gridlock.kwaddo.dev:
+# - the registry function (registry/dcs/index.js) is redeployed when it changed,
+#   through the Dilmune API;
+# - the browser build is pushed to the Kwaddo/gridlock-web repository, which the
+#   Dilmune app rebuilds from on every push.
+# client/assets is not in git: the build takes it from the gridlock-assets
+# bucket, which upload_assets.sh fills (and then runs this workflow by hand).
+#
+# Secrets: DCS_S3_ACCESS_KEY_ID + DCS_S3_SECRET_ACCESS_KEY (read access to
+# gridlock-assets), GRIDLOCK_WEB_DEPLOY_KEY (private half of a write deploy key
+# on gridlock-web), and optionally DCS_API_KEY (dcs_..., Dilmune Settings >
+# API Keys); without it, registry changes are flagged and deployed by hand.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  S3_ENDPOINT: https://api.dilmune.com/s3
+  ASSETS_BUCKET: gridlock-assets
+  REGISTRY_APP_ID: bc63cc60-b306-47c9-adca-a797eea5f769
+  REGISTRY_URL: https://gridlock-registry.fn.dilmune.app
+  SITE_URL: https://gridlock.kwaddo.dev
+
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether the registry changed
+        id: changed
+        run: |
+          before="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" != push ] || ! git cat-file -e "$before^{commit}" 2>/dev/null \
+              || ! git diff --quiet "$before" HEAD -- registry/dcs/index.js; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "registry/dcs/index.js is unchanged; skipping."
+          fi
+
+      - name: Deploy the registry function
+        if: steps.changed.outputs.deploy == 'true'
+        env:
+          DCS_API_KEY: ${{ secrets.DCS_API_KEY }}
+        run: |
+          if [ -z "$DCS_API_KEY" ]; then
+            echo "::warning::registry/dcs/index.js changed but DCS_API_KEY is not set; deploy it by hand (registry/dcs/README.md)."
+            exit 0
+          fi
+          jq -n --rawfile code registry/dcs/index.js '{sourceType: "inline", code: $code}' > body.json
+          curl --fail-with-body -sS -X POST "https://api.dilmune.com/api/v1/apps/$REGISTRY_APP_ID/deploy" \
+            -H "Authorization: Bearer $DCS_API_KEY" -H "Content-Type: application/json" \
+            --data @body.json
+          echo
+          # The edge takes a moment to switch over; wait until the registry answers again.
+          for i in $(seq 1 30); do
+            if curl -sf "$REGISTRY_URL/ice" | jq -e '.iceServers | length > 0' >/dev/null; then exit 0; fi
+            sleep 5
+          done
+          echo "registry did not come back" >&2
+          exit 1
+
+  web:
+    needs: registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Fetch assets from the bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.DCS_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DCS_S3_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+        run: |
+          # Everything but the models, which the page loads from the registry.
+          aws s3 sync "s3://$ASSETS_BUCKET/" client/assets/ --endpoint-url "$S3_ENDPOINT" \
+            --exclude 'models/*' --no-progress
+          # The models' version, from their names and checksums, so browsers
+          # replace cached models exactly when they change.
+          version=$(aws s3api list-objects-v2 --bucket "$ASSETS_BUCKET" --prefix models/ \
+            --endpoint-url "$S3_ENDPOINT" --query 'Contents[].[Key,ETag]' --output text \
+            | sort | sha256sum | cut -c1-12)
+          echo "GRIDLOCK_MODELS_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build the browser version
+        env:
+          GRIDLOCK_MODELS_URL: ${{ env.REGISTRY_URL }}/models
+        run: ./build_web.sh
+
+      - name: Publish to gridlock-web
+        env:
+          DEPLOY_KEY: ${{ secrets.GRIDLOCK_WEB_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$DEPLOY_KEY"
+          git clone --depth 1 git@github.com:Kwaddo/gridlock-web.git publish
+          rsync -a --delete --exclude .git dist/web/ publish/
+          cd publish
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The build is unchanged; nothing to publish."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "deploy: ${GITHUB_SHA::7}"
+          git push
+
+      - name: Wait until the site serves this build
+        run: |
+          want=$(sha256sum dist/web/gridlock.wasm | cut -d' ' -f1)
+          for i in $(seq 1 60); do
+            got=$(curl -sf "$SITE_URL/gridlock.wasm?ci=$GITHUB_RUN_ID-$i" | sha256sum | cut -d' ' -f1)
+            if [ "$got" = "$want" ]; then echo "Live at $SITE_URL"; exit 0; fi
+            sleep 10
+          done
+          echo "the site still serves an older build after 10 minutes" >&2
+          exit 1

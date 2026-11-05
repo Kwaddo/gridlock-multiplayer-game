@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use crate::net::PeerId;
 use rand::Rng;
 use crate::bot::personality::difficulty_mods;
 use crate::maze::MazeData;
@@ -30,8 +30,8 @@ pub struct ShotDecision {
 }
 
 pub fn try_shoot(
-    bot_addr: SocketAddr,
-    players: &HashMap<SocketAddr, Player>,
+    bot_addr: PeerId,
+    players: &HashMap<PeerId, Player>,
     bot_state: &mut BotState,
     maze: Option<&MazeData>,
     dt: f32,

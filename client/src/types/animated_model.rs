@@ -417,23 +417,26 @@ fn animation_override_index_for_stem(file_stem: &str) -> Option<usize> {
     }
 }
 
-pub fn load_gltf_animated_model(path: &str) -> Result<AnimatedModel, String> {
-    load_gltf_animated_model_internal(path, ClipSelectionMode::LongestDuration, None, false)
+pub fn load_gltf_animated_model(path: &str, bytes: &[u8]) -> Result<AnimatedModel, String> {
+    load_gltf_animated_model_internal(path, bytes, ClipSelectionMode::LongestDuration, None, false)
 }
 
 pub fn load_gltf_animated_model_with_mode(
     path: &str,
+    bytes: &[u8],
     mode: ClipSelectionMode,
 ) -> Result<AnimatedModel, String> {
-    load_gltf_animated_model_internal(path, mode, None, false)
+    load_gltf_animated_model_internal(path, bytes, mode, None, false)
 }
 
 pub fn load_gltf_animated_model_with_clip_index(
     path: &str,
+    bytes: &[u8],
     clip_index: usize,
 ) -> Result<AnimatedModel, String> {
     load_gltf_animated_model_internal(
         path,
+        bytes,
         ClipSelectionMode::LongestDuration,
         Some(clip_index),
         false,
@@ -442,10 +445,12 @@ pub fn load_gltf_animated_model_with_clip_index(
 
 pub fn load_gltf_animated_model_with_unskinned(
     path: &str,
+    bytes: &[u8],
     include_unskinned_primitives: bool,
 ) -> Result<AnimatedModel, String> {
     load_gltf_animated_model_internal(
         path,
+        bytes,
         ClipSelectionMode::LongestDuration,
         None,
         include_unskinned_primitives,
@@ -454,12 +459,12 @@ pub fn load_gltf_animated_model_with_unskinned(
 
 fn load_gltf_animated_model_internal(
     path: &str,
+    bytes: &[u8],
     mode: ClipSelectionMode,
     forced_clip_index: Option<usize>,
     include_unskinned_primitives: bool,
 ) -> Result<AnimatedModel, String> {
-    let (doc, buffers, images) = gltf::import(path)
-        .map_err(|e| format!("failed to import gltf '{}': {e}", path))?;
+    let (doc, buffers, images) = import_glb(path, bytes)?;
 
     let mesh_count = doc.meshes().count();
     let skin_count = doc.skins().count();
@@ -1074,4 +1079,14 @@ Add one in animation_override_index_for_stem().",
     );
 
     Ok(model)
+}
+
+/// Parse a self-contained `.glb` from memory. The bytes are read up front with
+/// macroquad's `load_file`, which works on native builds and in the browser
+/// alike; `path` is only for error messages.
+pub fn import_glb(
+    path: &str,
+    bytes: &[u8],
+) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, Vec<gltf::image::Data>), String> {
+    gltf::import_slice(bytes).map_err(|e| format!("failed to import gltf '{}': {e}", path))
 }

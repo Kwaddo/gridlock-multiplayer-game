@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -12,6 +13,13 @@ pub async fn init_font() {
     }
 }
 
+/// In the browser, paths are URLs relative to the page; nothing to probe.
+#[cfg(target_arch = "wasm32")]
+fn resolve_font_path(rel: &str) -> String {
+    rel.to_string()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn resolve_font_path(rel: &str) -> String {
     if Path::new(rel).exists() {
         return rel.to_string();

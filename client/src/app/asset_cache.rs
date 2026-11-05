@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CachedAssetEntry {
@@ -51,10 +50,7 @@ pub fn save_cached_manifest(server_addr: &str, entries: &[(String, String)]) {
 
     let manifest = CachedAssetManifest {
         server_addr: server_addr.to_string(),
-        updated_at_unix_secs: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        updated_at_unix_secs: platform::unix_time_ms() / 1000,
         entries: entries
             .iter()
             .map(|(key, path)| CachedAssetEntry {

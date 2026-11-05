@@ -9,9 +9,7 @@ use crate::weapons::{recoil, SpreadContext};
 
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
-use rodio::{Decoder, Sink};
 use std::collections::HashMap;
-use std::io::Cursor;
 
 use super::PlayingState;
 
@@ -667,25 +665,8 @@ impl PlayingState {
         if config.mute_audio {
             return;
         }
-        let Some(sample_bytes) = self.sound_samples.get(sound_key) else {
-            return;
-        };
-        let Some(audio_handle) = self.audio_stream_handle.as_ref() else {
-            return;
-        };
-
         let pitch = gen_range(0.94f32, 1.06f32);
         let volume = gen_range(0.7f32, 0.82f32);
-        let cursor: Cursor<Vec<u8>> = Cursor::new(sample_bytes.to_vec());
-        let Ok(source) = Decoder::new(cursor) else {
-            return;
-        };
-        let Ok(sink) = Sink::try_new(audio_handle) else {
-            return;
-        };
-        sink.set_speed(pitch);
-        sink.set_volume(volume);
-        sink.append(source);
-        sink.detach();
+        self.audio.play(sound_key, pitch, volume);
     }
 }
