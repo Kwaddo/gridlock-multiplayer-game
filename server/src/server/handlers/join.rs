@@ -16,7 +16,6 @@ pub fn handle_join(
     match_running: bool,
     src_addr: PeerId,
     requested_username: &str,
-    asset_manifest: Option<&serde_json::Value>,
 ) {
     // Check if player already exists from this address
     if let Some(existing_player) = players.get_mut(&src_addr) {
@@ -49,7 +48,6 @@ pub fn handle_join(
                 m.send(socket, src_addr);
             }
         }
-        utils::send_assets(socket, src_addr, asset_manifest);
 
         // auto-assign balanced teams for all lobby players
         game::auto_assign_lobby_teams(players);

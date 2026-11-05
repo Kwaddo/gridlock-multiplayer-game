@@ -1,4 +1,4 @@
-use gridlock_server::{PeerId, Server, EMBEDDED_MANIFEST};
+use gridlock_server::{PeerId, Server};
 
 const MSG_JOIN: u8 = protocol::MSG_JOIN;
 
@@ -8,7 +8,7 @@ fn sent_types(out: &[(PeerId, Vec<u8>)], to: PeerId) -> Vec<u8> {
 
 #[test]
 fn join_tick_disconnect_without_sockets() {
-    let mut server = Server::new(serde_json::from_str(EMBEDDED_MANIFEST).ok());
+    let mut server = Server::new();
     let (a, b) = (PeerId(1), PeerId(2));
 
     let mut join = vec![MSG_JOIN];
@@ -18,7 +18,6 @@ fn join_tick_disconnect_without_sockets() {
     let out = server.drain_outbox();
     let types = sent_types(&out, a);
     assert!(types.contains(&protocol::MSG_WELCOME));
-    assert!(types.contains(&protocol::MSG_ASSETS));
     assert!(types.contains(&protocol::MSG_STATE));
 
     let mut join = vec![MSG_JOIN];
@@ -36,7 +35,7 @@ fn join_tick_disconnect_without_sockets() {
 #[test]
 fn every_server_packet_decodes() {
     use protocol::{ClientMsg, ServerMsg};
-    let mut server = Server::new(serde_json::from_str(EMBEDDED_MANIFEST).ok());
+    let mut server = Server::new();
     let (a, b) = (PeerId(1), PeerId(2));
     let mut sent = Vec::new();
     let mut step = |server: &mut Server, peer: PeerId, msg: ClientMsg| {
@@ -74,7 +73,6 @@ fn every_server_packet_decodes() {
     let types: std::collections::HashSet<u8> = sent.iter().map(|(_, b)| b[0]).collect();
     for t in [
         protocol::MSG_WELCOME,
-        protocol::MSG_ASSETS,
         protocol::MSG_STATE,
         protocol::MSG_PLAYER_LIST,
         protocol::MSG_LOBBY_LEADER,

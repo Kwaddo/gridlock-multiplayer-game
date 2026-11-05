@@ -2,13 +2,19 @@
 // ICE and models routes as ../src/index.js (the Cloudflare Worker), but a DCS
 // function has no Durable Objects and no memory shared between requests, so:
 //
-// - State lives in a private bucket, reached through the S3 API (STATE_BUCKET),
-//   kept to as few requests as possible: the whole host list is one object
-//   (servers.json), and an idle host's poll is one listing of its mailbox.
-//   Objects under rooms/ are short-lived; the bucket's lifecycle rules delete
-//   anything left behind after a day.
-// - WebRTC signalling uses HTTP mailboxes instead of WebSocket rooms, since two
-//   sockets can land in different isolates and never meet. Players stop
+// - All state is one object, state.json, in a private bucket reached through
+//   the S3 API (STATE_BUCKET): the host list, and each open room with the
+//   signalling messages waiting in it. Nothing else is ever created there.
+//   Reading is one GET; polls only read. Writes happen on joins, offers and
+//   answers, leaves, heartbeats and a host's claim renewal.
+// - The bucket has no conditional writes, so two writes at once can lose one.
+//   That is kept rare (one complete offer and one complete answer per
+//   connection, written in turn) and harmless: a player still not connected
+//   re-announces itself every few seconds, which makes the host resend its
+//   offer and the player its answer; a host whose listing went missing gets
+//   404 on its next heartbeat and registers again.
+// - WebRTC signalling uses these mailboxes instead of WebSocket rooms, since
+//   two sockets can land in different isolates and never meet. Players stop
 //   polling once connected; the host polls every few seconds when idle.
 //
 // Host list. Game hosts announce themselves with a heartbeat; clients fetch the list.
@@ -20,9 +26,6 @@
 //   client-supplied one, so a listing can only point at the machine that made it.
 //   Browser hosts list a WebRTC room code instead. A listing lives TTL_SECONDS
 //   past its last heartbeat; a browser host leaving its room removes it at once.
-//   The bucket has no conditional writes, so two simultaneous updates can lose
-//   one; a host whose listing went missing gets 404 on its next heartbeat and
-//   registers again.
 //
 // ICE servers for WebRTC.
 //   GET    /ice            -> { iceServers: [...] }   STUN, plus a TURN relay when one is
@@ -32,13 +35,16 @@
 // WebRTC signalling (client-server topology; web/gridlock_web.js is the client).
 //   POST   /room/:code/join?host   -> { id, token }   claim the room (409 if taken)
 //   POST   /room/:code/join        -> { id, token }   join it (404 without a host)
-//   POST   /room/:code/send        { id, token, signals: [{ receiver, data }] }
+//   POST   /room/:code/hello       { id, token }      a player re-announcing itself
+//   POST   /room/:code/send        { id, token, host?, signals: [{ receiver, data }] }
 //   GET    /room/:code/poll?id&token[&host][&keep]
-//                                  -> [{ NewPeer } | { PeerLeft } | { Signal: { sender, data } }]
-//   POST   /room/:code/leave       { id, token }
-//   The host's polls carry ?host (its token is a host token) and, every so
-//   often, ?keep to renew its claim; a room not renewed for HOST_TTL_SECONDS
-//   closes, and a joining player's polls get 410.
+//                                  -> [{ id, NewPeer | PeerLeft | Signal: { sender, data } }]
+//   POST   /room/:code/leave       { id, token, host? }
+//   A poll returns every message for the caller from the last MESSAGE_TTL_MS,
+//   each with an id; clients skip the ones they have seen. The host's polls
+//   carry ?host (its token is a host token) and, every so often, ?keep to
+//   renew its claim; a room not renewed for HOST_TTL_SECONDS closes, and a
+//   joining player's polls get 410.
 //   Players are only ever introduced to the host, never to each other.
 //
 // Game models, for the browser build.
@@ -51,7 +57,8 @@
 
 const TTL_SECONDS = 60;
 const HOST_TTL_SECONDS = 120;
-const LISTINGS_KEY = "servers.json";
+const MESSAGE_TTL_MS = 60000;
+const STATE_KEY = "state.json";
 const MAX_LISTINGS = 500;
 const MAX_PER_IP = 4;
 const MAX_SIGNALS = 64;
@@ -80,6 +87,27 @@ export default {
   },
 };
 
+// ---------------------------------------------------------------- state
+
+// { listings: { id: { tokenHash, ip, expires, entry } },
+//   rooms: { code: { host, expires, messages: [{ id, to, at, body }] } } }
+// with anything expired already dropped.
+async function loadState(store) {
+  const now = Date.now();
+  const state = (await store.get(STATE_KEY)) || {};
+  const listings = Object.fromEntries(Object.entries(state.listings || {}).filter(([, l]) => l?.expires > now));
+  const rooms = {};
+  for (const [code, r] of Object.entries(state.rooms || {})) {
+    if (!(r?.expires > now)) continue;
+    rooms[code] = { ...r, messages: (r.messages || []).filter((m) => now - m.at < MESSAGE_TTL_MS) };
+  }
+  return { listings, rooms };
+}
+
+function saveState(store, state) {
+  return store.put(STATE_KEY, state);
+}
+
 // ---------------------------------------------------------------- host list
 
 async function servers(request, env, ctx, id, extra) {
@@ -87,7 +115,7 @@ async function servers(request, env, ctx, id, extra) {
   const store = new Store(env);
 
   if (!id && request.method === "GET") {
-    const listings = await loadListings(store);
+    const { listings } = await loadState(store);
     return json(Object.entries(listings).map(([id, listing]) => ({ id, ...listing.entry })));
   }
   if (!id && request.method === "POST") return createListing(request, store);
@@ -95,13 +123,6 @@ async function servers(request, env, ctx, id, extra) {
   if (request.method === "PUT") return heartbeat(request, store, id);
   if (request.method === "DELETE") return removeListing(request, store, id);
   return json({ error: "method not allowed" }, 405);
-}
-
-// Every unexpired listing, by id: one read of servers.json.
-async function loadListings(store) {
-  const now = Date.now();
-  const all = (await store.get(LISTINGS_KEY)) || {};
-  return Object.fromEntries(Object.entries(all).filter(([, l]) => l && l.expires > now));
 }
 
 async function createListing(request, store) {
@@ -123,7 +144,8 @@ async function createListing(request, store) {
   // heartbeat) replaces what it had, so the game is never listed twice.
   // Only the machine that listed a room may replace that listing: anyone else
   // could otherwise take over (or rename) another host's game.
-  const listings = await loadListings(store);
+  const state = await loadState(store);
+  const { listings } = state;
   for (const [other, l] of Object.entries(listings)) {
     if (room ? l.entry.room !== room : l.entry.addr !== entry.addr) continue;
     if (l.ip !== ip) return json({ error: "room already listed" }, 409);
@@ -137,27 +159,27 @@ async function createListing(request, store) {
   const id = crypto.randomUUID();
   const token = crypto.randomUUID();
   listings[id] = { tokenHash: await sha256Hex(token), ip, expires: Date.now() + TTL_SECONDS * 1000, entry };
-  await store.put(LISTINGS_KEY, listings);
+  await saveState(store, state);
   // Echo the address back so a host can tell whether it is reachable as listed.
   return json({ id, token, ttl: TTL_SECONDS, ...(entry.addr ? { addr: entry.addr } : {}) }, 201);
 }
 
 async function heartbeat(request, store, id) {
-  const listings = await loadListings(store);
-  const listing = await authorized(request, listings, id);
+  const state = await loadState(store);
+  const listing = await authorized(request, state.listings, id);
   if (!listing) return json({ error: "unknown listing" }, 404);
   const players = int((await readJson(request))?.players, 0, 255);
   if (players !== null) listing.entry.players = Math.min(players, listing.entry.max_players);
   listing.expires = Date.now() + TTL_SECONDS * 1000;
-  await store.put(LISTINGS_KEY, listings);
+  await saveState(store, state);
   return new Response(null, { status: 204 });
 }
 
 async function removeListing(request, store, id) {
-  const listings = await loadListings(store);
-  if (!(await authorized(request, listings, id))) return json({ error: "unknown listing" }, 404);
-  delete listings[id];
-  await store.put(LISTINGS_KEY, listings);
+  const state = await loadState(store);
+  if (!(await authorized(request, state.listings, id))) return json({ error: "unknown listing" }, 404);
+  delete state.listings[id];
+  await saveState(store, state);
   return new Response(null, { status: 204 });
 }
 
@@ -200,35 +222,30 @@ async function iceServers(env) {
 
 // ---------------------------------------------------------------- signalling
 
-// Room layout in the state bucket:
-//   rooms/<code>/host.json                  { id, expires }
-//   rooms/<code>/box/<peer>/<time>-<n>.json [message, ...] waiting for <peer>
-// A peer's token is an HMAC of the room, its id and its role, so nothing per
-// player is stored, and the host is known without reading host.json.
+// A room in state.json: { host: <host's peer id>, expires, messages }. A
+// peer's token is an HMAC of the room, its id and its role, so nothing per
+// player is stored, and the host is known without reading anything.
 async function room(request, env, ctx, code, action) {
   const store = new Store(env);
   const url = new URL(request.url);
-  const hostKey = `rooms/${code}/host.json`;
   const now = Date.now();
-  const liveHost = async () => {
-    const host = await store.get(hostKey);
-    return host && host.expires > now ? host : null;
-  };
-  const claim = (id) => store.put(hostKey, { id, expires: now + HOST_TTL_SECONDS * 1000 });
+  const send = (room, to, body) => room.messages.push({ id: crypto.randomUUID(), to, at: now, body });
 
   if (action === "join" && request.method === "POST") {
     const asHost = url.searchParams.has("host");
-    const host = await liveHost();
+    const state = await loadState(store);
+    const room = state.rooms[code];
     const id = crypto.randomUUID();
     const token = await peerToken(env, code, id, asHost);
     if (asHost) {
-      if (host) return json({ error: "room already has a host" }, 409);
-      await claim(id);
-      return json({ id, token });
+      if (room) return json({ error: "room already has a host" }, 409);
+      state.rooms[code] = { host: id, expires: now + HOST_TTL_SECONDS * 1000, messages: [] };
+    } else {
+      if (!room) return json({ error: "no host in this room" }, 404);
+      // The host is the offerer for every player, so only it hears about newcomers.
+      send(room, room.host, { NewPeer: id });
     }
-    if (!host) return json({ error: "no host in this room" }, 404);
-    // The host is the offerer for every player, so only it hears about newcomers.
-    await deliver(store, code, host.id, [{ NewPeer: id }]);
+    await saveState(store, state);
     return json({ id, token });
   }
 
@@ -238,79 +255,51 @@ async function room(request, env, ctx, code, action) {
     if (!(await validPeer(env, code, id, url.searchParams.get("token"), asHost))) {
       return json({ error: "bad token" }, 403);
     }
-    let keys;
-    if (asHost) {
-      // An idle host's poll is this one listing; it renews its claim when asked.
-      keys = await store.list(`rooms/${code}/box/${id}/`);
-      if (url.searchParams.has("keep")) ctx.waitUntil(claim(id).catch(() => {}));
-    } else {
-      // Players only poll while connecting, and learn here if the host left.
-      const [host, list] = await Promise.all([liveHost(), store.list(`rooms/${code}/box/${id}/`)]);
-      if (!host) return json({ error: "room closed" }, 410);
-      keys = list;
+    const state = await loadState(store);
+    const room = state.rooms[code];
+    if (!room || (asHost && room.host !== id)) return json({ error: "room closed" }, 410);
+    // The host renews its claim now and then; every other poll only reads.
+    if (asHost && url.searchParams.has("keep")) {
+      room.expires = now + HOST_TTL_SECONDS * 1000;
+      ctx.waitUntil(saveState(store, state).catch(() => {}));
     }
-    if (!keys.length) return json([]);
-    const batches = await Promise.all(keys.map((key) => store.get(key)));
-    ctx.waitUntil(Promise.all(keys.map((key) => store.delete(key))).catch(() => {}));
-    return json(batches.flatMap((b) => (Array.isArray(b) ? b : [])));
+    return json(room.messages.filter((m) => m.to === id).map((m) => ({ id: m.id, ...m.body })));
   }
 
-  if (action === "send" && request.method === "POST") {
+  if (["hello", "send", "leave"].includes(action) && request.method === "POST") {
     const body = await readJson(request);
     const id = typeof body?.id === "string" ? body.id : "";
     const asHost = Boolean(body?.host);
     if (!(await validPeer(env, code, id, body?.token, asHost))) return json({ error: "bad token" }, 403);
-    const signals = Array.isArray(body?.signals) ? body.signals.slice(0, MAX_SIGNALS) : [];
-    // Signals only flow between the host and a player: the host addresses
-    // players; a player's signals always go to the host.
-    let hostId = null;
-    if (!asHost) {
-      const host = await liveHost();
-      if (!host) return json({ error: "room closed" }, 410);
-      hostId = host.id;
-    }
-    const byReceiver = new Map();
-    for (const s of signals) {
-      const receiver = asHost ? s?.receiver : hostId;
-      if (typeof receiver !== "string" || !PEER_ID.test(receiver) || receiver === id) continue;
-      if (!byReceiver.has(receiver)) byReceiver.set(receiver, []);
-      byReceiver.get(receiver).push({ Signal: { sender: id, data: s.data } });
-    }
-    await Promise.all([...byReceiver].map(([receiver, messages]) => deliver(store, code, receiver, messages)));
-    return new Response(null, { status: 204 });
-  }
+    const state = await loadState(store);
+    const room = state.rooms[code];
+    if (!room) return action === "leave" ? new Response(null, { status: 204 }) : json({ error: "room closed" }, 410);
 
-  if (action === "leave" && request.method === "POST") {
-    const body = await readJson(request);
-    const id = typeof body?.id === "string" ? body.id : "";
-    const asHost = Boolean(body?.host);
-    if (!(await validPeer(env, code, id, body?.token, asHost))) return json({ error: "bad token" }, 403);
-    if (asHost) {
-      // A leaving host closes the room, and takes its listing off the host list.
-      await store.delete(hostKey);
-      ctx.waitUntil(dropRoomListings(store, code).catch(() => {}));
-    } else {
-      const host = await liveHost();
-      if (host) await deliver(store, code, host.id, [{ PeerLeft: id }]);
+    if (action === "hello" && !asHost) {
+      send(room, room.host, { NewPeer: id });
+    } else if (action === "send") {
+      // Signals only flow between the host and a player: the host addresses
+      // players; a player's signals always go to the host.
+      const signals = Array.isArray(body?.signals) ? body.signals.slice(0, MAX_SIGNALS) : [];
+      for (const s of signals) {
+        const receiver = asHost ? s?.receiver : room.host;
+        if (typeof receiver !== "string" || !PEER_ID.test(receiver) || receiver === id) continue;
+        send(room, receiver, { Signal: { sender: id, data: s.data } });
+      }
+    } else if (action === "leave") {
+      if (asHost && room.host === id) {
+        // A leaving host closes the room, and takes its listing off the host list.
+        delete state.rooms[code];
+        for (const [lid, l] of Object.entries(state.listings)) if (l.entry.room === code) delete state.listings[lid];
+      } else if (!asHost) {
+        send(room, room.host, { PeerLeft: id });
+      }
     }
+    await saveState(store, state);
     return new Response(null, { status: 204 });
   }
 
   return json({ error: "not found" }, 404);
-}
-
-async function dropRoomListings(store, code) {
-  const listings = await loadListings(store);
-  const ids = Object.keys(listings).filter((id) => listings[id].entry.room === code);
-  if (!ids.length) return;
-  for (const id of ids) delete listings[id];
-  await store.put(LISTINGS_KEY, listings);
-}
-
-async function deliver(store, code, receiver, messages) {
-  // Zero-padded time first, so listing a mailbox returns its messages in order.
-  const key = `rooms/${code}/box/${receiver}/${String(Date.now()).padStart(15, "0")}-${crypto.randomUUID()}.json`;
-  await store.put(key, messages);
 }
 
 async function peerToken(env, code, id, asHost) {
@@ -367,19 +356,6 @@ class Store {
     if (!resp.ok) throw new Error(`S3 PUT ${key}: ${resp.status}`);
   }
 
-  async delete(key) {
-    const resp = await this.send("DELETE", `/${key}`);
-    if (!resp.ok && resp.status !== 404) throw new Error(`S3 DELETE ${key}: ${resp.status}`);
-  }
-
-  // Keys under a prefix, in lexical order (at most 1000, plenty here).
-  async list(prefix) {
-    const resp = await this.send("GET", "", { "list-type": "2", prefix });
-    if (!resp.ok) throw new Error(`S3 LIST ${prefix}: ${resp.status}`);
-    const xml = await resp.text();
-    return [...xml.matchAll(/<Key>([^<]*)<\/Key>/g)].map((m) => unescapeXml(m[1]));
-  }
-
   async send(method, path, query = {}, body = "") {
     const url = new URL(this.base + path);
     const params = Object.keys(query).sort().map((k) => `${rfc3986(k)}=${rfc3986(query[k])}`).join("&");
@@ -431,10 +407,6 @@ function utf8(text) {
 
 function rfc3986(value) {
   return encodeURIComponent(value).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
-}
-
-function unescapeXml(text) {
-  return text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 }
 
 // ---------------------------------------------------------------- helpers
