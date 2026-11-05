@@ -56,25 +56,30 @@ impl PlayingState {
                 let transform = Mat4::from_translation(render_pos + vec3(0.0, y_offset, 0.0))
                     * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                     * Mat4::from_scale(vec3(s, s, s));
-                let gl = unsafe { get_internal_gl() };
-                gl.quad_gl.push_model_matrix(transform);
                 // Tint model by player color when a skin texture isn't used, on
                 // the GPU, so textured and untextured meshes both receive it
-                // without copying the whole mesh every frame.
-                let tinted = p.color != WHITE;
-                if tinted {
-                    TINT_MATERIAL.with(|material| {
-                        material.set_uniform("Tint", [p.color.r, p.color.g, p.color.b, 1.0f32]);
-                        gl_use_material(material);
-                    });
+                // without copying the whole mesh every frame. Skinning happens
+                // on the GPU too where it can; otherwise the CPU-skinned meshes
+                // are drawn.
+                let tint = Color::new(p.color.r, p.color.g, p.color.b, 1.0);
+                if !anim.draw_gpu(transform, tint) {
+                    let gl = unsafe { get_internal_gl() };
+                    gl.quad_gl.push_model_matrix(transform);
+                    let tinted = p.color != WHITE;
+                    if tinted {
+                        TINT_MATERIAL.with(|material| {
+                            material.set_uniform("Tint", [p.color.r, p.color.g, p.color.b, 1.0f32]);
+                            gl_use_material(material);
+                        });
+                    }
+                    for base_mesh in anim.meshes() {
+                        draw_mesh(base_mesh);
+                    }
+                    if tinted {
+                        gl_use_default_material();
+                    }
+                    gl.quad_gl.pop_model_matrix();
                 }
-                for base_mesh in anim.meshes() {
-                    draw_mesh(base_mesh);
-                }
-                if tinted {
-                    gl_use_default_material();
-                }
-                gl.quad_gl.pop_model_matrix();
 
                 // compute hand pos from joint (set hand_world_pos later when
                 // drawing weapon)
