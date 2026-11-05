@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Gridlock</title>
+    <!-- the G from the title screen -->
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <style>
+        html, body, canvas {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: absolute;
+            background: #0f0f1f;
+            z-index: 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- right click aims down sights, so no context menu -->
+    <canvas id="glcanvas" tabindex="1" oncontextmenu="event.preventDefault()"></canvas>
+    <!-- where models are hosted when they are not next to the page (build_web.sh fills these in) -->
+    <script>window.GRIDLOCK_MODELS_URL = ""; window.GRIDLOCK_MODELS_VERSION = "";</script>
+    <!-- miniquad/macroquad loader, then Gridlock's plugin (network, audio, clock) -->
+    <script src="mq_js_bundle.js"></script>
+    <script src="gridlock_web.js"></script>
+    <script>load("gridlock.wasm");</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::net::{SocketAddr, UdpSocket};
-use std::time::Instant;
+use crate::net::{Outbox, PeerId};
+use platform::Instant;
 
 use crate::player::{Player, Team, WorldId};
 use crate::protocols::*;
@@ -46,18 +46,18 @@ pub struct SndState {
     /// Plant progress (0.0 to 1.0) — takes PLANT_DURATION seconds
     pub plant_progress: f32,
     /// Who is currently planting (must be bomb carrier at bomb site)
-    pub planter: Option<SocketAddr>,
+    pub planter: Option<PeerId>,
     /// Defuse progress (0.0 to 1.0)
     pub defuse_progress: f32,
     /// Who is currently defusing
-    pub defuser: Option<SocketAddr>,
+    pub defuser: Option<PeerId>,
 
     /// Time when the bomb was planted (for detonation timer)
     pub bomb_plant_time: Option<Instant>,
 
     /// Players who are alive this round (reset each round)
     /// Dead players spectate the bomb site
-    pub round_alive: HashMap<SocketAddr, bool>,
+    pub round_alive: HashMap<PeerId, bool>,
 
     /// Saved spawn positions so we can re-use them across rounds
     pub red_spawn: (f32, f32, f32),
@@ -107,8 +107,8 @@ impl SndState {
     /// Start a new round. Returns true if the match should continue, false if a team won the match.
     pub fn start_round(
         &mut self,
-        socket: &UdpSocket,
-        players: &mut HashMap<SocketAddr, Player>,
+        socket: &Outbox,
+        players: &mut HashMap<PeerId, Player>,
     ) -> bool {
         // Check if a team has won the match (first to 4 rounds in a best-of-7)
         let rounds_to_win = (self.max_rounds / 2) + 1; // 4
@@ -169,11 +169,8 @@ impl SndState {
             player.post_teleport_freeze_until =
                 Some(Instant::now() + std::time::Duration::from_secs(SND_FREEZE_TIME as u64));
 
-            let mut respawn_msg = vec![MSG_RESPAWN];
-            respawn_msg.extend_from_slice(&player.position.0.to_be_bytes());
-            respawn_msg.extend_from_slice(&player.position.1.to_be_bytes());
-            respawn_msg.extend_from_slice(&player.position.2.to_be_bytes());
-            respawn_msg.push(0u8);
+            let respawn_msg =
+                ServerMsg::Respawn { position: player.position, kind: Some(0) }.encode();
             let _ = socket.send_to(&respawn_msg, *addr);
         }
 
@@ -191,8 +188,8 @@ impl SndState {
     pub fn tick(
         &mut self,
         dt: f32,
-        socket: &UdpSocket,
-        players: &mut HashMap<SocketAddr, Player>,
+        socket: &Outbox,
+        players: &mut HashMap<PeerId, Player>,
     ) -> Option<(String, u32)> {
         self.phase_timer -= dt;
 
@@ -315,7 +312,7 @@ impl SndState {
         None
     }
 
-    fn end_round(&mut self, winner: Team, _socket: &UdpSocket, _players: &mut HashMap<SocketAddr, Player>) {
+    fn end_round(&mut self, winner: Team, _socket: &Outbox, _players: &mut HashMap<PeerId, Player>) {
         match winner {
             Team::Red => self.red_round_wins += 1,
             Team::Blue => self.blue_round_wins += 1,
@@ -335,7 +332,7 @@ impl SndState {
 
     /// Check if all players on one team are dead.
     /// Returns the winning team (the team that still has alive players).
-    fn check_team_eliminated(&self, players: &HashMap<SocketAddr, Player>) -> Option<Team> {
+    fn check_team_eliminated(&self, players: &HashMap<PeerId, Player>) -> Option<Team> {
         let mut red_alive = 0u32;
         let mut blue_alive = 0u32;
 
@@ -362,8 +359,8 @@ impl SndState {
     /// Handle bomb pickup request
     pub fn try_pickup_bomb(
         &mut self,
-        player_addr: SocketAddr,
-        players: &HashMap<SocketAddr, Player>,
+        player_addr: PeerId,
+        players: &HashMap<PeerId, Player>,
     ) -> bool {
         let player = match players.get(&player_addr) {
             Some(p) => p,
@@ -387,7 +384,7 @@ impl SndState {
     }
 
     /// Handle plant start request
-    pub fn try_start_plant(&mut self, player_addr: SocketAddr, players: &HashMap<SocketAddr, Player>) {
+    pub fn try_start_plant(&mut self, player_addr: PeerId, players: &HashMap<PeerId, Player>) {
         let player = match players.get(&player_addr) {
             Some(p) => p,
             None => return,
@@ -408,7 +405,7 @@ impl SndState {
         }
     }
 
-    pub fn stop_plant(&mut self, player_addr: SocketAddr) {
+    pub fn stop_plant(&mut self, player_addr: PeerId) {
         if self.planter == Some(player_addr) {
             self.planter = None;
             self.plant_progress = 0.0;
@@ -416,7 +413,7 @@ impl SndState {
     }
 
     /// Handle defuse start request
-    pub fn try_start_defuse(&mut self, player_addr: SocketAddr, players: &HashMap<SocketAddr, Player>) {
+    pub fn try_start_defuse(&mut self, player_addr: PeerId, players: &HashMap<PeerId, Player>) {
         let player = match players.get(&player_addr) {
             Some(p) => p,
             None => return,
@@ -435,7 +432,7 @@ impl SndState {
         }
     }
 
-    pub fn stop_defuse(&mut self, player_addr: SocketAddr) {
+    pub fn stop_defuse(&mut self, player_addr: PeerId) {
         if self.defuser == Some(player_addr) {
             self.defuser = None;
             self.defuse_progress = 0.0;
@@ -445,42 +442,27 @@ impl SndState {
     /// Broadcast the S&D round state to all players
     pub fn broadcast_round_state(
         &self,
-        socket: &UdpSocket,
-        players: &HashMap<SocketAddr, Player>,
+        socket: &Outbox,
+        players: &HashMap<PeerId, Player>,
     ) {
-        let mut msg = Vec::with_capacity(64);
-        msg.push(MSG_SND_ROUND_STATE);
-        msg.push(self.current_round);
-        msg.push(self.max_rounds);
-        msg.push(self.red_round_wins);
-        msg.push(self.blue_round_wins);
-        msg.push(self.phase as u8);
-        msg.push(self.attacking_team.as_u8());
-
-        // Bomb carrier ID (0 = no carrier)
-        let carrier_id = self.bomb_carrier.unwrap_or(0);
-        msg.extend_from_slice(&carrier_id.to_be_bytes());
-
-        // Dropped bomb position (or zeros)
-        let (bx, by, bz) = self.bomb_dropped_pos.unwrap_or((0.0, 0.0, 0.0));
-        msg.extend_from_slice(&bx.to_be_bytes());
-        msg.extend_from_slice(&by.to_be_bytes());
-        msg.extend_from_slice(&bz.to_be_bytes());
-
-        // Bomb site position
-        msg.extend_from_slice(&self.bomb_site.0.to_be_bytes());
-        msg.extend_from_slice(&self.bomb_site.1.to_be_bytes());
-        msg.extend_from_slice(&self.bomb_site.2.to_be_bytes());
-
-        // Bomb planted flag
-        msg.push(if self.bomb_planted { 1u8 } else { 0u8 });
-
-        // Plant/defuse progress
-        msg.extend_from_slice(&self.plant_progress.to_be_bytes());
-        msg.extend_from_slice(&self.defuse_progress.to_be_bytes());
-
-        // Phase timer
-        msg.extend_from_slice(&self.phase_timer.to_be_bytes());
+        let msg = ServerMsg::SndRoundState(SndRound {
+            round: self.current_round,
+            max_rounds: self.max_rounds,
+            red_wins: self.red_round_wins,
+            blue_wins: self.blue_round_wins,
+            phase: self.phase as u8,
+            attacking_team: self.attacking_team.as_u8(),
+            // 0 = no carrier
+            bomb_carrier_id: self.bomb_carrier.unwrap_or(0),
+            // dropped bomb position (or zeros)
+            bomb_pos: self.bomb_dropped_pos.unwrap_or((0.0, 0.0, 0.0)),
+            bomb_site: self.bomb_site,
+            bomb_planted: self.bomb_planted,
+            plant_progress: self.plant_progress,
+            defuse_progress: self.defuse_progress,
+            phase_timer: self.phase_timer,
+        })
+        .encode();
 
         for (addr, _p) in players.iter() {
             let _ = socket.send_to(&msg, *addr);

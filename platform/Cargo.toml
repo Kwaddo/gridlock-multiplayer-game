@@ -1,0 +1,12 @@
+[package]
+name = "platform"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+# In the browser, randomness comes from crypto.getRandomValues through the
+# gridlock_web JS plugin; getrandom's "js" backend would need wasm-bindgen,
+# which miniquad's loader does not support.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["custom"] }

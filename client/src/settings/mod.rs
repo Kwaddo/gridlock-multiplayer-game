@@ -286,6 +286,7 @@ impl SettingsScreen {
                 self.crosshair_state.save_prompt_is_leave = false;
                 self.crosshair_state.pending_tab = None;
             } else {
+                config.save();
                 self.saved_config = Some(config.clone());
             }
         }
@@ -403,6 +404,7 @@ impl SettingsScreen {
                 && mouse.1 >= btn_y
                 && mouse.1 <= btn_y + btn_h
             {
+                config.save();
                 self.saved_config = Some(config.clone());
                 self.show_unsaved_prompt = false;
                 return true;

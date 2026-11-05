@@ -1,11 +1,11 @@
-use std::net::{SocketAddr, UdpSocket};
+use crate::net::{Outbox, PeerId};
 
 use rand::Rng;
 
 use crate::maze::generation::generate_maze;
 use crate::maze::types::{MazeLight, Prop, Room};
 use crate::maze::analysis::{ self, MazeAnalysis };
-use crate::protocols::MSG_MAZE;
+use crate::protocols::{self as wire, ServerMsg};
 
 pub struct MazeData {
     pub width: u8,
@@ -37,44 +37,25 @@ impl MazeData {
         }
     }
 
-    pub fn send(&self, socket: &UdpSocket, addr: SocketAddr) {
-        let header_len = 5;
-        let rooms_len = 1 + self.rooms.len() * 4;
-        let props_len = 1 + self.props.len() * 3;
-        let lights_len = 1 + self.lights.len().min(255) * 3;
-        let mut msg =
-            Vec::with_capacity(header_len + rooms_len + props_len + lights_len + self.cells.len());
-
-        msg.push(MSG_MAZE);
-        msg.push(self.width);
-        msg.push(self.height);
-        msg.push(self.teleporter.0);
-        msg.push(self.teleporter.1);
-
-        msg.push(self.rooms.len() as u8);
-        for room in &self.rooms {
-            msg.push(room.x);
-            msg.push(room.y);
-            msg.push(room.w);
-            msg.push(room.h);
-        }
-
-        msg.push(self.props.len() as u8);
-        for prop in &self.props {
-            msg.push(prop.kind.as_u8());
-            msg.push(prop.x);
-            msg.push(prop.y);
-        }
-
-        let light_count = self.lights.len().min(255);
-        msg.push(light_count as u8);
-        for light in self.lights.iter().take(light_count) {
-            msg.push(light.x);
-            msg.push(light.y);
-            msg.push(light.variant);
-        }
-
-        msg.extend_from_slice(&self.cells);
+    pub fn send(&self, socket: &Outbox, addr: PeerId) {
+        let layout = wire::MazeLayout {
+            width: self.width,
+            height: self.height,
+            teleporter: self.teleporter,
+            rooms: self.rooms.iter().map(|r| wire::MazeRoom { x: r.x, y: r.y, w: r.w, h: r.h }).collect(),
+            props: self
+                .props
+                .iter()
+                .map(|p| wire::MazeProp { kind: p.kind.as_u8(), x: p.x, y: p.y })
+                .collect(),
+            lights: self
+                .lights
+                .iter()
+                .map(|l| wire::MazeLight { x: l.x, y: l.y, variant: l.variant })
+                .collect(),
+            cells: self.cells.clone(),
+        };
+        let msg = ServerMsg::Maze(layout).encode();
         let _ = socket.send_to(&msg, addr);
     }
 

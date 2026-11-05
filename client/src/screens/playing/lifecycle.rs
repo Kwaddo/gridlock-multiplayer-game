@@ -140,10 +140,8 @@ impl PlayingState {
         }
     }
 
-    pub fn request_respawn(&self, socket: &std::net::UdpSocket, server_addr: &str) {
-        use crate::protocols::MSG_RESPAWN_REQUEST;
-        let msg = vec![MSG_RESPAWN_REQUEST];
-        let _ = socket.send_to(&msg, server_addr);
+    pub fn request_respawn(&self, link: &mut dyn transport::Link) {
+        link.send(&crate::protocols::ClientMsg::RespawnRequest.encode());
     }
 
     pub fn respawn(&mut self, spawn_pos: Vec3) {

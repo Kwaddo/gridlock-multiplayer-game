@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::net::{SocketAddr, UdpSocket};
+use crate::net::{Outbox, PeerId};
 
 use crate::player::Player;
 
 /// Returns a unique, valid username based on the requested string and existing players.
-pub fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -> String {
+pub fn handle_username(players: &HashMap<PeerId, Player>, requested: &str) -> String {
     let mut candidate = if requested.is_empty() || requested.len() > 20 {
         log!("Invalid username '{}'. Assigning default.", requested);
         "Player".to_string()
@@ -27,7 +27,7 @@ pub fn handle_username(players: &HashMap<SocketAddr, Player>, requested: &str) -
 }
 
 /// Sends asset manifest entries for a given client.  Used during join and on demand.
-pub fn send_assets(socket: &UdpSocket, addr: SocketAddr, manifest_opt: Option<&serde_json::Value>) {
+pub fn send_assets(socket: &Outbox, addr: PeerId, manifest_opt: Option<&serde_json::Value>) {
     let manifest = match manifest_opt {
         Some(m) => m,
         None => {
@@ -43,20 +43,11 @@ pub fn send_assets(socket: &UdpSocket, addr: SocketAddr, manifest_opt: Option<&s
             if assets.is_empty() {
                 continue;
             }
-            let mut msg = Vec::with_capacity(256);
-            msg.push(crate::protocols::MSG_ASSETS);
-            msg.push(*world_id);
-            msg.push(assets.len() as u8);
-            for (key, path) in assets {
-                if let Some(path_str) = path.as_str() {
-                    let key_bytes = key.as_bytes();
-                    let path_bytes = path_str.as_bytes();
-                    msg.push(key_bytes.len() as u8);
-                    msg.extend_from_slice(key_bytes);
-                    msg.push(path_bytes.len() as u8);
-                    msg.extend_from_slice(path_bytes);
-                }
-            }
+            let entries = assets
+                .iter()
+                .filter_map(|(key, path)| Some((key.clone(), path.as_str()?.to_string())))
+                .collect();
+            let msg = crate::protocols::ServerMsg::Assets { world: *world_id, entries }.encode();
             log!(
                 "Sending {} asset(s) for world '{}'",
                 assets.len(),

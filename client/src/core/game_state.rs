@@ -9,12 +9,16 @@ pub enum GameState {
     Exit,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LoginField {
-    Ip,
     Username,
+    Address,
+    ServerName,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MainMenuTab {
-    Play,
-    Servers,
+    Browse,
+    Host,
+    Direct,
 }

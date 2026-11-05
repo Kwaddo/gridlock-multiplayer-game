@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use crate::net::PeerId;
 use crate::player::Player;
 use crate::maze::MazeData;
 use crate::maze::analysis::MazeAnalysis;
@@ -36,7 +36,7 @@ fn make_nav_cells(maze: &MazeData) -> Vec<u8> {
 pub fn decide_behavior(
     bot: &Player,
     state: &BotState,
-    players: &HashMap<SocketAddr, Player>,
+    players: &HashMap<PeerId, Player>,
     maze: &MazeData,
     analysis: &MazeAnalysis
 ) -> Option<BotBehavior> {
@@ -475,7 +475,7 @@ fn roam_to_random_point(
     })
 }
 
-fn find_player_by_id<'a>(players: &'a HashMap<SocketAddr, Player>, id: u32) -> Option<&'a Player> {
+fn find_player_by_id<'a>(players: &'a HashMap<PeerId, Player>, id: u32) -> Option<&'a Player> {
     players.values().find(|p| p.id == id && p.is_alive)
 }
 

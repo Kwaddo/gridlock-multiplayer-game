@@ -9,9 +9,7 @@ use crate::weapons::combat::{default_player_hitboxes, CombatEntity, HitZone, Hit
 use crate::weapons::stats::{WeaponCategory, WeaponId};
 
 use macroquad::prelude::*;
-use rodio::{Decoder, Sink};
 use std::collections::HashMap;
-use std::io::Cursor;
 
 use super::state::HandsPlaybackMode;
 use super::PlayingState;
@@ -1055,12 +1053,9 @@ impl PlayingState {
         if config.mute_audio {
             return;
         }
-        let Some(sample_bytes) = self.sound_samples.get(sound_key) else {
+        if !self.audio.has(sound_key) {
             return;
-        };
-        let Some(audio_handle) = self.audio_stream_handle.as_ref() else {
-            return;
-        };
+        }
 
         let listener_pos = self.position;
         let diff = source_pos - listener_pos;
@@ -1093,17 +1088,7 @@ impl PlayingState {
         let pitch_variation = macroquad::rand::gen_range(0.95f32, 1.05f32);
         let final_pitch = (doppler_pitch * pitch_variation).clamp(0.5, 2.0);
 
-        let cursor: Cursor<Vec<u8>> = Cursor::new(sample_bytes.to_vec());
-        let Ok(source) = Decoder::new(cursor) else {
-            return;
-        };
-        let Ok(sink) = Sink::try_new(audio_handle) else {
-            return;
-        };
-        sink.set_speed(final_pitch);
-        sink.set_volume(volume);
-        sink.append(source);
-        sink.detach();
+        self.audio.play(sound_key, final_pitch, volume);
     }
 
     /// Play a sound at the local player's position (no distance attenuation, no doppler).
@@ -1111,24 +1096,7 @@ impl PlayingState {
         if config.mute_audio {
             return;
         }
-        let Some(sample_bytes) = self.sound_samples.get(sound_key) else {
-            return;
-        };
-        let Some(audio_handle) = self.audio_stream_handle.as_ref() else {
-            return;
-        };
-
         let pitch = macroquad::rand::gen_range(0.95f32, 1.05f32);
-        let cursor: Cursor<Vec<u8>> = Cursor::new(sample_bytes.to_vec());
-        let Ok(source) = Decoder::new(cursor) else {
-            return;
-        };
-        let Ok(sink) = Sink::try_new(audio_handle) else {
-            return;
-        };
-        sink.set_speed(pitch);
-        sink.set_volume(volume);
-        sink.append(source);
-        sink.detach();
+        self.audio.play(sound_key, pitch, volume);
     }
 }
