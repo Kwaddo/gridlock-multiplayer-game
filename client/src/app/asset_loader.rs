@@ -153,6 +153,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
     let is_sound = lower.ends_with(".ogg") || lower.ends_with(".wav") || lower.ends_with(".mp3");
 
     if is_asset_cached(playing_state, key, path, is_obj, is_gltf, is_sound) {
+        println!("Asset cache hit: {} ({})", key, path);
         return;
     }
 
@@ -418,20 +419,10 @@ fn is_asset_cached(
     }
 
     if is_obj || is_gltf {
-        if playing_state.models.contains_key(key) || playing_state.animated_models.contains_key(key)
-        {
-            println!("Asset cache hit: {} ({})", key, path);
-            return true;
-        }
+        playing_state.models.contains_key(key) || playing_state.animated_models.contains_key(key)
     } else if is_sound {
-        if playing_state.audio.has(key) {
-            println!("Asset cache hit: {} ({})", key, path);
-            return true;
-        }
-    } else if playing_state.assets.contains_key(key) {
-        println!("Asset cache hit: {} ({})", key, path);
-        return true;
+        playing_state.audio.has(key)
+    } else {
+        playing_state.assets.contains_key(key)
     }
-
-    false
 }

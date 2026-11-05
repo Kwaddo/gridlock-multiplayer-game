@@ -452,7 +452,7 @@ impl Server {
         if due || self.players.len() != self.last_broadcast_players {
             self.last_state_broadcast = Some(Instant::now());
             self.last_broadcast_players = self.players.len();
-            broadcast::broadcast_state(&self.outbox, &self.players);
+            broadcast::broadcast_state_with_events(&self.outbox, &self.players);
             // One-shot movement events have now gone out; they stay set until
             // then, however many position updates arrive in between.
             for player in self.players.values_mut() {

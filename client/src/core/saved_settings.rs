@@ -32,6 +32,36 @@ struct Saved {
     binds: BTreeMap<String, String>,
 }
 
+impl Saved {
+    /// Each field on its own, so one wrong value only loses that one setting.
+    fn lenient(value: &serde_json::Value) -> Self {
+        fn field<T: serde::de::DeserializeOwned>(value: &serde_json::Value, name: &str) -> Option<T> {
+            serde_json::from_value(value.get(name)?.clone()).ok()
+        }
+        let binds = value
+            .get("binds")
+            .and_then(|b| b.as_object())
+            .map(|b| {
+                b.iter()
+                    .filter_map(|(name, v)| Some((name.clone(), v.as_str()?.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Saved {
+            sensitivity: field(value, "sensitivity"),
+            fov: field(value, "fov"),
+            gui_scale: field(value, "gui_scale"),
+            minimap_size: field(value, "minimap_size"),
+            minimap_shape: field(value, "minimap_shape"),
+            mute_audio: field(value, "mute_audio"),
+            crouch_toggle: field(value, "crouch_toggle"),
+            slow_walk_toggle: field(value, "slow_walk_toggle"),
+            prone_toggle: field(value, "prone_toggle"),
+            binds,
+        }
+    }
+}
+
 /// Every binding in the settings screen, by the name it is stored under.
 macro_rules! bindings {
     ($($name:literal => $field:ident),* $(,)?) => {
@@ -81,7 +111,8 @@ impl GameConfig {
     pub fn load() -> Self {
         let mut config = GameConfig::new();
         let saved = platform::storage::load(STORAGE_KEY)
-            .and_then(|json| serde_json::from_str::<Saved>(&json).ok())
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+            .map(|value| Saved::lenient(&value))
             .unwrap_or_default();
 
         let finite = |v: Option<f32>| v.filter(|v| v.is_finite());
@@ -300,6 +331,20 @@ mod tests {
         }
         assert!(binding_from_str("Key:NotAKey").is_none());
         assert!(binding_from_str("garbage").is_none());
+    }
+
+    #[test]
+    fn one_bad_field_keeps_the_rest() {
+        let value = serde_json::json!({
+            "sensitivity": 2.5,
+            "fov": "wide",
+            "binds": { "forward": "Key:Up", "jump": 7 }
+        });
+        let saved = Saved::lenient(&value);
+        assert_eq!(saved.sensitivity, Some(2.5));
+        assert_eq!(saved.fov, None);
+        assert_eq!(saved.binds.get("forward").map(String::as_str), Some("Key:Up"));
+        assert!(!saved.binds.contains_key("jump"));
     }
 
     #[test]

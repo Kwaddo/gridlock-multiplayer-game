@@ -74,7 +74,10 @@ impl UdpHost {
             Err(e)
                 if matches!(
                     e.kind(),
-                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::ConnectionReset
+                    ErrorKind::WouldBlock
+                        | ErrorKind::TimedOut
+                        | ErrorKind::ConnectionReset
+                        | ErrorKind::Interrupted
                 ) => {}
             Err(e) => return Err(e),
         }
