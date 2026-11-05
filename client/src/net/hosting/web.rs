@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use gridlock_server::{PeerId, Server, EMBEDDED_MANIFEST, MAX_PLAYERS};
+use gridlock_server::{PeerId, Server, MAX_PLAYERS};
 use rand::Rng;
 use transport::web::{RtcEvent, RtcSocket};
 use transport::{Link, LinkStatus};
@@ -40,7 +40,7 @@ struct Loopback {
 
 impl LocalHost {
     pub fn start(name: &str, list_online: bool) -> Result<Self, String> {
-        let mut server = Server::new(serde_json::from_str(EMBEDDED_MANIFEST).ok());
+        let mut server = Server::new();
         server.set_name(name);
 
         let mut rng = rand::thread_rng();

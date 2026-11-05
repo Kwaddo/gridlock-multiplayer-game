@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 
 use super::LoginScreen;
-use crate::core::game_state::MainMenuTab;
+use crate::core::game_state::{LoginField, MainMenuTab};
 use crate::net::client::{join_target, ConnectPoll, Connector, Session};
 use crate::net::hosting::LocalHost;
 
@@ -36,11 +36,17 @@ impl LoginScreen {
         if is_key_pressed(KeyCode::Enter) {
             self.confirm();
         }
+        let max_chars = match self.active_field {
+            LoginField::Username => 20,
+            LoginField::ServerName => 32,
+            LoginField::Address => 64,
+        };
         while let Some(c) = get_char_pressed() {
             // Backspace, Tab and Enter also arrive here as characters (macOS sends
             // Backspace as DEL, 0x7f); the key handlers above already did their job.
-            if !c.is_control() {
-                self.field_text_mut(self.active_field).push(c);
+            let field = self.field_text_mut(self.active_field);
+            if !c.is_control() && field.chars().count() < max_chars {
+                field.push(c);
             }
         }
 

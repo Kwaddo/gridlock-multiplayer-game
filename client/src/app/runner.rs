@@ -15,11 +15,11 @@ use client::weapons::crosshair_presets::CrosshairPresetManager;
 use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
-use super::asset_cache::{ load_cached_manifest, save_cached_manifest };
 use super::asset_loader::{
     asset_loaded,
     download_progress,
     load_asset_entry,
+    load_manifest,
     preload,
     preload_status,
     Prefetcher,
@@ -76,7 +76,6 @@ pub async fn run() {
     let mut session: Option<Session> = None;
     let mut player_id: u32 = 0;
     let mut username = String::new();
-    let mut asset_cache_key = String::new();
     let mut config = GameConfig::load();
     let mut preset_manager = CrosshairPresetManager::new("");
     let mut maze: Option<Maze> = None;
@@ -98,24 +97,33 @@ pub async fn run() {
     let mut loading_assets: Vec<(String, String)> = Vec::new();
     let mut loading_index: usize = 0;
     let mut loading_current: String = String::new();
-    let mut loading_stable_frames: u8 = 0;
-    let mut loading_started: bool = false;
     let mut prefetcher = Prefetcher::default();
-    // Whether the viewmodel assets missing from the server's list were queued.
-    let mut viewmodels_queued = false;
-    // Assets the server listed after loading had finished, and the state to go
-    // back to once they are loaded.
-    let mut late_assets: Vec<(String, String)> = Vec::new();
-    let mut resume_state: Option<GameState> = None;
 
-    // Every game sends the same asset list (the server's embedded manifest), so
-    // start downloading it now, while the player is still on the title screen;
-    // joining then only reads it from the browser's cache.
-    for (_, path) in preload_list(&playing_state, model_quality) {
-        preload(&path);
+    // Everything a game loads: the asset manifest (one list for every game,
+    // kept with the assets) plus the first-person viewmodels. Downloading
+    // starts now, while the player is still on the title screen, so joining
+    // only reads it from the browser's cache.
+    let game_assets = {
+        let mut entries = load_manifest().await;
+        entries.extend(missing_viewmodel_assets(&playing_state));
+        resolve_asset_entries_for_quality(&entries, model_quality)
+    };
+    for (_, path) in &game_assets {
+        preload(path);
     }
 
+    let mut was_on_login = true;
+
     loop {
+        // Keys pressed while playing (WASD...) also queue up as typed text;
+        // drop them when the title screen comes back, or they would be typed
+        // into its fields.
+        let on_login = matches!(state, GameState::Login);
+        if on_login && !was_on_login {
+            while get_char_pressed().is_some() {}
+        }
+        was_on_login = on_login;
+
         // In a hidden browser tab these frames come from a background timer
         // (web/gridlock_web.js) and only keep the game going: step a game we
         // host, take in what the server sent, send keepalives. Nothing is
@@ -133,6 +141,10 @@ pub async fn run() {
             if sync.server_seen {
                 last_server_contact = Some(Instant::now());
             }
+            // A match that ended while hidden still hands back the lobby loadout.
+            if sync.returned_to_lobby {
+                playing_state.weapons = WeaponInventory::from_loadout(&loadout);
+            }
             if let Some(host) = session.as_mut().and_then(|s| s.host.as_mut()) {
                 host.update();
             }
@@ -143,21 +155,6 @@ pub async fn run() {
             next_frame().await;
             continue;
         }
-
-        // Loading them where they arrive would stall frames on the network, so
-        // late assets go back through the loading screen.
-        late_assets.retain(|(key, path)| !asset_loaded(&playing_state, key, path));
-        if !late_assets.is_empty() && session.is_some() && !matches!(state, GameState::Loading) {
-            for entry in late_assets.drain(..) {
-                if !loading_assets.contains(&entry) {
-                    loading_assets.push(entry);
-                }
-            }
-            resume_state = Some(state);
-            loading_started = true;
-            state = GameState::Loading;
-        }
-        late_assets.clear();
 
         if config.bind_fullscreen.is_pressed() {
             is_fullscreen = !is_fullscreen;
@@ -172,25 +169,16 @@ pub async fn run() {
                 if let Some(joined) = login_screen.update() {
                     username = joined.username.clone();
                     player_id = joined.player_id;
-                    asset_cache_key = joined.address.clone();
                     session = Some(joined);
                     // mark server contact as fresh on connect
                     last_server_contact = Some(Instant::now());
 
                     preset_manager = CrosshairPresetManager::new(&username);
 
-                    {
-                        let cached = load_cached_manifest(&asset_cache_key);
-                        loading_assets = resolve_asset_entries_for_quality(&cached, model_quality);
-                    }
+                    loading_assets = game_assets.clone();
                     loading_index = 0;
                     loading_current.clear();
-                    loading_stable_frames = 0;
-                    loading_started = !loading_assets.is_empty();
                     prefetcher.clear();
-                    viewmodels_queued = false;
-                    late_assets.clear();
-                    resume_state = None;
                     state = GameState::Loading;
                 }
                 login_screen.draw();
@@ -213,14 +201,6 @@ pub async fn run() {
                 }
                 if sync.server_seen {
                     last_server_contact = Some(Instant::now());
-                }
-                if let Some(entries) = sync.assets {
-                    late_assets.extend(resolve_asset_entries_for_quality(&entries, model_quality));
-                    if !asset_cache_key.is_empty() {
-                        let mut existing = load_cached_manifest(&asset_cache_key);
-                        merge_manifest_entries(&mut existing, entries);
-                        save_cached_manifest(&asset_cache_key, &existing);
-                    }
                 }
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&mut config, &username, player_id, maze.as_ref());
@@ -258,58 +238,26 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
 
-                if let Some(entries) = sync.assets {
-                    // Queue them for the loop below, which loads one per frame,
-                    // so the screen keeps drawing while they download.
-                    for (key, path) in resolve_asset_entries_for_quality(&entries, model_quality) {
-                        if !loading_assets.iter().any(|(k, p)| *k == key && *p == path) {
-                            loading_assets.push((key, path));
-                        }
-                    }
-                    if !asset_cache_key.is_empty() {
-                        let mut existing = load_cached_manifest(&asset_cache_key);
-                        merge_manifest_entries(&mut existing, entries);
-                        save_cached_manifest(&asset_cache_key, &existing);
-                    }
-                }
 
-                if !loading_started {
-                    loading_stable_frames += 1;
-                    if !loading_assets.is_empty() && loading_stable_frames >= 3 {
-                        loading_started = true;
-                    }
-                    if loading_stable_frames >= 30 {
-                        loading_started = true;
-                    }
-                }
-
-                if loading_started && loading_index < loading_assets.len() {
+                if loading_index < loading_assets.len() {
                     // Download a few ahead in the background; load the next
                     // one only once its bytes are here, so no frame waits on
                     // the network.
-                    for (_, path) in loading_assets.iter().skip(loading_index).take(PREFETCH_AHEAD) {
-                        prefetcher.start(path);
+                    // Assets already loaded (e.g. joining a second game) need no download.
+                    for (key, path) in loading_assets.iter().skip(loading_index).take(PREFETCH_AHEAD) {
+                        if !asset_loaded(&playing_state, key, path) {
+                            prefetcher.start(path);
+                        }
                     }
                     let (key, path) = loading_assets[loading_index].clone();
                     loading_current = key.clone();
-                    if prefetcher.ready(&path) {
+                    if asset_loaded(&playing_state, &key, &path) || prefetcher.ready(&path) {
                         load_asset_entry(&key, &path, &mut playing_state).await;
                         loading_index += 1;
                     }
                 }
 
-                // The game needs these whether or not the server listed them; load
-                // them through the same queue so nothing waits on the network.
-                if loading_started && loading_index >= loading_assets.len() && !viewmodels_queued {
-                    loading_assets.extend(missing_viewmodel_assets(&playing_state));
-                    viewmodels_queued = true;
-                }
-
-                if loading_started && loading_index >= loading_assets.len() && resume_state.is_some() {
-                    // Back from loading late assets, to wherever we were.
-                    state = resume_state.take().unwrap_or(GameState::Playing);
-                    last_server_contact = Some(Instant::now());
-                } else if loading_started && loading_index >= loading_assets.len() {
+                if loading_index >= loading_assets.len() {
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                     state = GameState::Playing;
                     // Loading paused this loop, so time spent there is not silence from the server.
@@ -326,7 +274,6 @@ pub async fn run() {
                     loading_assets.len(),
                     loading_index,
                     &loading_current,
-                    loading_started,
                     download
                 );
             }
@@ -366,9 +313,6 @@ pub async fn run() {
                     }
                     if sync.server_seen {
                         last_server_contact = Some(Instant::now());
-                    }
-                    if let Some(entries) = sync.assets {
-                        late_assets.extend(resolve_asset_entries_for_quality(&entries, model_quality));
                     }
 
                     playing_state.simulate(&config, maze.as_ref());
@@ -410,14 +354,6 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
 
-                if let Some(entries) = sync.assets {
-                    late_assets.extend(resolve_asset_entries_for_quality(&entries, model_quality));
-                    if !asset_cache_key.is_empty() {
-                        let mut existing = load_cached_manifest(&asset_cache_key);
-                        merge_manifest_entries(&mut existing, entries);
-                        save_cached_manifest(&asset_cache_key, &existing);
-                    }
-                }
 
                 if sync.returned_to_lobby {
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
@@ -457,14 +393,6 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
 
-                if let Some(entries) = sync.assets {
-                    late_assets.extend(resolve_asset_entries_for_quality(&entries, model_quality));
-                    if !asset_cache_key.is_empty() {
-                        let mut existing = load_cached_manifest(&asset_cache_key);
-                        merge_manifest_entries(&mut existing, entries);
-                        save_cached_manifest(&asset_cache_key, &existing);
-                    }
-                }
 
                 if sync.returned_to_lobby {
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
@@ -507,12 +435,6 @@ pub async fn run() {
                 }
                 if sync.server_seen {
                     last_server_contact = Some(Instant::now());
-                }
-                if let Some(entries) = sync.assets {
-                    late_assets.extend(resolve_asset_entries_for_quality(&entries, model_quality));
-                    if !asset_cache_key.is_empty() {
-                        save_cached_manifest(&asset_cache_key, &entries);
-                    }
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
@@ -571,9 +493,6 @@ pub async fn run() {
                 }
                 if sync.server_seen {
                     last_server_contact = Some(Instant::now());
-                }
-                if let Some(entries) = sync.assets {
-                    late_assets.extend(resolve_asset_entries_for_quality(&entries, model_quality));
                 }
 
                 playing_state.simulate(&config, maze.as_ref());
@@ -659,25 +578,6 @@ pub async fn run() {
     }
 }
 
-fn merge_manifest_entries(existing: &mut Vec<(String, String)>, incoming: Vec<(String, String)>) {
-    use std::collections::HashMap;
-
-    // build a quick lookup for the existing entries so we avoid an O(n²) scan
-    let mut index_map: HashMap<String, usize> = HashMap::with_capacity(existing.len());
-    for (i, (k, _)) in existing.iter().enumerate() {
-        index_map.insert(k.clone(), i);
-    }
-
-    for (key, path) in incoming {
-        if let Some(&idx) = index_map.get(&key) {
-            existing[idx].1 = path;
-        } else {
-            index_map.insert(key.clone(), existing.len());
-            existing.push((key, path));
-        }
-    }
-}
-
 fn resolve_asset_entries_for_quality(
     entries: &[(String, String)],
     model_quality: ModelQuality
@@ -746,23 +646,6 @@ fn resolve_asset_path_for_quality(path: &str, _model_quality: ModelQuality) -> S
     }
 
     path.to_string()
-}
-
-/// Every asset a game will ask for: the server's manifest, all worlds, and the
-/// viewmodel assets.
-fn preload_list(playing_state: &PlayingState, model_quality: ModelQuality) -> Vec<(String, String)> {
-    let manifest: serde_json::Value =
-        serde_json::from_str(gridlock_server::EMBEDDED_MANIFEST).unwrap_or_default();
-    let mut entries: Vec<(String, String)> = manifest
-        .as_object()
-        .into_iter()
-        .flat_map(|worlds| worlds.values())
-        .filter_map(|world| world.as_object())
-        .flat_map(|world| world.iter())
-        .filter_map(|(key, path)| Some((key.clone(), path.as_str()?.to_string())))
-        .collect();
-    entries.extend(missing_viewmodel_assets(playing_state));
-    resolve_asset_entries_for_quality(&entries, model_quality)
 }
 
 /// Viewmodel assets (first-person hands and weapons) the game needs that are

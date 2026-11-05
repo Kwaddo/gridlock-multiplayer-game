@@ -83,7 +83,6 @@ impl LoginScreen {
         total: usize,
         loaded: usize,
         current: &str,
-        started: bool,
         download: Option<(f64, f64)>,
     ) {
         self.draw_background();
@@ -99,9 +98,7 @@ impl LoginScreen {
         draw_rectangle(px, py, pw, ph, PANEL_BG);
         draw_rectangle_lines(px, py, pw, ph, 1.0, PANEL_BORDER);
 
-        let label = if !started {
-            "Receiving asset manifest..."
-        } else if total == 0 {
+        let label = if total == 0 {
             "Joining server..."
         } else if download.is_some_and(|(received, size)| received < size) {
             "Downloading assets..."
@@ -124,16 +121,6 @@ impl LoginScreen {
             let frac = ((loaded as f32 + partial.clamp(0.0, 1.0)) / total as f32).min(1.0);
             let fw = (bw - 4.0) * frac;
             draw_rectangle(bx + 2.0, by + 2.0, fw, bh - 4.0, ACCENT);
-        } else if !started {
-            let pulse_w = bw * 0.25;
-            let offset = ((self.anim_time * 1.2).sin() * 0.5 + 0.5) * (bw - pulse_w);
-            draw_rectangle(
-                bx + 2.0 + offset,
-                by + 2.0,
-                pulse_w,
-                bh - 4.0,
-                Color::new(ACCENT.r, ACCENT.g, ACCENT.b, 0.45),
-            );
         }
 
         if total > 0 {

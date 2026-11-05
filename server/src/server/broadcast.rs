@@ -119,7 +119,20 @@ pub fn move_all_players_to_lobby(
 
 /// Send a full `MSG_STATE` to every receiver; the message is tailored so that each
 /// client only receives updates about players in its own world.
+///
+/// One-shot movement events are left out: they go out once, with the periodic
+/// broadcast in `Server::tick` ([`broadcast_state_with_events`]), which then
+/// clears them. Sending them here too would replay them on the next tick.
 pub fn broadcast_state(socket: &Outbox, players: &HashMap<PeerId, Player>) {
+    send_state(socket, players, false);
+}
+
+/// [`broadcast_state`] including pending movement events; the caller clears them.
+pub fn broadcast_state_with_events(socket: &Outbox, players: &HashMap<PeerId, Player>) {
+    send_state(socket, players, true);
+}
+
+fn send_state(socket: &Outbox, players: &HashMap<PeerId, Player>, include_events: bool) {
     let now = Instant::now();
 
     for (recv_addr, receiver) in players.iter() {
@@ -143,8 +156,10 @@ pub fn broadcast_state(socket: &Outbox, players: &HashMap<PeerId, Player>) {
             if player.is_silent    { state_flags |= FLAG_SILENT; }
 
             let mut event_flags = 0u8;
-            if player.evt_jump_start { event_flags |= EVT_JUMP_START; }
-            if player.evt_landed     { event_flags |= EVT_LANDED; }
+            if include_events {
+                if player.evt_jump_start { event_flags |= EVT_JUMP_START; }
+                if player.evt_landed     { event_flags |= EVT_LANDED; }
+            }
 
             let freeze_secs: u8 = match player.post_teleport_freeze_until {
                 Some(t) if t > now => t.saturating_duration_since(now).as_secs().min(255) as u8,
