@@ -25,8 +25,11 @@ aws s3 sync "$SCRIPT_DIR/client/assets/" s3://gridlock-assets/ \
 
 echo "==> Starting the Deploy workflow..."
 if command -v gh >/dev/null 2>&1; then
-    gh workflow run deploy.yml --ref main --repo Kwaddo/gridlock-multiplayer-game
-    echo "    Follow it with: gh run watch --repo Kwaddo/gridlock-multiplayer-game"
+    if gh workflow run deploy.yml --ref main --repo Kwaddo/gridlock-multiplayer-game; then
+        echo "    Follow it with: gh run watch --repo Kwaddo/gridlock-multiplayer-game"
+    else
+        echo "    Could not start it (the upload itself is done): run Deploy from the Actions tab."
+    fi
 else
     echo "    gh is not installed: run the Deploy workflow from the repository's Actions tab."
 fi
