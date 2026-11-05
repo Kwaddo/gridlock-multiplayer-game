@@ -3,8 +3,9 @@ use crate::net::{ClientMsg, ServerMsg};
 use transport::{Backlogged, Link, LinkStatus};
 use platform::{Duration, Instant};
 
-/// How long to wait for `Welcome` once the link is open.
-const JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long to wait for `Welcome` once the link is open. A host still loading
+/// its assets answers between files, so allow for a slow one.
+const JOIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long WebRTC negotiation may take before the link opens.
 const LINK_TIMEOUT: Duration = Duration::from_secs(15);
 /// Join packets can be lost, so resend until the server answers.

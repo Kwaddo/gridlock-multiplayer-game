@@ -13,6 +13,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENDPOINT="https://api.dilmune.com/s3"
 export AWS_REGION="${AWS_REGION:-auto}"
+# Newer AWS CLIs send large files as aws-chunked uploads with checksums, and
+# Dilmune's S3 would store the chunk framing inside the file. Plain uploads only.
+export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 
 if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
     echo "error: set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY to a Dilmune S3 key" >&2
