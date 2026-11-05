@@ -1,4 +1,3 @@
-pub mod asset_cache;
 pub mod asset_loader;
 pub mod dev_ui;
 pub mod obj_loader;

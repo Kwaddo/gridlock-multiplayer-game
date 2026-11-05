@@ -19,7 +19,6 @@ pub struct NetUpdate {
     // (world, spawn_coordinates, freeze_secs, optional_authoritative_match_timer)
     // timer is encoded as big-endian u16 seconds
     pub world_change: Option<(WorldId, Vec3, Option<u8>, Option<u16>)>,
-    pub assets: Option<Vec<(String, String)>>, // (key, path)
     pub broken_walls: Option<Vec<(u8, u8)>>,
     pub damage_taken: Option<(f32, Option<u32>, bool)>, // (damage amount, attacker_id)
     pub kill_feed: Option<Vec<(u32, u32, String)>>, // (killer_id, victim_id, weapon)
@@ -84,7 +83,6 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
         maze: None,
         players: None,
         world_change: None,
-        assets: None,
         broken_walls: None,
         damage_taken: None,
         kill_feed: None,
@@ -263,13 +261,9 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
                     .collect();
                 update.player_list = Some(list);
             }
-            ServerMsg::Assets { entries, .. } => {
-                if let Some(ref mut existing) = update.assets {
-                    existing.extend(entries);
-                } else {
-                    update.assets = Some(entries);
-                }
-            }
+            // Older hosts still send their asset list; the game loads from its
+            // own manifest (app::asset_loader::load_manifest) instead.
+            ServerMsg::Assets { .. } => {}
             ServerMsg::WallBroken { x, y } => {
                 if let Some(ref mut walls) = update.broken_walls {
                     walls.push((x, y));

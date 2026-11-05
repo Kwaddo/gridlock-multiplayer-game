@@ -24,7 +24,6 @@ pub struct Server {
     players: HashMap<PeerId, Player>,
     bot_manager: BotManager,
     // cached assets manifest, sent to each client on join
-    asset_manifest: Option<serde_json::Value>,
     // shown to clients browsing for games
     name: String,
     // Do not generate a full gameplay maze at server start — create per-match instead.
@@ -62,12 +61,11 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(asset_manifest: Option<serde_json::Value>) -> Self {
+    pub fn new() -> Self {
         Server {
             outbox: Outbox::default(),
             players: HashMap::new(),
             bot_manager: BotManager::new(),
-            asset_manifest,
             name: "Gridlock".to_string(),
             maze: None,
             match_running: false,
@@ -132,7 +130,6 @@ impl Server {
                 self.match_running,
                 src_addr,
                 &username,
-                self.asset_manifest.as_ref(),
             ),
             ClientMsg::Disconnect => {
                 handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr)

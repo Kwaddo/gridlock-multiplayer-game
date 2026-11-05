@@ -29,6 +29,13 @@
     const POLL_CONNECTING_MS = 500;
     const POLL_CONNECTED_MS = 1000; // a connected player only checks whether to resume
     const HOST_KEEP_MS = 20000; // how often the host renews its claim on the room
+    // A player not connected yet re-announces itself this often, so a
+    // signalling write the registry lost (it has no atomic updates) only
+    // costs a few seconds: the host resends its offer, the player its answer.
+    const HELLO_MS = 6000;
+    // An offer or answer goes out once its ICE candidates are gathered (one
+    // write per side, nothing trickled), or after this long regardless.
+    const GATHER_MS = 2500;
     const SEND_BATCH_MS = 50;
     const DISCONNECT_GRACE_MS = 3000;
     // TURN is the last resort: a connection first tries direct paths only
@@ -110,6 +117,8 @@
 
         async poll() {
             let lastKeep = Date.now();
+            let lastHello = Date.now();
+            const seen = new Set(); // ids of messages already handled
             while (!this.closed) {
                 // A connected player needs no signalling: if the host goes,
                 // the WebRTC connection itself reports it.
@@ -125,9 +134,22 @@
                             }
                         }
                         const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
+                        // A host whose claim was lost claims the room again;
+                        // players already connected are not affected.
+                        if (resp.status === 410 && this.isHost && (await this.reclaim())) continue;
                         // 410: the host left; 403/404: this room is gone for us.
                         if (resp.status === 410 || resp.status === 403 || resp.status === 404) return this.shutdown();
-                        if (resp.ok) for (const msg of await resp.json()) if (!this.closed) this.onSignal(msg);
+                        if (resp.ok) {
+                            for (const msg of await resp.json()) {
+                                if (this.closed || seen.has(msg.id)) continue;
+                                seen.add(msg.id);
+                                this.onSignal(msg);
+                            }
+                        }
+                        if (!this.isHost && Date.now() - lastHello >= HELLO_MS) {
+                            lastHello = Date.now();
+                            this.post("/hello", {});
+                        }
                     } catch {} // network blip: try again on the next poll
                 }
                 await sleep(this.pollDelay(connected));
@@ -140,6 +162,22 @@
             if ([...this.peers.values()].some((p) => !p.open)) return POLL_CONNECTING_MS;
             if (this.isHost) return POLL_HOST_MS;
             return connected ? POLL_CONNECTED_MS : POLL_CONNECTING_MS;
+        }
+
+        async reclaim() {
+            try {
+                const resp = await fetch(this.room + "/join?host", { method: "POST" });
+                if (!resp.ok) return false;
+                this.me = await resp.json();
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        post(path, fields) {
+            const body = JSON.stringify({ id: this.me.id, token: this.me.token, host: this.isHost, ...fields });
+            return fetch(this.room + path, { method: "POST", body }).catch(() => {});
         }
 
         signal(msg) {
@@ -178,7 +216,11 @@
 
         onSignal(msg) {
             if (msg.NewPeer) {
-                this.connect(msg.NewPeer, true);
+                // Heard again from a player already being offered to: the offer
+                // (or its answer) went missing, so send the offer again.
+                const known = this.peers.get(this.byRemote.get(msg.NewPeer));
+                if (known && !known.open) this.sendDescription(known);
+                else if (!known) this.connect(msg.NewPeer, true);
             } else if (msg.PeerLeft) {
                 const id = this.byRemote.get(msg.PeerLeft);
                 if (id !== undefined) this.drop(id);
@@ -216,9 +258,6 @@
             this.peers.set(id, peer);
             this.byRemote.set(remoteId, id);
 
-            pc.onicecandidate = (e) => {
-                if (e.candidate) this.signal({ Signal: { receiver: remoteId, data: { candidate: e.candidate.toJSON(), gen } } });
-            };
             pc.onconnectionstatechange = () => {
                 const state = pc.connectionState;
                 if (state === "failed" && this.retryWithRelay(id)) return;
@@ -238,7 +277,8 @@
                 this.attach(id, pc.createDataChannel("gridlock", { ordered: false, maxRetransmits: 0 }));
                 pc.createOffer()
                     .then((offer) => pc.setLocalDescription(offer))
-                    .then(() => this.signal({ Signal: { receiver: remoteId, data: { sdp: pc.localDescription.toJSON(), gen } } }))
+                    .then(() => gathered(pc))
+                    .then(() => this.sendDescription(peer))
                     .catch(() => this.drop(id));
             } else {
                 pc.ondatachannel = (e) => this.attach(id, e.channel);
@@ -266,17 +306,31 @@
             } catch {}
         }
 
+        // Our offer or answer, with every ICE candidate gathered so far in it.
+        sendDescription(peer) {
+            if (!peer.pc.localDescription || this.closed) return;
+            this.signal({ Signal: { receiver: peer.remoteId, data: { sdp: peer.pc.localDescription.toJSON(), gen: peer.gen } } });
+        }
+
         async onPeerSignal(peer, data) {
             if (!peer || (data.gen ?? 0) !== peer.gen) return;
             const pc = peer.pc;
             try {
                 if (data.sdp) {
+                    // The same offer again: our answer went missing; resend it.
+                    if (data.sdp.type === "offer" && pc.remoteDescription) {
+                        if (pc.localDescription) this.sendDescription(peer);
+                        return;
+                    }
+                    // An answer we already have (the host resent its offer).
+                    if (data.sdp.type === "answer" && pc.remoteDescription) return;
                     await pc.setRemoteDescription(data.sdp);
                     for (const c of peer.pending) await pc.addIceCandidate(c);
                     peer.pending = [];
                     if (data.sdp.type === "offer") {
                         await pc.setLocalDescription(await pc.createAnswer());
-                        this.signal({ Signal: { receiver: peer.remoteId, data: { sdp: pc.localDescription.toJSON(), gen: peer.gen } } });
+                        await gathered(pc);
+                        this.sendDescription(peer);
                     } else if (peer.offerer && peer.gen === 0) {
                         // The answer is in: give the direct attempt a few seconds.
                         const id = this.byRemote.get(peer.remoteId);
@@ -377,6 +431,21 @@
         url.protocol = url.protocol === "wss:" ? "https:" : "http:";
         url.search = "";
         return url.toString().replace(/\/$/, "");
+    }
+
+    // Resolves once a connection has gathered its ICE candidates, or after
+    // GATHER_MS, whichever comes first.
+    function gathered(pc) {
+        if (pc.iceGatheringState === "complete") return Promise.resolve();
+        return new Promise((resolve) => {
+            const done = () => {
+                pc.removeEventListener("icegatheringstatechange", check);
+                resolve();
+            };
+            const check = () => pc.iceGatheringState === "complete" && done();
+            pc.addEventListener("icegatheringstatechange", check);
+            setTimeout(done, GATHER_MS);
+        });
     }
 
     function isStunOnly(server) {
