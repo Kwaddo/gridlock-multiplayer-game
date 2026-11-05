@@ -15,7 +15,9 @@
 //   DELETE /servers/:id                  (Authorization: Bearer <token>)
 //   A native host's address is the IP the request came from, never a
 //   client-supplied one, so a listing can only point at the machine that made it.
-//   Browser hosts list a WebRTC room code instead.
+//   Browser hosts list a WebRTC room code instead; such a listing disappears as
+//   soon as its room has no host (the tab closed or stopped polling), not only
+//   when its heartbeats stop.
 //
 // ICE servers for WebRTC.
 //   GET    /ice            -> { iceServers: [...] }   STUN, plus a TURN relay when one is
@@ -42,6 +44,9 @@
 
 const TTL_SECONDS = 90;
 const HOST_TTL_SECONDS = 60;
+// A browser host lists its game and claims its room at about the same time;
+// until this much later, a missing room does not mean the host is gone.
+const ROOM_GRACE_MS = 15000;
 const MAX_LISTINGS = 500;
 const MAX_PER_IP = 4;
 const MAX_SIGNALS = 64;
@@ -87,15 +92,24 @@ async function servers(request, env, ctx, id, extra) {
   return json({ error: "method not allowed" }, 405);
 }
 
-// Every unexpired listing; expired ones are deleted on the way.
+// Every unexpired listing; expired ones, and browser listings whose room has
+// no host any more, are deleted on the way.
 async function liveListings(store, ctx) {
   const keys = await store.list("servers/");
   const now = Date.now();
-  const all = await Promise.all(keys.map(async (key) => ({ key, listing: await store.get(key) })));
+  const all = await Promise.all(
+    keys.map(async (key) => {
+      const listing = await store.get(key);
+      const room = listing?.entry?.room;
+      const host = room ? await store.get(`rooms/${room}/host.json`) : null;
+      const settled = now - (listing?.created ?? 0) > ROOM_GRACE_MS;
+      return { key, listing, roomGone: Boolean(room) && settled && !(host && host.expires > now) };
+    }),
+  );
   const live = [];
-  for (const { key, listing } of all) {
+  for (const { key, listing, roomGone } of all) {
     if (!listing) continue;
-    if (listing.expires <= now) ctx.waitUntil(store.delete(key).catch(() => {}));
+    if (listing.expires <= now || roomGone) ctx.waitUntil(store.delete(key).catch(() => {}));
     else live.push({ id: key.slice("servers/".length, -".json".length), listing });
   }
   return live;
@@ -127,6 +141,7 @@ async function createListing(request, store, ctx) {
   await store.put(`servers/${id}.json`, {
     tokenHash: await sha256Hex(token),
     ip,
+    created: Date.now(),
     expires: Date.now() + TTL_SECONDS * 1000,
     entry,
   });
@@ -257,13 +272,27 @@ async function room(request, env, ctx, code, action) {
     if (!(await validPeer(env, code, id, body?.token))) return json({ error: "bad token" }, 403);
     const host = await liveHost();
     if (!host) return new Response(null, { status: 204 });
-    // A leaving host closes the room; players find out from their next poll.
-    if (host.id === id) await store.delete(hostKey);
-    else await deliver(store, code, host.id, [{ PeerLeft: id }]);
+    // A leaving host closes the room, and takes its listing off the host list;
+    // players find out from their next poll.
+    if (host.id === id) {
+      await store.delete(hostKey);
+      ctx.waitUntil(dropRoomListings(store, code).catch(() => {}));
+    } else {
+      await deliver(store, code, host.id, [{ PeerLeft: id }]);
+    }
     return new Response(null, { status: 204 });
   }
 
   return json({ error: "not found" }, 404);
+}
+
+async function dropRoomListings(store, code) {
+  const keys = await store.list("servers/");
+  await Promise.all(
+    keys.map(async (key) => {
+      if ((await store.get(key))?.entry?.room === code) await store.delete(key);
+    }),
+  );
 }
 
 async function deliver(store, code, receiver, messages) {
