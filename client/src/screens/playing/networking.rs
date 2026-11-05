@@ -6,6 +6,8 @@ use transport::Link;
 
 use super::PlayingState;
 
+const POSITION_SEND_INTERVAL: platform::Duration = platform::Duration::from_millis(33);
+
 impl PlayingState {
     pub fn send_network(
         &mut self,
@@ -204,14 +206,24 @@ impl PlayingState {
                 self.last_sent_weapon = current_weapon_name.to_string();
             }
 
-            let msg = ClientMsg::Position {
-                position: (self.position.x, self.position.y, self.position.z),
-                yaw: self.yaw,
-                state_flags: Some(state_flags),
-                event_flags: Some(event_flags),
+            // Position goes out at most 30 times a second (the server sends
+            // the world back at that rate too), but at once for a movement
+            // event or a change of stance, so those are never delayed.
+            let due = self
+                .last_position_sent
+                .map_or(true, |t| t.elapsed() >= POSITION_SEND_INTERVAL);
+            if due || event_flags != 0 || state_flags != self.last_state_flags_sent {
+                let msg = ClientMsg::Position {
+                    position: (self.position.x, self.position.y, self.position.z),
+                    yaw: self.yaw,
+                    state_flags: Some(state_flags),
+                    event_flags: Some(event_flags),
+                }
+                .encode();
+                s.send(&msg);
+                self.last_position_sent = Some(platform::Instant::now());
+                self.last_state_flags_sent = state_flags;
             }
-            .encode();
-            s.send(&msg);
             self.prev_was_sliding = self.movement_state.is_sliding;
         }
     }

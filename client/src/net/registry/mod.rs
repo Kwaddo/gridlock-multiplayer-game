@@ -21,7 +21,7 @@ mod web;
 pub use web::{ListFetch, Listing};
 
 /// Well inside the registry's 90 s listing TTL.
-const HEARTBEAT_SECS: u64 = 30;
+const HEARTBEAT_SECS: u64 = 20;
 /// Retry sooner while the game is not listed yet.
 const RETRY_SECS: u64 = 5;
 

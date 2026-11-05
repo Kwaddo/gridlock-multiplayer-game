@@ -7,7 +7,7 @@ use platform::{Duration, Instant};
 /// its assets answers between files, so allow for a slow one.
 const JOIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long WebRTC negotiation may take before the link opens.
-const LINK_TIMEOUT: Duration = Duration::from_secs(15);
+const LINK_TIMEOUT: Duration = Duration::from_secs(25);
 /// Join packets can be lost, so resend until the server answers.
 const JOIN_RESEND: Duration = Duration::from_millis(500);
 
