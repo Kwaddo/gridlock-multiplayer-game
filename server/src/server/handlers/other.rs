@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::net::{SocketAddr, UdpSocket};
-use std::time::{Duration, Instant};
+use crate::net::{Outbox, PeerId};
+use std::time::Duration;
+use platform::Instant;
 
 use crate::maze::MazeData;
 use crate::player::{Player, Team, WorldId};
@@ -12,20 +13,15 @@ const BACKSTAB_CONE_DOT: f32 = 0.5;
 /// Called when a client reports that they broke a wall at (x,y).
 /// Update the maze and broadcast the event to all connected players.
 pub fn handle_wall_broken(
-    socket: &UdpSocket,
+    socket: &Outbox,
     maze: &mut MazeData,
-    players: &HashMap<SocketAddr, Player>,
-    _src_addr: SocketAddr,
-    payload: &[u8],
+    players: &HashMap<PeerId, Player>,
+    _src_addr: PeerId,
+    x: u8,
+    y: u8,
 ) {
-    if payload.len() < 2 {
-        return;
-    }
-    let x = payload[0];
-    let y = payload[1];
-
     if maze.break_wall(x, y) {
-        let msg = [MSG_WALL_BROKEN, x, y];
+        let msg = ServerMsg::WallBroken { x, y }.encode();
         for (addr, p) in players.iter() {
             if p.is_bot {
                 continue;
@@ -37,66 +33,43 @@ pub fn handle_wall_broken(
 
 /// Respond to a LAN discovery packet by sending back a small summary of the server.
 pub fn handle_discover(
-    socket: &UdpSocket,
-    players: &HashMap<SocketAddr, Player>,
-    src_addr: SocketAddr,
+    socket: &Outbox,
+    players: &HashMap<PeerId, Player>,
+    name: &str,
+    src_addr: PeerId,
 ) {
-    let mut resp = Vec::with_capacity(64);
-    resp.push(MSG_DISCOVER);
-    resp.push(players.len() as u8);
-    resp.push(game::MATCH_MAX_PLAYERS as u8);
-    let name = "Gridlock";
-    let name_bytes = name.as_bytes();
-    resp.push(name_bytes.len() as u8);
-    resp.extend_from_slice(name_bytes);
+    let resp = ServerMsg::Discover {
+        players: players.len().min(255) as u8,
+        max_players: game::MATCH_MAX_PLAYERS as u8,
+        name: name.to_string(),
+    }
+    .encode();
     let _ = socket.send_to(&resp, src_addr);
 }
 
 /// Process a hit report from a client. This function parses payload and forwards
 /// to shared damage pipeline so bots can reuse the same logic.
 pub fn handle_hit(
-    socket: &UdpSocket,
-    players: &mut HashMap<SocketAddr, Player>,
-    src_addr: SocketAddr,
-    payload: &[u8],
+    socket: &Outbox,
+    players: &mut HashMap<PeerId, Player>,
+    src_addr: PeerId,
+    victim_id: u32,
+    damage_f: f32,
+    weapon_name: Option<String>,
+    is_backstab_claim: Option<bool>,
     _maze: &mut Option<MazeData>,
     _match_running: &mut bool,
     _match_start_time: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
     _snd_state: &mut Option<crate::server::snd::SndState>,
-    bot_states: &mut HashMap<SocketAddr, crate::bot::ai::BotState>,
+    bot_states: &mut HashMap<PeerId, crate::bot::ai::BotState>,
 ) {
     // the sender of the hit packet is the attacker
     let _attacker = src_addr;
-    if payload.len() < 8 {
-        return;
-    }
-
-    let victim_id = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
-    let damage_f = f32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
     let damage = damage_f.round().max(0.0) as u32;
-
-    let mut idx = 8;
-    let weapon_name = if idx < payload.len() {
-        let name_len = payload[idx] as usize;
-        idx += 1;
-        if idx + name_len <= payload.len() {
-            let name = String::from_utf8_lossy(&payload[idx..idx + name_len]).to_string();
-            idx += name_len;
-            name
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
-
-    let is_backstab_claim = if idx < payload.len() {
-        payload[idx] != 0
-    } else {
-        false
-    };
+    let weapon_name = weapon_name.unwrap_or_default();
+    let is_backstab_claim = is_backstab_claim.unwrap_or(false);
 
     let victim_addr_opt = players
         .iter()
@@ -145,10 +118,10 @@ pub fn handle_hit(
 /// Respond to a respawn request by moving the player to a spawn point and
 /// returning their new coordinates.
 pub fn handle_respawn_request(
-    socket: &UdpSocket,
+    socket: &Outbox,
     maze: Option<&MazeData>,
-    players: &mut HashMap<SocketAddr, Player>,
-    src_addr: SocketAddr,
+    players: &mut HashMap<PeerId, Player>,
+    src_addr: PeerId,
     match_mode: u8,
     snd_state: &Option<crate::server::snd::SndState>,
 ) {
@@ -195,11 +168,7 @@ pub fn handle_respawn_request(
         player.is_alive = true;
         player.position = spawn;
 
-        let mut resp = Vec::with_capacity(16);
-        resp.push(MSG_RESPAWN);
-        resp.extend_from_slice(&spawn.0.to_be_bytes());
-        resp.extend_from_slice(&spawn.1.to_be_bytes());
-        resp.extend_from_slice(&spawn.2.to_be_bytes());
+        let resp = ServerMsg::Respawn { position: spawn, kind: None }.encode();
         let _ = socket.send_to(&resp, src_addr);
     }
 
@@ -228,15 +197,11 @@ pub fn handle_respawn_request(
 
 /// Handle a client-request to set their preferred team while in the lobby.
 pub fn handle_set_team(
-    socket: &UdpSocket,
-    players: &mut HashMap<SocketAddr, Player>,
-    src_addr: SocketAddr,
-    payload: &[u8],
+    socket: &Outbox,
+    players: &mut HashMap<PeerId, Player>,
+    src_addr: PeerId,
+    team_byte: u8,
 ) {
-    if payload.is_empty() {
-        return;
-    }
-    let team_byte = payload[0];
     let team = Team::from_u8(team_byte).unwrap_or(Team::Spectator);
 
     if let Some(player) = players.get_mut(&src_addr) {
@@ -248,16 +213,16 @@ pub fn handle_set_team(
 }
 
 pub fn apply_damage(
-    socket: &UdpSocket,
-    players: &mut HashMap<SocketAddr, Player>,
-    attacker_addr: SocketAddr,
+    socket: &Outbox,
+    players: &mut HashMap<PeerId, Player>,
+    attacker_addr: PeerId,
     victim_id: u32,
     damage: u32,
     weapon_name: &str,
     is_backstab: bool,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
-    _bot_states: &mut HashMap<SocketAddr, crate::bot::ai::BotState>,
+    _bot_states: &mut HashMap<PeerId, crate::bot::ai::BotState>,
     _maze: Option<&MazeData>,
 ) {
     let (attacker, attacker_world, attacker_is_bot) = match players.get(&attacker_addr) {
@@ -339,7 +304,6 @@ pub fn apply_damage(
     }
 
     if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
-        let wbytes = weapon_name.as_bytes();
 
         let _chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
             if vref.team != Team::Spectator {
@@ -357,14 +321,11 @@ pub fn apply_damage(
             vmut.death_time = Some(Instant::now());
         }
 
-        let mut death_msg = vec![MSG_DEATH];
-        if let Some(att) = players.get(&attacker) {
-            death_msg.extend_from_slice(&att.id.to_be_bytes());
-        } else {
-            death_msg.extend_from_slice(&0u32.to_be_bytes());
+        let death_msg = ServerMsg::Death {
+            killer_id: players.get(&attacker).map_or(0, |att| att.id),
+            weapon: weapon_name.to_string(),
         }
-        death_msg.push(wbytes.len() as u8);
-        death_msg.extend_from_slice(wbytes);
+        .encode();
         if let Some(victim) = players.get(&victim_addr) {
             if !victim.is_bot {
                 let _ = socket.send_to(&death_msg, victim_addr);
@@ -397,22 +358,20 @@ pub fn apply_damage(
                 }
             }
 
-            let mut kill_msg = vec![MSG_KILL];
-            kill_msg.extend_from_slice(&victim_id.to_be_bytes());
-            kill_msg.push(wbytes.len() as u8);
-            kill_msg.extend_from_slice(wbytes);
+            let kill_msg =
+                ServerMsg::Kill { victim_id, weapon: weapon_name.to_string() }.encode();
             if !killer.is_bot {
                 let _ = socket.send_to(&kill_msg, attacker);
             }
         }
 
         if let Some((winner_id, winner_name)) = pending_match_end {
-            let mut end_msg = vec![MSG_MATCH_END];
-            end_msg.extend_from_slice(&winner_id.to_be_bytes());
-            let name_bytes = winner_name.as_bytes();
-            end_msg.push(name_bytes.len() as u8);
-            end_msg.extend_from_slice(name_bytes);
-            end_msg.push(game::MATCH_END_COUNTDOWN_SECS);
+            let end_msg = ServerMsg::MatchEnd {
+                winner_id: winner_id,
+                winner_name: winner_name.to_string(),
+                countdown: Some(game::MATCH_END_COUNTDOWN_SECS),
+            }
+            .encode();
 
             for (addr, p) in players.iter() {
                 if p.is_bot {
@@ -438,15 +397,12 @@ pub fn apply_damage(
         broadcast::broadcast_state(socket, players);
         broadcast::broadcast_player_list(socket, players);
 
-        let mut feed = vec![MSG_KILL_FEED];
-        if let Some(killer) = players.get(&attacker) {
-            feed.extend_from_slice(&killer.id.to_be_bytes());
-        } else {
-            feed.extend_from_slice(&0u32.to_be_bytes());
+        let feed = ServerMsg::KillFeed {
+            killer_id: players.get(&attacker).map_or(0, |killer| killer.id),
+            victim_id,
+            weapon: weapon_name.to_string(),
         }
-        feed.extend_from_slice(&victim_id.to_be_bytes());
-        feed.push(wbytes.len() as u8);
-        feed.extend_from_slice(wbytes);
+        .encode();
 
         for (addr, p) in players.iter() {
             if p.is_bot {
@@ -463,17 +419,14 @@ pub fn apply_damage(
             }
         }
 
-        let mut dmg_msg = vec![MSG_DAMAGE];
-        dmg_msg.extend_from_slice(&(damage as f32).to_be_bytes());
-        if let Some(att) = players.get(&attacker) {
-            dmg_msg.extend_from_slice(&att.id.to_be_bytes());
-        } else {
-            dmg_msg.extend_from_slice(&0u32.to_be_bytes());
-        }
-
         // stun when punched
         let is_punch = weapon_name.eq_ignore_ascii_case("punch") || weapon_name.eq_ignore_ascii_case("knife"); 
-        dmg_msg.push(if is_punch { 1u8 } else { 0u8 });
+        let dmg_msg = ServerMsg::Damage {
+            amount: damage as f32,
+            attacker_id: players.get(&attacker).map_or(0, |att| att.id),
+            stun: is_punch,
+        }
+        .encode();
 
         if let Some(victim) = players.get(&victim_addr) {
             if !victim.is_bot {

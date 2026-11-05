@@ -2,7 +2,6 @@ use super::crosshair::{CrosshairConfig, CrosshairType};
 use super::stats::WeaponCategory;
 use macroquad::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /*
     This module is for storing user created crosshairs,
@@ -65,14 +64,14 @@ impl CrosshairPreset {
 // manager for loading/saving presets, also holds the currently loaded presets in memory
 pub struct CrosshairPresetManager {
     pub presets: Vec<CrosshairPreset>,
-    pub save_path: PathBuf,
+    pub save_path: String,
 }
 
 impl CrosshairPresetManager {
     pub fn new(username: &str) -> Self {
         let mut manager = Self {
             presets: Vec::new(),
-            save_path: PathBuf::from(format!("crosshair_presets_{}.json", username)),
+            save_path: format!("crosshair_presets_{}.json", username),
         };
         manager.rebuild_defaults();
         manager.load_user_presets();
@@ -127,7 +126,7 @@ impl CrosshairPresetManager {
     }
     // load user presets from JSON and append
     fn load_user_presets(&mut self) {
-        if let Ok(data) = std::fs::read_to_string(&self.save_path) {
+        if let Some(data) = platform::storage::load(&self.save_path) {
             if let Ok(user_presets) = serde_json::from_str::<Vec<CrosshairPreset>>(&data) {
                 for mut p in user_presets {
                     p.is_default = false; // just in case, user presets should never be default
@@ -142,7 +141,7 @@ impl CrosshairPresetManager {
         let user_only: Vec<&CrosshairPreset> =
             self.presets.iter().filter(|p| !p.is_default).collect();
         if let Ok(data) = serde_json::to_string_pretty(&user_only) {
-            let _ = std::fs::write(&self.save_path, data);
+            let _ = platform::storage::save(&self.save_path, &data);
         }
     }
 

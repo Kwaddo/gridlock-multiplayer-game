@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::net::{SocketAddr, UdpSocket};
-use std::time::{Duration, Instant};
+use crate::net::{Outbox, PeerId};
+use std::time::Duration;
+use platform::Instant;
 
 use crate::bot::manager::BotManager;
 use crate::bot::personality::BotPersonalityId;
@@ -22,8 +23,8 @@ use crate::server::{
 /// Handle a `MSG_START_GAME` packet sent from a lobby player.  This routine does not
 /// actually start the match, but instead updates state and may broadcast countdowns.
 pub fn handle_start_game(
-    socket: &UdpSocket,
-    players: &mut HashMap<SocketAddr, Player>,
+    socket: &Outbox,
+    players: &mut HashMap<PeerId, Player>,
     maze: &mut Option<MazeData>,
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
@@ -35,7 +36,7 @@ pub fn handle_start_game(
     match_duration: &mut Option<Duration>,
     // value requested by the client (may be None = default)
     requested_duration: Option<Duration>,
-    src_addr: SocketAddr,
+    src_addr: PeerId,
 ) {
     // If a match is marked running but there are no players in the Maze,
     // treat it as stale and clear it so new starts are accepted.
@@ -58,7 +59,7 @@ pub fn handle_start_game(
         // Only the lobby leader (first-joined human lobby player) may start a new match.
         let leader_addr = game::lobby_leader_addr(players);
         if leader_addr != Some(src_addr) {
-            let _ = socket.send_to(&[MSG_START_DENIED, 1], src_addr);
+            let _ = socket.send_to(&ServerMsg::StartDenied { reason: Some(1) }.encode(), src_addr);
             log!("Start-game request from {} rejected: not the lobby leader.", src_addr);
             return;
         }
@@ -76,7 +77,8 @@ pub fn handle_start_game(
             *match_warmup_end =
                 Some(Instant::now() + Duration::from_secs(MATCH_START_COUNTDOWN_SECS as u64));
 
-            let cd: [u8; 3] = [MSG_MATCH_COUNTDOWN, MATCH_START_COUNTDOWN_SECS, match_mode];
+            let cd = ServerMsg::MatchCountdown { secs: MATCH_START_COUNTDOWN_SECS, mode: Some(match_mode) }
+                .encode();
             for (addr, _) in players.iter() {
                 let _ = socket.send_to(&cd, *addr);
             }
@@ -124,7 +126,7 @@ pub fn handle_start_game(
                         Some(m) => m,
                         None => {
                             // shouldn't happen: match_running implies a maze exists
-                            let _ = socket.send_to(&[MSG_START_DENIED], src_addr);
+                            let _ = socket.send_to(&ServerMsg::StartDenied { reason: None }.encode(), src_addr);
                             return;
                         }
                     };
@@ -151,13 +153,6 @@ pub fn handle_start_game(
                     // default 120s value if packets reorder.  if we don't have a
                     // start time (shouldn't happen while match_running is true) just
                     // send the nominal duration.
-                    let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
-                    let (sx, sy, sz) = req_player.position;
-                    response.extend_from_slice(&sx.to_be_bytes());
-                    response.extend_from_slice(&sy.to_be_bytes());
-                    response.extend_from_slice(&sz.to_be_bytes());
-                    response.push(match_mode);
-                    response.push(MATCH_POST_TELEPORT_FREEZE_SECS as u8);
                     // determine remaining seconds clamped to 255
                     // compute remaining timer, using u16::MAX as a stand-in for “infinite”
                     let timer_secs: u16 = if let Some(start) = *match_start_time {
@@ -178,8 +173,14 @@ pub fn handle_start_game(
                             None => u16::MAX,
                         }
                     };
-                    response.push((timer_secs >> 8) as u8);
-                    response.push((timer_secs & 0xFF) as u8);
+                    let response = ServerMsg::WorldChange {
+                        world: WorldId::Maze.as_u8(),
+                        spawn: req_player.position,
+                        mode: Some(match_mode),
+                        freeze_secs: Some(MATCH_POST_TELEPORT_FREEZE_SECS as u8),
+                        match_timer: Some(timer_secs),
+                    }
+                    .encode();
                     let _ = socket.send_to(&response, src_addr);
 
                     current_maze.send(&socket, src_addr);
@@ -191,11 +192,11 @@ pub fn handle_start_game(
                     );
 
                     // Broadcast announcement to all connected players
-                    let name_bytes = req_player.username.as_bytes();
-                    let mut ann = vec![MSG_MATCH_JOINED];
-                    ann.extend_from_slice(&req_player.id.to_be_bytes());
-                    ann.push(name_bytes.len() as u8);
-                    ann.extend_from_slice(name_bytes);
+                    let ann = ServerMsg::MatchJoined {
+                        id: req_player.id,
+                        name: req_player.username.clone(),
+                    }
+                    .encode();
                     for (addr, _) in players.iter() {
                         let _ = socket.send_to(&ann, *addr);
                     }
@@ -208,7 +209,7 @@ pub fn handle_start_game(
             }
         } else {
             // Inform the requester the match is running and full
-            let _ = socket.send_to(&[MSG_START_DENIED], src_addr);
+            let _ = socket.send_to(&ServerMsg::StartDenied { reason: None }.encode(), src_addr);
             log!("Start-game request rejected: match already running and full.");
         }
     }
@@ -217,8 +218,8 @@ pub fn handle_start_game(
 /// The warmup countdown has expired; actually start the match by generating a new
 /// maze and moving lobby players into it.
 pub fn maybe_start_match(
-    socket: &UdpSocket,
-    players: &mut HashMap<SocketAddr, Player>,
+    socket: &Outbox,
+    players: &mut HashMap<PeerId, Player>,
     maze: &mut Option<MazeData>,
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
@@ -267,7 +268,7 @@ pub fn maybe_start_match(
             // we can assign teams and unique loadouts deterministically.
             // Use a deterministic order (player id ascending) so clients and
             // server will agree on previewed team assignments.
-            let mut joiner_pairs: Vec<(std::net::SocketAddr, u32)> = players
+            let mut joiner_pairs: Vec<(PeerId, u32)> = players
                 .iter()
                 .filter_map(|(addr, p)| {
                     if p.world == WorldId::Lobby {
@@ -279,7 +280,7 @@ pub fn maybe_start_match(
                 .collect();
             // sort by player id to get a stable ordering
             joiner_pairs.sort_by_key(|(_, id)| *id);
-            let joiners: Vec<std::net::SocketAddr> =
+            let joiners: Vec<PeerId> =
                 joiner_pairs.iter().map(|(addr, _)| *addr).collect();
 
             // track assigned primaries per team so teammates don't share
@@ -378,23 +379,22 @@ pub fn maybe_start_match(
                         }
                     }
 
-                    let mut response = vec![MSG_WORLD_CHANGE, WorldId::Maze.as_u8()];
-                    // extract the authoritative spawn coordinates from the player
-                    let (sx, sy, sz) = player.position;
-                    response.extend_from_slice(&sx.to_be_bytes());
-                    response.extend_from_slice(&sy.to_be_bytes());
-                    response.extend_from_slice(&sz.to_be_bytes());
-                    // attach match mode so clients know which mode is starting
-                    response.push(match_mode);
-                    // attach freeze duration so all clients use the same value
-                    response.push(MATCH_POST_TELEPORT_FREEZE_SECS as u8);
                     // attach initial timer (same value already broadcast earlier)
                     let initial_secs: u16 = match match_duration {
                         Some(dur) => dur.as_secs().min(u16::MAX as u64) as u16,
                         None => u16::MAX,
                     };
-                    response.push((initial_secs >> 8) as u8);
-                    response.push((initial_secs & 0xFF) as u8);
+                    let response = ServerMsg::WorldChange {
+                        world: WorldId::Maze.as_u8(),
+                        // the authoritative spawn coordinates from the player
+                        spawn: player.position,
+                        // match mode so clients know which mode is starting
+                        mode: Some(match_mode),
+                        // freeze duration so all clients use the same value
+                        freeze_secs: Some(MATCH_POST_TELEPORT_FREEZE_SECS as u8),
+                        match_timer: Some(initial_secs),
+                    }
+                    .encode();
                     let _ = socket.send_to(&response, *addr);
 
                     current_maze.send(&socket, *addr);
@@ -552,8 +552,8 @@ pub fn maybe_start_match(
 
 /// Check for early match end conditions such as last‑man standing.
 pub fn check_early_end_conditions(
-    socket: &UdpSocket,
-    players: &mut HashMap<SocketAddr, Player>,
+    socket: &Outbox,
+    players: &mut HashMap<PeerId, Player>,
     maze: &mut Option<MazeData>,
     match_running: &mut bool,
     match_end_pending: &mut Option<(Instant, u32, String)>,
@@ -601,12 +601,12 @@ pub fn check_early_end_conditions(
         log!("Last player standing: '{}' wins the match", winner_name);
 
         // Broadcast MSG_MATCH_END (include countdown byte so clients can display timer)
-        let mut end_msg = vec![MSG_MATCH_END];
-        end_msg.extend_from_slice(&winner_id.to_be_bytes());
-        let name_bytes = winner_name.as_bytes();
-        end_msg.push(name_bytes.len() as u8);
-        end_msg.extend_from_slice(name_bytes);
-        end_msg.push(MATCH_END_COUNTDOWN_SECS);
+        let end_msg = ServerMsg::MatchEnd {
+            winner_id: winner_id,
+            winner_name: winner_name.to_string(),
+            countdown: Some(MATCH_END_COUNTDOWN_SECS),
+        }
+        .encode();
         for (addr, _) in players.iter() {
             let _ = socket.send_to(&end_msg, *addr);
         }
@@ -647,12 +647,12 @@ pub fn check_early_end_conditions(
                 winner_team_name, MATCH_SCORE_TO_WIN
             );
             // Broadcast MSG_MATCH_END with a placeholder id (0) and a team name.
-            let mut end_msg = vec![MSG_MATCH_END];
-            end_msg.extend_from_slice(&winner_id.to_be_bytes());
-            let name_bytes = winner_team_name.as_bytes();
-            end_msg.push(name_bytes.len() as u8);
-            end_msg.extend_from_slice(name_bytes);
-            end_msg.push(MATCH_END_COUNTDOWN_SECS);
+            let end_msg = ServerMsg::MatchEnd {
+                winner_id: winner_id,
+                winner_name: winner_team_name.to_string(),
+                countdown: Some(MATCH_END_COUNTDOWN_SECS),
+            }
+            .encode();
             for (addr, _) in players.iter() {
                 let _ = socket.send_to(&end_msg, *addr);
             }
@@ -668,8 +668,8 @@ pub fn check_early_end_conditions(
 
 /// Update the authoritative match timer and check for timeout-based end.
 pub fn update_match_timer(
-    socket: &UdpSocket,
-    players: &mut HashMap<SocketAddr, Player>,
+    socket: &Outbox,
+    players: &mut HashMap<PeerId, Player>,
     _maze: &mut Option<MazeData>,
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
@@ -741,12 +741,12 @@ pub fn update_match_timer(
             };
 
             // broadcast MSG_MATCH_END with countdown
-            let mut end_msg = vec![MSG_MATCH_END];
-            end_msg.extend_from_slice(&winner_id.to_be_bytes());
-            let name_bytes = winner_name.as_bytes();
-            end_msg.push(name_bytes.len() as u8);
-            end_msg.extend_from_slice(name_bytes);
-            end_msg.push(MATCH_END_COUNTDOWN_SECS);
+            let end_msg = ServerMsg::MatchEnd {
+                winner_id: winner_id,
+                winner_name: winner_name.to_string(),
+                countdown: Some(MATCH_END_COUNTDOWN_SECS),
+            }
+            .encode();
             for (addr, _) in players.iter() {
                 let _ = socket.send_to(&end_msg, *addr);
             }
@@ -762,8 +762,8 @@ pub fn update_match_timer(
 
 /// Execute the previously scheduled match end (after countdown expires).
 pub fn execute_scheduled_match_end(
-    socket: &UdpSocket,
-    players: &mut HashMap<SocketAddr, Player>,
+    socket: &Outbox,
+    players: &mut HashMap<PeerId, Player>,
     maze: &mut Option<MazeData>,
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,

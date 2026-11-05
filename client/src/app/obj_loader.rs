@@ -295,8 +295,8 @@ fn lift_dark_untextured_color(mut color: [u8; 4]) -> [u8; 4] {
     color
 }
 
-pub async fn load_gltf_static_mesh(path: &str) -> Result<Vec<Mesh>, String> {
-    load_gltf_static_mesh_impl(path, false).await
+pub async fn load_gltf_static_mesh(path: &str, bytes: &[u8]) -> Result<Vec<Mesh>, String> {
+    load_gltf_static_mesh_impl(path, bytes, false).await
 }
 
 /// Load a static mesh with lighting baked into the vertex colors.  This is
@@ -304,13 +304,12 @@ pub async fn load_gltf_static_mesh(path: &str) -> Result<Vec<Mesh>, String> {
 /// visible depth without requiring a custom shader.  The resulting meshes still
 /// carry the original `texture` field when present; the material multiply will
 /// dim them according to the baked colours.
-pub async fn load_gltf_static_mesh_lit(path: &str) -> Result<Vec<Mesh>, String> {
-    load_gltf_static_mesh_impl(path, true).await
+pub async fn load_gltf_static_mesh_lit(path: &str, bytes: &[u8]) -> Result<Vec<Mesh>, String> {
+    load_gltf_static_mesh_impl(path, bytes, true).await
 }
 
-async fn load_gltf_static_mesh_impl(path: &str, bake_lighting: bool) -> Result<Vec<Mesh>, String> {
-    let (doc, buffers, images) =
-        gltf::import(path).map_err(|e| format!("failed to import gltf '{}': {e}", path))?;
+async fn load_gltf_static_mesh_impl(path: &str, bytes: &[u8], bake_lighting: bool) -> Result<Vec<Mesh>, String> {
+    let (doc, buffers, images) = client::types::animated_model::import_glb(path, bytes)?;
 
     // we'll accumulate one mesh per primitive so that each texture can be
     // preserved.  vertices/indices for a prim are stored temporarily until the

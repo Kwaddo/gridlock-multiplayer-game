@@ -1,4 +1,4 @@
-use std::time::Instant;
+use platform::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorldId {
