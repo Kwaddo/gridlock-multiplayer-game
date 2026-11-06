@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the browser version into dist/web, ready to serve as static files
-# (locally with --serve, or on Dilmune; see web/README.md).
+# (on Dilmune; see web/README.md). --serve then runs the local server
+# (registry/local/server.mjs), for offline and LAN play.
 #
 #   [GRIDLOCK_REGISTRY=<registry URL>] [GRIDLOCK_MODELS_URL=<registry URL>/models] ./build_web.sh [--serve]
 #
@@ -44,6 +45,12 @@ fi
 echo "==> Done: $(du -sh "$DIST" | cut -f1) in $DIST"
 
 if [ "$1" = "--serve" ]; then
+    if command -v node >/dev/null 2>&1; then
+        # The page plus a local registry, so hosting and joining work offline
+        # and from other machines on the network.
+        exec node "$SCRIPT_DIR/registry/local/server.mjs" --dir "$DIST"
+    fi
+    echo "==> Node.js not found: serving the page only; games still use the registry baked into the build"
     echo "==> Serving on http://localhost:8080 (Ctrl+C to stop)"
     cd "$DIST" && python3 -m http.server 8080
 fi

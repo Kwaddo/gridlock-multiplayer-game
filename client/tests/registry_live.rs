@@ -1,6 +1,6 @@
 //! Talks to a running registry, so it only runs on request:
-//! `GRIDLOCK_REGISTRY=http://127.0.0.1:8787 cargo test -p client --test registry_live -- --ignored`
-//! (start one with `npx wrangler dev` in `registry/`).
+//! `GRIDLOCK_REGISTRY=http://127.0.0.1:8080 cargo test -p client --test registry_live -- --ignored`
+//! (start one with `node registry/local/server.mjs`).
 
 // Real sockets and threads: native only.
 #![cfg(not(target_arch = "wasm32"))]

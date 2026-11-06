@@ -79,6 +79,8 @@ impl ServerBrowser {
             Some(_) => {}
             None => self.entries.push(entry),
         }
+        // Games on this network first.
+        self.entries.sort_by_key(|e| e.origin != Origin::Lan);
     }
 
     pub fn entries(&self) -> &[ServerEntry] {
@@ -108,20 +110,25 @@ impl ServerBrowser {
 /// Native builds join UDP hosts; the browser build joins WebRTC rooms. The two
 /// cannot reach each other, so each keeps only the listings it can join.
 fn online_entry(listed: Listed) -> Option<ServerEntry> {
-    let Listed { name, addr, room, players, max_players } = listed;
+    let Listed { name, addr, room, players, max_players, lan } = listed;
+    // Native builds find their LAN games with the broadcast scan (by LAN
+    // address); a listing's public address is the online way in.
     #[cfg(not(target_arch = "wasm32"))]
-    let (target, detail) = {
-        let _ = room;
+    let (target, detail, origin) = {
+        let _ = (room, lan);
         let addr = addr?;
-        (addr.clone(), addr)
+        (addr.clone(), addr, Origin::Online)
     };
+    // Browsers cannot scan the network, so the registry says which rooms come
+    // from the player's own network; WebRTC then connects inside it.
     #[cfg(target_arch = "wasm32")]
-    let (target, detail) = {
+    let (target, detail, origin) = {
         let _ = addr;
         let room = room?;
-        (registry::room_url(&registry::registry_url()?, &room), format!("room {room}"))
+        let origin = if lan { Origin::Lan } else { Origin::Online };
+        (registry::room_url(&registry::registry_url()?, &room), format!("room {room}"), origin)
     };
-    Some(ServerEntry { name, target, detail, players, max_players, origin: Origin::Online })
+    Some(ServerEntry { name, target, detail, players, max_players, origin })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
