@@ -25,7 +25,30 @@ pub const MSG_WORLD_CHANGE: u8 = 9; // server -> client: bi-directional world tr
 
 // client -> server: active weapon changed (UTF‑8 name length + bytes)
 pub const MSG_WEAPON_CHANGE: u8 = 33;
-pub const MSG_LOBBY_LEADER: u8 = 34; // server -> all: current lobby leader player id [MSG_LOBBY_LEADER][id:4] (0 = no leader)
+pub const MSG_LOBBY_LEADER: u8 = 34; // server -> all: host player id [MSG_LOBBY_LEADER][id:4] (0 = none); the first human to
+                                    // join, unchanged while a match runs: starts and ends matches
+pub const MSG_CHAT: u8 = 35; // client -> server: [text:str8]
+                            // server -> all: [from_id:4][name:str8][text:str8] (from_id 0 = server notice)
+pub const MSG_PLAYER_JOINED: u8 = 36; // server -> others: a player connected [id:4][name:str8]
+pub const MSG_PLAYER_LEFT: u8 = 37; // server -> all: a player left [id:4][name:str8][reason:1] (see LEAVE_*)
+pub const MSG_END_MATCH: u8 = 38; // client -> server: host ends the running match, everyone returns to the lobby
+
+pub const MSG_MATCH_STATUS: u8 = 39; // server -> all: match phase [status:1] (see MATCH_STATUS_*), on change and every few seconds
+
+// MSG_MATCH_STATUS values
+pub const MATCH_STATUS_NONE: u8 = 0; // lobby only: the host can start a match
+pub const MATCH_STATUS_STARTING: u8 = 1; // warmup countdown running
+pub const MATCH_STATUS_RUNNING: u8 = 2; // match on: lobby players can join it
+pub const MATCH_STATUS_ENDING: u8 = 3; // winner shown, everyone returns to the lobby shortly
+
+// MSG_START_DENIED reasons (no byte = match running and full)
+pub const START_DENIED_NOT_HOST: u8 = 1;
+pub const START_DENIED_STARTING: u8 = 2;
+pub const START_DENIED_ENDING: u8 = 3;
+
+// MSG_PLAYER_LEFT reasons
+pub const LEAVE_QUIT: u8 = 0;
+pub const LEAVE_TIMED_OUT: u8 = 1;
 pub const MSG_ASSETS: u8 = 10; // server -> client: asset manifest per world
 pub const MSG_DISCOVER: u8 = 11; // client -> server: LAN discovery broadcast
 pub const MSG_WALL_BROKEN: u8 = 12; // client <-> server: breakable wall destroyed (x, y)

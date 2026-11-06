@@ -367,7 +367,3 @@ pub struct WeaponStats {
     pub randomness_growth: f32, // additional randomness per shot to make the pattern less predictable the longer you fire (radians)
     pub pattern_reset_time: f32, // time in seconds to fully reset after releasing trigger
 }
-
-pub(super) const VM_BASE_SCALE: f32 = 0.003;
-pub(super) const VM_BASE_POS: (f32, f32, f32) = (0.30, 0.08, -0.37);
-pub(super) const VM_BASE_ROT: (f32, f32, f32) = (0.05, -1.45, 0.0);

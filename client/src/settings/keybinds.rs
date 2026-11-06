@@ -25,6 +25,7 @@ const BIND_ACTIONS: &[(&str, &str)] = &[
     ("Slow Walk", "slow_walk"),
     ("Prone", "prone"),
     ("Fullscreen", "fullscreen"),
+    ("Chat", "chat"),
 ];
 
 fn get_binding(config: &GameConfig, action: &str) -> InputBinding {
@@ -50,6 +51,7 @@ fn get_binding(config: &GameConfig, action: &str) -> InputBinding {
         "slow_walk" => config.bind_slow_walk,
         "prone" => config.bind_prone,
         "fullscreen" => config.bind_fullscreen,
+        "chat" => config.bind_chat,
         _ => InputBinding::Key(KeyCode::Unknown),
     }
 }
@@ -77,6 +79,7 @@ fn set_binding(config: &mut GameConfig, action: &str, binding: InputBinding) {
         "slow_walk" => config.bind_slow_walk = binding,
         "prone" => config.bind_prone = binding,
         "fullscreen" => config.bind_fullscreen = binding,
+        "chat" => config.bind_chat = binding,
         _ => {}
     }
 }

@@ -69,12 +69,14 @@ pub const TEAM_LOADOUT_BLUE: [&str; 5] =
 
 use crate::player::Team;
 
-/// Return the PeerId of the current lobby leader — the human lobby player with the
-/// lowest player ID (i.e. first to join). Returns None when the lobby is empty.
-pub fn lobby_leader_addr(players: &HashMap<PeerId, Player>) -> Option<PeerId> {
+/// The host: the human player with the lowest ID (the first to join), in the lobby
+/// or in a match, so it stays the same while a match runs. Only the host starts
+/// and ends matches; anyone may join one that is running. None when no human is
+/// connected.
+pub fn host_addr(players: &HashMap<PeerId, Player>) -> Option<PeerId> {
     players
         .iter()
-        .filter(|(_, p)| !p.is_bot && p.world == WorldId::Lobby)
+        .filter(|(_, p)| !p.is_bot)
         .min_by_key(|(_, p)| p.id)
         .map(|(addr, _)| *addr)
 }
@@ -300,8 +302,8 @@ pub fn process_lobby_regen(players: &mut HashMap<PeerId, Player>) {
 }
 
 /// Remove players whose last activity timestamp is older than the timeout constant.
-/// Returns true if any players were removed.
-pub fn cleanup_inactive_players(players: &mut HashMap<PeerId, Player>) -> bool {
+/// Returns the players removed.
+pub fn cleanup_inactive_players(players: &mut HashMap<PeerId, Player>) -> Vec<Player> {
     let now = Instant::now();
     let mut to_remove = Vec::new();
 
@@ -314,7 +316,7 @@ pub fn cleanup_inactive_players(players: &mut HashMap<PeerId, Player>) -> bool {
         }
     }
 
-    let removed_any = !to_remove.is_empty();
+    let mut removed = Vec::with_capacity(to_remove.len());
     for addr in to_remove {
         if let Some(p) = players.remove(&addr) {
             log!(
@@ -322,7 +324,8 @@ pub fn cleanup_inactive_players(players: &mut HashMap<PeerId, Player>) -> bool {
                 p.username,
                 players.len()
             );
+            removed.push(p);
         }
     }
-    removed_any
+    removed
 }

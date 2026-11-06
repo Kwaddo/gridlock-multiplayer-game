@@ -2,7 +2,8 @@ use macroquad::prelude::*;
 use transport::Link;
 
 use crate::net::protocols::{
-    ClientMsg, ServerMsg, EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING,
+    ClientMsg, ServerMsg, LEAVE_TIMED_OUT, START_DENIED_ENDING, START_DENIED_NOT_HOST,
+    START_DENIED_STARTING, EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING,
     FLAG_IS_BOT, FLAG_PRONE, FLAG_SILENT, FLAG_SLIDING, FLAG_SPRINTING,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
@@ -38,7 +39,8 @@ pub struct NetUpdate {
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
     pub bot_shots: Option<Vec<(Vec3, Vec3)>>, // (start, end)
-    pub lobby_leader_id: Option<u32>,         // current lobby leader player ID (0 = none)
+    pub lobby_leader_id: Option<u32>,         // host player ID (0 = none)
+    pub match_status: Option<u8>,             // MATCH_STATUS_*
     pub death: bool,                          // You died
     pub death_killer_id: Option<u32>,         // who killed us (from MSG_DEATH)
     pub death_weapon: Option<String>,         // weapon used to kill us (from MSG_DEATH)
@@ -46,8 +48,20 @@ pub struct NetUpdate {
     // S&D round state
     pub snd_round_state: Option<SndRoundState>,
 
+    // chat lines and join/leave notices, oldest first
+    pub chat: Vec<ChatEvent>,
+
     // true if poll_updates read at least one packet from the socket during this call
     pub received_any: bool,
+}
+
+/// A chat-feed entry decoded from the server.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ChatEvent {
+    /// A player's line.
+    Line { name: String, text: String },
+    /// From the server: joins, leaves, match events.
+    Notice(String),
 }
 
 /// Parsed S&D round state from the server
@@ -108,6 +122,8 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
         self_freeze_secs: None,
         bot_shots: None,
         lobby_leader_id: None,
+        match_status: None,
+        chat: Vec::new(),
     };
 
     for packet in link.recv() {
@@ -220,15 +236,19 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
                     Some((world, vec3(spawn.0, spawn.1, spawn.2), freeze_secs, match_timer));
             }
             ServerMsg::StartDenied { reason } => {
-                let msg = if reason == Some(1) {
-                    "Only the host can start the game"
-                } else {
-                    "Match already running and full"
+                let msg = match reason {
+                    Some(START_DENIED_NOT_HOST) => "Only the host can start the game",
+                    Some(START_DENIED_STARTING) => "Match is starting: you will join it",
+                    Some(START_DENIED_ENDING) => "Match is ending: wait for the next one",
+                    _ => "Match already running and full",
                 };
                 update.lobby_console_message = Some(msg.to_string());
             }
             ServerMsg::LobbyLeader { id } => {
                 update.lobby_leader_id = Some(id);
+            }
+            ServerMsg::MatchStatus { status } => {
+                update.match_status = Some(status);
             }
             ServerMsg::MatchJoined { name, .. } => {
                 update.match_join_announce = Some(format!("{} joined the match", name));
@@ -314,6 +334,20 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
                     defuse_progress: s.defuse_progress,
                     phase_timer: s.phase_timer,
                 });
+            }
+            ServerMsg::Chat { from_id, name, text } => {
+                update.chat.push(if from_id == 0 {
+                    ChatEvent::Notice(text)
+                } else {
+                    ChatEvent::Line { name, text }
+                });
+            }
+            ServerMsg::PlayerJoined { name, .. } => {
+                update.chat.push(ChatEvent::Notice(format!("{} joined the game", name)));
+            }
+            ServerMsg::PlayerLeft { name, reason, .. } => {
+                let how = if reason == LEAVE_TIMED_OUT { "timed out" } else { "left the game" };
+                update.chat.push(ChatEvent::Notice(format!("{} {}", name, how)));
             }
             ServerMsg::BotShot { start, end, .. } => {
                 let start = vec3(start.0, start.1, start.2);

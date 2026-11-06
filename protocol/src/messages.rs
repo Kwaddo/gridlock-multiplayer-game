@@ -119,7 +119,7 @@ pub enum ServerMsg {
     Damage { amount: f32, attacker_id: u32, stun: bool },
     Kill { victim_id: u32, weapon: String },
     KillFeed { killer_id: u32, victim_id: u32, weapon: String },
-    StartDenied { reason: Option<u8> }, // 1 = not the host; otherwise running/full
+    StartDenied { reason: Option<u8> }, // START_DENIED_*; None = running and full
     MatchJoined { id: u32, name: String },
     MatchEnd { winner_id: u32, winner_name: String, countdown: Option<u8> },
     PlayerList(Vec<PlayerListEntry>),
@@ -128,6 +128,10 @@ pub enum ServerMsg {
     SndRoundState(SndRound),
     LobbyLeader { id: u32 }, // 0 = no leader
     BotShot { shooter_id: u32, victim_id: u32, start: Vec3, end: Vec3 },
+    Chat { from_id: u32, name: String, text: String }, // from_id 0 = server notice
+    PlayerJoined { id: u32, name: String },
+    PlayerLeft { id: u32, name: String, reason: u8 },
+    MatchStatus { status: u8 },
 }
 
 /// Client -> server.
@@ -158,6 +162,8 @@ pub enum ClientMsg {
     WeaponChange { name: String },
     BotSpawn { behavior: u8, level: u8 },
     BotDespawnAll,
+    Chat { text: String },
+    EndMatch,
 }
 
 impl ServerMsg {
@@ -295,6 +301,16 @@ impl ServerMsg {
                 .vec3(*start)
                 .vec3(*end)
                 .finish(),
+            ServerMsg::Chat { from_id, name, text } => {
+                Writer::new(MSG_CHAT).u32(*from_id).str8(name).str8(text).finish()
+            }
+            ServerMsg::PlayerJoined { id, name } => {
+                Writer::new(MSG_PLAYER_JOINED).u32(*id).str8(name).finish()
+            }
+            ServerMsg::PlayerLeft { id, name, reason } => {
+                Writer::new(MSG_PLAYER_LEFT).u32(*id).str8(name).u8(*reason).finish()
+            }
+            ServerMsg::MatchStatus { status } => vec![MSG_MATCH_STATUS, *status],
         }
     }
 
@@ -426,6 +442,12 @@ impl ServerMsg {
                 start: r.vec3()?,
                 end: r.vec3()?,
             },
+            MSG_CHAT => ServerMsg::Chat { from_id: r.u32()?, name: r.str8()?, text: r.str8()? },
+            MSG_PLAYER_JOINED => ServerMsg::PlayerJoined { id: r.u32()?, name: r.str8()? },
+            MSG_PLAYER_LEFT => {
+                ServerMsg::PlayerLeft { id: r.u32()?, name: r.str8()?, reason: r.u8()? }
+            }
+            MSG_MATCH_STATUS => ServerMsg::MatchStatus { status: r.u8()? },
             _ => return None,
         };
         Some(msg)
@@ -485,6 +507,8 @@ impl ClientMsg {
             ClientMsg::WeaponChange { name } => Writer::new(MSG_WEAPON_CHANGE).str8(name).finish(),
             ClientMsg::BotSpawn { behavior, level } => vec![MSG_BOT_SPAWN, *behavior, *level],
             ClientMsg::BotDespawnAll => vec![MSG_BOT_DESPAWN_ALL],
+            ClientMsg::Chat { text } => Writer::new(MSG_CHAT).str8(text).finish(),
+            ClientMsg::EndMatch => vec![MSG_END_MATCH],
         }
     }
 
@@ -530,6 +554,8 @@ impl ClientMsg {
             MSG_WEAPON_CHANGE => ClientMsg::WeaponChange { name: r.str8()? },
             MSG_BOT_SPAWN => ClientMsg::BotSpawn { behavior: r.u8()?, level: r.u8()? },
             MSG_BOT_DESPAWN_ALL => ClientMsg::BotDespawnAll,
+            MSG_CHAT => ClientMsg::Chat { text: r.str8()? },
+            MSG_END_MATCH => ClientMsg::EndMatch,
             _ => return None,
         };
         Some(msg)
@@ -604,6 +630,11 @@ mod tests {
         }]));
         rt_server(ServerMsg::MatchTimer { secs: 65535 });
         rt_server(ServerMsg::BotShot { shooter_id: 1, victim_id: 2, start: (0.0, 1.2, 0.0), end: (1.0, 1.0, 1.0) });
+        rt_server(ServerMsg::Chat { from_id: 3, name: "alice".into(), text: "gg".into() });
+        rt_server(ServerMsg::Chat { from_id: 0, name: String::new(), text: "Match ended".into() });
+        rt_server(ServerMsg::PlayerJoined { id: 4, name: "bob".into() });
+        rt_server(ServerMsg::MatchStatus { status: MATCH_STATUS_RUNNING });
+        rt_server(ServerMsg::PlayerLeft { id: 4, name: "bob".into(), reason: LEAVE_TIMED_OUT });
     }
 
     #[test]
@@ -637,6 +668,8 @@ mod tests {
         rt_client(ClientMsg::StartGame { mode: None, duration: None, autofill: None });
         rt_client(ClientMsg::WeaponChange { name: "MP5".into() });
         rt_client(ClientMsg::BotSpawn { behavior: 255, level: 2 });
+        rt_client(ClientMsg::Chat { text: "hello there".into() });
+        rt_client(ClientMsg::EndMatch);
     }
 
     #[test]
