@@ -18,6 +18,11 @@ impl PlayingState {
     ) {
         self.update_head_bob(get_frame_time());
         let camera = self.build_camera(config);
+        // Team Deathmatch in progress: the score bar takes the top of the screen
+        let tdm_bar = self.team_score.filter(|_| {
+            self.match_mode == Some(crate::net::protocols::MODE_TEAM_DEATHMATCH)
+                && self.current_world == WorldId::Maze
+        });
 
         clear_background(Color::from_rgba(16, 20, 28, 255));
         set_camera(&camera);
@@ -248,8 +253,10 @@ impl PlayingState {
                 self.hp,
                 self.max_hp,
                 &self.kill_feed,
-                // Hide the match timer in S&D — timing is handled per-round
-                if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY) {
+                // S&D times rounds, and the TDM score bar has the clock in it
+                if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
+                    || tdm_bar.is_some()
+                {
                     0.0
                 } else {
                     self.match_time_left
@@ -287,8 +294,27 @@ impl PlayingState {
             }
         }
 
+        if let Some(score) = tdm_bar {
+            let local_team = self
+                .connected_players
+                .iter()
+                .find(|(id, ..)| *id == player_id)
+                .map(|(_, _, _, _, _, team, _, _)| *team)
+                .unwrap_or(0);
+            let clock = (!config.hide_match_timer && self.match_time_left > 0.0)
+                .then_some(self.match_time_left);
+            crate::ui::hud::draw_team_score_bar(score, local_team, clock);
+        }
+
         // Show player list / scoreboard while holding Tab
-        if is_key_down(KeyCode::Tab) {
+        if is_key_down(KeyCode::Tab) && tdm_bar.is_some() {
+            crate::ui::hud::draw_team_scoreboard(
+                &self.connected_players,
+                player_id,
+                &self.match_player_ids,
+                self.team_score,
+            );
+        } else if is_key_down(KeyCode::Tab) {
             crate::ui::hud::draw_player_list(
                 &self.connected_players,
                 player_id,

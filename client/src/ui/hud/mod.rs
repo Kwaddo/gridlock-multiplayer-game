@@ -4,9 +4,11 @@ use std::collections::HashMap;
 mod crosshair;
 mod minimap;
 mod players;
-pub use players::draw_player_list;
+pub use players::{draw_player_list, draw_team_scoreboard};
 mod scope;
 mod status;
+mod team_score;
+pub use team_score::draw_team_score_bar;
 mod weapon_feed;
 pub use weapon_feed::draw_kill_feed;
 

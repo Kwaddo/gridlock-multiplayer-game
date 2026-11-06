@@ -5,6 +5,7 @@ use crate::bot::personality::{ BotArchetype, BotDifficulty, BotPersonality, BotP
 use crate::maze::pathfinding::{ cell_to_world, world_to_cell };
 use crate::server::game::MAZE_CELL_SIZE;
 use glam::Vec3;
+use rand::Rng;
 
 #[allow(dead_code)]
 pub struct BotState {
@@ -26,9 +27,47 @@ pub struct BotState {
 
     pub current_yaw: f32, // current facing direction in radians
     pub current_pitch: f32, // current pitch angle for looking up/down
+    pub tactics: BotTactics,
+}
+
+/// Short-lived combat state: who shot us, which way we strafe, whom we just lost sight of.
+#[derive(Clone, Debug, Default)]
+pub struct BotTactics {
+    /// Someone we can't see shot us: (attacker id, where they were, seconds left to care).
+    pub alert: Option<(u32, (f32, f32, f32), f32)>,
+    /// +1 or -1: which side we strafe to while fighting.
+    pub strafe_sign: f32,
+    /// Seconds until we pick a strafe side again.
+    pub strafe_timer: f32,
+    /// The target we last lost sight of and how long ago; seeing them again
+    /// soon after needs no fresh reaction time.
+    pub lost_target: Option<(u32, f32)>,
+}
+
+/// Seconds a bot keeps turning toward / hunting someone who shot it unseen.
+pub const ALERT_SECS: f32 = 3.0;
+
+impl BotState {
+    /// We were shot by `attacker_id` standing at `pos`.
+    pub fn alert(&mut self, attacker_id: u32, pos: (f32, f32, f32)) {
+        if self.target_id == Some(attacker_id) {
+            return; // already fighting them
+        }
+        self.tactics.alert = Some((attacker_id, pos, ALERT_SECS));
+        self.last_known_enemy_pos = Some(pos);
+    }
+}
+
+/// An enemy the bot can see and is fighting.
+#[derive(Clone, Copy, Debug)]
+pub struct Engagement {
+    pub target_pos: (f32, f32, f32),
+    pub distance: f32,
 }
 
 const PATH_ARRIVAL_THRESHOLD: f32 = 0.5; // distance threshold for considering a bot has arrived at a path node
+/// Seconds without moving along a path before the bot plans a new one.
+const REPLAN_WHEN_STUCK_SECS: f32 = 0.7;
 
 #[derive(Clone)]
 pub enum BotBehavior {
@@ -64,6 +103,81 @@ pub enum BotBehavior {
         path_index: usize,
         give_up_timer: f32, // seconds before giving up
     },
+    /// Walk to a spot: then hold an angle there facing `hold_face`, or (None,
+    /// roaming) pick something new.
+    Reposition {
+        path: Vec<(u8, u8)>,
+        path_index: usize,
+        hold_face: Option<(f32, f32)>,
+    },
+}
+
+impl BotBehavior {
+    /// The A* path this behavior walks, and how far along it is.
+    fn path_mut(&mut self) -> Option<(&[(u8, u8)], &mut usize)> {
+        match self {
+            BotBehavior::Hunt { path, path_idx, .. } => Some((path, path_idx)),
+            BotBehavior::Flank { path, path_index, .. }
+            | BotBehavior::Retreat { path, path_index }
+            | BotBehavior::Investigate { path, path_index, .. }
+            | BotBehavior::Reposition { path, path_index, .. } => Some((path, path_index)),
+            _ => None,
+        }
+    }
+}
+
+/// Where to go next along a path.
+struct PathStep {
+    dir: Vec3,
+    /// Distance to where the path next changes direction (or ends): the bot
+    /// has to have slowed down by then or momentum carries it into a wall.
+    to_turn: f32,
+}
+
+/// The next step along `path`, advancing past cells reached. `None` once the
+/// path is done, or when the bot is no longer next to it (pushed off, or
+/// carried past a corner): the path is then dropped (`idx` set to its end) so
+/// the next decision plans a new one from where the bot is.
+fn follow_path(path: &[(u8, u8)], idx: &mut usize, pos: (f32, f32, f32)) -> Option<PathStep> {
+    let next = loop {
+        let &cell = path.get(*idx)?;
+        let (wx, wz) = cell_to_world(cell.0, cell.1, MAZE_CELL_SIZE);
+        let to_cell = Vec3::new(wx - pos.0, 0.0, wz - pos.2);
+        if to_cell.length() >= PATH_ARRIVAL_THRESHOLD {
+            break (cell, to_cell);
+        }
+        *idx += 1;
+    };
+    let (cell, to_cell) = next;
+    let here = ((pos.0 / MAZE_CELL_SIZE).floor() as i32, (pos.2 / MAZE_CELL_SIZE).floor() as i32);
+    let step = |a: (i32, i32), b: (u8, u8)| (b.0 as i32 - a.0, b.1 as i32 - a.1);
+    let (dx, dz) = step(here, cell);
+    if dx.abs() + dz.abs() > 1 {
+        *idx = path.len();
+        return None;
+    }
+
+    // run on while the path keeps going the same way
+    let mut to_turn = to_cell.length();
+    let mut heading = (dx, dz);
+    let mut i = *idx;
+    while let Some(&after) = path.get(i + 1) {
+        let cur = path[i];
+        let d = step((cur.0 as i32, cur.1 as i32), after);
+        if d != heading {
+            break;
+        }
+        to_turn += MAZE_CELL_SIZE;
+        heading = d;
+        i += 1;
+    }
+    Some(PathStep { dir: to_cell.normalize(), to_turn })
+}
+
+/// Top speed that still lets a bot slow to a corner-taking pace within `to_turn`.
+fn cornering_speed(to_turn: f32, acceleration: f32) -> f32 {
+    const TURN_SPEED: f32 = 2.5;
+    (2.0 * acceleration * (to_turn - 0.3).max(0.0)).sqrt() + TURN_SPEED
 }
 
 pub fn tick_bot(
@@ -72,23 +186,36 @@ pub fn tick_bot(
     dt: f32,
     physics: &PhysicsConfig,
     maze_cells: Option<(&[u8], u8, u8, &[crate::maze::types::Prop])>,
+    engage: Option<Engagement>,
 ) {
     let mut desired_dir = Vec3::ZERO; // movement we intend to apply every tick
     let want_jump = false; // whether we want to jump this tick
-    let speed: f32 = physics.walk_speed;
+    let mut speed: f32 = physics.walk_speed;
+    let mut sprinting = false;
+    let mut strafing = false;
 
-    match &mut state.behavior {
-        BotBehavior::Static => {}
+    // timers that run whatever the bot does
+    if let BotBehavior::Hunt { repath_timer, .. } | BotBehavior::Flank { repath_timer, .. } =
+        &mut state.behavior
+    {
+        *repath_timer -= dt;
+    }
+    if let BotBehavior::Investigate { give_up_timer, .. } = &mut state.behavior {
+        *give_up_timer -= dt;
+    }
+    if let BotBehavior::HoldAngle { hold_timer, .. } = &mut state.behavior {
+        *hold_timer += dt;
+    }
 
-        BotBehavior::Patrol { waypoints, current, arrival_threshold } => {
+    let pos = bot.position;
+    let retreating = matches!(state.behavior, BotBehavior::Retreat { .. });
+    match (engage, &mut state.behavior) {
+        (_, BotBehavior::Static) | (_, BotBehavior::HoldAngle { .. }) => {}
+
+        (_, BotBehavior::Patrol { waypoints, current, arrival_threshold }) => {
             if !waypoints.is_empty() {
                 let waypoint = waypoints[*current];
-                desired_dir = Vec3::new(
-                    waypoint.0 - bot.position.0,
-                    0.0,
-                    waypoint.2 - bot.position.2
-                );
-
+                desired_dir = Vec3::new(waypoint.0 - pos.0, 0.0, waypoint.2 - pos.2);
                 if desired_dir.length() < *arrival_threshold {
                     // if we're close enough to the waypoint, switch to the next one
                     *current = (*current + 1) % waypoints.len();
@@ -97,78 +224,48 @@ pub fn tick_bot(
                 }
             }
         }
-        // path-following behaviors: Hunt, Flank, Retreat, Investigate
-        // all share the same core logic: walk toward the next cell in the A* path
-        /*
-            for each of the 4 hunting bots
-            follow A* cell by cell so we can brain it later on
-            retreat has no timer cause they just escape but hunt and flank do to know when to change ur path or give up hunting a player
-            Investigate as well but stops because there will be nothjing to investigate in a while
-            Hold angle doesnt move because we will call it when we find a good angle in step 5
-        */
-        BotBehavior::Hunt { path, path_idx, repath_timer, .. } => {
-            // .. means ignore remaining field because its not relevant to target player
-            *repath_timer -= dt;
-            if let Some(&cell) = path.get(*path_idx) {
-                let (wx, wz) = cell_to_world(cell.0, cell.1, MAZE_CELL_SIZE);
-                desired_dir = Vec3::new(wx - bot.position.0, 0.0, wz - bot.position.2);
-                if desired_dir.length() < PATH_ARRIVAL_THRESHOLD {
-                    *path_idx += 1; // advance to next cell
-                } else {
-                    desired_dir = desired_dir.normalize();
-                }
+
+        // In a fight (and not running away): keep to a good range and strafe
+        // instead of walking into the enemy.
+        (Some(fight), behavior) if !retreating => {
+            let to_enemy = Vec3::new(fight.target_pos.0 - pos.0, 0.0, fight.target_pos.2 - pos.2);
+            let to_enemy = to_enemy.normalize_or_zero();
+            let side = Vec3::new(-to_enemy.z, 0.0, to_enemy.x) * state.tactics.strafe_sign;
+            let close_in_from = state.personality.range_max * 0.6;
+            if fight.distance > close_in_from {
+                // too far to fight well: keep walking the path in
+                desired_dir = behavior
+                    .path_mut()
+                    .and_then(|(path, idx)| follow_path(path, idx, pos))
+                    .map_or(to_enemy, |step| step.dir);
+            } else if fight.distance < state.personality.range_min {
+                desired_dir = (side - to_enemy).normalize_or_zero(); // back off sideways
+                strafing = true;
             } else {
-                *repath_timer = 0.0;
+                desired_dir = side;
+                strafing = true;
             }
+            speed = physics.walk_speed * 0.8;
         }
 
-        BotBehavior::Flank { path, path_index, repath_timer, .. } => {
-            *repath_timer -= dt;
-            if let Some(&cell) = path.get(*path_index) {
-                let (wx, wz) = cell_to_world(cell.0, cell.1, MAZE_CELL_SIZE);
-                desired_dir = Vec3::new(wx - bot.position.0, 0.0, wz - bot.position.2);
-                if desired_dir.length() < PATH_ARRIVAL_THRESHOLD {
-                    *path_index += 1;
-                } else {
-                    desired_dir = desired_dir.normalize();
-                }
-            } else {
-                *repath_timer = 0.0;
+        (_, behavior) => {
+            if let Some(step) = behavior.path_mut().and_then(|(path, idx)| follow_path(path, idx, pos)) {
+                desired_dir = step.dir;
+                // travelling with nobody in sight: run, easing off for corners
+                speed = physics
+                    .sprint_speed
+                    .min(cornering_speed(step.to_turn, physics.acceleration));
+                sprinting = speed > physics.walk_speed;
             }
         }
+    }
 
-        BotBehavior::Retreat { path, path_index } => {
-            if let Some(&cell) = path.get(*path_index) {
-                let (wx, wz) = cell_to_world(cell.0, cell.1, MAZE_CELL_SIZE);
-                desired_dir = Vec3::new(wx - bot.position.0, 0.0, wz - bot.position.2);
-                if desired_dir.length() < PATH_ARRIVAL_THRESHOLD {
-                    *path_index += 1;
-                } else {
-                    desired_dir = desired_dir.normalize();
-                }
-            }
-        }
-
-        BotBehavior::Investigate { path, path_index, give_up_timer } => {
-            *give_up_timer -= dt;
-            if let Some(&cell) = path.get(*path_index) {
-                let (wx, wz) = cell_to_world(cell.0, cell.1, MAZE_CELL_SIZE);
-                desired_dir = Vec3::new(wx - bot.position.0, 0.0, wz - bot.position.2);
-                if desired_dir.length() < PATH_ARRIVAL_THRESHOLD {
-                    *path_index += 1;
-                } else {
-                    desired_dir = desired_dir.normalize();
-                }
-            } else {
-                *give_up_timer = 0.0;
-            }
-        }
-
-        // HoldAngle: stay put, face the specified direction
-        BotBehavior::HoldAngle { hold_timer, .. } => {
-            *hold_timer += dt;
-            // no movement — desired_dir stays ZERO
-        }
+    // pick a strafe side now and then, so strafing doesn't look like a pendulum
+    state.tactics.strafe_timer -= dt;
+    if state.tactics.strafe_timer <= 0.0 || state.tactics.strafe_sign == 0.0 {
+        let mut rng = rand::thread_rng();
+        state.tactics.strafe_sign = if rng.gen_bool(0.5) { 1.0 } else { -1.0 };
+        state.tactics.strafe_timer = rng.gen_range(0.6..1.4);
     }
 
     // save old position for collision rollback in case we walk into a wall
@@ -221,11 +318,16 @@ pub fn tick_bot(
         };
 
         if hits_wall(bot.position.0, bot.position.2) {
-            // revert X, keep Z — try sliding along Z axis
-            bot.position.0 = old_pos.0;
-            state.movement.velocity.x = 0.0;
-
-            // if Z alone also puts us in a wall/prop it's a corner — full stop
+            // Move one axis at a time, keeping whichever is free, so the bot
+            // slides along walls (and off corners it clips) either way.
+            let (new_x, new_z) = (bot.position.0, bot.position.2);
+            bot.position.0 = new_x;
+            bot.position.2 = old_pos.2;
+            if hits_wall(bot.position.0, bot.position.2) {
+                bot.position.0 = old_pos.0;
+                state.movement.velocity.x = 0.0;
+            }
+            bot.position.2 = new_z;
             if hits_wall(bot.position.0, bot.position.2) {
                 bot.position.2 = old_pos.2;
                 state.movement.velocity.z = 0.0;
@@ -244,7 +346,7 @@ pub fn tick_bot(
     // Kept until the next state broadcast sends them (see Server::tick).
     bot.evt_jump_start |= evt_jump_start;
     bot.evt_landed |= evt_jump_land;
-    bot.is_sprinting = false;
+    bot.is_sprinting = sprinting;
     bot.is_crouched = false;
     bot.is_prone = false;
     bot.is_sliding = false;
@@ -272,14 +374,31 @@ pub fn tick_bot(
     let dominated_by_movement = !matches!(
         state.behavior,
         BotBehavior::Static | BotBehavior::HoldAngle { .. }
-    );
+    ) && desired_dir != Vec3::ZERO;
     let dx = bot.position.0 - old_pos.0;
     let dz = bot.position.2 - old_pos.2;
     let moved = (dx * dx + dz * dz).sqrt();
-    if dominated_by_movement && moved < 0.01 {
+    if strafing {
+        // strafed into a wall: go the other way rather than grinding on it
+        if moved < 0.01 {
+            state.tactics.strafe_sign = -state.tactics.strafe_sign;
+            state.tactics.strafe_timer = 0.8;
+        }
+        state.stuck_timer = 0.0;
+    } else if dominated_by_movement && moved < 0.01 {
         state.stuck_timer += dt;
     } else {
         state.stuck_timer = 0.0;
+    }
+
+    // Blocked for a moment while walking a path (caught on a corner or a
+    // prop): drop the path so the next decision plans a fresh one from here.
+    if state.stuck_timer > REPLAN_WHEN_STUCK_SECS {
+        if let Some((path, idx)) = state.behavior.path_mut() {
+            if *idx < path.len() {
+                *idx = path.len();
+            }
+        }
     }
 
     // Unstick: if stuck for >1s, teleport to nearest adjacent open cell

@@ -69,6 +69,39 @@ pub const TEAM_LOADOUT_BLUE: [&str; 5] =
 
 use crate::player::Team;
 
+/// Kills each team has scored in the current match. Counted when the kill
+/// happens, so a player leaving doesn't take their kills off the team.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TeamScore {
+    pub red: u32,
+    pub blue: u32,
+}
+
+impl TeamScore {
+    /// A kill by `killer` of `victim`; team kills and spectators don't score.
+    pub fn record_kill(&mut self, killer: Team, victim: Team) {
+        if killer == victim {
+            return;
+        }
+        match killer {
+            Team::Red => self.red += 1,
+            Team::Blue => self.blue += 1,
+            Team::Spectator => {}
+        }
+    }
+
+    /// The team at or past `MATCH_SCORE_TO_WIN`, if any.
+    pub fn winner(&self) -> Option<Team> {
+        if self.red >= MATCH_SCORE_TO_WIN && self.red >= self.blue {
+            Some(Team::Red)
+        } else if self.blue >= MATCH_SCORE_TO_WIN {
+            Some(Team::Blue)
+        } else {
+            None
+        }
+    }
+}
+
 /// The host: the human player with the lowest ID (the first to join), in the lobby
 /// or in a match, so it stays the same while a match runs. Only the host starts
 /// and ends matches; anyone may join one that is running. None when no human is
