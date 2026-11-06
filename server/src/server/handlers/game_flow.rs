@@ -554,6 +554,7 @@ pub fn check_early_end_conditions(
     match_start_time: &mut Option<Instant>,
     match_mode: u8,
     match_duration: &mut Option<Duration>,
+    team_score: game::TeamScore,
 ) {
     // gun game should never end just because someone died;
     // kills are handled separately in hit logic
@@ -614,19 +615,7 @@ pub fn check_early_end_conditions(
     // Team Deathmatch early win: if one team reaches the score threshold,
     // end the match with that team as the winner. Only applies to TDM.
     if match_mode == MODE_TEAM_DEATHMATCH {
-        let mut red_kills: u32 = 0;
-        let mut blue_kills: u32 = 0;
-        for p in players.values() {
-            if p.world == WorldId::Maze {
-                match p.team {
-                    Team::Red => red_kills = red_kills.saturating_add(p.kills),
-                    Team::Blue => blue_kills = blue_kills.saturating_add(p.kills),
-                    _ => {}
-                }
-            }
-        }
-        if red_kills >= MATCH_SCORE_TO_WIN || blue_kills >= MATCH_SCORE_TO_WIN {
-            let winning_team = if red_kills >= MATCH_SCORE_TO_WIN { Team::Red } else { Team::Blue };
+        if let Some(winning_team) = team_score.winner() {
             let winner_team_name = if winning_team == Team::Red { "Red Team".to_string() } else { "Blue Team".to_string() };
             let winner_id = players
                 .values()
@@ -671,6 +660,7 @@ pub fn update_match_timer(
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
     match_duration: Option<Duration>,
+    team_score: game::TeamScore,
 ) {
     if let Some(start) = match_start_time {
         let elapsed = Instant::now().duration_since(*start);
@@ -701,17 +691,7 @@ pub fn update_match_timer(
 
             // For TDM: determine winner by team total kills
             let (winner_id, winner_name) = if match_mode == MODE_TEAM_DEATHMATCH {
-                let mut red_kills: u32 = 0;
-                let mut blue_kills: u32 = 0;
-                for p in players.values() {
-                    if p.world == WorldId::Maze {
-                        match p.team {
-                            Team::Red => red_kills = red_kills.saturating_add(p.kills),
-                            Team::Blue => blue_kills = blue_kills.saturating_add(p.kills),
-                            _ => {}
-                        }
-                    }
-                }
+                let (red_kills, blue_kills) = (team_score.red, team_score.blue);
                 if red_kills > blue_kills {
                     let id = players.values().filter(|p| p.world == WorldId::Maze && p.team == Team::Red).max_by_key(|p| p.kills).map(|p| p.id).unwrap_or(0);
                     (id, "Red Team".to_string())

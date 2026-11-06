@@ -64,6 +64,7 @@ pub fn handle_hit(
     match_mode: u8,
     _snd_state: &mut Option<crate::server::snd::SndState>,
     bot_states: &mut HashMap<PeerId, crate::bot::ai::BotState>,
+    team_score: &mut game::TeamScore,
 ) {
     // the sender of the hit packet is the attacker
     let _attacker = src_addr;
@@ -112,6 +113,7 @@ pub fn handle_hit(
         match_mode,
         bot_states,
         _maze.as_ref(), // pass immutable reference for any maze queries during damage application
+        team_score,
     );
 }
 
@@ -222,8 +224,9 @@ pub fn apply_damage(
     is_backstab: bool,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
-    _bot_states: &mut HashMap<PeerId, crate::bot::ai::BotState>,
+    bot_states: &mut HashMap<PeerId, crate::bot::ai::BotState>,
     _maze: Option<&MazeData>,
+    team_score: &mut game::TeamScore,
 ) {
     let (attacker, attacker_world, attacker_is_bot) = match players.get(&attacker_addr) {
         Some(a) => {
@@ -303,6 +306,17 @@ pub fn apply_damage(
         return;
     }
 
+    // a match bot that gets shot by an enemy turns toward them, seen or not
+    if let (Some(state), Some(shooter), Some(victim)) = (
+        bot_states.get_mut(&victim_addr),
+        players.get(&attacker_addr),
+        players.get(&victim_addr),
+    ) {
+        if state.personality_id.is_some() && shooter.team != victim.team {
+            state.alert(shooter.id, shooter.position);
+        }
+    }
+
     if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
 
         let _chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
@@ -334,8 +348,14 @@ pub fn apply_damage(
 
         let mut victim_reset_required = false;
         let mut pending_match_end: Option<(u32, String)> = None;
+        let victim_team = players.get(&victim_addr).map(|v| v.team);
         if let Some(killer) = players.get_mut(&attacker) {
             killer.kills += 1;
+            if attacker_world == WorldId::Maze {
+                if let Some(victim_team) = victim_team {
+                    team_score.record_kill(killer.team, victim_team);
+                }
+            }
 
             if match_mode == MODE_GUN_GAME {
                 let is_punch = weapon_name.eq_ignore_ascii_case("punch");

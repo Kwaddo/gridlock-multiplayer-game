@@ -303,6 +303,8 @@ pub fn sync_world(
                 }
 
                 // Reset local player state for a fresh match
+                // (the server sends the new match's score straight away)
+                playing_state.team_score = None;
                 playing_state.is_dead = false;
                 playing_state.hp = playing_state.max_hp;
                 playing_state.death_timer = 0.0;
@@ -336,6 +338,7 @@ pub fn sync_world(
                 playing_state.match_time_left = 0.0;
                 // a match the host ended early leaves no victory screen up
                 playing_state.match_end_countdown_timer = 0.0;
+                playing_state.team_score = None;
                 // leaving the Maze / returning to Lobby — clear any mode-specific restrictions
                 playing_state.match_mode = None;
                 playing_state.weapons.set_locked_slot(None);
@@ -645,6 +648,9 @@ pub fn sync_world(
         if let Some(status) = updates.match_status {
             playing_state.match_status = status;
         }
+        if let Some(score) = updates.team_score {
+            playing_state.team_score = Some(score);
+        }
         if let Some(leader_id) = updates.lobby_leader_id {
             playing_state.lobby_leader_id = if leader_id == 0 { None } else { Some(leader_id) };
         }
@@ -678,6 +684,11 @@ pub fn sync_world(
                 playing_state.rebuild_player_index();
             }
 
+            playing_state.match_player_ids = list
+                .iter()
+                .filter(|(_, _, _, _, world, ..)| *world == WorldId::Maze)
+                .map(|(id, ..)| *id)
+                .collect();
             // `list` now has entries: (id, name, kills, deaths, world, alive, gun_level, team, weapon, is_bot)
             playing_state.connected_players = list
                 .into_iter()
