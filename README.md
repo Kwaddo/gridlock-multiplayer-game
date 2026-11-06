@@ -16,6 +16,7 @@ A multiplayer first-person shooter written in Rust. Built on [macroquad](https:/
 - **Bots** — server-side AI players (`server/src/bot/`).
 - **Bombsite / objective logic** — see `server/src/server/game.rs`.
 - **Pause menu, dev mode, lobby inventory, login** — modular screen system in `client/src/screens/`.
+- **Chat and match control** — text chat (`T` or `Enter`, rebindable) with join/leave notices; from the pause menu the host can end a match for everyone and anyone can leave a match, both returning to the lobby without disconnecting.
 - **Spatial audio** — `rodio` on the client for footsteps, gunfire, slides.
 
 ---

@@ -58,6 +58,10 @@ pub struct Server {
     last_state_broadcast: Option<Instant>,
     /// Player count at the last state broadcast: a join or leave sends at once.
     last_broadcast_players: usize,
+    /// When each player last chatted (chat rate limit).
+    last_chat: HashMap<PeerId, Instant>,
+    /// Last `MSG_MATCH_STATUS` broadcast: value and time.
+    last_status_sent: Option<(u8, Instant)>,
 }
 
 impl Server {
@@ -85,6 +89,8 @@ impl Server {
             last_regen_tick: Instant::now(),
             last_state_broadcast: None,
             last_broadcast_players: 0,
+            last_chat: HashMap::new(),
+            last_status_sent: None,
         }
     }
 
@@ -123,14 +129,18 @@ impl Server {
         };
 
         match msg {
-            ClientMsg::Join { username } => handlers::handle_join(
-                &self.outbox,
-                &mut self.players,
-                self.maze.as_ref(),
-                self.match_running,
-                src_addr,
-                &username,
-            ),
+            ClientMsg::Join { username } => {
+                handlers::handle_join(
+                    &self.outbox,
+                    &mut self.players,
+                    self.maze.as_ref(),
+                    self.match_running,
+                    src_addr,
+                    &username,
+                );
+                // the newcomer needs it now, not at the next periodic resend
+                self.send_match_status(true);
+            }
             ClientMsg::Disconnect => {
                 handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr)
             }
@@ -148,6 +158,8 @@ impl Server {
 
             // client-requested world change (teleporter)
             ClientMsg::WorldChange { target } => {
+                let was_in_maze =
+                    self.players.get(&src_addr).is_some_and(|p| p.world == WorldId::Maze);
                 handlers::handle_world_change(
                     &self.outbox,
                     self.maze.as_ref(),
@@ -155,6 +167,15 @@ impl Server {
                     src_addr,
                     target,
                 );
+                if was_in_maze && target == WorldId::Lobby.as_u8() {
+                    if let Some(p) = self.players.get(&src_addr) {
+                        let text = format!("{} left the match", p.username);
+                        handlers::broadcast_notice(&self.outbox, &self.players, &text);
+                        // the maze view no longer includes them
+                        broadcast::broadcast_state(&self.outbox, &self.players);
+                        broadcast::broadcast_player_list(&self.outbox, &self.players);
+                    }
+                }
             },
             ClientMsg::WeaponChange { name } => {
                 // client tells us which weapon they're now holding; update
@@ -165,53 +186,9 @@ impl Server {
                     broadcast::broadcast_state(&self.outbox, &self.players);
                 }
             },
-            // client requests to start a match from the lobby
+            // client requests to start a match from the lobby (or join the running one)
             ClientMsg::StartGame { mode, duration, autofill } => {
-                // read the requested game mode from the payload
-                if let Some(requested) = mode {
-                    if requested == MODE_GUN_GAME
-                        || requested == MODE_TEAM_DEATHMATCH
-                        || requested == MODE_SEARCH_AND_DESTROY
-                    {
-                        self.match_mode = requested;
-                    }
-                }
-                // duration code: 0=default, 65535=unlimited
-                let dur_code: u16 = duration.unwrap_or(0);
-                // auto-fill settings: bots_per_team, diff_mask
-                if let Some((bots_per_team, diff_mask)) = autofill {
-                    self.autofill_bots_per_team = bots_per_team.min(8);
-                    self.autofill_diff_mask = diff_mask & 0b11111;
-                } else {
-                    self.autofill_bots_per_team = 0;
-                    self.autofill_diff_mask = 0b11111;
-                }
-                // Duration: client-provided value overrides mode default when non-zero
-                let requested_duration: Option<Duration> = if dur_code == u16::MAX {
-                    None // unlimited
-                } else if dur_code > 0 {
-                    Some(Duration::from_secs(dur_code as u64))
-                } else {
-                    match self.match_mode {
-                        MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
-                        MODE_SEARCH_AND_DESTROY => None,
-                        _ => game::MATCH_DURATION,
-                    }
-                };
-                handlers::handle_start_game(
-                    &self.outbox,
-                    &mut self.players,
-                    &mut self.maze,
-                    &mut self.match_running,
-                    &mut self.match_start_time,
-                    &mut self.match_warmup_end,
-                    &mut self.match_end_pending,
-                    &mut self.match_total_maze_entries,
-                    self.match_mode,
-                    &mut self.match_duration,
-                    requested_duration,
-                    src_addr,
-                );
+                self.handle_start_request(src_addr, mode, duration, autofill)
             }
             ClientMsg::WallBroken { x, y } => {
                 if let Some(ref mut m) = self.maze {
@@ -394,7 +371,168 @@ impl Server {
                 broadcast::broadcast_player_list(&self.outbox, &self.players);
             }
 
+            ClientMsg::Chat { text } => handlers::handle_chat(
+                &self.outbox,
+                &self.players,
+                &mut self.last_chat,
+                src_addr,
+                &text,
+            ),
+            ClientMsg::EndMatch => self.handle_end_match(src_addr),
+
         }
+    }
+
+    /// `MSG_START_GAME`: the host starts a match from the lobby; while one runs,
+    /// anyone in the lobby joins it. The mode, duration and bot settings only
+    /// apply to a new match: a player joining never changes the one running.
+    fn handle_start_request(
+        &mut self,
+        src_addr: PeerId,
+        mode: Option<u8>,
+        duration: Option<u16>,
+        autofill: Option<(u8, u8)>,
+    ) {
+        self.end_match_if_abandoned();
+        let new_match = !self.match_running
+            && self.match_warmup_end.is_none()
+            && self.match_end_pending.is_none()
+            && game::host_addr(&self.players) == Some(src_addr);
+        let mut requested_duration = self.match_duration;
+        if new_match {
+            if let Some(requested) = mode {
+                if requested == MODE_GUN_GAME
+                    || requested == MODE_TEAM_DEATHMATCH
+                    || requested == MODE_SEARCH_AND_DESTROY
+                {
+                    self.match_mode = requested;
+                }
+            }
+            // auto-fill settings: bots_per_team, diff_mask
+            if let Some((bots_per_team, diff_mask)) = autofill {
+                self.autofill_bots_per_team = bots_per_team.min(8);
+                self.autofill_diff_mask = diff_mask & 0b11111;
+            } else {
+                self.autofill_bots_per_team = 0;
+                self.autofill_diff_mask = 0b11111;
+            }
+            // duration code: 0=default, 65535=unlimited; a non-zero value
+            // overrides the mode default
+            let dur_code: u16 = duration.unwrap_or(0);
+            requested_duration = if dur_code == u16::MAX {
+                None // unlimited
+            } else if dur_code > 0 {
+                Some(Duration::from_secs(dur_code as u64))
+            } else {
+                match self.match_mode {
+                    MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
+                    MODE_SEARCH_AND_DESTROY => None,
+                    _ => game::MATCH_DURATION,
+                }
+            };
+        }
+        handlers::handle_start_game(
+            &self.outbox,
+            &mut self.players,
+            &mut self.maze,
+            &mut self.match_running,
+            &mut self.match_start_time,
+            &mut self.match_warmup_end,
+            &mut self.match_end_pending,
+            &mut self.match_total_maze_entries,
+            self.match_mode,
+            &mut self.match_duration,
+            requested_duration,
+            src_addr,
+        );
+        self.send_match_status(false);
+    }
+
+    /// The match phase as clients see it (`MATCH_STATUS_*`).
+    fn match_status(&self) -> u8 {
+        if self.match_end_pending.is_some() {
+            MATCH_STATUS_ENDING
+        } else if self.match_running {
+            MATCH_STATUS_RUNNING
+        } else if self.match_warmup_end.is_some() {
+            MATCH_STATUS_STARTING
+        } else {
+            MATCH_STATUS_NONE
+        }
+    }
+
+    /// Broadcast the match phase when it changed, and every few seconds anyway
+    /// (packets get lost, and new players need it). `force` sends now.
+    fn send_match_status(&mut self, force: bool) {
+        let status = self.match_status();
+        let due = match self.last_status_sent {
+            Some((sent, at)) => sent != status || at.elapsed() >= Duration::from_secs(2),
+            None => true,
+        };
+        if force || due {
+            let msg = ServerMsg::MatchStatus { status }.encode();
+            broadcast::to_humans(&self.outbox, &self.players, &msg);
+            self.last_status_sent = Some((status, Instant::now()));
+        }
+    }
+
+    /// End a running match once every human has left the Maze (quit or went
+    /// back to the lobby), so bots don't play on by themselves.
+    fn end_match_if_abandoned(&mut self) {
+        if !self.match_running {
+            return;
+        }
+        let humans_in_maze = self
+            .players
+            .values()
+            .filter(|p| p.world == WorldId::Maze && !p.is_bot)
+            .count();
+        if humans_in_maze == 0 {
+            log!("No players remain in match — ending match early");
+            self.end_match_now();
+        }
+    }
+
+    /// Handler for `MSG_END_MATCH`: the host stops the match and everyone goes
+    /// back to the lobby, still connected. Ignored when no match is on.
+    fn handle_end_match(&mut self, src_addr: PeerId) {
+        if !self.match_running && self.match_end_pending.is_none() {
+            return;
+        }
+        if game::host_addr(&self.players) != Some(src_addr) {
+            let msg = ServerMsg::Chat {
+                from_id: 0,
+                name: String::new(),
+                text: "Only the host can end the match".to_string(),
+            }
+            .encode();
+            let _ = self.outbox.send_to(&msg, src_addr);
+            return;
+        }
+        let host = self.players.get(&src_addr).map(|p| p.username.clone()).unwrap_or_default();
+        log!("Match ended by host '{}'", host);
+        self.end_match_now();
+        handlers::broadcast_notice(&self.outbox, &self.players, &format!("{} ended the match", host));
+    }
+
+    /// Stop the current match at once: bots despawn, every player returns to
+    /// the lobby and match state resets. Connections are kept.
+    fn end_match_now(&mut self) {
+        handlers::execute_scheduled_match_end(
+            &self.outbox,
+            &mut self.players,
+            &mut self.maze,
+            &mut self.match_running,
+            &mut self.match_start_time,
+            &mut self.match_end_pending,
+            &mut self.last_match_time_sent,
+            &mut self.match_total_maze_entries,
+            &mut self.match_duration,
+            String::new(),
+            &mut self.snd_state,
+            &mut self.bot_manager,
+        );
+        self.send_match_status(false);
     }
 
     /// Periodic simulation step; call after each packet and at least every 100ms.
@@ -458,26 +596,21 @@ impl Server {
             }
         }
 
-        if game::cleanup_inactive_players(&mut self.players) {
+        let timed_out = game::cleanup_inactive_players(&mut self.players);
+        if !timed_out.is_empty() {
+            for p in &timed_out {
+                handlers::announce_left(&self.outbox, &self.players, p, LEAVE_TIMED_OUT);
+            }
             // players were removed — broadcast so other clients drop their characters
             broadcast::broadcast_state(&self.outbox, &self.players);
             broadcast::broadcast_player_list(&self.outbox, &self.players);
         }
-
-        // If a match is running but there are no players left in the Maze, end it immediately
-        if self.match_running {
-            let maze_count = self.players
-                .values()
-                .filter(|p| p.world == WorldId::Maze)
-                .count();
-            if maze_count == 0 {
-                log!("No self.players remain in match — ending match early");
-                self.match_running = false;
-                self.match_start_time = None;
-                self.maze = None;
-                self.match_total_maze_entries = 0;
-            }
+        if self.last_chat.len() > self.players.len() {
+            let players = &self.players;
+            self.last_chat.retain(|addr, _| players.contains_key(addr));
         }
+
+        self.end_match_if_abandoned();
 
         // Warmup expiry: actually start the match when the warmup countdown ends
         if self.match_warmup_end.is_some() && !self.match_running {
@@ -596,5 +729,168 @@ impl Server {
         } else {
             self.last_end_countdown_sent = None;
         }
+        self.send_match_status(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn to(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<ServerMsg> {
+        out.iter().filter(|(p, _)| *p == peer).filter_map(|(_, b)| ServerMsg::decode(b)).collect()
+    }
+
+    fn start_match(server: &mut Server, host: PeerId) {
+        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None };
+        server.handle_packet(host, &start.encode());
+        // skip the warmup countdown
+        server.match_warmup_end = Some(Instant::now());
+        server.tick();
+        assert!(server.match_running);
+    }
+
+    #[test]
+    fn host_ends_match_and_everyone_stays_connected() {
+        let mut server = Server::new();
+        let (a, b) = (PeerId(1), PeerId(2));
+        server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
+        server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+        start_match(&mut server, a);
+        server.drain_outbox();
+
+        // only the host may end it
+        server.handle_packet(b, &ClientMsg::EndMatch.encode());
+        assert!(server.match_running);
+        assert!(!to(&server.drain_outbox(), b).iter().any(|m| matches!(m, ServerMsg::WorldChange { .. })));
+
+        server.handle_packet(a, &ClientMsg::EndMatch.encode());
+        let out = server.drain_outbox();
+        for peer in [a, b] {
+            let msgs = to(&out, peer);
+            assert!(msgs.iter().any(|m| matches!(m, ServerMsg::WorldChange { world: 0, .. })));
+            assert!(msgs.iter().any(|m| matches!(m, ServerMsg::Chat { from_id: 0, .. })));
+        }
+        assert!(!server.match_running && server.maze.is_none());
+        assert!(server.has_peer(a) && server.has_peer(b));
+
+        // the lobby is still up: a new match can start straight away
+        start_match(&mut server, a);
+    }
+
+    #[test]
+    fn match_ends_once_every_human_has_left_it() {
+        let mut server = Server::new();
+        let (a, b) = (PeerId(1), PeerId(2));
+        server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
+        server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+        start_match(&mut server, a);
+        server.drain_outbox();
+
+        let lobby = ClientMsg::WorldChange { target: WorldId::Lobby.as_u8() };
+        server.handle_packet(b, &lobby.encode());
+        server.tick();
+        assert!(server.match_running, "alice is still playing");
+        let notice = ServerMsg::Chat { from_id: 0, name: String::new(), text: "bob left the match".into() };
+        assert!(to(&server.drain_outbox(), a).contains(&notice));
+
+        server.handle_packet(a, &lobby.encode());
+        server.tick();
+        assert!(!server.match_running && server.maze.is_none());
+    }
+
+    fn statuses(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<u8> {
+        to(out, peer)
+            .into_iter()
+            .filter_map(|m| match m {
+                ServerMsg::MatchStatus { status } => Some(status),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn two_players() -> (Server, PeerId, PeerId) {
+        let mut server = Server::new();
+        let (a, b) = (PeerId(1), PeerId(2));
+        server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
+        server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+        (server, a, b)
+    }
+
+    #[test]
+    fn host_stays_host_while_in_the_match() {
+        let (mut server, a, b) = two_players();
+        start_match(&mut server, a);
+        // bob goes back to the lobby; alice, in the maze, is still the host
+        server.handle_packet(b, &ClientMsg::WorldChange { target: WorldId::Lobby.as_u8() }.encode());
+        let leaders: Vec<u32> = to(&server.drain_outbox(), b)
+            .into_iter()
+            .filter_map(|m| match m {
+                ServerMsg::LobbyLeader { id } => Some(id),
+                _ => None,
+            })
+            .collect();
+        assert!(!leaders.is_empty());
+        assert!(leaders.iter().all(|id| *id == 1), "host changed: {leaders:?}");
+    }
+
+    #[test]
+    fn anyone_in_the_lobby_can_join_a_running_match_without_changing_it() {
+        let (mut server, a, b) = two_players();
+        start_match(&mut server, a);
+        let (mode, duration) = (server.match_mode, server.match_duration);
+        server.handle_packet(b, &ClientMsg::WorldChange { target: WorldId::Lobby.as_u8() }.encode());
+        server.drain_outbox();
+
+        // bob (not the host) rejoins, asking for other settings
+        let start = ClientMsg::StartGame {
+            mode: Some(MODE_GUN_GAME),
+            duration: Some(30),
+            autofill: Some((8, 0b1)),
+        };
+        server.handle_packet(b, &start.encode());
+        let out = server.drain_outbox();
+        assert!(to(&out, b).iter().any(|m| matches!(m, ServerMsg::WorldChange { world: 1, .. })));
+        assert_eq!(server.players[&b].world, WorldId::Maze);
+        assert_eq!((server.match_mode, server.match_duration), (mode, duration));
+        assert_eq!(server.autofill_bots_per_team, 0);
+    }
+
+    #[test]
+    fn start_requests_while_starting_or_ending_are_refused_with_a_reason() {
+        let (mut server, a, b) = two_players();
+        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None };
+        server.handle_packet(a, &start.encode());
+        server.drain_outbox();
+        server.handle_packet(b, &start.encode());
+        assert!(to(&server.drain_outbox(), b)
+            .contains(&ServerMsg::StartDenied { reason: Some(START_DENIED_STARTING) }));
+
+        server.match_warmup_end = Some(Instant::now());
+        server.tick();
+        server.match_end_pending = Some((Instant::now() + Duration::from_secs(60), 1, "alice".into()));
+        server.handle_packet(b, &ClientMsg::WorldChange { target: WorldId::Lobby.as_u8() }.encode());
+        server.drain_outbox();
+        server.handle_packet(b, &start.encode());
+        assert!(to(&server.drain_outbox(), b)
+            .contains(&ServerMsg::StartDenied { reason: Some(START_DENIED_ENDING) }));
+        assert_eq!(server.players[&b].world, WorldId::Lobby);
+    }
+
+    #[test]
+    fn match_status_follows_the_match() {
+        let (mut server, a, b) = two_players();
+        assert_eq!(statuses(&server.drain_outbox(), b).last(), Some(&MATCH_STATUS_NONE));
+
+        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None };
+        server.handle_packet(a, &start.encode());
+        assert_eq!(statuses(&server.drain_outbox(), b).last(), Some(&MATCH_STATUS_STARTING));
+
+        server.match_warmup_end = Some(Instant::now());
+        server.tick();
+        assert_eq!(statuses(&server.drain_outbox(), b).last(), Some(&MATCH_STATUS_RUNNING));
+
+        server.handle_packet(a, &ClientMsg::EndMatch.encode());
+        assert_eq!(statuses(&server.drain_outbox(), b).last(), Some(&MATCH_STATUS_NONE));
     }
 }

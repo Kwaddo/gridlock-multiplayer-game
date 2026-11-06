@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use crate::net::{Outbox, PeerId};
 
-use crate::server::{broadcast, game};
+use crate::protocols::LEAVE_QUIT;
+use crate::server::{broadcast, game, handlers};
 use crate::player::Player;
 
 /// Handler for MSG_DISCONNECT: remove player and inform others.
@@ -16,6 +17,7 @@ pub fn handle_disconnect(
             p.username,
             players.len()
         );
+        handlers::announce_left(socket, players, &p, LEAVE_QUIT);
         // re-balance lobby teams after player left
         game::auto_assign_lobby_teams(players);
         // broadcast state so other clients remove the character immediately

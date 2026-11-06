@@ -506,5 +506,7 @@ impl PlayingState {
         if is_snd {
             self.draw_snd_hud(player_id);
         }
+
+        self.chat.draw();
     }
 }
