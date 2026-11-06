@@ -71,6 +71,7 @@ pub struct GameConfig {
     pub bind_slow_walk: InputBinding,
     pub bind_prone: InputBinding,
     pub bind_fullscreen: InputBinding,
+    pub bind_chat: InputBinding,
 
     // Camera (UI value 40-120, default 90)
     pub fov: f32,
@@ -135,6 +136,7 @@ impl GameConfig {
             bind_slow_walk: InputBinding::Key(KeyCode::LeftAlt),
             bind_prone: InputBinding::Key(KeyCode::Z),
             bind_fullscreen: InputBinding::Key(KeyCode::F11),
+            bind_chat: InputBinding::Key(KeyCode::T),
 
             // Camera - UI value, converted to internal with raw_fov()
             // this is the same as the sensitivity from earlier, just converting it to a more intuitive UI value while raw_fov() converts it back to the actual FOV used in the game
@@ -239,6 +241,7 @@ impl GameConfig {
             ("Slow Walk", self.bind_slow_walk),
             ("Prone", self.bind_prone),
             ("Fullscreen", self.bind_fullscreen),
+            ("Chat", self.bind_chat),
         ]
     }
 }

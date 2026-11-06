@@ -25,6 +25,14 @@ impl PlayingState {
                 s.send(&msg);
             }
 
+            if std::mem::take(&mut self.pending_end_match) {
+                s.send(&ClientMsg::EndMatch.encode());
+            }
+
+            for text in self.chat.take_outgoing() {
+                s.send(&ClientMsg::Chat { text }.encode());
+            }
+
             // Lobby console: send start-game request to server (include selected gamemode)
             if self.pending_start_request {
                 self.pending_start_request = false;
@@ -132,7 +140,8 @@ impl PlayingState {
                     (dx * dx + dz * dz).sqrt() <= 3.5
                 };
 
-                let e_held = macroquad::prelude::is_key_down(macroquad::prelude::KeyCode::E);
+                let e_held = !self.chat.is_open()
+                    && macroquad::prelude::is_key_down(macroquad::prelude::KeyCode::E);
 
                 // Planting: we have the bomb, near site, hold E
                 if self.snd_bomb_carrier_id != 0

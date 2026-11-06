@@ -58,21 +58,26 @@ impl PlayingState {
             self.knife_miss_slow_timer = (self.knife_miss_slow_timer - raw_delta).max(0.0);
         }
 
+        // Typing a chat line takes every key (ESC cancels it rather than pausing).
+        if self.chat.is_open() {
+            self.chat.update_input();
+            self.halt_local_input();
+            return None;
+        }
+
         // Lobby console UI takes input precedence. Check it first so ESC closes the console
         // instead of opening the pause menu while the console is visible.
         self.check_shooting_range_start();
         self.check_lobby_console();
         if self.lobby_console_open {
             // keep UI responsive (mouse) but prevent movement/weapon input and stop movement
-            self.last_mouse_pos = mouse_position();
-            self.move_dir = Vec3::ZERO;
-            self.jump_requested = false;
-            self.movement_state.velocity = Vec3::ZERO;
-            self.movement_state.is_sprinting = false;
-            self.movement_state.is_crouching = false;
-            self.movement_state.is_slow_walking = false;
-            self.movement_state.is_prone = false;
-            self.movement_state.is_sliding = false;
+            self.halt_local_input();
+            return None;
+        }
+
+        if config.bind_chat.is_pressed() || is_key_pressed(KeyCode::Enter) {
+            self.chat.open();
+            self.halt_local_input();
             return None;
         }
 

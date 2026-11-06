@@ -334,6 +334,8 @@ pub fn sync_world(
             } else {
                 // returning to lobby: clear match-end state and maze
                 playing_state.match_time_left = 0.0;
+                // a match the host ended early leaves no victory screen up
+                playing_state.match_end_countdown_timer = 0.0;
                 // leaving the Maze / returning to Lobby — clear any mode-specific restrictions
                 playing_state.match_mode = None;
                 playing_state.weapons.set_locked_slot(None);
@@ -591,9 +593,13 @@ pub fn sync_world(
             playing_state.match_time_left = secs as f32;
         }
 
-        // Match-join announcement broadcast (show bottom-left)
+        for event in updates.chat {
+            playing_state.chat.push(event);
+        }
+
+        // Match-join announcement broadcast: in the chat, with the other comings and goings
         if let Some(msg) = updates.match_join_announce {
-            playing_state.announcements.push((msg, 4.0));
+            playing_state.chat.push(client::net::ChatEvent::Notice(msg));
         }
 
         // Match-end winner + countdown (server-sent). Do NOT change world locally; server will send WorldChange when it executes the return.
@@ -636,6 +642,9 @@ pub fn sync_world(
         }
 
         // Lobby leader update
+        if let Some(status) = updates.match_status {
+            playing_state.match_status = status;
+        }
         if let Some(leader_id) = updates.lobby_leader_id {
             playing_state.lobby_leader_id = if leader_id == 0 { None } else { Some(leader_id) };
         }

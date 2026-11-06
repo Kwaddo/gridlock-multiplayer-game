@@ -719,6 +719,7 @@ impl PlayingState {
             ann.1 = (ann.1 - delta).max(0.0);
         }
         self.announcements.retain(|ann| ann.1 > 0.0);
+        self.chat.tick(delta);
 
         self.damage_numbers.retain_mut(|dn| {
             dn.lifetime -= delta;

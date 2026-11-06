@@ -7,7 +7,7 @@ use platform::{Duration, Instant};
 
 use client::core::{ GameConfig, GameState };
 use client::screens::dev_mode::{ draw_dev_overlay, DevModeState };
-use client::screens::{ draw_pause_menu, LobbyInventoryScreen, LoginScreen, PlayingState };
+use client::screens::{ LobbyInventoryScreen, LoginScreen, PauseAction, PauseMenu, PlayingState };
 use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
@@ -71,6 +71,7 @@ pub async fn run() {
     let mut state = GameState::Login;
     let mut login_screen = LoginScreen::new();
     let mut settings_screen = SettingsScreen::new();
+    let mut pause_menu = PauseMenu::default();
     let mut playing_state = PlayingState::new().await;
 
     let mut session: Option<Session> = None;
@@ -167,6 +168,8 @@ pub async fn run() {
                     state = GameState::Exit;
                 }
                 if let Some(joined) = login_screen.update() {
+                    playing_state.chat.clear();
+                    pause_menu.reset();
                     username = joined.username.clone();
                     player_id = joined.player_id;
                     session = Some(joined);
@@ -401,15 +404,32 @@ pub async fn run() {
                 playing_state.simulate(&config, maze.as_ref());
                 playing_state.render(&mut config, &username, player_id, maze.as_ref());
 
+                let in_match = playing_state.current_world == client::types::world::WorldId::Maze;
+                let is_host = playing_state.is_host(player_id);
                 if
-                    let Some(new_state) = draw_pause_menu(
+                    let Some(action) = pause_menu.draw(
                         &config,
                         &mut settings_screen,
                         &mut playing_state.dev_mode,
-                        playing_state.current_world == client::types::world::WorldId::Maze
+                        in_match,
+                        is_host
                     )
                 {
-                    state = new_state;
+                    // Ending or leaving the match keeps the connection: the
+                    // server moves us back to the lobby and play goes on there.
+                    state = match action {
+                        PauseAction::Go(next) => next,
+                        PauseAction::EndMatch => {
+                            playing_state.pending_end_match = true;
+                            GameState::Playing
+                        }
+                        PauseAction::LeaveMatch => {
+                            playing_state.pending_world_change = Some(
+                                client::types::world::WorldId::Lobby
+                            );
+                            GameState::Playing
+                        }
+                    };
                     if matches!(state, GameState::LobbyInventory) {
                         lobby_inventory = LobbyInventoryScreen::new();
                     }
