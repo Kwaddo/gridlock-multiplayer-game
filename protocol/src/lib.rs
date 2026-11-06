@@ -35,6 +35,9 @@ pub const MSG_END_MATCH: u8 = 38; // client -> server: host ends the running mat
 
 pub const MSG_MATCH_STATUS: u8 = 39; // server -> all: match phase [status:1] (see MATCH_STATUS_*), on change and every few seconds
 
+pub const MSG_TEAM_SCORE: u8 = 40; // server -> all, team modes: [red:u16][blue:u16][to_win:u16] (big-endian),
+                                  // kills each team has scored this match; sent on change and every few seconds
+
 // MSG_MATCH_STATUS values
 pub const MATCH_STATUS_NONE: u8 = 0; // lobby only: the host can start a match
 pub const MATCH_STATUS_STARTING: u8 = 1; // warmup countdown running

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::net::PeerId;
-use crate::player::Player;
+use crate::player::{Player, Team, WorldId};
 use crate::maze::MazeData;
 use crate::maze::analysis::MazeAnalysis;
 use crate::bot::ai::{ BotState, BotBehavior };
@@ -79,117 +79,125 @@ pub fn decide_behavior(
         }
     };
 
-    // find nearest living enemy
+    // What the bot knows: the enemy it can see (shooting picked it), whoever
+    // shot it unseen, and where the nearest enemy is (bots always roughly know,
+    // which keeps them heading for the fight).
+    let visible = state.target_id.and_then(|id| find_enemy(players, bot, id));
+    let alerted = state.tactics.alert.map(|(id, pos, _)| (find_enemy(players, bot, id), pos));
     let nearest_enemy = players
         .values()
-        .filter(|p| p.is_alive && p.team != bot.team && p.id != bot.id)
+        .filter(|p| is_enemy(bot, p))
         .min_by(|a, b| {
             let da = dist2(a.position, bot.position);
             let db = dist2(b.position, bot.position);
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
+    let threatened = visible.is_some() || alerted.is_some();
 
-    // check if bot should retreat (health below threshold)
-    let health_ratio = (bot.health as f32) / 125.0;
+    // retreat when hurt
+    let health_ratio = (bot.health as f32) / (bot.max_health.max(1) as f32);
     if health_ratio < state.personality.retreat_health_threshold {
-        if !matches!(state.behavior, BotBehavior::Retreat { .. }) {
-            return retreat_from_enemy(bot_cell, nearest_enemy, maze, &nav_cells);
-        }
-        // already retreating — check if path is exhausted
         if let BotBehavior::Retreat { path, path_index } = &state.behavior {
-            if *path_index >= path.len() {
-                return pick_hold_angle(bot_cell, nearest_enemy, analysis, maze, state, &nav_cells);
+            if *path_index < path.len() {
+                return None; // keep retreating
             }
+            // got away: hold an angle back toward them
+            return pick_hold_angle(bot_cell, visible.or(nearest_enemy), analysis, maze, state, &nav_cells);
         }
-        return None; // keep retreating
+        if !matches!(state.behavior, BotBehavior::HoldAngle { .. }) {
+            return retreat_from_enemy(bot_cell, visible.or(nearest_enemy), maze, &nav_cells);
+        }
     }
 
-    // check if current behavior's timers have expired or paths are done
+    // keep doing what we are doing unless it is finished or something more
+    // urgent came up
     match &state.behavior {
-        BotBehavior::Hunt { repath_timer, target_player_id, path, path_idx, .. } => {
+        BotBehavior::Hunt { repath_timer, target_player_id, path, path_idx } => {
             let path_done = *path_idx >= path.len();
-            if *repath_timer <= 0.0 || path_done {
-                // timer expired or path exhausted — recalculate path to target
-                if let Some(enemy) = find_player_by_id(players, *target_player_id) {
-                    if
-                        let Some(goal) = world_to_cell(
-                            enemy.position.0,
-                            enemy.position.2,
-                            MAZE_CELL_SIZE,
-                            &maze.cells,
-                            maze.width,
-                            maze.height
-                        )
-                    {
-                        if
-                            let Some(new_path) = astar(
-                                &nav_cells,
-                                maze.width,
-                                maze.height,
-                                bot_cell,
-                                goal
-                            )
-                        {
+            match find_enemy(players, bot, *target_player_id) {
+                Some(enemy) if *repath_timer <= 0.0 || path_done => {
+                    // the target moved on: path to where they are now
+                    if let Some(new_path) = route_to_player(&nav_cells, maze, bot_cell, enemy) {
+                        return Some(BotBehavior::Hunt {
+                            path: new_path,
+                            path_idx: 0,
+                            target_player_id: enemy.id,
+                            repath_timer: state.personality.base_repath_interval,
+                        });
+                    }
+                }
+                Some(_) => return None, // still on the way
+                None => {} // target dead or gone: pick something new
+            }
+        }
+
+        BotBehavior::Flank { repath_timer, target_player_id, path, path_index } => {
+            let path_done = *path_index >= path.len();
+            match find_enemy(players, bot, *target_player_id) {
+                Some(enemy) if *repath_timer <= 0.0 || path_done => {
+                    if path_done {
+                        // made it round the back: go straight for them
+                        if let Some(new_path) = route_to_player(&nav_cells, maze, bot_cell, enemy) {
                             return Some(BotBehavior::Hunt {
                                 path: new_path,
                                 path_idx: 0,
-                                target_player_id: *target_player_id,
+                                target_player_id: enemy.id,
                                 repath_timer: state.personality.base_repath_interval,
                             });
                         }
                     }
-                }
-                if !path_done {
-                    // timer expired but no target → fall through to pick new behavior
-                } else {
-                    return None; // path done but no real target (walking to position), stay put
-                }
-            } else {
-                return None; // still following path
-            }
-        }
-
-        BotBehavior::Flank { repath_timer, target_player_id, path, path_index, .. } => {
-            let path_done = *path_index >= path.len();
-            if *repath_timer <= 0.0 || path_done {
-                if let Some(enemy) = find_player_by_id(players, *target_player_id) {
                     return flank_behind_enemy(bot_cell, enemy, state, maze, &nav_cells);
                 }
-                // target gone — fall through
-            } else {
-                return None;
+                Some(_) => return None,
+                None => {}
             }
         }
 
         BotBehavior::HoldAngle { hold_timer, max_hold_time, .. } => {
-            if *hold_timer < *max_hold_time {
-                if nearest_enemy.is_some() {
-                    // spotted enemy while holding — chance to push
-                    let roll = rand::thread_rng().gen::<f32>();
-                    if roll < state.personality.push_weight {
-                        // fall through to pick new behavior (will Hunt)
-                    } else {
-                        return None; // keep holding, shoot from here
-                    }
-                } else {
-                    return None; // keep holding
+            if let Some(enemy) = visible {
+                if dist2(enemy.position, bot.position).sqrt() <= state.personality.range_max {
+                    return None; // they walked into our angle: fight from here
                 }
+                // seen but out of reach: go after them
+            } else if alerted.is_none() && *hold_timer < *max_hold_time {
+                return None; // keep holding
             }
-            // timer expired or decided to push — fall through
+            // shot from somewhere unseen, or held long enough: move
         }
 
-        BotBehavior::Investigate { give_up_timer, path, path_index, .. } => {
-            if *give_up_timer > 0.0 && *path_index < path.len() {
+        BotBehavior::Investigate { give_up_timer, path, path_index } => {
+            if !threatened && *give_up_timer > 0.0 && *path_index < path.len() {
                 return None; // still investigating
             }
-            // give up — fall through
         }
 
         BotBehavior::Retreat { path, path_index } => {
             if *path_index < path.len() {
                 return None; // still retreating
             }
-            // path done — fall through
+        }
+
+        BotBehavior::Reposition { path, path_index, hold_face } => {
+            let destination = path.last().copied();
+            if *path_index < path.len() {
+                if !threatened {
+                    return None; // still on the way
+                }
+            } else if threatened {
+                // something came up on the way: deal with it below
+            } else if destination.is_some_and(|d| d != bot_cell) {
+                // the path was dropped (blocked or pushed off it): plan again
+                if let Some(path) = destination.and_then(|d| route(&nav_cells, maze, bot_cell, d)) {
+                    return Some(BotBehavior::Reposition { path, path_index: 0, hold_face: *hold_face });
+                }
+            } else if let Some(face) = hold_face {
+                // arrived: hold the angle we came for
+                return Some(BotBehavior::HoldAngle {
+                    face_direction: *face,
+                    hold_timer: 0.0,
+                    max_hold_time: state.personality.reposition_interval,
+                });
+            }
         }
 
         BotBehavior::Static => {}
@@ -200,29 +208,40 @@ pub fn decide_behavior(
         }
     }
 
-    // --- Pick a new behavior based on archetype and personality weights ---
+    // --- Pick a new behavior ---
 
-    if let Some(enemy) = nearest_enemy {
+    // someone we can't see shot us: go and find them
+    if visible.is_none() {
+        if let Some((attacker, pos)) = alerted {
+            if let Some(enemy) = attacker {
+                if let Some(path) = route_to_player(&nav_cells, maze, bot_cell, enemy) {
+                    return Some(BotBehavior::Hunt {
+                        path,
+                        path_idx: 0,
+                        target_player_id: enemy.id,
+                        repath_timer: state.personality.base_repath_interval,
+                    });
+                }
+            }
+            if let Some(path) = route_to_pos(&nav_cells, maze, bot_cell, pos) {
+                return Some(BotBehavior::Investigate { path, path_index: 0, give_up_timer: 5.0 });
+            }
+        }
+    }
+
+    if let Some(enemy) = visible.or(nearest_enemy) {
         let roll = rand::thread_rng().gen::<f32>();
-        let total =
-            state.personality.push_weight +
-            state.personality.flank_weight +
-            state.personality.hold_angle_weight;
+        let total = (state.personality.push_weight
+            + state.personality.flank_weight
+            + state.personality.hold_angle_weight)
+            .max(0.001);
 
         let push_chance = state.personality.push_weight / total;
         let flank_chance = state.personality.flank_weight / total;
 
         if roll < push_chance {
             // HUNT — A* directly to the enemy
-            let enemy_cell = world_to_cell(
-                enemy.position.0,
-                enemy.position.2,
-                MAZE_CELL_SIZE,
-                &maze.cells,
-                maze.width,
-                maze.height
-            )?;
-            let path = astar(&nav_cells, maze.width, maze.height, bot_cell, enemy_cell)?;
+            let path = route_to_player(&nav_cells, maze, bot_cell, enemy)?;
             return Some(BotBehavior::Hunt {
                 path,
                 path_idx: 0,
@@ -234,7 +253,7 @@ pub fn decide_behavior(
             return flank_behind_enemy(bot_cell, enemy, state, maze, &nav_cells);
         } else {
             // HOLD ANGLE — find a strategic position
-            return pick_hold_angle(bot_cell, nearest_enemy, analysis, maze, state, &nav_cells);
+            return pick_hold_angle(bot_cell, Some(enemy), analysis, maze, state, &nav_cells);
         }
     }
 
@@ -242,31 +261,12 @@ pub fn decide_behavior(
     if let Some(last_pos) = state.last_known_enemy_pos {
         let roll = rand::thread_rng().gen::<f32>();
         if roll < state.personality.noise_investigation_weight {
-            if
-                let Some(target_cell) = world_to_cell(
-                    last_pos.0,
-                    last_pos.2,
-                    MAZE_CELL_SIZE,
-                    &maze.cells,
-                    maze.width,
-                    maze.height
-                )
-            {
-                if
-                    let Some(path) = astar(
-                        &nav_cells,
-                        maze.width,
-                        maze.height,
-                        bot_cell,
-                        target_cell
-                    )
-                {
-                    return Some(BotBehavior::Investigate {
-                        path,
-                        path_index: 0,
-                        give_up_timer: 5.0,
-                    });
-                }
+            if let Some(path) = route_to_pos(&nav_cells, maze, bot_cell, last_pos) {
+                return Some(BotBehavior::Investigate {
+                    path,
+                    path_index: 0,
+                    give_up_timer: 5.0,
+                });
             }
         }
     }
@@ -309,7 +309,7 @@ fn flank_behind_enemy(
             maze.height
         )
     )?;
-    let path = astar(nav_cells, maze.width, maze.height, bot_cell, target_cell)?;
+    let path = route(nav_cells, maze, bot_cell, target_cell)?;
     Some(BotBehavior::Flank {
         path,
         path_index: 0,
@@ -347,7 +347,7 @@ fn retreat_from_enemy(
         maze.width,
         maze.height
     )?;
-    let path = astar(nav_cells, maze.width, maze.height, bot_cell, retreat_cell)?;
+    let path = route(nav_cells, maze, bot_cell, retreat_cell)?;
     Some(BotBehavior::Retreat {
         path,
         path_index: 0,
@@ -423,15 +423,9 @@ fn pick_hold_angle(
         });
     }
 
-    // path to the hold position using Hunt (tick_bot will walk us there)
-    // when path exhausts, next decide_behavior call picks HoldAngle
-    let path = astar(nav_cells, maze.width, maze.height, bot_cell, target)?;
-    Some(BotBehavior::Hunt {
-        path,
-        path_idx: 0,
-        target_player_id: 0, // no real target, walking to position
-        repath_timer: f32::MAX, // don't repath
-    })
+    // walk to the hold position; on arrival decide_behavior switches to HoldAngle
+    let path = route(nav_cells, maze, bot_cell, target)?;
+    Some(BotBehavior::Reposition { path, path_index: 0, hold_face: Some((face_dx, face_dz)) })
 }
 
 fn roam_to_random_point(
@@ -466,17 +460,50 @@ fn roam_to_random_point(
         return None;
     }
 
-    let path = astar(nav_cells, maze.width, maze.height, bot_cell, target)?;
-    Some(BotBehavior::Hunt {
-        path,
-        path_idx: 0,
-        target_player_id: 0, // roaming
-        repath_timer: f32::MAX,
-    })
+    let path = route(nav_cells, maze, bot_cell, target)?;
+    Some(BotBehavior::Reposition { path, path_index: 0, hold_face: None })
 }
 
-fn find_player_by_id<'a>(players: &'a HashMap<PeerId, Player>, id: u32) -> Option<&'a Player> {
-    players.values().find(|p| p.id == id && p.is_alive)
+/// `p` is someone `bot` fights: alive, in the maze, on the other team.
+fn is_enemy(bot: &Player, p: &Player) -> bool {
+    p.id != bot.id
+        && p.is_alive
+        && p.world == WorldId::Maze
+        && p.team != bot.team
+        && p.team != Team::Spectator
+}
+
+fn find_enemy<'a>(players: &'a HashMap<PeerId, Player>, bot: &Player, id: u32) -> Option<&'a Player> {
+    players.values().find(|p| p.id == id && is_enemy(bot, p))
+}
+
+/// A* from `from` to `to`, without `from` itself: the bot is already in that
+/// cell, and walking back to its centre first makes it stutter on every repath.
+fn route(nav_cells: &[u8], maze: &MazeData, from: (u8, u8), to: (u8, u8)) -> Option<Vec<(u8, u8)>> {
+    let mut path = astar(nav_cells, maze.width, maze.height, from, to)?;
+    if path.len() > 1 {
+        path.remove(0);
+    }
+    Some(path)
+}
+
+fn route_to_pos(
+    nav_cells: &[u8],
+    maze: &MazeData,
+    from: (u8, u8),
+    pos: (f32, f32, f32),
+) -> Option<Vec<(u8, u8)>> {
+    let goal = world_to_cell(pos.0, pos.2, MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height)?;
+    route(nav_cells, maze, from, goal)
+}
+
+fn route_to_player(
+    nav_cells: &[u8],
+    maze: &MazeData,
+    from: (u8, u8),
+    player: &Player,
+) -> Option<Vec<(u8, u8)>> {
+    route_to_pos(nav_cells, maze, from, player.position)
 }
 
 fn dist2(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {

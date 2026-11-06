@@ -235,6 +235,10 @@ pub struct PlayingState {
     pub lobby_leader_id: Option<u32>,
     /// Match phase from the server (`MATCH_STATUS_*`).
     pub match_status: u8,
+    /// Team Deathmatch score from the server, while a match is on.
+    pub team_score: Option<crate::net::TeamScore>,
+    /// Players in the running match (the rest are in the lobby).
+    pub match_player_ids: HashSet<u32>,
 }
 
 pub struct KillFeedEntry {
@@ -393,6 +397,8 @@ impl PlayingState {
             fps_time_acc: 0.0,
             lobby_leader_id: None,
             match_status: crate::net::protocols::MATCH_STATUS_NONE,
+            team_score: None,
+            match_player_ids: HashSet::new(),
         }
     }
 }

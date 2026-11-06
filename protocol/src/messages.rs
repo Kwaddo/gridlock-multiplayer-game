@@ -132,6 +132,7 @@ pub enum ServerMsg {
     PlayerJoined { id: u32, name: String },
     PlayerLeft { id: u32, name: String, reason: u8 },
     MatchStatus { status: u8 },
+    TeamScore { red: u16, blue: u16, to_win: u16 },
 }
 
 /// Client -> server.
@@ -311,6 +312,9 @@ impl ServerMsg {
                 Writer::new(MSG_PLAYER_LEFT).u32(*id).str8(name).u8(*reason).finish()
             }
             ServerMsg::MatchStatus { status } => vec![MSG_MATCH_STATUS, *status],
+            ServerMsg::TeamScore { red, blue, to_win } => {
+                Writer::new(MSG_TEAM_SCORE).u16(*red).u16(*blue).u16(*to_win).finish()
+            }
         }
     }
 
@@ -448,6 +452,7 @@ impl ServerMsg {
                 ServerMsg::PlayerLeft { id: r.u32()?, name: r.str8()?, reason: r.u8()? }
             }
             MSG_MATCH_STATUS => ServerMsg::MatchStatus { status: r.u8()? },
+            MSG_TEAM_SCORE => ServerMsg::TeamScore { red: r.u16()?, blue: r.u16()?, to_win: r.u16()? },
             _ => return None,
         };
         Some(msg)
@@ -634,6 +639,7 @@ mod tests {
         rt_server(ServerMsg::Chat { from_id: 0, name: String::new(), text: "Match ended".into() });
         rt_server(ServerMsg::PlayerJoined { id: 4, name: "bob".into() });
         rt_server(ServerMsg::MatchStatus { status: MATCH_STATUS_RUNNING });
+        rt_server(ServerMsg::TeamScore { red: 42, blue: 7, to_win: 100 });
         rt_server(ServerMsg::PlayerLeft { id: 4, name: "bob".into(), reason: LEAVE_TIMED_OUT });
     }
 

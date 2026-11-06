@@ -41,6 +41,7 @@ pub struct NetUpdate {
     pub bot_shots: Option<Vec<(Vec3, Vec3)>>, // (start, end)
     pub lobby_leader_id: Option<u32>,         // host player ID (0 = none)
     pub match_status: Option<u8>,             // MATCH_STATUS_*
+    pub team_score: Option<TeamScore>,        // team modes: kills per team
     pub death: bool,                          // You died
     pub death_killer_id: Option<u32>,         // who killed us (from MSG_DEATH)
     pub death_weapon: Option<String>,         // weapon used to kill us (from MSG_DEATH)
@@ -53,6 +54,14 @@ pub struct NetUpdate {
 
     // true if poll_updates read at least one packet from the socket during this call
     pub received_any: bool,
+}
+
+/// Kills each team has scored this match, and how many win it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TeamScore {
+    pub red: u16,
+    pub blue: u16,
+    pub to_win: u16,
 }
 
 /// A chat-feed entry decoded from the server.
@@ -123,6 +132,7 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
         bot_shots: None,
         lobby_leader_id: None,
         match_status: None,
+        team_score: None,
         chat: Vec::new(),
     };
 
@@ -249,6 +259,9 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
             }
             ServerMsg::MatchStatus { status } => {
                 update.match_status = Some(status);
+            }
+            ServerMsg::TeamScore { red, blue, to_win } => {
+                update.team_score = Some(TeamScore { red, blue, to_win });
             }
             ServerMsg::MatchJoined { name, .. } => {
                 update.match_join_announce = Some(format!("{} joined the match", name));

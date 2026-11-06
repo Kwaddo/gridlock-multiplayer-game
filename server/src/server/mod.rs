@@ -62,6 +62,10 @@ pub struct Server {
     last_chat: HashMap<PeerId, Instant>,
     /// Last `MSG_MATCH_STATUS` broadcast: value and time.
     last_status_sent: Option<(u8, Instant)>,
+    /// Team kills this match (team modes).
+    team_score: game::TeamScore,
+    /// Last `MSG_TEAM_SCORE` broadcast: value and time.
+    last_team_score_sent: Option<(game::TeamScore, Instant)>,
 }
 
 impl Server {
@@ -91,6 +95,8 @@ impl Server {
             last_broadcast_players: 0,
             last_chat: HashMap::new(),
             last_status_sent: None,
+            team_score: game::TeamScore::default(),
+            last_team_score_sent: None,
         }
     }
 
@@ -211,6 +217,7 @@ impl Server {
                 self.match_mode,
                 &mut self.snd_state,
                 self.bot_manager.bot_states_mut(),
+                &mut self.team_score,
             ),
             ClientMsg::RespawnRequest => {
                 handlers::handle_respawn_request(
@@ -357,6 +364,7 @@ impl Server {
                         idle_look_timer: 0.0,
                         current_yaw: 0.0,
                         current_pitch: 0.0,
+                        tactics: Default::default(),
                     };
 
                     self.bot_manager.spawn_bot(&mut self.players, bot_player, bot_state);
@@ -572,7 +580,14 @@ impl Server {
             }
         }
         // tick bots
-        self.bot_manager.tick(&self.outbox, &mut self.players, &mut self.match_end_pending, self.match_mode, self.maze.as_ref());
+        self.bot_manager.tick(
+            &self.outbox,
+            &mut self.players,
+            &mut self.match_end_pending,
+            self.match_mode,
+            self.maze.as_ref(),
+            &mut self.team_score,
+        );
         if self.bot_manager.handle_range_challenge_timeout(&mut self.players) {
             broadcast::broadcast_state(&self.outbox, &self.players);
             broadcast::broadcast_player_list(&self.outbox, &self.players);
@@ -614,6 +629,8 @@ impl Server {
 
         // Warmup expiry: actually start the match when the warmup countdown ends
         if self.match_warmup_end.is_some() && !self.match_running {
+            // every match starts from nil
+            self.team_score = game::TeamScore::default();
             handlers::maybe_start_match(
                 &self.outbox,
                 &mut self.players,
@@ -665,6 +682,7 @@ impl Server {
                 &mut self.match_start_time,
                 self.match_mode,
                 &mut self.match_duration,
+                self.team_score,
             );
         }
 
@@ -681,6 +699,7 @@ impl Server {
                 &mut self.match_end_pending,
                 self.match_mode,
                 self.match_duration,
+                self.team_score,
             );
         }
 
@@ -730,6 +749,34 @@ impl Server {
             self.last_end_countdown_sent = None;
         }
         self.send_match_status(false);
+        self.send_team_score();
+    }
+
+    /// Broadcast the team score during a Team Deathmatch: when it changes, and
+    /// every few seconds anyway (packets get lost, and new players need it).
+    fn send_team_score(&mut self) {
+        let in_play = self.match_mode == MODE_TEAM_DEATHMATCH
+            && (self.match_running || self.match_end_pending.is_some());
+        if !in_play {
+            self.last_team_score_sent = None;
+            return;
+        }
+        let score = self.team_score;
+        let due = match self.last_team_score_sent {
+            Some((sent, at)) => sent != score || at.elapsed() >= Duration::from_secs(2),
+            None => true,
+        };
+        if due {
+            let clamp = |v: u32| v.min(u16::MAX as u32) as u16;
+            let msg = ServerMsg::TeamScore {
+                red: clamp(score.red),
+                blue: clamp(score.blue),
+                to_win: clamp(game::MATCH_SCORE_TO_WIN),
+            }
+            .encode();
+            broadcast::to_humans(&self.outbox, &self.players, &msg);
+            self.last_team_score_sent = Some((score, Instant::now()));
+        }
     }
 }
 
@@ -892,5 +939,44 @@ mod tests {
 
         server.handle_packet(a, &ClientMsg::EndMatch.encode());
         assert_eq!(statuses(&server.drain_outbox(), b).last(), Some(&MATCH_STATUS_NONE));
+    }
+
+    #[test]
+    fn team_score_counts_kills_as_they_happen_and_keeps_them() {
+        let (mut server, a, b) = two_players();
+        start_match(&mut server, a);
+        let (alice, bob) = (server.players[&a].team, server.players[&b].team);
+        assert_ne!(alice, bob, "TDM puts the two on opposite teams");
+        server.players.get_mut(&a).unwrap().post_teleport_freeze_until = None;
+        server.players.get_mut(&b).unwrap().post_teleport_freeze_until = None;
+        server.drain_outbox();
+
+        let kill = ClientMsg::Hit { victim_id: 2, damage: 500.0, weapon: Some("AK-47".into()), backstab: None };
+        server.handle_packet(a, &kill.encode());
+        server.tick();
+        let expected = if alice == crate::player::Team::Red {
+            game::TeamScore { red: 1, blue: 0 }
+        } else {
+            game::TeamScore { red: 0, blue: 1 }
+        };
+        assert_eq!(server.team_score, expected);
+        let (red, blue) = (expected.red as u16, expected.blue as u16);
+        let sent = ServerMsg::TeamScore { red, blue, to_win: game::MATCH_SCORE_TO_WIN as u16 };
+        assert!(to(&server.drain_outbox(), b).contains(&sent));
+
+        // alice leaving the match doesn't take her kill off her team
+        server.handle_packet(a, &ClientMsg::WorldChange { target: WorldId::Lobby.as_u8() }.encode());
+        server.tick();
+        assert_eq!(server.team_score, expected);
+    }
+
+    #[test]
+    fn team_kills_score_nothing() {
+        let mut score = game::TeamScore::default();
+        score.record_kill(crate::player::Team::Red, crate::player::Team::Red);
+        score.record_kill(crate::player::Team::Spectator, crate::player::Team::Blue);
+        assert_eq!(score, game::TeamScore::default());
+        score.record_kill(crate::player::Team::Blue, crate::player::Team::Red);
+        assert_eq!(score, game::TeamScore { red: 0, blue: 1 });
     }
 }
