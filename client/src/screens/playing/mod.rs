@@ -1,4 +1,5 @@
 mod camera;
+pub mod chat;
 mod movement;
 mod rendering;
 mod teleporter;

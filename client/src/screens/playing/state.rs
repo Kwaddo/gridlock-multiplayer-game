@@ -167,6 +167,10 @@ pub struct PlayingState {
 
     // short bottom-left announcements (message, timer)
     pub announcements: Vec<(String, f32)>,
+    /// Text chat and join/leave notices.
+    pub chat: super::chat::Chat,
+    /// Host asked (pause menu) to end the running match for everyone.
+    pub pending_end_match: bool,
     pub lobby_console_message: Option<String>,
     pub lobby_console_message_timer: f32,
     pub range_phase: u8,
@@ -229,6 +233,8 @@ pub struct PlayingState {
 
     // lobby leader player ID — only this player may start a match
     pub lobby_leader_id: Option<u32>,
+    /// Match phase from the server (`MATCH_STATUS_*`).
+    pub match_status: u8,
 }
 
 pub struct KillFeedEntry {
@@ -327,6 +333,8 @@ impl PlayingState {
             lobby_console_message_timer: 0.0,
             range_phase: 1,
             announcements: Vec::with_capacity(Self::INIT_ANNOUNCEMENTS),
+            chat: Default::default(),
+            pending_end_match: false,
             connected_players: Vec::new(),
             hands_playback_mode: HandsPlaybackMode::IdleLoop,
             hands_anim_initialized: false,
@@ -384,6 +392,7 @@ impl PlayingState {
             fps_frame_count: 0,
             fps_time_acc: 0.0,
             lobby_leader_id: None,
+            match_status: crate::net::protocols::MATCH_STATUS_NONE,
         }
     }
 }

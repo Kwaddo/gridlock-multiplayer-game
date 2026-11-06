@@ -38,29 +38,22 @@ pub fn handle_start_game(
     requested_duration: Option<Duration>,
     src_addr: PeerId,
 ) {
-    // If a match is marked running but there are no players in the Maze,
-    // treat it as stale and clear it so new starts are accepted.
-    if *match_running {
-        let maze_count = players
-            .values()
-            .filter(|p| p.world == WorldId::Maze)
-            .count();
-        if maze_count == 0 {
-            log!("Stale match detected (no players) — clearing match state");
-            *match_running = false;
-            *match_start_time = None;
-            *match_duration = game::MATCH_DURATION;
-            *match_end_pending = None;
-        }
+    // A match nobody plays in any more is ended by `Server` before this runs.
+    if match_warmup_end.is_some() {
+        let _ = socket.send_to(&ServerMsg::StartDenied { reason: Some(START_DENIED_STARTING) }.encode(), src_addr);
+        return;
+    }
+    if match_end_pending.is_some() {
+        // the match is over; joining now would only show the end screen
+        let _ = socket.send_to(&ServerMsg::StartDenied { reason: Some(START_DENIED_ENDING) }.encode(), src_addr);
+        return;
     }
 
-    // only accept start requests when not already running or scheduled
-    if !*match_running && match_warmup_end.is_none() && match_end_pending.is_none() {
-        // Only the lobby leader (first-joined human lobby player) may start a new match.
-        let leader_addr = game::lobby_leader_addr(players);
-        if leader_addr != Some(src_addr) {
-            let _ = socket.send_to(&ServerMsg::StartDenied { reason: Some(1) }.encode(), src_addr);
-            log!("Start-game request from {} rejected: not the lobby leader.", src_addr);
+    if !*match_running {
+        // Only the host (first-joined human player) may start a new match.
+        if game::host_addr(players) != Some(src_addr) {
+            let _ = socket.send_to(&ServerMsg::StartDenied { reason: Some(START_DENIED_NOT_HOST) }.encode(), src_addr);
+            log!("Start-game request from {} rejected: not the host.", src_addr);
             return;
         }
 

@@ -1,3 +1,6 @@
+// Real sockets and threads: native only.
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::net::UdpSocket;
 use std::thread;
 use std::time::Duration;

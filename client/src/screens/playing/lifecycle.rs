@@ -13,6 +13,25 @@ impl PlayingState {
         self.jump_requested = false;
     }
 
+    /// Whether we host the game (the server names the host: the first human to
+    /// join). The host starts and ends matches.
+    pub fn is_host(&self, player_id: u32) -> bool {
+        self.lobby_leader_id == Some(player_id)
+    }
+
+    /// Stop the local player while a UI (chat, lobby console) has the keyboard.
+    pub(super) fn halt_local_input(&mut self) {
+        self.last_mouse_pos = mouse_position();
+        self.move_dir = Vec3::ZERO;
+        self.jump_requested = false;
+        self.movement_state.velocity = Vec3::ZERO;
+        self.movement_state.is_sprinting = false;
+        self.movement_state.is_crouching = false;
+        self.movement_state.is_slow_walking = false;
+        self.movement_state.is_prone = false;
+        self.movement_state.is_sliding = false;
+    }
+
     pub fn take_damage(&mut self, damage: f32, attacker_id: Option<u32>) {
         if self.dev_mode.god_mode || self.is_dead || self.invulnerability_timer > 0.0 {
             return;

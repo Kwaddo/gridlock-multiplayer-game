@@ -83,3 +83,58 @@ fn every_server_packet_decodes() {
         assert!(types.contains(&t), "server never sent type {t}; got {types:?}");
     }
 }
+
+fn decoded(out: &[(PeerId, Vec<u8>)], to: PeerId) -> Vec<protocol::ServerMsg> {
+    out.iter()
+        .filter(|(p, _)| *p == to)
+        .filter_map(|(_, b)| protocol::ServerMsg::decode(b))
+        .collect()
+}
+
+fn joined_pair() -> (Server, PeerId, PeerId) {
+    use protocol::ClientMsg;
+    let mut server = Server::new();
+    let (a, b) = (PeerId(1), PeerId(2));
+    server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
+    server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+    server.tick();
+    (server, a, b)
+}
+
+#[test]
+fn join_and_leave_are_announced() {
+    use protocol::{ServerMsg, LEAVE_QUIT};
+    let mut server = Server::new();
+    let (a, b) = (PeerId(1), PeerId(2));
+    server.handle_packet(a, &protocol::ClientMsg::Join { username: "alice".into() }.encode());
+    server.drain_outbox();
+    server.handle_packet(b, &protocol::ClientMsg::Join { username: "bob".into() }.encode());
+    let out = server.drain_outbox();
+    assert!(decoded(&out, a).contains(&ServerMsg::PlayerJoined { id: 2, name: "bob".into() }));
+    assert!(!decoded(&out, b).iter().any(|m| matches!(m, ServerMsg::PlayerJoined { .. })));
+
+    server.handle_packet(b, &protocol::ClientMsg::Disconnect.encode());
+    let out = server.drain_outbox();
+    assert!(decoded(&out, a)
+        .contains(&ServerMsg::PlayerLeft { id: 2, name: "bob".into(), reason: LEAVE_QUIT }));
+}
+
+#[test]
+fn chat_reaches_everyone_cleaned_and_rate_limited() {
+    use protocol::{ClientMsg, ServerMsg};
+    let (mut server, a, b) = joined_pair();
+    server.drain_outbox();
+
+    server.handle_packet(a, &ClientMsg::Chat { text: "  gg\n wp ".into() }.encode());
+    let out = server.drain_outbox();
+    let line = ServerMsg::Chat { from_id: 1, name: "alice".into(), text: "gg wp".into() };
+    assert!(decoded(&out, a).contains(&line));
+    assert!(decoded(&out, b).contains(&line));
+
+    // straight away again: dropped
+    server.handle_packet(a, &ClientMsg::Chat { text: "spam".into() }.encode());
+    // blank: dropped
+    server.handle_packet(b, &ClientMsg::Chat { text: "   ".into() }.encode());
+    let out = server.drain_outbox();
+    assert!(!out.iter().any(|(_, b)| b[0] == protocol::MSG_CHAT));
+}

@@ -5,6 +5,15 @@ use platform::Instant;
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
 
+/// Send one packet to every human player.
+pub fn to_humans(socket: &Outbox, players: &HashMap<PeerId, Player>, msg: &[u8]) {
+    for (addr, p) in players.iter() {
+        if !p.is_bot {
+            let _ = socket.send_to(msg, *addr);
+        }
+    }
+}
+
 /// Send the full connected player list to a single destination
 #[allow(dead_code)]
 pub fn send_player_list(
@@ -35,7 +44,7 @@ fn player_list_msg(players: &HashMap<PeerId, Player>) -> Vec<u8> {
 }
 
 /// Broadcast updated player list to every connected client.
-/// Also broadcasts the current lobby leader so clients can update the host indicator.
+/// Also broadcasts the host so clients can update the host indicator.
 pub fn broadcast_player_list(socket: &Outbox, players: &HashMap<PeerId, Player>) {
     broadcast_lobby_leader(socket, players);
 
@@ -50,9 +59,9 @@ pub fn broadcast_player_list(socket: &Outbox, players: &HashMap<PeerId, Player>)
     }
 }
 
-/// Broadcast the current lobby leader's player ID to every connected client.
+/// Broadcast the host's player ID to every connected client.
 pub fn broadcast_lobby_leader(socket: &Outbox, players: &HashMap<PeerId, Player>) {
-    let leader_id: u32 = crate::server::game::lobby_leader_addr(players)
+    let leader_id: u32 = crate::server::game::host_addr(players)
         .and_then(|addr| players.get(&addr))
         .map(|p| p.id)
         .unwrap_or(0);

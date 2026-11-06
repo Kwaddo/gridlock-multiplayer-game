@@ -1,4 +1,7 @@
-use crate::net::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH};
+use crate::net::protocols::{
+    MATCH_STATUS_ENDING, MATCH_STATUS_RUNNING, MATCH_STATUS_STARTING, MODE_GUN_GAME,
+    MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH,
+};
 use crate::types::world::WorldId;
 use macroquad::prelude::*;
 
@@ -669,10 +672,24 @@ impl PlayingState {
         let total_btn_w = start_btn_w + 12.0 + close_btn_w;
         let btn_start_x = panel_x + (panel_w - total_btn_w) / 2.0;
 
-        let is_leader = self.lobby_leader_id == Some(player_id);
+        // What the main button does depends on the match phase: the host starts
+        // a match; while one runs, anyone in the lobby can join it.
+        let start_label = match self.pending_start_gamemode {
+            MODE_GUN_GAME => "START  GUN GAME",
+            MODE_TEAM_DEATHMATCH => "START  TEAM DEATHMATCH",
+            MODE_SEARCH_AND_DESTROY => "START  SEARCH & DESTROY",
+            _ => "START MATCH",
+        };
+        let (action_label, action_enabled) = match self.match_status {
+            MATCH_STATUS_RUNNING => ("JOIN MATCH", true),
+            MATCH_STATUS_STARTING => ("MATCH STARTING...", false),
+            MATCH_STATUS_ENDING => ("MATCH ENDING...", false),
+            _ if self.is_host(player_id) => (start_label, true),
+            _ => ("WAITING FOR HOST...", false),
+        };
 
-        if is_leader {
-            // Start Match — orange accent (matches login CONNECT button)
+        if action_enabled {
+            // orange accent (matches login CONNECT button)
             let s_hov = mouse.0 >= btn_start_x
                 && mouse.0 <= btn_start_x + start_btn_w
                 && mouse.1 >= btn_area_y
@@ -684,20 +701,15 @@ impl PlayingState {
                 btn_h,
                 if s_hov { ACCENT_HOVER } else { ACCENT },
             );
-            let start_label = match self.pending_start_gamemode {
-                MODE_GUN_GAME => "START  GUN GAME",
-                MODE_TEAM_DEATHMATCH => "START  TEAM DEATHMATCH",
-                MODE_SEARCH_AND_DESTROY => "START  SEARCH & DESTROY",
-                _ => "START MATCH",
-            };
-            let slw = measure_game_text(start_label, 17);
+            let slw = measure_game_text(action_label, 17);
             draw_text_ex(
-                start_label,
+                action_label,
                 btn_start_x + (start_btn_w - slw) / 2.0,
                 btn_area_y + 27.0,
                 text_params(17, Color::new(0.05, 0.05, 0.05, 1.0)),
             );
             if s_hov && clicked {
+                // the same request starts a match or joins the running one
                 self.pending_start_request = true;
                 self.lobby_console_open = false;
                 set_cursor_grab(true);
@@ -705,7 +717,7 @@ impl PlayingState {
                 self.last_mouse_pos = mouse_position();
             }
         } else {
-            // Non-leader: show disabled "Waiting for host..." button
+            // disabled: waiting for the host, or for the match to start/finish
             draw_rectangle(
                 btn_start_x,
                 btn_area_y,
@@ -714,10 +726,9 @@ impl PlayingState {
                 Color::new(0.10, 0.11, 0.20, 1.0),
             );
             draw_rectangle_lines(btn_start_x, btn_area_y, start_btn_w, btn_h, 1.0, PANEL_BORDER);
-            let wait_label = "WAITING FOR HOST...";
-            let wlw = measure_game_text(wait_label, 17);
+            let wlw = measure_game_text(action_label, 17);
             draw_text_ex(
-                wait_label,
+                action_label,
                 btn_start_x + (start_btn_w - wlw) / 2.0,
                 btn_area_y + 27.0,
                 text_params(17, TEXT_DIM),
