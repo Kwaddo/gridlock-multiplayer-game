@@ -13,7 +13,7 @@
 "use strict";
 
 (function () {
-    const PLUGIN_VERSION = 2;
+    const PLUGIN_VERSION = 3;
 
     // Event kinds shared with transport/src/web.rs.
     const EV_PEER_JOINED = 1;
@@ -460,7 +460,9 @@
             url.pathname = "/ice";
             const resp = await fetch(url);
             const body = await resp.json();
-            if (Array.isArray(body.iceServers) && body.iceServers.length) return body.iceServers;
+            // An empty list is deliberate: the local server (registry/local/) has
+            // no STUN to offer offline, and LAN peers connect without one.
+            if (Array.isArray(body.iceServers)) return body.iceServers;
         } catch {}
         return STUN_FALLBACK;
     }
@@ -710,6 +712,17 @@
             } catch {
                 return 0; // quota exceeded or storage disabled
             }
+        };
+
+        // ---- platform::page_setting: window.GRIDLOCK_<name>, set by the page
+        // (the local server sets GRIDLOCK_REGISTRY). Bytes via gridlock_storage_take.
+
+        env.gridlock_page_setting = function (namePtr, nameLen, lenOut) {
+            const value = window["GRIDLOCK_" + readString(namePtr, nameLen)];
+            if (typeof value !== "string") return 0;
+            storageTaken = encoder.encode(value);
+            writeU32(lenOut, storageTaken.length);
+            return 1;
         };
 
         // ---- pointer lock (replaces miniquad's version)

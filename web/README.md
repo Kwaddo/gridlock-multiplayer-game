@@ -21,19 +21,62 @@ The Rust side of those imports lives in `platform/`, `transport/src/web.rs` and
 the wasm must agree, and `PLUGIN_VERSION` / `gridlock_web_crate_version` let
 miniquad warn when they do not.
 
-## Build and try it locally
+## Games on your network
 
-Deploy the Worker first (`registry/README.md`), or run it locally with
-`npx wrangler dev` in `registry/`. Then:
+On <https://gridlock.kwaddo.dev>, games hosted from your own network are at
+the top of BROWSE with a green LAN badge. The registry compares addresses:
+a game whose host reached it from the same public address (IPv4) or the same
+/64 (IPv6) is marked `lan` in its reply; the address itself is never shown.
+Game traffic between players always goes directly from browser to browser
+over WebRTC (on a LAN, inside it); only the brief introduction goes through
+the registry. A page on HTTPS cannot reach a local server
+(`http://192.168…`), so games hosted on one (below) are listed only there.
+
+## Play offline / on your network
 
 ```bash
-GRIDLOCK_REGISTRY=https://gridlock-registry.<you>.workers.dev ./build_web.sh --serve
-# or, against a local Worker:
-GRIDLOCK_REGISTRY=http://127.0.0.1:8787 ./build_web.sh --serve
+./play_local.sh            # builds dist/web the first time; --rebuild to build again
+# or, after any build:
+./build_web.sh --serve
 ```
 
-Open <http://localhost:8080> in two windows: host in one (HOST tab), join from
-the other (BROWSE, or DIRECT with the room code the host is shown).
+Both run `registry/local/server.mjs` (Node.js 18+, no packages). It serves the
+page and the registry's API from your machine, kept in memory, and prints
+the addresses to open:
+
+```
+Gridlock local server
+  Play on this machine:   http://localhost:8080
+  Play from your network: http://192.168.1.20:8080
+```
+
+No internet is needed. Anyone on the same network opens the second address
+and can host (HOST tab), see the games in BROWSE, or join one by its room code
+(DIRECT). Open two windows on one machine to try it alone.
+
+How it works: the server adds `window.GRIDLOCK_REGISTRY = location.origin` to
+the page it serves, and the game uses that at run time instead of the registry
+baked into the build (`platform::page_setting`). The same build therefore
+works online and offline. `/ice` returns no ICE servers, since peers on one
+network connect directly, and `/models/*` is served from the build (or from
+`client/assets/models` when the build left them out).
+
+Options: `--port`, `--host` (default `0.0.0.0`, every interface; use
+`127.0.0.1` to keep it to this machine), `--dir`, `--models`. Native clients
+can use the same server: `GRIDLOCK_REGISTRY=http://<that address> ./client`.
+
+If players on other machines see the game list but cannot connect:
+
+- Check that both machines are on the same network, and that the network does
+  not isolate clients from each other. Many guest Wi-Fi networks do.
+- Check that the firewall lets Node.js accept connections. macOS asks the
+  first time the server starts.
+- Browsers hide local IP addresses behind mDNS names (`<id>.local`), and the
+  network must pass mDNS (multicast) for peers to find each other.
+
+The page is plain HTTP on a LAN address, so the browser does not keep models
+in Cache Storage there (it needs HTTPS or localhost). Each load downloads them
+again from the local server, which is fast on a LAN.
 
 ## Publish on Dilmune
 

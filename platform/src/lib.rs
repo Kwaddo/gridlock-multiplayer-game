@@ -35,6 +35,29 @@ pub fn page_hidden() -> bool {
     return unsafe { web::gridlock_page_hidden() } != 0;
 }
 
+/// A setting from the page that loaded the game: the string in
+/// `window.GRIDLOCK_<name>`, when it is set and not empty. The local server
+/// (`registry/local/`) uses it to point the game at itself. Native builds have
+/// no page, so this is always `None` there.
+pub fn page_setting(name: &str) -> Option<String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = name;
+        None
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    unsafe {
+        let mut len = 0u32;
+        if web::gridlock_page_setting(name.as_ptr(), name.len() as u32, &mut len) == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; len as usize];
+        web::gridlock_storage_take(buf.as_mut_ptr());
+        String::from_utf8(buf).ok().filter(|v| !v.is_empty())
+    }
+}
+
 /// Small text values kept between runs (settings, crosshair presets).
 ///
 /// Native builds keep a file named `key` in the working directory, which the
@@ -74,7 +97,7 @@ pub mod storage {
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn gridlock_web_crate_version() -> u32 {
-    2
+    3
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -92,6 +115,9 @@ mod web {
         pub(crate) fn gridlock_storage_get(key: *const u8, key_len: u32, len_out: *mut u32) -> u32;
         pub(crate) fn gridlock_storage_take(buf: *mut u8);
         pub(crate) fn gridlock_storage_set(key: *const u8, key_len: u32, value: *const u8, value_len: u32) -> u32;
+        /// 1 if `window.GRIDLOCK_<name>` is a string; its UTF-8 length goes to
+        /// `len_out`, bytes via `gridlock_storage_take`.
+        pub(crate) fn gridlock_page_setting(name: *const u8, name_len: u32, len_out: *mut u32) -> u32;
     }
 
     /// Monotonic instant with the same API surface as `std::time::Instant`.
