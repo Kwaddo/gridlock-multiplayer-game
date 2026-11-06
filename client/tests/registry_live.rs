@@ -2,6 +2,9 @@
 //! `GRIDLOCK_REGISTRY=http://127.0.0.1:8787 cargo test -p client --test registry_live -- --ignored`
 //! (start one with `npx wrangler dev` in `registry/`).
 
+// Real sockets and threads: native only.
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::thread;
