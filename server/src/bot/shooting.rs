@@ -37,14 +37,11 @@ pub fn try_shoot(
     dt: f32,
 ) -> Option<ShotDecision> {
 
-    if bot_state.shooting.fire_rate > 0.0 {
-        bot_state.shooting.fire_rate = (bot_state.shooting.fire_rate - dt).max(0.0);
-        return None; // still cooling down, can't shoot
-    }
-
-    if bot_state.shooting.reaction_remaining > 0.0 {
-        bot_state.shooting.reaction_remaining = (bot_state.shooting.reaction_remaining - dt).max(0.0);
-        return None; // still reacting, can't shoot yet
+    // timers run every tick, whatever else happens
+    bot_state.shooting.fire_rate = (bot_state.shooting.fire_rate - dt).max(0.0);
+    bot_state.shooting.reaction_remaining = (bot_state.shooting.reaction_remaining - dt).max(0.0);
+    if let Some((_, since)) = &mut bot_state.tactics.lost_target {
+        *since += dt;
     }
 
     // resolve bot player from players using bot_addr
@@ -53,55 +50,81 @@ pub fn try_shoot(
         None => return None, // bot player not found (shouldn't happen)
     };
     let weapon_stats = get_weapon_stats(&bot.current_weapon);
+    let mods = difficulty_mods(bot_state.difficulty);
 
-    // find target
-    
-    let runtime_fov = bot_state
-        .personality
-        .base_fov_degrees
-        .max(difficulty_mods(bot_state.difficulty).fov_degrees);
-
-    let target = players.values()
-        .filter(|p| {
-            p.id != bot.id 
-            && p.is_alive 
-            && p.world == bot.world 
-            && distance(bot.position, p.position) <= bot_state.shooting_config.detection_range.unwrap_or(weapon_stats.range)
+    // find target: who can we see and shoot at?
+    let runtime_fov = bot_state.personality.base_fov_degrees.max(mods.fov_degrees);
+    let range = bot_state.shooting_config.detection_range.unwrap_or(weapon_stats.range);
+    let can_engage = |p: &Player| {
+        p.id != bot.id
+            && p.is_alive
+            && p.world == bot.world
+            && distance(bot.position, p.position) <= range
             && is_in_fov(bot, p, runtime_fov)
             && has_line_of_sight(bot, p, maze)
-            && (
-                if bot.world == WorldId::Lobby {
-                    !p.is_bot
-                } else {
-                    p.team != bot.team && p.team != Team::Spectator
-                }
-            )
-        }).min_by(|a, b| {
-            let da = distance(bot.position, a.position);
-            let db = distance(bot.position, b.position);
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        });
+            && (if bot.world == WorldId::Lobby {
+                !p.is_bot
+            } else {
+                p.team != bot.team && p.team != Team::Spectator
+            })
+    };
+    let current = bot_state
+        .target_id
+        .and_then(|id| players.values().find(|p| p.id == id))
+        .filter(|p| can_engage(p));
+    let nearest = players.values().filter(|p| can_engage(p)).min_by(|a, b| {
+        let da = distance(bot.position, a.position);
+        let db = distance(bot.position, b.position);
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    // Stick with the enemy we are fighting: switching costs a new reaction
+    // time, and flipping between two at similar range meant never firing.
+    // Only a clearly closer one (more so for better bots) takes over.
+    let target = match (current, nearest) {
+        (Some(c), Some(n))
+            if n.id != c.id
+                && distance(bot.position, n.position)
+                    < distance(bot.position, c.position) * (1.0 - mods.target_stickiness * 0.6) =>
+        {
+            Some(n)
+        }
+        (Some(c), _) => Some(c),
+        (None, n) => n,
+    };
 
-        let Some(target) = target else {
-            bot_state.target_id = None;
-            bot_state.shooting.has_target = false;
-            return None; // no valid targets
-        };
+    let Some(target) = target else {
+        if let Some(id) = bot_state.target_id.take() {
+            bot_state.tactics.lost_target = Some((id, 0.0));
+        }
+        bot_state.shooting.has_target = false;
+        return None; // no valid targets
+    };
 
-        // handle target change
-        let new_target = target.id;
+    // handle target change
+    let new_target = target.id;
 
-        if bot_state.target_id != Some(new_target) {
-            bot_state.target_id = Some(new_target);
-            bot_state.shooting.has_target = true;
+    if bot_state.target_id != Some(new_target) {
+        if let Some(old) = bot_state.target_id {
+            bot_state.tactics.lost_target = Some((old, 0.0));
+        }
+        // Someone we only just lost sight of (behind a corner, say) needs no
+        // fresh reaction; a new face does.
+        let seen_moments_ago = matches!(
+            bot_state.tactics.lost_target,
+            Some((id, since)) if id == new_target && since <= mods.wall_read_memory_time
+        );
+        bot_state.target_id = Some(new_target);
+        bot_state.shooting.has_target = true;
+        if !seen_moments_ago {
             bot_state.shooting.reaction_remaining = bot_state.shooting_config.reaction_time;
             return None; // just acquired target, start reaction timer
         }
+    }
 
-        // has target and reaction time elapsed, attempt to shoot
-        if bot_state.shooting.reaction_remaining > 0.0 {
-            return None; // still reacting, can't shoot yet
-        }
+    // has target and reaction time elapsed, attempt to shoot
+    if bot_state.shooting.reaction_remaining > 0.0 {
+        return None; // still reacting, can't shoot yet
+    }
 
         // gate fire on aim alignment — bot must actually be looking at the target, this is to guard against bot firing when target is not visually in sight
         {

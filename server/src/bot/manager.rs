@@ -9,6 +9,9 @@ use crate::bot::behavior;
 use crate::bot::personality::{ self, BotPersonalityId };
 use crate::protocols::{ ServerMsg, MODE_TEAM_DEATHMATCH };
 use crate::server::handlers::other;
+/// Seconds between a match bot's decisions (plus up to 0.1 s jitter).
+const DECISION_INTERVAL: f32 = 0.2;
+
 pub struct BotManager {
     bot_addrs: Vec<PeerId>,
     bot_states: HashMap<PeerId, BotState>,
@@ -159,6 +162,7 @@ impl BotManager {
             idle_look_timer: 0.0,
             current_yaw: 0.0,
             current_pitch: 0.0,
+            tactics: Default::default(),
         };
 
         let addr = self.spawn_bot(players, bot_player, bot_state);
@@ -188,7 +192,8 @@ impl BotManager {
         players: &mut HashMap<PeerId, Player>,
         match_end_pending: &mut Option<(Instant, u32, String)>,
         match_mode: u8,
-        maze: Option<&crate::maze::MazeData>
+        maze: Option<&crate::maze::MazeData>,
+        team_score: &mut crate::server::game::TeamScore,
     ) {
         if self.last_tick.elapsed() < self.tick_interval {
             return;
@@ -198,9 +203,10 @@ impl BotManager {
         let dt = self.tick_interval.as_secs_f32();
 
         // ── Brain: run decide_behavior for maze-world bots ──
-        // Collect behavior changes first, then apply (avoids borrow conflicts).
+        // A few times a second rather than every tick: decisions with random
+        // rolls made 30 times a second flip-flop (a camper "decides" to push
+        // within moments), and nobody re-plans that fast.
         if let Some(m) = maze {
-            let mut behavior_changes: Vec<(PeerId, ai::BotBehavior)> = Vec::new();
             for addr in &self.bot_addrs {
                 let bot = match players.get(addr) {
                     Some(p) if p.is_alive && p.world == WorldId::Maze => p,
@@ -214,31 +220,20 @@ impl BotManager {
                 {
                     continue;
                 }
-                let state = match self.bot_states.get(addr) {
-                    Some(s) => s,
-                    None => {
-                        continue;
-                    }
+                let Some(state) = self.bot_states.get_mut(addr) else {
+                    continue;
                 };
                 // only run for bots with a personality_id (maze bots, not shooting range bots)
                 if state.personality_id.is_none() {
                     continue;
                 }
-                if
-                    let Some(new_behavior) = behavior::decide_behavior(
-                        bot,
-                        state,
-                        players,
-                        m,
-                        &m.analysis
-                    )
-                {
-                    behavior_changes.push((*addr, new_behavior));
+                state.behavior_decision_timer -= dt;
+                if state.behavior_decision_timer > 0.0 {
+                    continue;
                 }
-            }
-            // apply behavior changes
-            for (addr, new_behavior) in behavior_changes {
-                if let Some(state) = self.bot_states.get_mut(&addr) {
+                // a little jitter so a team of bots doesn't think in lockstep
+                state.behavior_decision_timer = DECISION_INTERVAL + rand::random::<f32>() * 0.1;
+                if let Some(new_behavior) = behavior::decide_behavior(bot, state, players, m, &m.analysis) {
                     state.behavior = new_behavior;
                 }
             }
@@ -255,53 +250,78 @@ impl BotManager {
                         p.world == WorldId::Maze &&
                         p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
                 });
-            let target_pos = self.bot_states
-                .get(addr)
-                .and_then(|s| s.target_id)
-                .and_then(|target_id|
-                    players
-                        .values()
-                        .find(|p| p.id == target_id)
-                        .map(|p| p.position)
-                );
+            let Some(state) = self.bot_states.get_mut(addr) else {
+                continue;
+            };
+            let find_alive = |id: u32| players.values().find(|p| p.id == id && p.is_alive).map(|p| p.position);
+            // the enemy in sight, if any
+            let target_pos = state.target_id.and_then(find_alive);
+            // else whoever shot us: where they are now, or where they shot from
+            let alert_pos = state
+                .tactics
+                .alert
+                .map(|(id, pos, _)| find_alive(id).unwrap_or(pos));
             if let Some(bot) = players.get_mut(addr) {
-                if let Some(state) = self.bot_states.get_mut(addr) {
-                    if is_frozen {
-                        state.movement.velocity.x = 0.0;
-                        state.movement.velocity.z = 0.0;
-                        continue;
+                if is_frozen {
+                    state.movement.velocity.x = 0.0;
+                    state.movement.velocity.z = 0.0;
+                    continue;
+                }
+                // fighting moves (strafing, keeping range) only for match bots;
+                // shooting-range bots keep to their set routine
+                let engage = target_pos.filter(|_| state.personality_id.is_some()).map(|pos| {
+                    let dx = pos.0 - bot.position.0;
+                    let dz = pos.2 - bot.position.2;
+                    ai::Engagement { target_pos: pos, distance: (dx * dx + dz * dz).sqrt() }
+                });
+                let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height, m.props.as_slice()));
+                ai::tick_bot(bot, state, dt, &PhysicsConfig::default(), maze_cells, engage);
+
+                if let Some(target_pos) = target_pos {
+                    // remember last known enemy position for investigation behavior
+                    state.last_known_enemy_pos = Some(target_pos);
+                }
+                if let Some(look_pos) = target_pos.or(alert_pos) {
+                    let dx = look_pos.0 - bot.position.0;
+                    let dy = look_pos.1 - bot.position.1;
+                    let dz = look_pos.2 - bot.position.2;
+                    let horiz_dist = (dx * dx + dz * dz).sqrt(); // for FOV and yaw calculations
+                    if horiz_dist > 0.01 {
+                        let target_yaw = dz.atan2(dx); // atan2 is a method that returns the angle between the positive x-axis and the point (dx, dz)
+                        let target_pitch = -(dy / horiz_dist.max(0.001)).atan(); // negative because in most FPS coordinate systems, looking up is negative pitch
+
+                        // Smoothly rotate towards target based on personality turn_rate.
+                        // turn_rate_mult > 1 means slower (easier bots), so divide.
+                        let turn_rate = state.personality.base_turn_rate
+                            / personality::difficulty_mods(state.difficulty).turn_rate_mult.max(0.01);
+
+                        // lerp yaw
+                        let yaw_diff = {
+                            let d = target_yaw - state.current_yaw;
+                            ((d + PI).rem_euclid(2.0 * PI)) - PI // shortest angle difference
+                        };
+
+                        let max_turn = turn_rate * dt;
+                        state.current_yaw += yaw_diff.clamp(-max_turn, max_turn);
+
+                        let pitch_diff = target_pitch - state.current_pitch;
+                        state.current_pitch += pitch_diff.clamp(-max_turn * 0.6, max_turn * 0.6);
+
+                        bot.yaw = state.current_yaw;
+                        bot.pitch = state.current_pitch;
                     }
-                    let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height, m.props.as_slice()));
-                    ai::tick_bot(bot, state, dt, &PhysicsConfig::default(), maze_cells);
-                    if let Some(target_pos) = target_pos {
-                        // remember last known enemy position for investigation behavior
-                        state.last_known_enemy_pos = Some(target_pos);
-                        let dx = target_pos.0 - bot.position.0;
-                        let dy = target_pos.1 - bot.position.1;
-                        let dz = target_pos.2 - bot.position.2;
-                        let horiz_dist = (dx * dx + dz * dz).sqrt(); // for FOV and yaw calculations
-                        if horiz_dist > 0.01 {
-                            let target_yaw = dz.atan2(dx); // atan2 is a method that returns the angle between the positive x-axis and the point (dx, dz)
-                            let target_pitch = -(dy / horiz_dist.max(0.001)).atan(); // negative because in most FPS coordinate systems, looking up is negative pitch
-                            
-                            // Smoothly rotate towards target based on personality turn_rate
-                            let turn_rate = state.personality.base_turn_rate * personality::difficulty_mods(state.difficulty).turn_rate_mult;
-                            
-                            // lerp yaw
-                            let yaw_diff = {
-                                let d = target_yaw - state.current_yaw;
-                                ((d + PI).rem_euclid(2.0 * PI)) - PI // shortest angle difference
-                            };
+                } else {
+                    // nothing to aim at: the aim follows where the bot looks, so
+                    // spotting someone turns from here, not from a stale angle
+                    state.current_yaw = bot.yaw;
+                    state.current_pitch = bot.pitch;
+                }
 
-                            let max_turn = turn_rate * dt;
-                            state.current_yaw += yaw_diff.clamp(-max_turn, max_turn);
-
-                            let pitch_diff = target_pitch - state.current_pitch;
-                            state.current_pitch += pitch_diff.clamp(-max_turn * 0.6, max_turn * 0.6);
-
-                            bot.yaw = state.current_yaw;
-                            bot.pitch = state.current_pitch;
-                        }
+                // the alert fades, and ends once we see someone
+                if let Some((_, _, left)) = &mut state.tactics.alert {
+                    *left -= dt;
+                    if *left <= 0.0 || target_pos.is_some() {
+                        state.tactics.alert = None;
                     }
                 }
             }
@@ -377,7 +397,8 @@ impl BotManager {
                     match_end_pending,
                     match_mode,
                     &mut self.bot_states,
-                    maze
+                    maze,
+                    team_score
                 );
             }
         }
