@@ -135,6 +135,10 @@ Installs to `~/.local/share/gridlock`, symlinks `gridlock` into `~/.local/bin`, 
    ```
 3. Log in from the client screen, pick a loadout in the lobby, join the match.
 
+**Browser, offline or on your network:** `./play_local.sh` builds the browser
+version and serves it with a local registry (Node.js 18+). Open the address it
+prints on any machine on the network, then host or join. See `web/README.md`.
+
 ---
 
 ## Assets
