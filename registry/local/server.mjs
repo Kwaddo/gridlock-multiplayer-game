@@ -40,6 +40,13 @@ const MAX_SIGNALS = 64;
 const MAX_BODY = 256 * 1024;
 const ROOM_CODE = /^[A-Za-z0-9_-]{4,32}$/;
 const PEER_ID = /^[0-9a-f-]{36}$/;
+// Long polling: a poll with `wait` and nothing new for the caller is held
+// this long, answered the moment a message for it arrives. Signalling then
+// costs one LAN round trip instead of a poll interval. The reply carries
+// LONG_POLL_HEADER so the page knows it may poll again at once; the live
+// registry does not hold polls, and the page keeps its intervals there.
+const LONG_POLL_MS = 15000;
+const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -184,10 +191,26 @@ function authorized(req, id) {
 
 // ---------------------------------------------------------------- signalling
 
-function room(req, body, url, code, action) {
+// Peer id -> callbacks of its held polls.
+const waiting = new Map();
+let nextSeq = 1;
+
+function wake(id) {
+  const callbacks = waiting.get(id);
+  if (!callbacks) return;
+  waiting.delete(id);
+  for (const cb of callbacks) cb();
+}
+
+function room(req, res, body, url, code, action) {
   prune();
   const now = Date.now();
-  const deliver = (to, msgBody) => rooms.get(code)?.messages.push({ id: randomUUID(), to, at: now, body: msgBody });
+  const deliver = (to, msgBody) => {
+    const r = rooms.get(code);
+    if (!r) return;
+    r.messages.push({ id: randomUUID(), seq: nextSeq++, to, at: now, body: msgBody });
+    wake(to);
+  };
 
   if (action === "join" && req.method === "POST") {
     const asHost = url.searchParams.has("host");
@@ -215,7 +238,33 @@ function room(req, body, url, code, action) {
     if (asHost && url.searchParams.has("keep")) r.expires = now + HOST_TTL_SECONDS * 1000;
     // Every message for the caller from the last MESSAGE_TTL_MS, with ids; the
     // client skips the ones it has seen (same contract as the live registry).
-    return json(r.messages.filter((m) => m.to === id).map((m) => ({ id: m.id, ...m.body })));
+    // `seq` lets a long poll say which messages it already has.
+    const reply = () => {
+      const current = rooms.get(code);
+      if (!current || (asHost && current.host !== id)) return json({ error: "room closed" }, 410);
+      const out = json(current.messages.filter((m) => m.to === id).map((m) => ({ id: m.id, seq: m.seq, ...m.body })));
+      out.headers[LONG_POLL_HEADER] = "1";
+      return out;
+    };
+    if (!url.searchParams.has("wait")) return reply();
+    const after = Number(url.searchParams.get("after")) || 0;
+    if (r.messages.some((m) => m.to === id && m.seq > after)) return reply();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        waiting.get(id)?.delete(finish);
+        resolve(reply());
+      };
+      const timer = setTimeout(finish, LONG_POLL_MS);
+      if (!waiting.has(id)) waiting.set(id, new Set());
+      waiting.get(id).add(finish);
+      // the page went away mid-poll: stop holding it (the request itself
+      // reports "close" as soon as its body is read, so watch the response)
+      res.on("close", finish);
+    });
   }
 
   if (["hello", "send", "leave"].includes(action) && req.method === "POST") {
@@ -242,6 +291,8 @@ function room(req, body, url, code, action) {
         rooms.delete(code);
         for (const [lid, l] of listings) if (l.entry.room === code) listings.delete(lid);
         log(`room ${code} closed`);
+        // held polls hear that the room closed
+        for (const peer of [...waiting.keys()]) wake(peer);
       } else if (!asHost) {
         deliver(r.host, { PeerLeft: id });
       }
@@ -388,7 +439,7 @@ const server = createServer((req, res) => {
       if (root === "ice") return req.method === "GET" ? json({ iceServers: [] }) : json({ error: "not found" }, 404);
       if (root === "servers") return servers(req, body, arg, action);
       if (!ROOM_CODE.test(arg)) return json({ error: "bad room code" }, 400);
-      return room(req, body, url, arg, action);
+      return room(req, res, body, url, arg, action);
     })
     .catch((e) => (e === TOO_BIG ? json({ error: "too large" }, 413) : json({ error: "server error" }, 500)))
     .then(reply);
@@ -398,6 +449,7 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Expose-Headers": "X-Gridlock-Long-Poll",
 };
 
 const TOO_BIG = new Error("body too large");
