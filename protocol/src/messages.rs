@@ -151,8 +151,12 @@ pub enum ClientMsg {
         mode: Option<u8>,
         // seconds; 0 = server default, 65535 = unlimited
         duration: Option<u16>,
-        // (bots_per_team, difficulty mask)
+        // (bots, difficulty mask): bots is the Red team's bot count in team
+        // modes and the total bot count in Gun Game
         autofill: Option<(u8, u8)>,
+        // Blue team's bot count in team modes; `None` (older clients) means
+        // the same as Red
+        blue_bots: Option<u8>,
     },
     SetTeam { team: u8 },
     SndBombPickup,
@@ -490,7 +494,7 @@ impl ClientMsg {
                 w.finish()
             }
             ClientMsg::RespawnRequest => vec![MSG_RESPAWN_REQUEST],
-            ClientMsg::StartGame { mode, duration, autofill } => {
+            ClientMsg::StartGame { mode, duration, autofill, blue_bots } => {
                 let mut w = Writer::new(MSG_START_GAME);
                 if let Some(m) = mode {
                     w.u8(*m);
@@ -498,6 +502,9 @@ impl ClientMsg {
                         w.u16(*d);
                         if let Some((bots, mask)) = autofill {
                             w.u8(*bots).u8(*mask);
+                            if let Some(blue) = blue_bots {
+                                w.u8(*blue);
+                            }
                         }
                     }
                 }
@@ -548,7 +555,8 @@ impl ClientMsg {
                     (Some(b), Some(m)) => Some((b, m)),
                     _ => None,
                 };
-                ClientMsg::StartGame { mode, duration, autofill }
+                let blue_bots = if autofill.is_some() { r.u8() } else { None };
+                ClientMsg::StartGame { mode, duration, autofill, blue_bots }
             }
             MSG_SET_TEAM => ClientMsg::SetTeam { team: r.u8()? },
             MSG_SND_BOMB_PICKUP => ClientMsg::SndBombPickup,
@@ -670,8 +678,9 @@ mod tests {
         rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: Some(1), event_flags: Some(2) });
         rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: None, event_flags: None });
         rt_client(ClientMsg::Hit { victim_id: 2, damage: 30.0, weapon: Some("AK".into()), backstab: Some(false) });
-        rt_client(ClientMsg::StartGame { mode: Some(3), duration: Some(0), autofill: Some((4, 0b11111)) });
-        rt_client(ClientMsg::StartGame { mode: None, duration: None, autofill: None });
+        rt_client(ClientMsg::StartGame { mode: Some(3), duration: Some(0), autofill: Some((4, 0b11111)), blue_bots: None });
+        rt_client(ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: Some((1, 0b00100)), blue_bots: Some(5) });
+        rt_client(ClientMsg::StartGame { mode: None, duration: None, autofill: None, blue_bots: None });
         rt_client(ClientMsg::WeaponChange { name: "MP5".into() });
         rt_client(ClientMsg::BotSpawn { behavior: 255, level: 2 });
         rt_client(ClientMsg::Chat { text: "hello there".into() });

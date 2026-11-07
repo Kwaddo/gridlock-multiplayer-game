@@ -87,8 +87,11 @@ pub struct PlayingState {
     pub pending_range_start: bool,
     pub lobby_console_open: bool,
     // auto-fill bot settings (lobby console)
-    pub autofill_enabled: bool,
-    pub autofill_bots_per_team: u8,   // 0..=8
+    // auto-fill bots the host asks for (0 = none): per team in team modes,
+    // a plain total in Gun Game
+    pub autofill_red_bots: u8,        // 0..=MAX_BOTS_PER_TEAM
+    pub autofill_blue_bots: u8,       // 0..=MAX_BOTS_PER_TEAM
+    pub autofill_ffa_bots: u8,        // 0..=MAX_FFA_BOTS
     pub autofill_diff_recruit: bool,
     pub autofill_diff_easy: bool,
     pub autofill_diff_normal: bool,
@@ -281,8 +284,9 @@ impl PlayingState {
             pending_set_team: None,
             pending_range_start: false,
             lobby_console_open: false,
-            autofill_enabled: false,
-            autofill_bots_per_team: 3,
+            autofill_red_bots: 0,
+            autofill_blue_bots: 0,
+            autofill_ffa_bots: 0,
             autofill_diff_recruit: true,
             autofill_diff_easy: true,
             autofill_diff_normal: true,

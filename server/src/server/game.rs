@@ -16,15 +16,31 @@ pub const PLAYER_TIMEOUT: Duration = Duration::from_secs(10);
 // and the native host after every packet. Rarer events still send at once.
 pub const STATE_BROADCAST_INTERVAL: Duration = Duration::from_millis(33);
 pub const MAZE_CELL_SIZE: f32 = 1.8;
-pub const MAZE_WIDTH: u8 = 35;
-pub const MAZE_HEIGHT: u8 = 35;
+// The maze is square and sized for the players in the match (humans plus
+// bots), so a duel isn't a long hunt and a full lobby still has room. Sides
+// are odd: the maze carver works on odd cells. Wire coordinates are u8, so a
+// side must stay well under 255.
+pub const MAZE_MIN_SIDE: u8 = 23; // ~41 m across
+pub const MAZE_MAX_SIDE: u8 = 43; // a full 16-player match: ~77 m across
+
+/// Maze side length, in cells, for a match with `players` participants.
+/// Grows with the square root of the player count, so each player gets a
+/// little less room as the lobby fills (more people, more encounters):
+/// 1 player: 23, 2: 25, 4: 29, 8: 33, 12: 39, 16: 41.
+pub fn maze_side_for_players(players: usize) -> u8 {
+    let n = players.max(1) as f32;
+    let side = (15.0 + 6.5 * n.sqrt()).round() as u8;
+    let odd = side | 1;
+    odd.clamp(MAZE_MIN_SIDE, MAZE_MAX_SIDE)
+}
 pub const MAZE_AUTO_RESPAWN_DELAY: Duration = Duration::from_secs(3);
 
 // Match / game loop settings (basic foundation)
 // match length; `None` = infinite, `Some(d)` = end matches after `d` elapses
 pub const MATCH_DURATION: Option<Duration> = Some(Duration::from_secs(900)); // TDM default: 15 minutes
 pub const MIN_PLAYERS_TO_START: usize = 1; // minimal players required to start a match
-pub const MATCH_MAX_PLAYERS: usize = 16; // maximum concurrent players in a running match
+pub use crate::protocols::MATCH_MAX_PLAYERS; // maximum concurrent players in a running match
+pub use crate::protocols::{MAX_BOTS_PER_TEAM, MAX_FFA_BOTS}; // auto-fill caps
 pub const MATCH_SCORE_TO_WIN: u32 = 100; // kills required to win the match (used for TDM)
 
 pub const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts // seconds shown to players before a match actually starts

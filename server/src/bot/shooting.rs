@@ -3,10 +3,13 @@ use crate::net::PeerId;
 use rand::Rng;
 use crate::bot::personality::difficulty_mods;
 use crate::maze::MazeData;
-use crate::player::{Player, Team, WorldId};
+use crate::player::{Player, WorldId};
 use crate::server::game::MAZE_CELL_SIZE;
 use crate::bot::ai::BotState;
 use crate::weapons_stats::get_weapon_stats;
+
+/// Weapons with a shorter range than this are melee: no hit beyond their reach.
+const MELEE_RANGE_CUTOFF: f32 = 5.0;
 
 
 #[derive(Clone, Copy)]
@@ -65,7 +68,7 @@ pub fn try_shoot(
             && (if bot.world == WorldId::Lobby {
                 !p.is_bot
             } else {
-                p.team != bot.team && p.team != Team::Spectator
+                bot.is_hostile_to(p)
             })
     };
     let current = bot_state
@@ -152,7 +155,15 @@ pub fn try_shoot(
         if bot_state.shooting.fire_rate > 0.0 {
             return None; // still cooling down, can't shoot
         }
-        
+
+        // Melee (Gun Game's final Punch level) only lands within arm's reach;
+        // the bot still tracks the target from afar and closes in.
+        if weapon_stats.range < MELEE_RANGE_CUTOFF
+            && distance(bot.position, target.position) > weapon_stats.range
+        {
+            return None;
+        }
+
         let weapon_min_interval = if weapon_stats.shots_per_sec > 0.0 {
             1.0 / weapon_stats.shots_per_sec
         } else {

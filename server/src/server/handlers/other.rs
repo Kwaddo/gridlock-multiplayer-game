@@ -312,7 +312,7 @@ pub fn apply_damage(
         players.get(&attacker_addr),
         players.get(&victim_addr),
     ) {
-        if state.personality_id.is_some() && shooter.team != victim.team {
+        if state.personality_id.is_some() && victim.is_hostile_to(shooter) {
             state.alert(shooter.id, shooter.position);
         }
     }

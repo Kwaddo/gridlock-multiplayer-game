@@ -1,6 +1,6 @@
 use crate::net::protocols::{
     ClientMsg, EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS,
-    FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING,
+    FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MODE_GUN_GAME,
 };
 use transport::Link;
 
@@ -50,8 +50,13 @@ impl PlayingState {
                 } else {
                     0
                 };
-                // auto-fill: bots_per_team (0=disabled, 1-8=per team count)
-                let bpt = if self.autofill_enabled { self.autofill_bots_per_team } else { 0 };
+                // auto-fill: Red/Blue bot counts in team modes, a total in
+                // Gun Game (0 = no bots)
+                let (bots, blue_bots) = if mode == MODE_GUN_GAME {
+                    (self.autofill_ffa_bots, None)
+                } else {
+                    (self.autofill_red_bots, Some(self.autofill_blue_bots))
+                };
                 // difficulty mask: bit0=Recruit, bit1=Easy, bit2=Normal, bit3=Hard, bit4=Nightmare
                 let mut diff_mask: u8 = 0;
                 if self.autofill_diff_recruit   { diff_mask |= 1 << 0; }
@@ -63,7 +68,8 @@ impl PlayingState {
                 let msg = ClientMsg::StartGame {
                     mode: Some(mode),
                     duration: Some(dur_code),
-                    autofill: Some((bpt, diff_mask)),
+                    autofill: Some((bots, diff_mask)),
+                    blue_bots,
                 }
                 .encode();
                 s.send(&msg);
