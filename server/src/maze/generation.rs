@@ -52,6 +52,7 @@ pub fn generate_maze(
 
     let rooms = carve_rooms(&mut grid, w, h, &mut rng);
     connect_rooms(&mut grid, w, h, &rooms, &mut rng);
+    braid_dead_ends(&mut grid, w, h, &mut rng);
 
     let teleporter = if let Some(room) = rooms.first() {
         let tx = (room.x as usize + 1).min((room.x + room.w - 1) as usize);
@@ -183,14 +184,35 @@ fn carve_rooms(grid: &mut [u8], w: usize, h: usize, rng: &mut StdRng) -> Vec<Roo
     rooms
 }
 
+/// Longest tunnel dug out of a room to reach the maze; longer ones made long
+/// straight lanes across the map.
+const MAX_ROOM_TUNNEL: usize = 5;
+
+/// Share of the maze's dead ends that get opened into a loop. A perfect maze
+/// is all dead ends, which means long walks back out and players hunting for
+/// each other; loops give flanks and shorter routes between any two spots.
+const DEAD_END_OPEN_CHANCE: f64 = 0.65;
+
+/// A tunnel candidate out of a room: start cell on the room's edge, the
+/// direction it digs, and the wall cells it would open.
+struct Tunnel {
+    from: (usize, usize),
+    dir: (i32, i32),
+    cells: Vec<usize>,
+    /// runs right beside an open cell for part of its length
+    side_by_side: bool,
+}
+
+/// Link each room to the maze on up to two sides with the shortest tunnels
+/// available, preferring ones that don't run beside an existing corridor.
 fn connect_rooms(grid: &mut [u8], w: usize, h: usize, rooms: &[Room], rng: &mut StdRng) {
     for room in rooms {
-        let mut edges = Vec::new();
         let rx = room.x as usize;
         let ry = room.y as usize;
         let rw = room.w as usize;
         let rh = room.h as usize;
 
+        let mut edges = Vec::new();
         for x in (rx + 1)..(rx + rw - 1) {
             edges.push((x, ry, 0i32, -1i32));
             edges.push((x, ry + rh - 1, 0, 1));
@@ -199,32 +221,117 @@ fn connect_rooms(grid: &mut [u8], w: usize, h: usize, rooms: &[Room], rng: &mut 
             edges.push((rx, y, -1i32, 0));
             edges.push((rx + rw - 1, y, 1, 0));
         }
-
+        // shuffle so equal-length tunnels are picked at random
         edges.shuffle(rng);
 
-        let mut links = 0;
-        for &(sx, sy, dx, dy) in &edges {
-            if links >= 2 {
+        let mut tunnels: Vec<Tunnel> = edges
+            .iter()
+            .filter_map(|&(sx, sy, dx, dy)| plan_tunnel(grid, w, h, (sx, sy), (dx, dy)))
+            .collect();
+        // short, clean tunnels first; a tunnel of length 0 means this side
+        // already opens onto the maze
+        tunnels.sort_by_key(|t| (t.side_by_side, t.cells.len() > MAX_ROOM_TUNNEL, t.cells.len()));
+
+        let mut used_dirs: Vec<(i32, i32)> = Vec::new();
+        for t in &tunnels {
+            if used_dirs.len() >= 2 {
                 break;
             }
-
-            let mut cx = sx as i32;
-            let mut cy = sy as i32;
-            loop {
-                let nx = cx + dx;
-                let ny = cy + dy;
-                if nx <= 0 || ny <= 0 || nx >= (w as i32 - 1) || ny >= (h as i32 - 1) {
-                    break;
-                }
-                let idx = ny as usize * w + nx as usize;
-                if grid[idx] == 1 {
-                    grid[sy * w + sx] = 1;
-                    links += 1;
-                    break;
-                }
+            // one link per side of the room, so the two links lead different ways
+            if used_dirs.contains(&t.dir) {
+                continue;
+            }
+            for &idx in &t.cells {
                 grid[idx] = 1;
-                cx = nx;
-                cy = ny;
+            }
+            grid[t.from.1 * w + t.from.0] = 1;
+            used_dirs.push(t.dir);
+        }
+    }
+}
+
+/// Walk from a room edge cell outward until an open cell; `None` if the walk
+/// hits the outer wall first.
+fn plan_tunnel(
+    grid: &[u8],
+    w: usize,
+    h: usize,
+    from: (usize, usize),
+    dir: (i32, i32),
+) -> Option<Tunnel> {
+    let (dx, dy) = dir;
+    let open = |x: i32, y: i32| -> bool {
+        x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && grid[y as usize * w + x as usize] == 1
+    };
+    let mut cells = Vec::new();
+    let mut side_by_side = false;
+    let (mut cx, mut cy) = (from.0 as i32, from.1 as i32);
+    loop {
+        let nx = cx + dx;
+        let ny = cy + dy;
+        if nx <= 0 || ny <= 0 || nx >= (w as i32 - 1) || ny >= (h as i32 - 1) {
+            return None;
+        }
+        if open(nx, ny) {
+            return Some(Tunnel { from, dir, cells, side_by_side });
+        }
+        // the cells either side of this one, across the dig direction
+        if open(nx + dy, ny + dx) || open(nx - dy, ny - dx) {
+            side_by_side = true;
+        }
+        cells.push(ny as usize * w + nx as usize);
+        cx = nx;
+        cy = ny;
+    }
+}
+
+/// Open a share of the maze's dead ends by knocking through the wall to a
+/// passage beyond, turning dead ends into loops. Only walls between two open
+/// cells in a straight line are knocked out, so every corridor stays one cell
+/// wide and the outer wall is never touched.
+fn braid_dead_ends(grid: &mut [u8], w: usize, h: usize, rng: &mut StdRng) {
+    let open = |g: &[u8], x: usize, y: usize| g[y * w + x] == 1;
+    for y in 1..h - 1 {
+        for x in 1..w - 1 {
+            if !open(grid, x, y) {
+                continue;
+            }
+            let exits = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .filter(|(dx, dy)| open(grid, (x as i32 + dx) as usize, (y as i32 + dy) as usize))
+                .count();
+            if exits != 1 || !rng.gen_bool(DEAD_END_OPEN_CHANCE) {
+                continue;
+            }
+            let mut walls: Vec<(usize, usize)> = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .filter_map(|&(dx, dy)| {
+                    let (wx, wy) = (x as i32 + dx, y as i32 + dy);
+                    let (bx, by) = (x as i32 + 2 * dx, y as i32 + 2 * dy);
+                    let inside = |a: i32, b: i32| a > 0 && b > 0 && a < w as i32 - 1 && b < h as i32 - 1;
+                    if !inside(wx, wy) || !inside(bx, by) {
+                        return None;
+                    }
+                    let (wx, wy, bx, by) = (wx as usize, wy as usize, bx as usize, by as usize);
+                    if open(grid, wx, wy) || !open(grid, bx, by) {
+                        return None;
+                    }
+                    // the wall's own side cells must be walls, or opening it
+                    // would make a 2-wide gap
+                    let side_open = if dx != 0 {
+                        open(grid, wx, wy - 1) || open(grid, wx, wy + 1)
+                    } else {
+                        open(grid, wx - 1, wy) || open(grid, wx + 1, wy)
+                    };
+                    if side_open {
+                        return None;
+                    }
+                    Some((wx, wy))
+                })
+                .collect();
+            walls.shuffle(rng);
+            if let Some(&(wx, wy)) = walls.first() {
+                grid[wy * w + wx] = 1;
             }
         }
     }
@@ -388,4 +495,101 @@ fn has_clearance(cells: &[u8], width: u8, height: u8, x: u8, y: u8) -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::game::{maze_side_for_players, MAZE_MAX_SIDE, MAZE_MIN_SIDE};
+    use std::collections::VecDeque;
+
+    fn sizes() -> Vec<u8> {
+        let mut sizes: Vec<u8> = (1..=16).map(maze_side_for_players).collect();
+        sizes.extend([MAZE_MIN_SIDE, MAZE_MAX_SIDE]);
+        sizes.sort();
+        sizes.dedup();
+        sizes
+    }
+
+    /// Open cells reachable from the first open cell.
+    fn reachable(cells: &[u8], w: usize, h: usize) -> Vec<bool> {
+        let mut seen = vec![false; w * h];
+        let Some(start) = cells.iter().position(|&c| c == 1) else { return seen };
+        let mut queue = VecDeque::from([start]);
+        seen[start] = true;
+        while let Some(i) = queue.pop_front() {
+            let (x, y) = (i % w, i / w);
+            let mut next = Vec::new();
+            if x > 0 { next.push(i - 1); }
+            if x + 1 < w { next.push(i + 1); }
+            if y > 0 { next.push(i - w); }
+            if y + 1 < h { next.push(i + w); }
+            for n in next {
+                if cells[n] == 1 && !seen[n] {
+                    seen[n] = true;
+                    queue.push_back(n);
+                }
+            }
+        }
+        seen
+    }
+
+    #[test]
+    fn every_open_cell_and_room_is_reachable_at_every_size() {
+        for side in sizes() {
+            for seed in 0..40u64 {
+                let (cells, rooms, _, _, teleporter) = generate_maze(side, side, seed);
+                let w = side as usize;
+                let seen = reachable(&cells, w, w);
+                for (i, &c) in cells.iter().enumerate() {
+                    assert!(c == 0 || seen[i], "side {side} seed {seed}: cell {i} cut off");
+                }
+                assert!(!rooms.is_empty(), "side {side} seed {seed}: no rooms");
+                for r in &rooms {
+                    assert!(seen[r.y as usize * w + r.x as usize], "side {side} seed {seed}: room cut off");
+                }
+                let (tx, ty) = teleporter;
+                assert_eq!(cells[ty as usize * w + tx as usize], 1, "side {side} seed {seed}: teleporter in a wall");
+            }
+        }
+    }
+
+    #[test]
+    fn outer_wall_stays_closed() {
+        for side in sizes() {
+            let (cells, ..) = generate_maze(side, side, 7);
+            let w = side as usize;
+            for i in 0..w {
+                for idx in [i, (w - 1) * w + i, i * w, i * w + w - 1] {
+                    assert_eq!(cells[idx], 0, "side {side}: border cell {idx} open");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn most_dead_ends_are_opened_into_loops() {
+        let side = MAZE_MAX_SIDE as usize;
+        let (cells, ..) = generate_maze(MAZE_MAX_SIDE, MAZE_MAX_SIDE, 3);
+        let open = |x: usize, y: usize| cells[y * side + x] == 1;
+        let (mut open_cells, mut dead_ends) = (0, 0);
+        for y in 1..side - 1 {
+            for x in 1..side - 1 {
+                if !open(x, y) {
+                    continue;
+                }
+                open_cells += 1;
+                let exits = [open(x + 1, y), open(x - 1, y), open(x, y + 1), open(x, y - 1)]
+                    .iter()
+                    .filter(|&&o| o)
+                    .count();
+                if exits == 1 {
+                    dead_ends += 1;
+                }
+            }
+        }
+        // an unbraided backtracker maze of this size has roughly 1 in 10
+        // open cells as a dead end
+        assert!(dead_ends * 25 < open_cells, "{dead_ends} dead ends in {open_cells} open cells");
+    }
 }
