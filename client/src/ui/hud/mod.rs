@@ -2,6 +2,7 @@ use macroquad::prelude::*;
 use std::collections::HashMap;
 
 mod crosshair;
+mod loading;
 mod minimap;
 mod players;
 pub use players::{draw_player_list, draw_team_scoreboard};
@@ -9,6 +10,7 @@ mod scope;
 mod status;
 mod team_score;
 pub use team_score::draw_team_score_bar;
+pub use loading::draw_background_loading;
 mod weapon_feed;
 pub use weapon_feed::draw_kill_feed;
 
