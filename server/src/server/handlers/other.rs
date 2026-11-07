@@ -204,14 +204,37 @@ pub fn handle_set_team(
     src_addr: PeerId,
     team_byte: u8,
 ) {
-    let team = Team::from_u8(team_byte).unwrap_or(Team::Spectator);
-
-    if let Some(player) = players.get_mut(&src_addr) {
-        if player.world == WorldId::Lobby {
-            player.team = team;
-            broadcast::broadcast_player_list(socket, players);
-        }
+    // Teams are kept balanced by the server; only the host may swap sides,
+    // and only when the teams stay within one of each other.
+    let team = match Team::from_u8(team_byte) {
+        Some(t @ (Team::Red | Team::Blue)) => t,
+        _ => return,
+    };
+    if game::host_addr(players) != Some(src_addr) {
+        return;
     }
+    let Some(current) = players.get(&src_addr).filter(|p| p.world == WorldId::Lobby).map(|p| p.team) else {
+        return;
+    };
+    if current == team {
+        return;
+    }
+    let (mut red, mut blue) = game::lobby_team_counts(players);
+    match current {
+        Team::Red => red -= 1,
+        Team::Blue => blue -= 1,
+        Team::Spectator => {}
+    }
+    if team == Team::Red { red += 1 } else { blue += 1 }
+    if red.abs_diff(blue) > 1 {
+        // refused: resend the list so the requester's roster is right again
+        broadcast::broadcast_player_list(socket, players);
+        return;
+    }
+    if let Some(player) = players.get_mut(&src_addr) {
+        player.team = team;
+    }
+    broadcast::broadcast_player_list(socket, players);
 }
 
 pub fn apply_damage(

@@ -54,6 +54,8 @@ pub struct Server {
     autofill_red_bots: u8,
     autofill_blue_bots: u8,
     autofill_diff_mask: u8,     // all difficulties enabled by default
+    // what the host has picked in its lobby console, passed on to everyone
+    lobby_settings: LobbySettings,
     // Track last tick time for delta-time calculation
     last_tick: Instant,
     // Regen fires at most once per second to avoid per-packet health spikes
@@ -93,6 +95,13 @@ impl Server {
             autofill_red_bots: 0,
             autofill_blue_bots: 0,
             autofill_diff_mask: 0b11111,
+            lobby_settings: LobbySettings {
+                mode: MODE_TEAM_DEATHMATCH,
+                duration: 0,
+                red_bots: 0,
+                blue_bots: 0,
+                diff_mask: 0b11111,
+            },
             last_tick: Instant::now(),
             last_regen_tick: Instant::now(),
             last_state_broadcast: None,
@@ -150,7 +159,13 @@ impl Server {
                 );
                 // the newcomer needs it now, not at the next periodic resend
                 self.send_match_status(true);
+                if game::balance_lobby_teams(&mut self.players) {
+                    broadcast::broadcast_player_list(&self.outbox, &self.players);
+                }
+                let settings = ServerMsg::LobbySettings(self.lobby_settings).encode();
+                let _ = self.outbox.send_to(&settings, src_addr);
             }
+            ClientMsg::LobbySettings(settings) => self.handle_lobby_settings(src_addr, settings),
             ClientMsg::Disconnect => {
                 handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr)
             }
@@ -395,6 +410,35 @@ impl Server {
         }
     }
 
+    /// `MSG_LOBBY_SETTINGS` from a client: the host changed its lobby console.
+    /// Anyone else's is ignored. Valid settings go to every player, so they
+    /// can see what the next match will be.
+    fn handle_lobby_settings(&mut self, src_addr: PeerId, settings: LobbySettings) {
+        if game::host_addr(&self.players) != Some(src_addr) {
+            return;
+        }
+        let valid_mode = [MODE_GUN_GAME, MODE_TEAM_DEATHMATCH, MODE_SEARCH_AND_DESTROY].contains(&settings.mode);
+        if !valid_mode {
+            return;
+        }
+        let (red_cap, blue_cap) = if settings.mode == MODE_GUN_GAME {
+            (game::MAX_FFA_BOTS, 0)
+        } else {
+            (game::MAX_BOTS_PER_TEAM, game::MAX_BOTS_PER_TEAM)
+        };
+        let settings = LobbySettings {
+            red_bots: settings.red_bots.min(red_cap),
+            blue_bots: settings.blue_bots.min(blue_cap),
+            diff_mask: settings.diff_mask & 0b11111,
+            ..settings
+        };
+        if settings != self.lobby_settings {
+            self.lobby_settings = settings;
+            let msg = ServerMsg::LobbySettings(settings).encode();
+            broadcast::to_humans(&self.outbox, &self.players, &msg);
+        }
+    }
+
     /// `MSG_START_GAME`: the host starts a match from the lobby; while one runs,
     /// anyone in the lobby joins it. The mode, duration and bot settings only
     /// apply to a new match: a player joining never changes the one running.
@@ -441,6 +485,17 @@ impl Server {
             // duration code: 0=default, 65535=unlimited; a non-zero value
             // overrides the mode default
             let dur_code: u16 = duration.unwrap_or(0);
+            // what everyone's lobby console shows is what is starting now
+            self.handle_lobby_settings(
+                src_addr,
+                LobbySettings {
+                    mode: self.match_mode,
+                    duration: dur_code,
+                    red_bots: self.autofill_red_bots,
+                    blue_bots: self.autofill_blue_bots,
+                    diff_mask: self.autofill_diff_mask,
+                },
+            );
             requested_duration = if dur_code == u16::MAX {
                 None // unlimited
             } else if dur_code > 0 {
@@ -604,6 +659,11 @@ impl Server {
         );
         if self.bot_manager.handle_range_challenge_timeout(&mut self.players) {
             broadcast::broadcast_state(&self.outbox, &self.players);
+            broadcast::broadcast_player_list(&self.outbox, &self.players);
+        }
+        // players come and go and return from matches: keep the lobby's
+        // teams even for the next match
+        if game::balance_lobby_teams(&mut self.players) {
             broadcast::broadcast_player_list(&self.outbox, &self.players);
         }
         if self.last_regen_tick.elapsed() >= Duration::from_secs(1) {
@@ -798,6 +858,7 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::player::Team;
 
     fn to(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<ServerMsg> {
         out.iter().filter(|(p, _)| *p == peer).filter_map(|(_, b)| ServerMsg::decode(b)).collect()
@@ -995,4 +1056,76 @@ mod tests {
         score.record_kill(crate::player::Team::Blue, crate::player::Team::Red);
         assert_eq!(score, game::TeamScore { red: 0, blue: 1 });
     }
+
+    fn teams(server: &Server) -> Vec<Team> {
+        let mut players: Vec<&Player> = server.players.values().filter(|p| !p.is_bot).collect();
+        players.sort_by_key(|p| p.id);
+        players.iter().map(|p| p.team).collect()
+    }
+
+    #[test]
+    fn lobby_teams_stay_balanced_and_only_the_host_can_swap() {
+        let mut server = Server::new();
+        let (a, b, c) = (PeerId(1), PeerId(2), PeerId(3));
+        server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
+        server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+        assert_eq!(teams(&server), vec![Team::Red, Team::Blue]);
+
+        // bob (not the host) cannot change sides
+        server.handle_packet(b, &ClientMsg::SetTeam { team: 1 }.encode());
+        assert_eq!(teams(&server), vec![Team::Red, Team::Blue]);
+        // the host cannot make it 2 v 0 either
+        server.handle_packet(a, &ClientMsg::SetTeam { team: 2 }.encode());
+        assert_eq!(teams(&server), vec![Team::Red, Team::Blue]);
+
+        // with a third player, the host may swap to the smaller side
+        server.handle_packet(c, &ClientMsg::Join { username: "cat".into() }.encode());
+        assert_eq!(teams(&server), vec![Team::Red, Team::Blue, Team::Red]);
+        server.handle_packet(a, &ClientMsg::SetTeam { team: 2 }.encode());
+        assert_eq!(teams(&server), vec![Team::Blue, Team::Blue, Team::Red]);
+
+        // whoever leaves, the rest are evened out again
+        server.handle_packet(c, &ClientMsg::Disconnect.encode());
+        server.tick();
+        let t = teams(&server);
+        assert!(t.contains(&Team::Red) && t.contains(&Team::Blue), "{t:?}");
+    }
+
+    #[test]
+    fn match_teams_are_the_balanced_lobby_teams() {
+        let mut server = Server::new();
+        let (a, b) = (PeerId(1), PeerId(2));
+        server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
+        server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+        start_match(&mut server, a);
+        assert_eq!(teams(&server), vec![Team::Red, Team::Blue]);
+    }
+
+    #[test]
+    fn only_the_host_sets_the_lobby_settings_and_everyone_hears() {
+        let mut server = Server::new();
+        let (a, b) = (PeerId(1), PeerId(2));
+        server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
+        server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+        server.drain_outbox();
+
+        let theirs = LobbySettings { mode: MODE_GUN_GAME, duration: 600, red_bots: 4, blue_bots: 0, diff_mask: 1 };
+        server.handle_packet(b, &ClientMsg::LobbySettings(theirs).encode());
+        assert!(server.drain_outbox().is_empty());
+
+        // the host's goes to everyone, clamped to what the server accepts
+        let mine = LobbySettings { mode: MODE_TEAM_DEATHMATCH, duration: 900, red_bots: 2, blue_bots: 40, diff_mask: 0xff };
+        server.handle_packet(a, &ClientMsg::LobbySettings(mine).encode());
+        let out = server.drain_outbox();
+        let expected = LobbySettings { blue_bots: game::MAX_BOTS_PER_TEAM, diff_mask: 0b11111, ..mine };
+        for peer in [a, b] {
+            assert!(to(&out, peer).contains(&ServerMsg::LobbySettings(expected)));
+        }
+
+        // a newcomer is told at once
+        let c = PeerId(3);
+        server.handle_packet(c, &ClientMsg::Join { username: "cat".into() }.encode());
+        assert!(to(&server.drain_outbox(), c).contains(&ServerMsg::LobbySettings(expected)));
+    }
 }
+
