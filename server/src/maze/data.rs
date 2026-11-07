@@ -68,19 +68,12 @@ impl MazeData {
         )
     }
 
-    /// Determine two deterministic team spawn positions (world coords).
-    /// Picks two room centers (if rooms available) that are farthest apart.
-    /// Falls back to opposite maze corners if rooms are absent.
+    /// Determine two deterministic team spawn positions (world coords): the
+    /// two cells with a clear 3x3 area around them (open, no props) that are
+    /// farthest apart. Only rooms have such areas, so the teams start in the
+    /// two rooms farthest from each other. Falls back to opposite maze
+    /// corners if there are fewer than two.
     pub fn team_spawn_positions(&self, cell_size: f32) -> ((f32, f32, f32), (f32, f32, f32)) {
-        // Collect candidate centers from rooms
-        let mut centers: Vec<(f32, f32)> = Vec::new();
-        for r in &self.rooms {
-            // center cell of the room (may be fractional when width/height even)
-            let cx = r.x as f32 + (r.w as f32) / 2.0;
-            let cy = r.y as f32 + (r.h as f32) / 2.0;
-            centers.push((cx, cy));
-        }
-
         // Helper: check 3x3 clearance around a cell and ensure no props occupy that area
         let width_usize = self.width as usize;
         let height_usize = self.height as usize;
@@ -121,58 +114,46 @@ impl MazeData {
             true
         };
 
-        // If we have at least two room centers, pick the pair with max distance
-        if centers.len() >= 2 {
-            let mut best: Option<(usize, usize, f32)> = None;
-            for i in 0..centers.len() {
-                for j in (i + 1)..centers.len() {
-                    let dx = centers[i].0 - centers[j].0;
-                    let dy = centers[i].1 - centers[j].1;
-                    let d2 = dx * dx + dy * dy;
-                    if best.as_ref().map_or(true, |b| d2 > b.2) {
-                        best = Some((i, j, d2));
+        // The pair of `cells` farthest apart, with its squared distance in cells.
+        let farthest_pair = |cells: &[(usize, usize)]| {
+            let mut best: Option<((usize, usize), (usize, usize), usize)> = None;
+            for (i, &a) in cells.iter().enumerate() {
+                for &b in &cells[i + 1..] {
+                    let d2 = a.0.abs_diff(b.0).pow(2) + a.1.abs_diff(b.1).pow(2);
+                    if best.map_or(true, |(_, _, best_d2)| d2 > best_d2) {
+                        best = Some((a, b, d2));
                     }
                 }
             }
-            if let Some((i, j, _)) = best {
-                let a = centers[i];
-                let b = centers[j];
-                // Try to find a nearby clear spawn cell inside each room near the center.
-                let find_spawn_near = |cx: f32, cy: f32| -> (f32, f32, f32) {
-                    let rcx = cx.floor() as isize;
-                    let rcy = cy.floor() as isize;
-                    // search a small radius around the room center for a clear cell
-                    for r in 0..=((self.width.max(self.height)) as isize) {
-                        for oy in -r..=r {
-                            for ox in -r..=r {
-                                let sx = rcx + ox;
-                                let sy = rcy + oy;
-                                if sx < 1 || sy < 1 {
-                                    continue;
-                                }
-                                let ux = sx as usize;
-                                let uy = sy as usize;
-                                if ux + 1 >= width_usize || uy + 1 >= height_usize {
-                                    continue;
-                                }
-                                if has_clearance(ux, uy) {
-                                    return (
-                                        (ux as f32 + 0.5) * cell_size,
-                                        0.0_f32,
-                                        (uy as f32 + 0.5) * cell_size,
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    // fallback to center cell world coords
-                    ((cx + 0.5) * cell_size, 0.0_f32, (cy + 0.5) * cell_size)
-                };
+            best
+        };
+        let cells_where = |keep: &dyn Fn(usize, usize) -> bool| -> Vec<(usize, usize)> {
+            (1..height_usize.saturating_sub(1))
+                .flat_map(|y| (1..width_usize.saturating_sub(1)).map(move |x| (x, y)))
+                .filter(|&(x, y)| keep(x, y))
+                .collect()
+        };
 
-                let a_world = find_spawn_near(a.0, a.1);
-                let b_world = find_spawn_near(b.0, b.1);
-                return (a_world, b_world);
+        // Rooms first: open 3x3 areas. Props can fill a small maze's rooms,
+        // leaving clear spots in one room only; then any open cell with no
+        // prop next to it will do, so the teams still start far apart.
+        let min_apart = width_usize.min(height_usize) * 2 / 5;
+        let mut best = farthest_pair(&cells_where(&|x, y| has_clearance(x, y)));
+        if best.map_or(true, |(_, _, d2)| d2 < min_apart * min_apart) {
+            let prop_free = |x: usize, y: usize| {
+                self.cells[y * width_usize + x] == 1
+                    && !self.props.iter().any(|p| (p.x as usize).abs_diff(x) <= 1 && (p.y as usize).abs_diff(y) <= 1)
+            };
+            let wider = farthest_pair(&cells_where(&prop_free));
+            if wider.map_or(false, |(_, _, d2)| best.map_or(true, |(_, _, b2)| d2 > b2)) {
+                best = wider;
             }
+        }
+        if let Some((a, b, _)) = best {
+            let world = |(x, y): (usize, usize)| {
+                ((x as f32 + 0.5) * cell_size, 0.0_f32, (y as f32 + 0.5) * cell_size)
+            };
+            return (world(a), world(b));
         }
 
         // Fallback: choose corners but ensure they have clearance; prefer scanning inward
@@ -336,5 +317,36 @@ impl MazeData {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::game::{maze_side_for_players, MAZE_CELL_SIZE};
+
+    fn open_at(maze: &MazeData, pos: (f32, f32, f32)) -> bool {
+        let x = (pos.0 / MAZE_CELL_SIZE).floor() as usize;
+        let y = (pos.2 / MAZE_CELL_SIZE).floor() as usize;
+        x < maze.width as usize && y < maze.height as usize && maze.cells[y * maze.width as usize + x] == 1
+    }
+
+    #[test]
+    fn spawns_and_bomb_site_work_at_every_size() {
+        for players in 1..=16 {
+            let side = maze_side_for_players(players);
+            for _ in 0..10 {
+                let maze = MazeData::new(side, side);
+                let (red, blue) = maze.team_spawn_positions(MAZE_CELL_SIZE);
+                assert!(open_at(&maze, red) && open_at(&maze, blue), "side {side}: team spawn in a wall");
+                let apart = ((red.0 - blue.0).powi(2) + (red.2 - blue.2).powi(2)).sqrt();
+                let min_apart = (side as usize * 2 / 5) as f32 * MAZE_CELL_SIZE;
+                assert!(apart >= min_apart, "side {side}: team spawns only {apart} m apart");
+                assert!(open_at(&maze, maze.bomb_site_position(MAZE_CELL_SIZE)), "side {side}: bomb site in a wall");
+                let (x, y, z, _) = maze.random_spawn_world(MAZE_CELL_SIZE);
+                assert!(open_at(&maze, (x, y, z)), "side {side}: random spawn in a wall");
+                assert!(open_at(&maze, maze.teleporter_world(MAZE_CELL_SIZE)), "side {side}: teleporter in a wall");
+            }
+        }
     }
 }

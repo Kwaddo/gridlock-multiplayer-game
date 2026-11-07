@@ -71,6 +71,12 @@ pub const MSG_START_GAME: u8 = 19; // client -> server: request to start a match
 pub const MODE_GUN_GAME: u8 = 1;
 pub const MODE_TEAM_DEATHMATCH: u8 = 2;
 pub const MODE_SEARCH_AND_DESTROY: u8 = 3;
+
+// Auto-fill bot limits for MSG_START_GAME, shared so the host's lobby console
+// offers exactly what the server accepts
+pub const MAX_BOTS_PER_TEAM: u8 = 8; // team modes, per team
+pub const MAX_FFA_BOTS: u8 = 15; // Gun Game total (one per bot personality)
+pub const MATCH_MAX_PLAYERS: usize = 16; // humans plus bots in a running match
 pub const MSG_START_DENIED: u8 = 20; // server -> client: start request rejected (match running / full)
 pub const MSG_MATCH_JOINED: u8 = 21; // server -> all: announce player joined a running match (id, name)
 pub const MSG_MATCH_END: u8 = 22; // server -> all: announce match end (winner_id, name, countdown_secs)

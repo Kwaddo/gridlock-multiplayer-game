@@ -49,7 +49,10 @@ pub struct Server {
     // Search & Destroy state (only Some when S&D mode is active)
     snd_state: Option<snd::SndState>,
     // Auto-fill bot settings (set by the client that starts the match)
-    autofill_bots_per_team: u8, // 0=disabled, 1-8=per team
+    // auto-fill bot counts: Red/Blue in team modes; Gun Game uses only
+    // `autofill_red_bots`, as the total (0 = no bots)
+    autofill_red_bots: u8,
+    autofill_blue_bots: u8,
     autofill_diff_mask: u8,     // all difficulties enabled by default
     // Track last tick time for delta-time calculation
     last_tick: Instant,
@@ -87,7 +90,8 @@ impl Server {
             match_mode: MODE_TEAM_DEATHMATCH,
             match_total_maze_entries: 0,
             snd_state: None,
-            autofill_bots_per_team: 0,
+            autofill_red_bots: 0,
+            autofill_blue_bots: 0,
             autofill_diff_mask: 0b11111,
             last_tick: Instant::now(),
             last_regen_tick: Instant::now(),
@@ -193,8 +197,8 @@ impl Server {
                 }
             },
             // client requests to start a match from the lobby (or join the running one)
-            ClientMsg::StartGame { mode, duration, autofill } => {
-                self.handle_start_request(src_addr, mode, duration, autofill)
+            ClientMsg::StartGame { mode, duration, autofill, blue_bots } => {
+                self.handle_start_request(src_addr, mode, duration, autofill, blue_bots)
             }
             ClientMsg::WallBroken { x, y } => {
                 if let Some(ref mut m) = self.maze {
@@ -400,6 +404,7 @@ impl Server {
         mode: Option<u8>,
         duration: Option<u16>,
         autofill: Option<(u8, u8)>,
+        blue_bots: Option<u8>,
     ) {
         self.end_match_if_abandoned();
         let new_match = !self.match_running
@@ -416,12 +421,21 @@ impl Server {
                     self.match_mode = requested;
                 }
             }
-            // auto-fill settings: bots_per_team, diff_mask
-            if let Some((bots_per_team, diff_mask)) = autofill {
-                self.autofill_bots_per_team = bots_per_team.min(8);
+            // auto-fill settings: bot counts and difficulty mask
+            if let Some((bots, diff_mask)) = autofill {
+                if self.match_mode == MODE_GUN_GAME {
+                    // no teams: one total
+                    self.autofill_red_bots = bots.min(game::MAX_FFA_BOTS);
+                    self.autofill_blue_bots = 0;
+                } else {
+                    self.autofill_red_bots = bots.min(game::MAX_BOTS_PER_TEAM);
+                    self.autofill_blue_bots =
+                        blue_bots.unwrap_or(bots).min(game::MAX_BOTS_PER_TEAM);
+                }
                 self.autofill_diff_mask = diff_mask & 0b11111;
             } else {
-                self.autofill_bots_per_team = 0;
+                self.autofill_red_bots = 0;
+                self.autofill_blue_bots = 0;
                 self.autofill_diff_mask = 0b11111;
             }
             // duration code: 0=default, 65535=unlimited; a non-zero value
@@ -644,7 +658,8 @@ impl Server {
                 &mut self.snd_state,
                 self.match_duration,
                 &mut self.bot_manager,
-                self.autofill_bots_per_team,
+                self.autofill_red_bots,
+                self.autofill_blue_bots,
                 self.autofill_diff_mask,
             );
         }
@@ -789,7 +804,7 @@ mod tests {
     }
 
     fn start_match(server: &mut Server, host: PeerId) {
-        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None };
+        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None, blue_bots: None };
         server.handle_packet(host, &start.encode());
         // skip the warmup countdown
         server.match_warmup_end = Some(Instant::now());
@@ -894,19 +909,20 @@ mod tests {
             mode: Some(MODE_GUN_GAME),
             duration: Some(30),
             autofill: Some((8, 0b1)),
+            blue_bots: None,
         };
         server.handle_packet(b, &start.encode());
         let out = server.drain_outbox();
         assert!(to(&out, b).iter().any(|m| matches!(m, ServerMsg::WorldChange { world: 1, .. })));
         assert_eq!(server.players[&b].world, WorldId::Maze);
         assert_eq!((server.match_mode, server.match_duration), (mode, duration));
-        assert_eq!(server.autofill_bots_per_team, 0);
+        assert_eq!((server.autofill_red_bots, server.autofill_blue_bots), (0, 0));
     }
 
     #[test]
     fn start_requests_while_starting_or_ending_are_refused_with_a_reason() {
         let (mut server, a, b) = two_players();
-        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None };
+        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None, blue_bots: None };
         server.handle_packet(a, &start.encode());
         server.drain_outbox();
         server.handle_packet(b, &start.encode());
@@ -929,7 +945,7 @@ mod tests {
         let (mut server, a, b) = two_players();
         assert_eq!(statuses(&server.drain_outbox(), b).last(), Some(&MATCH_STATUS_NONE));
 
-        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None };
+        let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None, blue_bots: None };
         server.handle_packet(a, &start.encode());
         assert_eq!(statuses(&server.drain_outbox(), b).last(), Some(&MATCH_STATUS_STARTING));
 

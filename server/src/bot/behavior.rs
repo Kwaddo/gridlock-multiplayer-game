@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::net::PeerId;
-use crate::player::{Player, Team, WorldId};
+use crate::player::{Player, WorldId};
 use crate::maze::MazeData;
 use crate::maze::analysis::MazeAnalysis;
 use crate::bot::ai::{ BotState, BotBehavior };
@@ -466,11 +466,7 @@ fn roam_to_random_point(
 
 /// `p` is someone `bot` fights: alive, in the maze, on the other team.
 fn is_enemy(bot: &Player, p: &Player) -> bool {
-    p.id != bot.id
-        && p.is_alive
-        && p.world == WorldId::Maze
-        && p.team != bot.team
-        && p.team != Team::Spectator
+    p.is_alive && p.world == WorldId::Maze && bot.is_hostile_to(p)
 }
 
 fn find_enemy<'a>(players: &'a HashMap<PeerId, Player>, bot: &Player, id: u32) -> Option<&'a Player> {
