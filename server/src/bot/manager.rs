@@ -7,7 +7,7 @@ use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
 use crate::bot::personality::{ self, BotPersonalityId };
-use crate::protocols::{ ServerMsg, MODE_TEAM_DEATHMATCH };
+use crate::protocols::ServerMsg;
 use crate::server::handlers::other;
 /// Seconds between a match bot's decisions (plus up to 0.1 s jitter).
 const DECISION_INTERVAL: f32 = 0.2;
@@ -214,10 +214,8 @@ impl BotManager {
                         continue;
                     }
                 };
-                if
-                    match_mode == MODE_TEAM_DEATHMATCH &&
-                    bot.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
-                {
+                // frozen like the humans at match start, in every mode
+                if bot.post_teleport_freeze_until.map_or(false, |t| t > Instant::now()) {
                     continue;
                 }
                 let Some(state) = self.bot_states.get_mut(addr) else {
@@ -246,8 +244,7 @@ impl BotManager {
             let is_frozen = players
                 .get(addr)
                 .map_or(false, |p| {
-                    match_mode == MODE_TEAM_DEATHMATCH &&
-                        p.world == WorldId::Maze &&
+                    p.world == WorldId::Maze &&
                         p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
                 });
             let Some(state) = self.bot_states.get_mut(addr) else {
@@ -336,8 +333,7 @@ impl BotManager {
             let is_frozen = players
                 .get(addr)
                 .map_or(false, |p| {
-                    match_mode == MODE_TEAM_DEATHMATCH &&
-                        p.world == WorldId::Maze &&
+                    p.world == WorldId::Maze &&
                         p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
                 });
             if is_frozen {
