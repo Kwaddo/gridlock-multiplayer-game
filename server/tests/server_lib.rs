@@ -63,8 +63,8 @@ fn every_server_packet_decodes() {
         backstab: Some(false),
     });
     // non-host start request must be denied
-    step(&mut server, b, ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: None });
-    step(&mut server, a, ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: None });
+    step(&mut server, b, ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: None, blue_bots: None });
+    step(&mut server, a, ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: None, blue_bots: None });
 
     assert!(!sent.is_empty());
     for (_, bytes) in &sent {

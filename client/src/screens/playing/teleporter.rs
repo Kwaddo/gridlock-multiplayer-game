@@ -1,6 +1,6 @@
 use crate::net::protocols::{
-    MATCH_STATUS_ENDING, MATCH_STATUS_RUNNING, MATCH_STATUS_STARTING, MODE_GUN_GAME,
-    MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH,
+    MATCH_MAX_PLAYERS, MATCH_STATUS_ENDING, MATCH_STATUS_RUNNING, MATCH_STATUS_STARTING,
+    MAX_BOTS_PER_TEAM, MAX_FFA_BOTS, MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH,
 };
 use crate::types::world::WorldId;
 use macroquad::prelude::*;
@@ -25,6 +25,11 @@ const RED_BORDER: Color = Color::new(0.90, 0.40, 0.40, 0.35);
 const BLUE_BORDER: Color = Color::new(0.42, 0.62, 0.95, 0.35);
 const BTN_CLOSE_BG: Color = Color::new(0.12, 0.13, 0.22, 1.0);
 const BTN_CLOSE_HOVER: Color = Color::new(0.18, 0.20, 0.32, 1.0);
+const CONTROL_BG: Color = Color::new(0.12, 0.13, 0.22, 1.0);
+const CONTROL_HOVER: Color = Color::new(0.18, 0.20, 0.32, 1.0);
+
+/// Height of each team's roster panel in the lobby console.
+const ROSTER_H: f32 = 118.0;
 
 impl PlayingState {
     /// Modal lobby console UI. Blocks gameplay input while open.
@@ -227,6 +232,20 @@ impl PlayingState {
         // ── team roster (TDM / S&D only) ──────────────────────────────────────
         let roster_top = desc_y + 44.0;
 
+        // humans on each side, placing the unassigned the way the roster does
+        let (mut red_humans, mut blue_humans) = (0usize, 0usize);
+        for (_id, _name, _k, _d, _gl, team, _wep, is_bot) in self.connected_players.iter() {
+            if *is_bot {
+                continue;
+            }
+            match *team {
+                1 => red_humans += 1,
+                2 => blue_humans += 1,
+                _ if red_humans <= blue_humans => red_humans += 1,
+                _ => blue_humans += 1,
+            }
+        }
+
         if self.pending_start_gamemode != MODE_GUN_GAME {
             let mut preview_red: Vec<&(u32, String, u32, u32, u8, u8, String, bool)> = Vec::new();
             let mut preview_blue: Vec<&(u32, String, u32, u32, u8, u8, String, bool)> = Vec::new();
@@ -246,7 +265,7 @@ impl PlayingState {
 
             let gap = 12.0;
             let roster_w = (panel_w - 48.0 - gap) / 2.0;
-            let roster_h = 118.0;
+            let roster_h = ROSTER_H;
             let left_x = panel_x + 24.0;
             let right_x = left_x + roster_w + gap;
 
@@ -280,8 +299,15 @@ impl PlayingState {
                 Color::new(0.42, 0.62, 0.95, 0.18),
             );
 
-            let red_title = format!("RED TEAM  ({})", preview_red.len());
-            let blue_title = format!("BLUE TEAM  ({})", preview_blue.len());
+            let team_title = |name: &str, players: usize, bots: u8| {
+                if bots == 0 {
+                    format!("{}  ({})", name, players)
+                } else {
+                    format!("{}  ({} + {} BOTS)", name, players, bots)
+                }
+            };
+            let red_title = team_title("RED TEAM", preview_red.len(), self.autofill_red_bots);
+            let blue_title = team_title("BLUE TEAM", preview_blue.len(), self.autofill_blue_bots);
             draw_text_ex(
                 &red_title,
                 left_x + 10.0,
@@ -386,209 +412,12 @@ impl PlayingState {
             }
         }
 
-        // ── auto-fill bot settings ──────────────────────────────────────────────
-        let autofill_top = if self.pending_start_gamemode != MODE_GUN_GAME {
-            roster_top + 118.0 + 14.0
-        } else {
-            desc_y + 44.0
-        };
-
-        // Show auto-fill section for team-based modes only
-        if self.pending_start_gamemode != MODE_GUN_GAME {
-            let section_x = panel_x + 24.0;
-            let section_w = panel_w - 48.0;
-
-            // ── auto-fill checkbox ──
-            let cb_y = autofill_top;
-            let cb_size = 18.0;
-            let cb_hov = mouse.0 >= section_x
-                && mouse.0 <= section_x + cb_size
-                && mouse.1 >= cb_y
-                && mouse.1 <= cb_y + cb_size;
-
-            // checkbox box
-            draw_rectangle(section_x, cb_y, cb_size, cb_size,
-                if cb_hov { Color::new(0.18, 0.20, 0.32, 1.0) } else { Color::new(0.12, 0.13, 0.22, 1.0) });
-            draw_rectangle_lines(section_x, cb_y, cb_size, cb_size, 1.0,
-                if self.autofill_enabled { ACCENT } else { PANEL_BORDER });
-
-            // checkmark
-            if self.autofill_enabled {
-                let cx = section_x + 4.0;
-                let cy = cb_y + 4.0;
-                draw_rectangle(cx, cy, cb_size - 8.0, cb_size - 8.0, ACCENT);
-            }
-
-            if cb_hov && clicked {
-                self.autofill_enabled = !self.autofill_enabled;
-            }
-
-            draw_text_ex("AUTO-FILL BOTS", section_x + cb_size + 8.0, cb_y + 14.0,
-                text_params(14, if self.autofill_enabled { WHITE } else { TEXT_DIM }));
-
-            // ── bots per team (only when enabled) ──
-            if self.autofill_enabled {
-                let bpt_y = cb_y + 28.0;
-
-                draw_text_ex("BOTS PER TEAM", section_x, bpt_y + 14.0,
-                    text_params(12, TEXT_LABEL));
-
-                // minus button
-                let minus_x = section_x + 120.0;
-                let btn_sz = 22.0;
-                let minus_hov = mouse.0 >= minus_x && mouse.0 <= minus_x + btn_sz
-                    && mouse.1 >= bpt_y && mouse.1 <= bpt_y + btn_sz;
-                draw_rectangle(minus_x, bpt_y, btn_sz, btn_sz,
-                    if minus_hov { ACCENT_HOVER } else { ACCENT });
-                let mw = measure_game_text("-", 16);
-                draw_text_ex("-", minus_x + (btn_sz - mw) / 2.0, bpt_y + 17.0,
-                    text_params(16, Color::new(0.05, 0.05, 0.05, 1.0)));
-                if minus_hov && clicked && self.autofill_bots_per_team > 1 {
-                    self.autofill_bots_per_team -= 1;
-                }
-
-                // number display
-                let num_x = minus_x + btn_sz + 6.0;
-                let num_w = 36.0;
-                draw_rectangle(num_x, bpt_y, num_w, btn_sz,
-                    Color::new(0.12, 0.13, 0.22, 1.0));
-                draw_rectangle_lines(num_x, bpt_y, num_w, btn_sz, 1.0, PANEL_BORDER);
-                let num_str = format!("{}", self.autofill_bots_per_team);
-                let nw = measure_game_text(&num_str, 16);
-                draw_text_ex(&num_str, num_x + (num_w - nw) / 2.0, bpt_y + 17.0,
-                    text_params(16, WHITE));
-
-                // plus button
-                let plus_x = num_x + num_w + 6.0;
-                let plus_hov = mouse.0 >= plus_x && mouse.0 <= plus_x + btn_sz
-                    && mouse.1 >= bpt_y && mouse.1 <= bpt_y + btn_sz;
-                draw_rectangle(plus_x, bpt_y, btn_sz, btn_sz,
-                    if plus_hov { ACCENT_HOVER } else { ACCENT });
-                let pw = measure_game_text("+", 16);
-                draw_text_ex("+", plus_x + (btn_sz - pw) / 2.0, bpt_y + 17.0,
-                    text_params(16, Color::new(0.05, 0.05, 0.05, 1.0)));
-                if plus_hov && clicked && self.autofill_bots_per_team < 8 {
-                    self.autofill_bots_per_team += 1;
-                }
-
-                // total bots label
-                let total = self.autofill_bots_per_team * 2;
-                let total_str = format!("({} total)", total);
-                draw_text_ex(&total_str, plus_x + btn_sz + 10.0, bpt_y + 14.0,
-                    text_params(12, TEXT_DIM));
-
-                // ── difficulty filter dropdown ──
-                let dd_y = bpt_y + 30.0;
-                let arrow_label = "DIFFICULTY FILTER";
-                draw_text_ex(arrow_label, section_x, dd_y + 14.0,
-                    text_params(12, TEXT_LABEL));
-
-                // dropdown arrow button
-                let arrow_x = section_x + 140.0;
-                let arrow_w = 24.0;
-                let arrow_h = 20.0;
-                let arrow_hov = mouse.0 >= arrow_x && mouse.0 <= arrow_x + arrow_w
-                    && mouse.1 >= dd_y && mouse.1 <= dd_y + arrow_h;
-                draw_rectangle(arrow_x, dd_y, arrow_w, arrow_h,
-                    if arrow_hov { Color::new(0.18, 0.20, 0.32, 1.0) } else { Color::new(0.12, 0.13, 0.22, 1.0) });
-                draw_rectangle_lines(arrow_x, dd_y, arrow_w, arrow_h, 1.0, PANEL_BORDER);
-                let arrow_char = if self.autofill_dropdown_open { "^" } else { "v" };
-                let aw = measure_game_text(arrow_char, 12);
-                draw_text_ex(arrow_char, arrow_x + (arrow_w - aw) / 2.0, dd_y + 14.0,
-                    text_params(12, TEXT_LABEL));
-
-                if arrow_hov && clicked {
-                    self.autofill_dropdown_open = !self.autofill_dropdown_open;
-                }
-
-                // active difficulties summary (inline)
-                let mut active: Vec<&str> = Vec::new();
-                if self.autofill_diff_recruit { active.push("Rec"); }
-                if self.autofill_diff_easy { active.push("Easy"); }
-                if self.autofill_diff_normal { active.push("Norm"); }
-                if self.autofill_diff_hard { active.push("Hard"); }
-                if self.autofill_diff_nightmare { active.push("NM"); }
-                let summary = if active.len() == 5 { "All".to_string() } else if active.is_empty() { "None!".to_string() } else { active.join(", ") };
-                draw_text_ex(&summary, arrow_x + arrow_w + 8.0, dd_y + 14.0,
-                    text_params(12, if active.is_empty() { Color::new(1.0, 0.3, 0.3, 1.0) } else { TEXT_DIM }));
-
-                // dropdown panel (drawn on top)
-                if self.autofill_dropdown_open {
-                    let dd_panel_x = arrow_x;
-                    let dd_panel_y = dd_y + arrow_h + 2.0;
-                    let dd_panel_w = section_w - (arrow_x - section_x);
-                    let dd_row_h = 24.0;
-                    let dd_panel_h = dd_row_h * 5.0 + 8.0;
-
-                    draw_rectangle(dd_panel_x, dd_panel_y, dd_panel_w, dd_panel_h,
-                        Color::new(0.08, 0.09, 0.16, 0.98));
-                    draw_rectangle_lines(dd_panel_x, dd_panel_y, dd_panel_w, dd_panel_h, 1.0, PANEL_BORDER);
-
-                    let difficulties: [(&str, &str); 5] = [
-                        ("Recruit", "Slowest reaction, worst aim"),
-                        ("Easy", "Below average skill"),
-                        ("Normal", "Average players"),
-                        ("Hard", "Skilled opponents"),
-                        ("Nightmare", "Near-perfect aim & reactions"),
-                    ];
-                    let diff_flags: [bool; 5] = [
-                        self.autofill_diff_recruit,
-                        self.autofill_diff_easy,
-                        self.autofill_diff_normal,
-                        self.autofill_diff_hard,
-                        self.autofill_diff_nightmare,
-                    ];
-
-                    for (di, ((diff_name, diff_desc), &enabled)) in
-                        difficulties.iter().zip(diff_flags.iter()).enumerate()
-                    {
-                        let row_y = dd_panel_y + 4.0 + di as f32 * dd_row_h;
-                        let dcb_x = dd_panel_x + 8.0;
-                        let dcb_sz = 16.0;
-                        let row_hov = mouse.0 >= dd_panel_x
-                            && mouse.0 <= dd_panel_x + dd_panel_w
-                            && mouse.1 >= row_y
-                            && mouse.1 <= row_y + dd_row_h;
-
-                        if row_hov {
-                            draw_rectangle(dd_panel_x + 1.0, row_y, dd_panel_w - 2.0, dd_row_h,
-                                Color::new(0.15, 0.17, 0.28, 0.8));
-                        }
-
-                        // checkbox
-                        draw_rectangle(dcb_x, row_y + 4.0, dcb_sz, dcb_sz,
-                            Color::new(0.12, 0.13, 0.22, 1.0));
-                        draw_rectangle_lines(dcb_x, row_y + 4.0, dcb_sz, dcb_sz, 1.0,
-                            if enabled { ACCENT } else { PANEL_BORDER });
-                        if enabled {
-                            draw_rectangle(dcb_x + 3.0, row_y + 7.0, dcb_sz - 6.0, dcb_sz - 6.0, ACCENT);
-                        }
-
-                        draw_text_ex(diff_name, dcb_x + dcb_sz + 8.0, row_y + 16.0,
-                            text_params(13, if enabled { WHITE } else { TEXT_DIM }));
-                        draw_text_ex(diff_desc, dcb_x + dcb_sz + 90.0, row_y + 16.0,
-                            text_params(11, Color::new(0.45, 0.47, 0.58, 0.8)));
-
-                        if row_hov && clicked {
-                            match di {
-                                0 => self.autofill_diff_recruit = !self.autofill_diff_recruit,
-                                1 => self.autofill_diff_easy = !self.autofill_diff_easy,
-                                2 => self.autofill_diff_normal = !self.autofill_diff_normal,
-                                3 => self.autofill_diff_hard = !self.autofill_diff_hard,
-                                4 => self.autofill_diff_nightmare = !self.autofill_diff_nightmare,
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // ── time limit selector (Gun Game) ────────────────────────────────────
-        if self.pending_start_gamemode == MODE_GUN_GAME {
+        let section_x = panel_x + 24.0;
+        let section_w = panel_w - 48.0;
+        let gun_game = self.pending_start_gamemode == MODE_GUN_GAME;
+        if gun_game {
             let tl_top = desc_y + 44.0;
-            let section_x = panel_x + 24.0;
-            let section_w = panel_w - 48.0;
 
             draw_text_ex(
                 "TIME LIMIT",
@@ -650,6 +479,126 @@ impl PlayingState {
 
             draw_rectangle(section_x, btn_y + btn_h, section_w, 1.0, SEP);
         }
+
+        // ── bots ──────────────────────────────────────────────────────────────
+        // Team modes: a bot count per team, under that team's roster. Gun Game:
+        // one total, as it has no teams. Zero means no bots.
+        let bots_top = if gun_game {
+            desc_y + 44.0 + 8.0 + 38.0 + 24.0
+        } else {
+            roster_top + ROSTER_H + 24.0
+        };
+        draw_text_ex("BOTS", section_x, bots_top, text_params(12, TEXT_DIM));
+
+        let humans = red_humans + blue_humans;
+        let bots = if gun_game {
+            self.autofill_ffa_bots as usize
+        } else {
+            (self.autofill_red_bots + self.autofill_blue_bots) as usize
+        };
+        // what the match will look like, on the label line
+        let summary = if gun_game {
+            format!("{} PLAYERS  +  {} BOTS", humans, bots)
+        } else {
+            format!(
+                "MATCH-UP  {}  v  {}",
+                red_humans + self.autofill_red_bots as usize,
+                blue_humans + self.autofill_blue_bots as usize
+            )
+        };
+        let sum_w = measure_game_text(&summary, 12);
+        draw_text_ex(
+            &summary,
+            section_x + section_w - sum_w,
+            bots_top,
+            text_params(12, TEXT_LABEL),
+        );
+
+        let row_y = bots_top + 8.0;
+        let row_h = 34.0;
+        if gun_game {
+            bot_stepper(
+                &mut self.autofill_ffa_bots,
+                MAX_FFA_BOTS,
+                section_x,
+                row_y,
+                section_w,
+                row_h,
+                ACCENT,
+                PANEL_BORDER,
+                mouse,
+                clicked,
+            );
+        } else {
+            let gap = 12.0;
+            let col_w = (section_w - gap) / 2.0;
+            bot_stepper(
+                &mut self.autofill_red_bots,
+                MAX_BOTS_PER_TEAM,
+                section_x,
+                row_y,
+                col_w,
+                row_h,
+                RED_TEAM,
+                RED_BORDER,
+                mouse,
+                clicked,
+            );
+            bot_stepper(
+                &mut self.autofill_blue_bots,
+                MAX_BOTS_PER_TEAM,
+                section_x + col_w + gap,
+                row_y,
+                col_w,
+                row_h,
+                BLUE_TEAM,
+                BLUE_BORDER,
+                mouse,
+                clicked,
+            );
+        }
+
+        // second row: difficulty filter on the left; quick presets on the right
+        let opts_y = row_y + row_h + 12.0;
+        let preset_h = 22.0;
+        let mut presets_x = section_x + section_w;
+        if gun_game {
+            presets_x -= 64.0;
+            if small_button("NONE", presets_x, opts_y, 64.0, preset_h, mouse, clicked) {
+                self.autofill_ffa_bots = 0;
+            }
+        } else {
+            presets_x -= 64.0;
+            if small_button("NONE", presets_x, opts_y, 64.0, preset_h, mouse, clicked) {
+                self.autofill_red_bots = 0;
+                self.autofill_blue_bots = 0;
+            }
+            presets_x -= 112.0 + 8.0;
+            if small_button("EVEN TEAMS", presets_x, opts_y, 112.0, preset_h, mouse, clicked) {
+                // top up the smaller side so both teams field the same number
+                let red = red_humans + self.autofill_red_bots as usize;
+                let blue = blue_humans + self.autofill_blue_bots as usize;
+                let target = red.max(blue).max(1);
+                let cap = MAX_BOTS_PER_TEAM as usize;
+                self.autofill_red_bots = target.saturating_sub(red_humans).min(cap) as u8;
+                self.autofill_blue_bots = target.saturating_sub(blue_humans).min(cap) as u8;
+            }
+        }
+
+        // a full match turns some bots away; say so before the host starts
+        if humans + bots > MATCH_MAX_PLAYERS && !self.autofill_dropdown_open {
+            let fit = MATCH_MAX_PLAYERS.saturating_sub(humans);
+            let warn = format!("A match holds {} players: only {} bots will join.", MATCH_MAX_PLAYERS, fit);
+            draw_text_ex(
+                &warn,
+                section_x,
+                opts_y + preset_h + 22.0,
+                text_params(12, Color::new(1.0, 0.65, 0.42, 1.0)),
+            );
+        }
+
+        // drawn last: its dropdown opens over everything above
+        self.draw_bot_difficulty(section_x, opts_y, presets_x - section_x - 12.0, mouse, clicked);
 
         // ── console feedback message ───────────────────────────────────────────
         if let Some(msg) = &self.lobby_console_message {
@@ -865,4 +814,160 @@ impl PlayingState {
             self.pending_range_start = true;
         }
     }
+}
+
+impl PlayingState {
+    /// "BOT DIFFICULTY" filter: a summary of the enabled difficulties and a
+    /// dropdown of checkboxes, `w` wide from (`x`, `y`).
+    fn draw_bot_difficulty(&mut self, x: f32, y: f32, w: f32, mouse: (f32, f32), clicked: bool) {
+        use crate::ui::fonts::{measure_game_text, text_params};
+
+        let h = 22.0;
+        let hov = mouse.0 >= x && mouse.0 <= x + w && mouse.1 >= y && mouse.1 <= y + h;
+        draw_rectangle(x, y, w, h, if hov || self.autofill_dropdown_open { CONTROL_HOVER } else { CONTROL_BG });
+        draw_rectangle_lines(x, y, w, h, 1.0, if self.autofill_dropdown_open { ACCENT } else { PANEL_BORDER });
+        if hov && clicked {
+            self.autofill_dropdown_open = !self.autofill_dropdown_open;
+        }
+
+        draw_text_ex("DIFFICULTY", x + 8.0, y + 15.0, text_params(12, TEXT_LABEL));
+
+        let mut active: Vec<&str> = Vec::new();
+        if self.autofill_diff_recruit { active.push("Rec"); }
+        if self.autofill_diff_easy { active.push("Easy"); }
+        if self.autofill_diff_normal { active.push("Norm"); }
+        if self.autofill_diff_hard { active.push("Hard"); }
+        if self.autofill_diff_nightmare { active.push("NM"); }
+        let summary = if active.len() == 5 {
+            "All".to_string()
+        } else if active.is_empty() {
+            "None!".to_string()
+        } else {
+            active.join(", ")
+        };
+        let arrow = if self.autofill_dropdown_open { "^" } else { "v" };
+        let aw = measure_game_text(arrow, 12);
+        draw_text_ex(arrow, x + w - aw - 8.0, y + 15.0, text_params(12, TEXT_LABEL));
+        draw_text_ex(
+            &summary,
+            x + 92.0,
+            y + 15.0,
+            text_params(12, if active.is_empty() { Color::new(1.0, 0.3, 0.3, 1.0) } else { TEXT_DIM }),
+        );
+
+        if !self.autofill_dropdown_open {
+            return;
+        }
+
+        // dropdown panel, drawn over whatever is below
+        let panel_x = x;
+        let panel_y = y + h + 2.0;
+        let panel_w = w.max(300.0);
+        let row_h = 24.0;
+        let panel_h = row_h * 5.0 + 8.0;
+        draw_rectangle(panel_x, panel_y, panel_w, panel_h, Color::new(0.08, 0.09, 0.16, 0.98));
+        draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 1.0, PANEL_BORDER);
+
+        let difficulties: [(&str, &str); 5] = [
+            ("Recruit", "Slowest reaction, worst aim"),
+            ("Easy", "Below average skill"),
+            ("Normal", "Average players"),
+            ("Hard", "Skilled opponents"),
+            ("Nightmare", "Near-perfect aim & reactions"),
+        ];
+        let flags: [&mut bool; 5] = [
+            &mut self.autofill_diff_recruit,
+            &mut self.autofill_diff_easy,
+            &mut self.autofill_diff_normal,
+            &mut self.autofill_diff_hard,
+            &mut self.autofill_diff_nightmare,
+        ];
+        for (i, ((name, desc), flag)) in difficulties.iter().zip(flags).enumerate() {
+            let row_y = panel_y + 4.0 + i as f32 * row_h;
+            let cb_x = panel_x + 8.0;
+            let cb = 16.0;
+            let row_hov = mouse.0 >= panel_x
+                && mouse.0 <= panel_x + panel_w
+                && mouse.1 >= row_y
+                && mouse.1 <= row_y + row_h;
+            if row_hov {
+                draw_rectangle(panel_x + 1.0, row_y, panel_w - 2.0, row_h, Color::new(0.15, 0.17, 0.28, 0.8));
+            }
+            draw_rectangle(cb_x, row_y + 4.0, cb, cb, CONTROL_BG);
+            draw_rectangle_lines(cb_x, row_y + 4.0, cb, cb, 1.0, if *flag { ACCENT } else { PANEL_BORDER });
+            if *flag {
+                draw_rectangle(cb_x + 3.0, row_y + 7.0, cb - 6.0, cb - 6.0, ACCENT);
+            }
+            draw_text_ex(name, cb_x + cb + 8.0, row_y + 16.0, text_params(13, if *flag { WHITE } else { TEXT_DIM }));
+            draw_text_ex(desc, cb_x + cb + 90.0, row_y + 16.0, text_params(11, Color::new(0.45, 0.47, 0.58, 0.8)));
+            if row_hov && clicked {
+                *flag = !*flag;
+            }
+        }
+    }
+}
+
+/// A `- N BOTS +` stepper filling `w` x `h`, clamped to `0..=max`. `accent`
+/// colours the buttons and count; `border` frames it.
+#[allow(clippy::too_many_arguments)]
+fn bot_stepper(
+    value: &mut u8,
+    max: u8,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    accent: Color,
+    border: Color,
+    mouse: (f32, f32),
+    clicked: bool,
+) {
+    use crate::ui::fonts::{measure_game_text, text_params};
+
+    draw_rectangle(x, y, w, h, CONTROL_BG);
+    draw_rectangle_lines(x, y, w, h, 1.0, border);
+
+    let inside = |bx: f32| mouse.0 >= bx && mouse.0 <= bx + h && mouse.1 >= y && mouse.1 <= y + h;
+    let button = |bx: f32, label: &str, enabled: bool| -> bool {
+        let hov = enabled && inside(bx);
+        let bg = if !enabled {
+            Color::new(accent.r, accent.g, accent.b, 0.10)
+        } else if hov {
+            Color::new(accent.r, accent.g, accent.b, 0.45)
+        } else {
+            Color::new(accent.r, accent.g, accent.b, 0.22)
+        };
+        draw_rectangle(bx + 3.0, y + 3.0, h - 6.0, h - 6.0, bg);
+        let lw = measure_game_text(label, 18);
+        let lc = if enabled { WHITE } else { TEXT_DIM };
+        draw_text_ex(label, bx + (h - lw) / 2.0, y + h / 2.0 + 6.0, text_params(18, lc));
+        hov && clicked
+    };
+    if button(x, "-", *value > 0) {
+        *value -= 1;
+    }
+    if button(x + w - h, "+", *value < max) {
+        *value += 1;
+    }
+
+    let label = match *value {
+        0 => "NO BOTS".to_string(),
+        1 => "1 BOT".to_string(),
+        n => format!("{} BOTS", n),
+    };
+    let lw = measure_game_text(&label, 15);
+    let lc = if *value == 0 { TEXT_DIM } else { accent };
+    draw_text_ex(&label, x + (w - lw) / 2.0, y + h / 2.0 + 5.0, text_params(15, lc));
+}
+
+/// A small outlined button; returns true when clicked.
+fn small_button(label: &str, x: f32, y: f32, w: f32, h: f32, mouse: (f32, f32), clicked: bool) -> bool {
+    use crate::ui::fonts::{measure_game_text, text_params};
+
+    let hov = mouse.0 >= x && mouse.0 <= x + w && mouse.1 >= y && mouse.1 <= y + h;
+    draw_rectangle(x, y, w, h, if hov { CONTROL_HOVER } else { CONTROL_BG });
+    draw_rectangle_lines(x, y, w, h, 1.0, if hov { ACCENT } else { PANEL_BORDER });
+    let lw = measure_game_text(label, 12);
+    draw_text_ex(label, x + (w - lw) / 2.0, y + h / 2.0 + 4.0, text_params(12, if hov { WHITE } else { TEXT_LABEL }));
+    hov && clicked
 }

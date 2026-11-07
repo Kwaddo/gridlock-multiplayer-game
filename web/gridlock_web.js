@@ -25,7 +25,9 @@
     // ?nodirect makes the direct attempt fail, to check the fallback to TURN.
     const NO_DIRECT = new URLSearchParams(location.search).has("nodirect");
     const STUN_FALLBACK = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
-    const POLL_HOST_MS = 2000;
+    // An idle host polls this often to notice newcomers: half the interval is
+    // the average wait before a join even starts.
+    const POLL_HOST_MS = 1000;
     const POLL_CONNECTING_MS = 500;
     const POLL_CONNECTED_MS = 1000; // a connected player only checks whether to resume
     const HOST_KEEP_MS = 20000; // how often the host renews its claim on the room
@@ -33,9 +35,17 @@
     // signalling write the registry lost (it has no atomic updates) only
     // costs a few seconds: the host resends its offer, the player its answer.
     const HELLO_MS = 6000;
-    // An offer or answer goes out once its ICE candidates are gathered (one
-    // write per side, nothing trickled), or after this long regardless.
-    const GATHER_MS = 2500;
+    // An offer or answer goes out once its ICE candidates are gathered, or
+    // after this long regardless; candidates found later follow on their own
+    // (trickled), so a slow STUN server no longer holds up the handshake.
+    const GATHER_MS = 400;
+    // A registry that holds polls until something arrives (the local one,
+    // registry/local/server.mjs) marks its replies with this header; the page
+    // then polls again at once instead of waiting out an interval.
+    const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
+    // Least time between two long polls, so a registry answering at once
+    // (nothing held) can't spin the loop.
+    const LONG_POLL_GAP_MS = 50;
     const SEND_BATCH_MS = 50;
     const DISCONNECT_GRACE_MS = 3000;
     // TURN is the last resort: a connection first tries direct paths only
@@ -119,6 +129,8 @@
             let lastKeep = Date.now();
             let lastHello = Date.now();
             const seen = new Set(); // ids of messages already handled
+            let longPoll = false; // the registry holds polls (see LONG_POLL_HEADER)
+            let lastSeq = 0; // newest message seq seen, for a long poll's `after`
             while (!this.closed) {
                 // A connected player needs no signalling: if the host goes,
                 // the WebRTC connection itself reports it.
@@ -133,7 +145,11 @@
                                 lastKeep = Date.now();
                             }
                         }
+                        // Ask to be held until something new arrives; a registry
+                        // without long polling ignores this.
+                        q += `&wait&after=${lastSeq}`;
                         const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
+                        longPoll = resp.headers.has(LONG_POLL_HEADER);
                         // A host whose claim was lost claims the room again;
                         // players already connected are not affected.
                         if (resp.status === 410 && this.isHost && (await this.reclaim())) continue;
@@ -143,6 +159,7 @@
                             for (const msg of await resp.json()) {
                                 // Messages carry ids (repeated until they expire);
                                 // a registry without ids sends each one once.
+                                if (typeof msg.seq === "number") lastSeq = Math.max(lastSeq, msg.seq);
                                 if (this.closed || (msg.id !== undefined && seen.has(msg.id))) continue;
                                 if (msg.id !== undefined) seen.add(msg.id);
                                 this.onSignal(msg);
@@ -152,9 +169,11 @@
                             lastHello = Date.now();
                             this.post("/hello", {});
                         }
-                    } catch {} // network blip: try again on the next poll
+                    } catch {
+                        longPoll = false; // network blip: try again on the next poll
+                    }
                 }
-                await sleep(this.pollDelay(connected));
+                await sleep(longPoll && !connected ? LONG_POLL_GAP_MS : this.pollDelay(connected));
             }
         }
 
@@ -256,9 +275,18 @@
                 // ?relay in the page URL forces every connection through TURN (for testing the relay).
                 iceTransportPolicy: FORCE_RELAY || (NO_DIRECT && !relay) ? "relay" : "all",
             });
-            const peer = { remoteId, pc, channel: null, pending: [], open: false, gen, offerer };
+            // `described`: our offer/answer went out, so candidates found from
+            // now on are sent on their own
+            const peer = { remoteId, pc, channel: null, pending: [], open: false, gen, offerer, described: false };
             this.peers.set(id, peer);
             this.byRemote.set(remoteId, id);
+
+            // Trickle ICE: a candidate gathered before the description went out
+            // is already in it; later ones are sent as they come.
+            pc.onicecandidate = (e) => {
+                if (!e.candidate || !peer.described || this.peers.get(id) !== peer) return;
+                this.signal({ Signal: { receiver: remoteId, data: { candidate: e.candidate.toJSON(), gen } } });
+            };
 
             pc.onconnectionstatechange = () => {
                 const state = pc.connectionState;
@@ -311,6 +339,7 @@
         // Our offer or answer, with every ICE candidate gathered so far in it.
         sendDescription(peer) {
             if (!peer.pc.localDescription || this.closed) return;
+            peer.described = true;
             this.signal({ Signal: { receiver: peer.remoteId, data: { sdp: peer.pc.localDescription.toJSON(), gen: peer.gen } } });
         }
 

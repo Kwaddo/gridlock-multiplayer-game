@@ -119,4 +119,18 @@ impl Player {
             regen_resume_at: None,
         }
     }
+
+    /// Whether `self` fights `other` in a match. Team modes put everyone on
+    /// Red or Blue; free-for-all modes (Gun Game) leave everyone teamless, so
+    /// a teamless player fights anyone. A teamless player is never a target
+    /// for someone on a team.
+    pub fn is_hostile_to(&self, other: &Player) -> bool {
+        if self.id == other.id {
+            return false;
+        }
+        if self.team == Team::Spectator {
+            return true;
+        }
+        other.team != self.team && other.team != Team::Spectator
+    }
 }
