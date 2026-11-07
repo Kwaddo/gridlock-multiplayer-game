@@ -651,6 +651,9 @@ pub fn sync_world(
         if let Some(score) = updates.team_score {
             playing_state.team_score = Some(score);
         }
+        if let Some(settings) = updates.lobby_settings {
+            playing_state.host_settings = Some(settings);
+        }
         if let Some(leader_id) = updates.lobby_leader_id {
             playing_state.lobby_leader_id = if leader_id == 0 { None } else { Some(leader_id) };
         }

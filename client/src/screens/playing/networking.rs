@@ -1,6 +1,7 @@
 use crate::net::protocols::{
     ClientMsg, EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS,
-    FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, MODE_GUN_GAME,
+    FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, LobbySettings,
+    MODE_GUN_GAME,
 };
 use transport::Link;
 
@@ -36,43 +37,23 @@ impl PlayingState {
             // Lobby console: send start-game request to server (include selected gamemode)
             if self.pending_start_request {
                 self.pending_start_request = false;
-                let mode = self.pending_start_gamemode;
-                // compute duration code: 0=default, 1..=65534=seconds, 65535=infinite
-                let dur_code: u16 = if config.hide_match_timer {
-                    u16::MAX
-                } else if let Some(secs) = config.match_time_override_secs {
-                    // if user picked a value explicitly; treat 0 as default
-                    if secs == 0 {
-                        0
-                    } else {
-                        secs.min(u16::MAX as u32) as u16
-                    }
-                } else {
-                    0
-                };
+                let settings = self.lobby_settings_now(config);
                 // auto-fill: Red/Blue bot counts in team modes, a total in
-                // Gun Game (0 = no bots)
-                let (bots, blue_bots) = if mode == MODE_GUN_GAME {
-                    (self.autofill_ffa_bots, None)
-                } else {
-                    (self.autofill_red_bots, Some(self.autofill_blue_bots))
-                };
-                // difficulty mask: bit0=Recruit, bit1=Easy, bit2=Normal, bit3=Hard, bit4=Nightmare
-                let mut diff_mask: u8 = 0;
-                if self.autofill_diff_recruit   { diff_mask |= 1 << 0; }
-                if self.autofill_diff_easy      { diff_mask |= 1 << 1; }
-                if self.autofill_diff_normal    { diff_mask |= 1 << 2; }
-                if self.autofill_diff_hard      { diff_mask |= 1 << 3; }
-                if self.autofill_diff_nightmare { diff_mask |= 1 << 4; }
-                // always send duration and auto-fill so server can parse easily
+                // Gun Game (0 = no bots); always sent so the server parses easily
+                let blue_bots = (settings.mode != MODE_GUN_GAME).then_some(settings.blue_bots);
                 let msg = ClientMsg::StartGame {
-                    mode: Some(mode),
-                    duration: Some(dur_code),
-                    autofill: Some((bots, diff_mask)),
+                    mode: Some(settings.mode),
+                    duration: Some(settings.duration),
+                    autofill: Some((settings.red_bots, settings.diff_mask)),
                     blue_bots,
                 }
                 .encode();
                 s.send(&msg);
+            }
+
+            // The host's lobby console changed: tell everyone what's next.
+            if let Some(settings) = self.pending_lobby_settings.take() {
+                s.send(&ClientMsg::LobbySettings(settings).encode());
             }
 
             // Send requested team selection (from lobby console)
@@ -241,5 +222,36 @@ impl PlayingState {
             }
             self.prev_was_sliding = self.movement_state.is_sliding;
         }
+    }
+}
+
+impl PlayingState {
+    /// The match this client's lobby console is set up for, as sent with
+    /// `StartGame` and shared with the other players as `LobbySettings`.
+    pub(super) fn lobby_settings_now(&self, config: &crate::core::GameConfig) -> LobbySettings {
+        let mode = self.pending_start_gamemode;
+        // duration code: 0 = mode default, 1..=65534 = seconds, 65535 = unlimited
+        let duration = if config.hide_match_timer {
+            u16::MAX
+        } else {
+            config.match_time_override_secs.map_or(0, |secs| secs.min(u16::MAX as u32) as u16)
+        };
+        // difficulty mask: bit0=Recruit, bit1=Easy, bit2=Normal, bit3=Hard, bit4=Nightmare
+        let diff_mask = [
+            self.autofill_diff_recruit,
+            self.autofill_diff_easy,
+            self.autofill_diff_normal,
+            self.autofill_diff_hard,
+            self.autofill_diff_nightmare,
+        ]
+        .iter()
+        .enumerate()
+        .fold(0u8, |mask, (bit, on)| if *on { mask | 1 << bit } else { mask });
+        let (red_bots, blue_bots) = if mode == MODE_GUN_GAME {
+            (self.autofill_ffa_bots, 0)
+        } else {
+            (self.autofill_red_bots, self.autofill_blue_bots)
+        };
+        LobbySettings { mode, duration, red_bots, blue_bots, diff_mask }
     }
 }
