@@ -16,14 +16,11 @@ use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
 use super::asset_loader::{
-    asset_loaded,
     download_progress,
-    load_asset_entry,
     load_manifest,
     preload,
     preload_status,
-    Prefetcher,
-    PREFETCH_AHEAD,
+    AssetQueue,
 };
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
@@ -95,10 +92,9 @@ pub async fn run() {
     // server does not mark us inactive when we are idle/paused.
     let mut last_keepalive: Option<Instant> = None;
 
-    let mut loading_assets: Vec<(String, String)> = Vec::new();
-    let mut loading_index: usize = 0;
-    let mut loading_current: String = String::new();
-    let mut prefetcher = Prefetcher::default();
+    // Joining waits only for what spawning needs; the rest of the game's
+    // assets keep loading in the background while playing.
+    let mut asset_queue = AssetQueue::default();
 
     // Everything a game loads: the asset manifest (one list for every game,
     // kept with the assets) plus the first-person viewmodels. Downloading
@@ -178,10 +174,11 @@ pub async fn run() {
 
                     preset_manager = CrosshairPresetManager::new(&username);
 
-                    loading_assets = game_assets.clone();
-                    loading_index = 0;
-                    loading_current.clear();
-                    prefetcher.clear();
+                    asset_queue = AssetQueue::start(
+                        &game_assets,
+                        spawn_assets(&loadout),
+                        &playing_state
+                    );
                     state = GameState::Loading;
                 }
                 login_screen.draw();
@@ -242,25 +239,11 @@ pub async fn run() {
                 }
 
 
-                if loading_index < loading_assets.len() {
-                    // Download a few ahead in the background; load the next
-                    // one only once its bytes are here, so no frame waits on
-                    // the network.
-                    // Assets already loaded (e.g. joining a second game) need no download.
-                    for (key, path) in loading_assets.iter().skip(loading_index).take(PREFETCH_AHEAD) {
-                        if !asset_loaded(&playing_state, key, path) {
-                            prefetcher.start(path);
-                        }
-                    }
-                    let (key, path) = loading_assets[loading_index].clone();
-                    loading_current = key.clone();
-                    if asset_loaded(&playing_state, &key, &path) || prefetcher.ready(&path) {
-                        load_asset_entry(&key, &path, &mut playing_state).await;
-                        loading_index += 1;
-                    }
-                }
+                // The lobby loadout's weapons are what the player spawns with.
+                asset_queue.prioritize(spawn_assets(&loadout));
+                asset_queue.pump(&mut playing_state).await;
 
-                if loading_index >= loading_assets.len() {
+                if asset_queue.ready_to_play() {
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                     state = GameState::Playing;
                     // Loading paused this loop, so time spent there is not silence from the server.
@@ -270,15 +253,9 @@ pub async fn run() {
                     playing_state.last_mouse_pos = mouse_position();
                 }
 
-                let download = loading_assets
-                    .get(loading_index)
-                    .and_then(|(_, path)| download_progress(path));
-                login_screen.draw_loading(
-                    loading_assets.len(),
-                    loading_index,
-                    &loading_current,
-                    download
-                );
+                let (loaded, total) = asset_queue.essential_progress();
+                let current = asset_queue.current().cloned().unwrap_or_default();
+                login_screen.draw_loading(total, loaded, &current.0, download_progress(&current.1));
             }
 
             GameState::Playing => {
@@ -555,6 +532,19 @@ pub async fn run() {
             }
         }
 
+        // In a game: keep loading the rest of the assets, one per frame at
+        // most, whatever the player needs next first.
+        if
+            session.is_some() &&
+            !asset_queue.is_done() &&
+            !matches!(state, GameState::Login | GameState::Loading | GameState::Exit)
+        {
+            asset_queue.prioritize(wanted_assets(&playing_state, &loadout));
+            asset_queue.pump(&mut playing_state).await;
+            let (loaded, total) = asset_queue.progress();
+            client::ui::hud::draw_background_loading(loaded, total);
+        }
+
         // A game we host: step it (the browser runs the server in this loop), and
         // pass on what the host should know, e.g. whether outsiders can reach it.
         if let Some(host) = session.as_mut().and_then(|s| s.host.as_mut()) {
@@ -596,6 +586,35 @@ pub async fn run() {
 
         next_frame().await;
     }
+}
+
+/// The models a player needs to spawn with `loadout`: its weapons and their
+/// hands, the knife's hands, and the idle animation every other player is
+/// drawn with until their own animations arrive.
+fn spawn_assets(loadout: &Loadout) -> Vec<&'static str> {
+    let mut keys = vec!["fp_hands", "anim_rifle_idle"];
+    for id in loadout.slots {
+        keys.extend(id.stats().viewmodel_model);
+        keys.push(PlayingState::preferred_hands_key_for_weapon(id));
+    }
+    keys
+}
+
+/// What to load next while playing: the weapons the player holds or picked in
+/// the lobby, then the animations other players are showing right now.
+fn wanted_assets(playing_state: &PlayingState, loadout: &Loadout) -> Vec<&'static str> {
+    let held = playing_state.weapons.weapons.iter().map(|w| w.id);
+    let mut keys = Vec::new();
+    for id in held.chain(loadout.slots) {
+        keys.extend(id.stats().viewmodel_model);
+        keys.push(PlayingState::preferred_hands_key_for_weapon(id));
+    }
+    let skins = playing_state.other_players
+        .iter()
+        .map(|p| p.skin_type)
+        .chain(playing_state.practice_bots.iter().map(|b| b.player.skin_type));
+    keys.extend(skins.filter_map(|skin| skin.model_key()));
+    keys
 }
 
 fn resolve_asset_entries_for_quality(
