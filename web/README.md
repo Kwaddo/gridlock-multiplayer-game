@@ -59,7 +59,10 @@ the page it serves, and the game uses that at run time instead of the registry
 baked into the build (`platform::page_setting`). The same build therefore
 works online and offline. `/ice` returns no ICE servers, since peers on one
 network connect directly, and `/models/*` is served from the build (or from
-`client/assets/models` when the build left them out).
+`client/assets/models` when the build left them out). Its signalling polls
+are long polls: a poll is held until a message arrives (up to 15 s), so the
+host hears of a new player, and each side of the offer/answer, within one LAN
+round trip instead of a poll interval.
 
 Options: `--port`, `--host` (default `0.0.0.0`, every interface; use
 `127.0.0.1` to keep it to this machine), `--dir`, `--models`. Native clients

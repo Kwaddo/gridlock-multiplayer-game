@@ -25,6 +25,10 @@ use super::asset_loader::{
 use super::dev_ui::draw_bot_tab;
 use super::world_sync::sync_world;
 
+/// Time the loading screen may spend loading assets each frame; it keeps the
+/// screen drawing (and a game hosted in this tab answering) at about 60 fps.
+const LOADING_FRAME_BUDGET: Duration = Duration::from_millis(12);
+
 // asset quality selector used when resolving which version of a model to
 // request from the server.  the value is passed down to
 // `resolve_asset_path_for_quality`, which currently just uses it when
@@ -241,7 +245,14 @@ pub async fn run() {
 
                 // The lobby loadout's weapons are what the player spawns with.
                 asset_queue.prioritize(spawn_assets(&loadout));
-                asset_queue.pump(&mut playing_state).await;
+                // Nothing is being played yet, so load as much as fits in a
+                // frame instead of one file per frame: the ~20 small sounds
+                // and textures alone took a third of a second that way.
+                let frame_start = Instant::now();
+                while asset_queue.pump(&mut playing_state).await
+                    && frame_start.elapsed() < LOADING_FRAME_BUDGET
+                    && !asset_queue.ready_to_play()
+                {}
 
                 if asset_queue.ready_to_play() {
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
