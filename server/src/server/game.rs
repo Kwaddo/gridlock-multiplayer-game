@@ -45,7 +45,7 @@ pub const MATCH_SCORE_TO_WIN: u32 = 100; // kills required to win the match (use
 
 pub const MATCH_START_COUNTDOWN_SECS: u8 = 5; // seconds shown to players before a match actually starts // seconds shown to players before a match actually starts
 pub const MATCH_END_COUNTDOWN_SECS: u8 = 6; // seconds to wait after a win before returning players to lobby
-pub const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 3; // seconds players cannot move right after teleport into Maze
+pub const MATCH_POST_TELEPORT_FREEZE_SECS: u64 = 5; // seconds players (and bots) cannot move right after teleport into Maze
 
 // --- Gun Game configuration (single-mode for now)
 // Customize this progression to change the sequence of weapons for Gun Game.

@@ -1,6 +1,6 @@
 use crate::core::game_state::*;
 use crate::net::browser::ServerBrowser;
-use crate::net::client::Connector;
+use crate::net::client::{ConnectProgress, Connector};
 use crate::ui::fonts::{measure_game_text, text_params};
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
@@ -133,11 +133,9 @@ impl LoginScreen {
             text_params(13, TEXT_DIM),
         );
 
-        if self.connector.is_some() {
+        if let Some(connector) = &self.connector {
             draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.55));
-            let t = "Connecting...";
-            let tw = measure_game_text(t, 28);
-            draw_text_ex(t, (sw - tw) / 2.0, sh / 2.0, text_params(28, ACCENT));
+            draw_connecting(&connector.progress(), sw, sh);
         }
     }
 
@@ -179,6 +177,60 @@ impl LoginScreen {
             MainMenuTab::Direct => &[LoginField::Username, LoginField::Address],
         }
     }
+}
+
+/// The "Connecting" panel: current step, an estimated progress bar, and how
+/// long the join has taken and may still take before it gives up.
+fn draw_connecting(p: &ConnectProgress, sw: f32, sh: f32) {
+    let pw = 480.0_f32.min(sw * 0.85);
+    let ph = 176.0;
+    let px = (sw - pw) / 2.0;
+    let py = sh * 0.38;
+    let pad = 30.0;
+    draw_rectangle(px, py, pw, ph, PANEL_BG);
+    draw_rectangle_lines(px, py, pw, ph, 1.0, PANEL_BORDER);
+
+    let centered = |text: &str, y: f32, size: u16, color: Color| {
+        let w = measure_game_text(text, size);
+        draw_text_ex(text, (sw - w) / 2.0, y, text_params(size, color));
+    };
+
+    // dots cycle so the panel visibly lives even when the bar barely moves
+    let dots = ".".repeat(1 + (p.elapsed.as_millis() / 400 % 3) as usize);
+    centered(&format!("CONNECTING{dots:<3}"), py + 34.0, 22, ACCENT);
+    centered(&format!("Step {} of {}  -  {}", p.step, p.steps, p.stage), py + 60.0, 16, WHITE);
+
+    let bx = px + pad;
+    let bw = pw - pad * 2.0;
+    let bh = 22.0;
+    let by = py + 76.0;
+    draw_rectangle(bx, by, bw, bh, INPUT_BG);
+    draw_rectangle_lines(bx, by, bw, bh, 1.0, PANEL_BORDER);
+    let frac = p.fraction.clamp(0.0, 1.0);
+    draw_rectangle(bx + 2.0, by + 2.0, (bw - 4.0) * frac, bh - 4.0, ACCENT);
+    let pct = format!("{}%", (frac * 100.0).round() as u32);
+    let pct_w = measure_game_text(&pct, 14);
+    draw_text_ex(&pct, bx + (bw - pct_w) / 2.0, by + 16.0, text_params(14, WHITE));
+
+    // long room URLs keep their distinctive end
+    let chars: Vec<char> = p.address.chars().collect();
+    let address = if chars.len() > 40 {
+        format!("...{}", chars[chars.len() - 37..].iter().collect::<String>())
+    } else {
+        p.address.to_string()
+    };
+    draw_text_ex(&address, bx, by + bh + 20.0, text_params(13, TEXT_DIM));
+    let elapsed = format!("{:.1}s", p.elapsed.as_secs_f32());
+    let ew = measure_game_text(&elapsed, 15);
+    draw_text_ex(&elapsed, bx + bw - ew, by + bh + 20.0, text_params(15, TEXT_LABEL));
+
+    let gives_up = p.gives_up_in.as_secs_f32().ceil() as u32;
+    let footer = if p.join_attempts > 1 {
+        format!("Join request sent {}x  |  gives up in {}s", p.join_attempts, gives_up)
+    } else {
+        format!("Gives up in {}s if there is no answer", gives_up)
+    };
+    centered(&footer, py + ph - 16.0, 13, TEXT_DIM);
 }
 
 fn in_rect(mouse: (f32, f32), x: f32, y: f32, w: f32, h: f32) -> bool {
