@@ -113,7 +113,9 @@ impl PlayingState {
         keys
     }
 
-    fn preferred_hands_key_for_weapon(id: WeaponId) -> &'static str {
+    /// The first-person hands rig `id` is drawn with (the asset loader
+    /// loads it before the player spawns with that weapon).
+    pub fn preferred_hands_key_for_weapon(id: WeaponId) -> &'static str {
         if id == WeaponId::Minigun {
             return "fp_hands_minigun";
         }

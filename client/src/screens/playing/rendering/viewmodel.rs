@@ -115,12 +115,9 @@ impl PlayingState {
                     );
                 }
                 return;
-            } else {
-                println!(
-                    "Model '{}' not found in cache, using 2D fallback",
-                    model_key
-                );
             }
+            // Not loaded yet (it arrives in the background after joining) or
+            // failed to load: the 2D sprite below stands in.
         }
 
         self.draw_2d_viewmodel(weapon, stats);
