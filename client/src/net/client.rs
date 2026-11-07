@@ -31,6 +31,26 @@ pub struct Connector {
     started: Instant,
     opened: Option<Instant>,
     last_sent: Option<Instant>,
+    /// Join requests sent so far.
+    attempts: u32,
+}
+
+/// Where a join stands, for the "Connecting" screen.
+pub struct ConnectProgress<'a> {
+    /// What is happening now.
+    pub stage: &'static str,
+    /// 1-based step out of `steps`.
+    pub step: u8,
+    pub steps: u8,
+    /// 0..1 bar fill. Estimated from time spent against the timeouts, since
+    /// neither step reports real progress; it eases out so it never stalls
+    /// at a hard edge and never reaches full before the join succeeds.
+    pub fraction: f32,
+    pub elapsed: Duration,
+    /// Seconds left before this step gives up.
+    pub gives_up_in: Duration,
+    pub join_attempts: u32,
+    pub address: &'a str,
 }
 
 pub enum ConnectPoll {
@@ -61,6 +81,49 @@ impl Connector {
             started: Instant::now(),
             opened: None,
             last_sent: None,
+            attempts: 0,
+        }
+    }
+
+    pub fn progress(&self) -> ConnectProgress<'_> {
+        // eased 0..1 over `limit`: quick at first, slowing as the timeout nears
+        let ease = |t: Duration, limit: Duration| {
+            let x = (t.as_secs_f32() / limit.as_secs_f32()).min(1.0);
+            1.0 - (-5.0 * x).exp()
+        };
+        // linking takes the first 60% of the bar, the join request the rest
+        const LINK_SHARE: f32 = 0.6;
+        let (stage, step, fraction, gives_up_in) = match self.opened {
+            None => {
+                let stage = if self.host.is_some() {
+                    "Starting your server"
+                } else if cfg!(target_arch = "wasm32") {
+                    "Opening peer connection"
+                } else {
+                    "Reaching server"
+                };
+                let t = self.started.elapsed();
+                (stage, 1, 0.02 + (LINK_SHARE - 0.02) * ease(t, LINK_TIMEOUT), LINK_TIMEOUT.saturating_sub(t))
+            }
+            Some(opened) => {
+                let t = opened.elapsed();
+                (
+                    "Joining game",
+                    2,
+                    LINK_SHARE + (0.97 - LINK_SHARE) * ease(t, JOIN_TIMEOUT),
+                    JOIN_TIMEOUT.saturating_sub(t),
+                )
+            }
+        };
+        ConnectProgress {
+            stage,
+            step,
+            steps: 2,
+            fraction,
+            elapsed: self.started.elapsed(),
+            gives_up_in,
+            join_attempts: self.attempts,
+            address: &self.address,
         }
     }
 
@@ -97,6 +160,7 @@ impl Connector {
                 if self.last_sent.map_or(true, |t| t.elapsed() >= JOIN_RESEND) {
                     self.link.send(&self.join);
                     self.last_sent = Some(Instant::now());
+                    self.attempts += 1;
                 }
             }
         }
