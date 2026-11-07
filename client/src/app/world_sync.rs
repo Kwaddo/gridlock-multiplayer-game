@@ -389,9 +389,13 @@ pub fn sync_world(
         // an authoritative per-player freeze in MSG_STATE, use it as a fallback
         // to enforce movement/weapon locks when the MSG_WORLD_CHANGE packet
         // was lost while entering the Maze.
+        // The server sends whole seconds rounded down, so it only ever extends
+        // the local timer: overwriting it would unlock up to a second early.
         if !world_change_applied {
             if let Some(secs) = updates.self_freeze_secs {
-                if playing_state.current_world == WorldId::Maze {
+                if playing_state.current_world == WorldId::Maze
+                    && secs as f32 > playing_state.post_teleport_freeze_timer
+                {
                     playing_state.post_teleport_freeze_timer = secs as f32;
                 }
             }
