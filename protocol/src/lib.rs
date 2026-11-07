@@ -37,6 +37,8 @@ pub const MSG_MATCH_STATUS: u8 = 39; // server -> all: match phase [status:1] (s
 
 pub const MSG_TEAM_SCORE: u8 = 40; // server -> all, team modes: [red:u16][blue:u16][to_win:u16] (big-endian),
                                   // kills each team has scored this match; sent on change and every few seconds
+pub const MSG_LOBBY_SETTINGS: u8 = 41; // both ways, see `LobbySettings`: the host -> server when it changes
+                                       // its lobby console; server -> all on change and to each joiner
 
 // MSG_MATCH_STATUS values
 pub const MATCH_STATUS_NONE: u8 = 0; // lobby only: the host can start a match
@@ -77,6 +79,22 @@ pub const MODE_SEARCH_AND_DESTROY: u8 = 3;
 pub const MAX_BOTS_PER_TEAM: u8 = 8; // team modes, per team
 pub const MAX_FFA_BOTS: u8 = 15; // Gun Game total (one per bot personality)
 pub const MATCH_MAX_PLAYERS: usize = 16; // humans plus bots in a running match
+
+/// Where `total` auto-fill bots go in a team mode with `red_humans` and
+/// `blue_humans` already placed: each bot joins whichever team is smaller
+/// (Red on a tie), so team sizes never differ by more than one once they
+/// are evened out. Returns the teams in spawn order, so a match too full
+/// for every bot drops the last ones and stays balanced.
+pub fn balanced_bot_order(red_humans: usize, blue_humans: usize, total: usize) -> Vec<bool> {
+    let (mut red, mut blue) = (red_humans, blue_humans);
+    (0..total)
+        .map(|_| {
+            let to_red = red <= blue;
+            if to_red { red += 1 } else { blue += 1 }
+            to_red
+        })
+        .collect()
+}
 pub const MSG_START_DENIED: u8 = 20; // server -> client: start request rejected (match running / full)
 pub const MSG_MATCH_JOINED: u8 = 21; // server -> all: announce player joined a running match (id, name)
 pub const MSG_MATCH_END: u8 = 22; // server -> all: announce match end (winner_id, name, countdown_secs)
@@ -114,3 +132,18 @@ pub const EVT_JUMP_START: u8 = 1 << 0;
 pub const EVT_LANDED: u8 = 1 << 1;
 pub const EVT_SLIDE_START: u8 = 1 << 2;
 pub const EVT_SLIDE_END: u8 = 1 << 3;
+
+#[cfg(test)]
+mod bot_split_tests {
+    use super::balanced_bot_order;
+
+    #[test]
+    fn bots_even_out_the_teams() {
+        // 2 v 1 humans, 3 bots: Blue first, then alternating
+        assert_eq!(balanced_bot_order(2, 1, 3), vec![false, true, false]);
+        // already even: Red first on a tie
+        assert_eq!(balanced_bot_order(1, 1, 2), vec![true, false]);
+        // lopsided humans: every bot goes to the small team until it catches up
+        assert_eq!(balanced_bot_order(3, 0, 3), vec![false, false, false]);
+    }
+}

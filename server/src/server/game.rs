@@ -378,3 +378,45 @@ pub fn cleanup_inactive_players(players: &mut HashMap<PeerId, Player>) -> Vec<Pl
     }
     removed
 }
+
+/// Humans in the lobby on (Red, Blue).
+pub fn lobby_team_counts(players: &HashMap<PeerId, Player>) -> (usize, usize) {
+    let lobby = || players.values().filter(|p| p.world == WorldId::Lobby && !p.is_bot);
+    (
+        lobby().filter(|p| p.team == crate::player::Team::Red).count(),
+        lobby().filter(|p| p.team == crate::player::Team::Blue).count(),
+    )
+}
+
+/// Keep the lobby's humans on two teams whose sizes differ by at most one,
+/// as the next team match will play them. Anyone without a team (new, or
+/// back from Gun Game) joins the smaller one; then, while one team is two or
+/// more bigger, its newest player moves across. Returns whether anyone moved.
+pub fn balance_lobby_teams(players: &mut HashMap<PeerId, Player>) -> bool {
+    use crate::player::Team;
+    let mut lobby: Vec<(u32, PeerId)> = players
+        .iter()
+        .filter(|(_, p)| p.world == WorldId::Lobby && !p.is_bot)
+        .map(|(addr, p)| (p.id, *addr))
+        .collect();
+    lobby.sort();
+    let (mut red, mut blue) = lobby_team_counts(players);
+    let mut changed = false;
+
+    for (_, addr) in &lobby {
+        let p = players.get_mut(addr).expect("listed above");
+        if p.team == Team::Spectator {
+            p.team = if red <= blue { red += 1; Team::Red } else { blue += 1; Team::Blue };
+            changed = true;
+        }
+    }
+    while red.abs_diff(blue) > 1 {
+        let (from, to) = if red > blue { (Team::Red, Team::Blue) } else { (Team::Blue, Team::Red) };
+        let newest = lobby.iter().rev().find(|(_, addr)| players[addr].team == from);
+        let Some((_, addr)) = newest else { break };
+        players.get_mut(addr).expect("listed above").team = to;
+        if from == Team::Red { red -= 1; blue += 1 } else { blue -= 1; red += 1 }
+        changed = true;
+    }
+    changed
+}

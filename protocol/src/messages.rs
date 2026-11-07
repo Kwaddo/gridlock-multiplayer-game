@@ -133,6 +133,38 @@ pub enum ServerMsg {
     PlayerLeft { id: u32, name: String, reason: u8 },
     MatchStatus { status: u8 },
     TeamScore { red: u16, blue: u16, to_win: u16 },
+    LobbySettings(LobbySettings),
+}
+
+/// What the host has picked in the lobby console for the next match. The
+/// host sends it as it changes; the server passes it to everyone so the
+/// other players can see what is coming.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LobbySettings {
+    pub mode: u8,
+    /// seconds; 0 = mode default, 65535 = unlimited (as in `StartGame`)
+    pub duration: u16,
+    /// bots on Red, or every bot in Gun Game
+    pub red_bots: u8,
+    pub blue_bots: u8,
+    /// bit0 = Recruit .. bit4 = Nightmare
+    pub diff_mask: u8,
+}
+
+impl LobbySettings {
+    fn write(&self, w: &mut Writer) {
+        w.u8(self.mode).u16(self.duration).u8(self.red_bots).u8(self.blue_bots).u8(self.diff_mask);
+    }
+
+    fn read(r: &mut Reader) -> Option<Self> {
+        Some(LobbySettings {
+            mode: r.u8()?,
+            duration: r.u16()?,
+            red_bots: r.u8()?,
+            blue_bots: r.u8()?,
+            diff_mask: r.u8()?,
+        })
+    }
 }
 
 /// Client -> server.
@@ -159,6 +191,7 @@ pub enum ClientMsg {
         blue_bots: Option<u8>,
     },
     SetTeam { team: u8 },
+    LobbySettings(LobbySettings),
     SndBombPickup,
     SndPlantStart,
     SndPlantStop,
@@ -316,6 +349,11 @@ impl ServerMsg {
                 Writer::new(MSG_PLAYER_LEFT).u32(*id).str8(name).u8(*reason).finish()
             }
             ServerMsg::MatchStatus { status } => vec![MSG_MATCH_STATUS, *status],
+            ServerMsg::LobbySettings(s) => {
+                let mut w = Writer::new(MSG_LOBBY_SETTINGS);
+                s.write(&mut w);
+                w.finish()
+            }
             ServerMsg::TeamScore { red, blue, to_win } => {
                 Writer::new(MSG_TEAM_SCORE).u16(*red).u16(*blue).u16(*to_win).finish()
             }
@@ -457,6 +495,7 @@ impl ServerMsg {
             }
             MSG_MATCH_STATUS => ServerMsg::MatchStatus { status: r.u8()? },
             MSG_TEAM_SCORE => ServerMsg::TeamScore { red: r.u16()?, blue: r.u16()?, to_win: r.u16()? },
+            MSG_LOBBY_SETTINGS => ServerMsg::LobbySettings(LobbySettings::read(&mut r)?),
             _ => return None,
         };
         Some(msg)
@@ -511,6 +550,11 @@ impl ClientMsg {
                 w.finish()
             }
             ClientMsg::SetTeam { team } => vec![MSG_SET_TEAM, *team],
+            ClientMsg::LobbySettings(s) => {
+                let mut w = Writer::new(MSG_LOBBY_SETTINGS);
+                s.write(&mut w);
+                w.finish()
+            }
             ClientMsg::SndBombPickup => vec![MSG_SND_BOMB_PICKUP],
             ClientMsg::SndPlantStart => vec![MSG_SND_PLANT_START],
             ClientMsg::SndPlantStop => vec![MSG_SND_PLANT_STOP],
@@ -559,6 +603,7 @@ impl ClientMsg {
                 ClientMsg::StartGame { mode, duration, autofill, blue_bots }
             }
             MSG_SET_TEAM => ClientMsg::SetTeam { team: r.u8()? },
+            MSG_LOBBY_SETTINGS => ClientMsg::LobbySettings(LobbySettings::read(&mut r)?),
             MSG_SND_BOMB_PICKUP => ClientMsg::SndBombPickup,
             MSG_SND_PLANT_START => ClientMsg::SndPlantStart,
             MSG_SND_PLANT_STOP => ClientMsg::SndPlantStop,
@@ -648,6 +693,9 @@ mod tests {
         rt_server(ServerMsg::PlayerJoined { id: 4, name: "bob".into() });
         rt_server(ServerMsg::MatchStatus { status: MATCH_STATUS_RUNNING });
         rt_server(ServerMsg::TeamScore { red: 42, blue: 7, to_win: 100 });
+        let settings = LobbySettings { mode: 2, duration: 900, red_bots: 3, blue_bots: 1, diff_mask: 0b10101 };
+        rt_server(ServerMsg::LobbySettings(settings));
+        rt_client(ClientMsg::LobbySettings(settings));
         rt_server(ServerMsg::PlayerLeft { id: 4, name: "bob".into(), reason: LEAVE_TIMED_OUT });
     }
 
