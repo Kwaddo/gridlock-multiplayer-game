@@ -3,7 +3,9 @@
 > The live game now runs these services as a Dilmune edge function instead;
 > see `dcs/README.md`. The browser build's signalling there is HTTP polling,
 > so the Worker below no longer works for browser games (native hosts and the
-> host list still do).
+> host list still do). For offline or LAN play, `local/server.mjs` serves the
+> same API from your own machine (`web/README.md`, "Play offline / on your
+> network").
 
 One Cloudflare Worker provides everything the game needs online:
 

@@ -26,12 +26,15 @@ const HEARTBEAT_SECS: u64 = 20;
 const RETRY_SECS: u64 = 5;
 
 /// Base URL of the host list, from `GRIDLOCK_REGISTRY` (at run time on native,
-/// baked in at build time on both). `None` turns online play off.
+/// baked in at build time on both). In the browser the page can override it at
+/// run time with `window.GRIDLOCK_REGISTRY`, which the local server
+/// (`registry/local/`) sets to itself for offline play. `None` turns online
+/// play off.
 pub fn registry_url() -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     let runtime = std::env::var("GRIDLOCK_REGISTRY").ok();
     #[cfg(target_arch = "wasm32")]
-    let runtime: Option<String> = None;
+    let runtime = platform::page_setting("REGISTRY");
 
     runtime
         .or_else(|| option_env!("GRIDLOCK_REGISTRY").map(str::to_string))
@@ -54,6 +57,10 @@ pub struct Listed {
     pub room: Option<String>,
     pub players: u8,
     pub max_players: u8,
+    /// The registry saw this game come from the asker's own network (same
+    /// public address), so the WebRTC connection stays inside that network.
+    #[serde(default)]
+    pub lan: bool,
 }
 
 /// How players reach the listed game.
