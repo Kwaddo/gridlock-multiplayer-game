@@ -232,15 +232,15 @@ pub fn maybe_start_match(
             // start the match now (generate maze, move lobby players into Maze).
             // Bots are planned first so the maze is sized for everyone who
             // will play in it.
-            let humans = players
-                .values()
-                .filter(|p| p.world == WorldId::Lobby && !p.is_bot)
-                .count();
+            // the lobby's teams are what the match plays (team modes)
+            game::balance_lobby_teams(players);
+            let (red_humans, blue_humans) = game::lobby_team_counts(players);
+            let humans = red_humans + blue_humans;
             let bot_slots = bot_team_slots(
                 match_mode,
                 autofill_red_bots,
                 autofill_blue_bots,
-                humans,
+                (red_humans, blue_humans),
                 eligible_bot_personalities(autofill_diff_mask).len(),
             );
             let side = game::maze_side_for_players(humans + bot_slots.len());
@@ -315,16 +315,13 @@ pub fn maybe_start_match(
                 ));
             }
 
-            for (i, addr) in joiners.iter().enumerate() {
+            for addr in joiners.iter() {
                 if let Some(player) = players.get_mut(addr) {
                     player.world = WorldId::Maze;
                     // choose spawn based on match mode / team
                     if let Some((red_spawn, blue_spawn)) = team_spawns {
-                        let team = if i % 2 == 0 {
-                            crate::player::Team::Red
-                        } else {
-                            crate::player::Team::Blue
-                        };
+                        // balanced in the lobby (see game::balance_lobby_teams)
+                        let team = if player.team == Team::Blue { Team::Blue } else { Team::Red };
                         let spawn = match team {
                             crate::player::Team::Red => red_spawn,
                             crate::player::Team::Blue => blue_spawn,
@@ -355,7 +352,7 @@ pub fn maybe_start_match(
                             crate::server::game::GUN_GAME_PROGRESSION[0].to_string();
                     } else {
                         // Team modes (TDM, S&D): assign balanced teams
-                        let team = if i % 2 == 0 { Team::Red } else { Team::Blue };
+                        let team = if player.team == Team::Blue { Team::Blue } else { Team::Red };
                         player.team = team;
 
                         // pick a primary for this player avoiding duplicates
@@ -771,15 +768,29 @@ fn eligible_bot_personalities(diff_mask: u8) -> Vec<BotPersonalityId> {
         .collect()
 }
 
-/// The team of each auto-fill bot to add, in spawn order. Team modes take
-/// `red` and `blue` bots, interleaved so that if the match is too full for
-/// all of them, both teams lose bots evenly. Gun Game has no teams: `red` is
-/// the total and every bot is teamless. Never more bots than free match
-/// slots or distinct personalities.
-fn bot_team_slots(match_mode: u8, red: u8, blue: u8, humans: usize, personalities: usize) -> Vec<Team> {
+/// The team of each auto-fill bot to add, in spawn order. Gun Game has no
+/// teams: `red` is the total and every bot is teamless. In team modes with
+/// two or more humans, the `red + blue` bots are spread so the teams end up
+/// even ([`balanced_bot_order`]); a player alone gets `red` and `blue` bots
+/// as asked (say, one against many). Either way the order is interleaved,
+/// so a match too full for every bot stays as even as it was. Never more
+/// bots than free match slots or distinct personalities.
+fn bot_team_slots(
+    match_mode: u8,
+    red: u8,
+    blue: u8,
+    (red_humans, blue_humans): (usize, usize),
+    personalities: usize,
+) -> Vec<Team> {
+    let humans = red_humans + blue_humans;
     let mut slots = Vec::new();
     if match_mode == MODE_GUN_GAME {
         slots.resize(red as usize, Team::Spectator);
+    } else if humans >= 2 {
+        slots = balanced_bot_order(red_humans, blue_humans, (red + blue) as usize)
+            .into_iter()
+            .map(|to_red| if to_red { Team::Red } else { Team::Blue })
+            .collect();
     } else {
         for i in 0..red.max(blue) {
             if i < red {
@@ -800,21 +811,31 @@ mod bot_slot_tests {
 
     #[test]
     fn team_modes_take_each_count() {
-        let slots = bot_team_slots(MODE_TEAM_DEATHMATCH, 1, 3, 2, 15);
+        // alone: as asked
+        let slots = bot_team_slots(MODE_TEAM_DEATHMATCH, 1, 3, (1, 0), 15);
         assert_eq!(slots, vec![Team::Red, Team::Blue, Team::Blue, Team::Blue]);
     }
 
     #[test]
+    fn with_two_or_more_humans_bots_even_the_teams() {
+        // 1 v 1 asking for 0 red + 4 blue: spread 2 and 2
+        let slots = bot_team_slots(MODE_TEAM_DEATHMATCH, 0, 4, (1, 1), 15);
+        assert_eq!(slots.iter().filter(|t| **t == Team::Red).count(), 2);
+        // 2 v 1 with 1 bot: it goes to Blue
+        assert_eq!(bot_team_slots(MODE_TEAM_DEATHMATCH, 1, 0, (2, 1), 15), vec![Team::Blue]);
+    }
+
+    #[test]
     fn gun_game_bots_are_teamless() {
-        let slots = bot_team_slots(MODE_GUN_GAME, 5, 0, 1, 15);
+        let slots = bot_team_slots(MODE_GUN_GAME, 5, 0, (1, 0), 15);
         assert_eq!(slots, vec![Team::Spectator; 5]);
     }
 
     #[test]
     fn capped_by_free_slots_and_personalities() {
-        assert_eq!(bot_team_slots(MODE_TEAM_DEATHMATCH, 8, 8, 14, 15).len(), 2);
-        assert_eq!(bot_team_slots(MODE_GUN_GAME, 15, 0, 0, 4).len(), 4);
-        let full = bot_team_slots(MODE_TEAM_DEATHMATCH, 4, 4, 12, 15);
+        assert_eq!(bot_team_slots(MODE_TEAM_DEATHMATCH, 8, 8, (7, 7), 15).len(), 2);
+        assert_eq!(bot_team_slots(MODE_GUN_GAME, 15, 0, (0, 0), 4).len(), 4);
+        let full = bot_team_slots(MODE_TEAM_DEATHMATCH, 4, 4, (6, 6), 15);
         assert_eq!(full, vec![Team::Red, Team::Blue, Team::Red, Team::Blue]);
     }
 }

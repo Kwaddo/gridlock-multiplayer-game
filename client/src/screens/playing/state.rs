@@ -98,6 +98,14 @@ pub struct PlayingState {
     pub autofill_diff_hard: bool,
     pub autofill_diff_nightmare: bool,
     pub autofill_dropdown_open: bool,
+    /// The host's lobby console choices, from the server (shown to everyone
+    /// else); `None` until the first arrives.
+    pub host_settings: Option<crate::net::protocols::LobbySettings>,
+    /// What this client, as host, last sent the server, so it only sends
+    /// changes.
+    pub sent_lobby_settings: Option<crate::net::protocols::LobbySettings>,
+    /// Lobby console changes waiting to go to the server.
+    pub pending_lobby_settings: Option<crate::net::protocols::LobbySettings>,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
     pub pending_hits: Vec<(u32, f32, bool)>, // victim_id, damage, backstab attempt?
@@ -293,6 +301,9 @@ impl PlayingState {
             autofill_diff_hard: true,
             autofill_diff_nightmare: true,
             autofill_dropdown_open: false,
+            host_settings: None,
+            sent_lobby_settings: None,
+            pending_lobby_settings: None,
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
             pending_hits: Vec::new(),

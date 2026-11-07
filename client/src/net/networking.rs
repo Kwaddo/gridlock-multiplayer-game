@@ -2,7 +2,7 @@ use macroquad::prelude::*;
 use transport::Link;
 
 use crate::net::protocols::{
-    ClientMsg, ServerMsg, LEAVE_TIMED_OUT, START_DENIED_ENDING, START_DENIED_NOT_HOST,
+    ClientMsg, LobbySettings, ServerMsg, LEAVE_TIMED_OUT, START_DENIED_ENDING, START_DENIED_NOT_HOST,
     START_DENIED_STARTING, EVT_JUMP_START, EVT_LANDED, FLAG_ADS, FLAG_AIRBORNE, FLAG_CROUCHING,
     FLAG_IS_BOT, FLAG_PRONE, FLAG_SILENT, FLAG_SLIDING, FLAG_SPRINTING,
 };
@@ -40,6 +40,7 @@ pub struct NetUpdate {
     pub self_freeze_secs: Option<u8>,
     pub bot_shots: Option<Vec<(Vec3, Vec3)>>, // (start, end)
     pub lobby_leader_id: Option<u32>,         // host player ID (0 = none)
+    pub lobby_settings: Option<LobbySettings>, // the host's lobby console choices
     pub match_status: Option<u8>,             // MATCH_STATUS_*
     pub team_score: Option<TeamScore>,        // team modes: kills per team
     pub death: bool,                          // You died
@@ -131,6 +132,7 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
         self_freeze_secs: None,
         bot_shots: None,
         lobby_leader_id: None,
+        lobby_settings: None,
         match_status: None,
         team_score: None,
         chat: Vec::new(),
@@ -259,6 +261,9 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32) -> NetUpdate {
             }
             ServerMsg::MatchStatus { status } => {
                 update.match_status = Some(status);
+            }
+            ServerMsg::LobbySettings(settings) => {
+                update.lobby_settings = Some(settings);
             }
             ServerMsg::TeamScore { red, blue, to_win } => {
                 update.team_score = Some(TeamScore { red, blue, to_win });
