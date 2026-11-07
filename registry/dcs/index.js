@@ -19,7 +19,8 @@
 //   polling once connected; the host polls every few seconds when idle.
 //
 // Host list. Game hosts announce themselves with a heartbeat; clients fetch the list.
-//   GET    /servers        -> [{ id, name, addr | room, players, max_players }]
+//   GET    /servers        -> [{ id, name, addr | room, players, max_players, lan? }]
+//   (lan: the listing came from the asker's own network; its address is never shown.)
 //   POST   /servers        { name, port | room, players, max_players } -> { id, token, ttl, addr? }
 //   PUT    /servers/:id    { players }   (Authorization: Bearer <token>)
 //   DELETE /servers/:id                  (Authorization: Bearer <token>)
@@ -128,7 +129,14 @@ async function servers(request, env, ctx, id, extra) {
 
   if (!id && request.method === "GET") {
     const { listings } = await loadState(store);
-    return json(Object.entries(listings).map(([id, listing]) => ({ id, ...listing.entry })));
+    const ip = request.headers.get("CF-Connecting-IP");
+    return json(
+      Object.entries(listings).map(([id, listing]) => ({
+        id,
+        ...listing.entry,
+        ...(sameNetwork(listing.ip, ip) ? { lan: true } : {}),
+      })),
+    );
   }
   if (!id && request.method === "POST") return createListing(request, store);
   if (!id || !PEER_ID.test(id)) return json({ error: "not found" }, 404);
@@ -448,6 +456,25 @@ function rfc3986(value) {
 }
 
 // ---------------------------------------------------------------- helpers
+
+// Whether two client addresses are on the same network, as far as the
+// registry can tell: the same public IPv4 address (one NAT), or the same /64
+// for IPv6 (one LAN segment). Used to flag games from the asker's network.
+function sameNetwork(a, b) {
+  const v4 = (ip) => (ip.startsWith("::ffff:") && ip.includes(".") ? ip.slice(7) : ip);
+  a = v4(a || "");
+  b = v4(b || "");
+  if (!a || !b) return false;
+  if (!a.includes(":") || !b.includes(":")) return a === b;
+  const prefix = (ip) => {
+    const [head, tail = ""] = ip.split("%")[0].toLowerCase().split("::");
+    const left = head ? head.split(":") : [];
+    const right = tail ? tail.split(":") : [];
+    const groups = ip.includes("::") ? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right] : left;
+    return groups.slice(0, 4).map((g) => parseInt(g, 16)).join(":");
+  };
+  return prefix(a) === prefix(b);
+}
 
 function cleanName(value) {
   if (typeof value !== "string") return null;
