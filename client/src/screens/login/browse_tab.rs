@@ -78,8 +78,13 @@ impl LoginScreen {
             let pc_color = if full { Color::new(1.0, 0.35, 0.35, 1.0) } else { TEXT_LABEL };
             draw_text_ex(&pc, lx + lw - pcw - col_pad, ry + 30.0, text_params(15, pc_color));
 
-            // Pointing at a game gets its join ready (see transport::prewarm).
-            if hover && !full {
+            // A game on the player's own network is connected to while it is
+            // listed, so joining it is instant (see transport::preconnect);
+            // pointing at any other gets its join ready (transport::prewarm).
+            // (Not while a join is under way: that one has the connection.)
+            if !full && server.origin == Origin::Lan && self.connector.is_none() {
+                transport::preconnect(&server.target);
+            } else if hover && !full {
                 transport::prewarm(&server.target);
             }
             if hover && clicked && !full {
