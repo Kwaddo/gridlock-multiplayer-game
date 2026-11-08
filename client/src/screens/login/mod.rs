@@ -7,10 +7,20 @@ use macroquad::rand::gen_range;
 
 mod background;
 mod browse_tab;
+mod controls;
 mod direct_tab;
 mod host_tab;
 mod update;
 mod widgets;
+
+pub use controls::ControlsAction;
+
+/// A screen the menu asks the game to open over it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MenuRequest {
+    Settings,
+    Controls,
+}
 
 const MENU_BG: Color = Color::new(0.06, 0.06, 0.12, 1.0);
 const PANEL_BG: Color = Color::new(0.09, 0.11, 0.19, 0.95);
@@ -67,6 +77,8 @@ pub struct LoginScreen {
     particles: Vec<MenuParticle>,
     anim_time: f32,
     connector: Option<Connector>,
+    /// Set by the SETTINGS / CONTROLS buttons; taken by the game loop.
+    request: Option<MenuRequest>,
 }
 
 impl LoginScreen {
@@ -87,7 +99,19 @@ impl LoginScreen {
             particles,
             anim_time: 0.0,
             connector: None,
+            request: None,
         }
+    }
+
+    /// The screen the player asked for this frame, if any.
+    pub fn take_request(&mut self) -> Option<MenuRequest> {
+        self.request.take()
+    }
+
+    /// Just the animated background and title, for screens drawn over the menu.
+    pub fn draw_backdrop(&self) {
+        self.draw_background();
+        self.draw_title();
     }
 
     /// A join (or our own server) is being set up: the "Connecting" panel is up.
@@ -131,10 +155,24 @@ impl LoginScreen {
             draw_text_ex(&self.error_msg, panel_x + (panel_w - ew) / 2.0, ey, text_params(15, ERROR));
         }
 
+        // Settings and the controls reference, reachable before joining
+        let bw = 150.0;
+        let bh = 34.0;
+        let by = panel_y + panel_h + 14.0;
+        let cx = panel_x + panel_w / 2.0;
+        if self.connector.is_none() {
+            if widgets::outline_button("SETTINGS", 15, cx - bw - 6.0, by, bw, bh) {
+                self.request = Some(MenuRequest::Settings);
+            }
+            if widgets::outline_button("CONTROLS", 15, cx + 6.0, by, bw, bh) {
+                self.request = Some(MenuRequest::Controls);
+            }
+        }
+
         draw_text_ex(
             "F11 fullscreen   |   TAB switch fields   |   ENTER confirm",
             panel_x,
-            panel_y + panel_h + 16.0,
+            by + bh + 22.0,
             text_params(13, TEXT_DIM),
         );
 

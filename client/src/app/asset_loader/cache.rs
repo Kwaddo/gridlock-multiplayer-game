@@ -34,7 +34,7 @@ pub(super) fn is_asset_cached(
     if is_obj || is_gltf {
         playing_state.models.contains_key(key) || playing_state.animated_models.contains_key(key)
     } else if is_sound {
-        playing_state.audio.has(key)
+        playing_state.audio.has_file(key)
     } else {
         playing_state.assets.contains_key(key)
     }

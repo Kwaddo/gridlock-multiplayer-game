@@ -5,6 +5,8 @@ pub enum GameState {
     Playing,
     Paused,
     Settings,
+    /// The settings screen opened from the main menu (no game running).
+    MenuSettings,
     DevMode,
     Exit,
 }

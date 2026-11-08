@@ -1,5 +1,6 @@
 mod audio;
 mod constants;
+mod event_sounds;
 mod hands;
 mod hitboxes;
 mod players;
@@ -15,6 +16,8 @@ use crate::weapons::combat::CombatEntity;
 use macroquad::prelude::*;
 
 use super::PlayingState;
+
+pub use event_sounds::EventSoundState;
 
 thread_local! {
     /// The set `player_anims_in_use` fills, kept between frames so it is
@@ -59,6 +62,7 @@ impl PlayingState {
 
     #[inline(always)]
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
+        self.audio.set_levels(config.master_volume, config.mute_audio);
         let raw_delta = get_frame_time();
         if raw_delta > 0.20 {
             self.move_dir = Vec3::ZERO;
@@ -110,6 +114,8 @@ impl PlayingState {
         }
 
 
+        self.play_event_sounds(maze);
+
         if self.is_dead {
             self.simulate_dead(delta);
             return;
@@ -117,8 +123,12 @@ impl PlayingState {
 
         self.weapons.update(delta);
 
-        // Auto-switch to another weapon when current is empty (all modes except Gun Game)
-        if self.match_mode != Some(crate::net::protocols::MODE_GUN_GAME) {
+        if self.match_mode == Some(crate::net::protocols::MODE_GUN_GAME) {
+            // Gun Game never runs dry: every gun keeps a full reserve, so
+            // only the magazine (and reloading it) matters.
+            self.weapons.refill_reserves();
+        } else {
+            // Auto-switch to another weapon when current is empty
             self.weapons.auto_switch_on_empty();
         }
 
@@ -126,7 +136,7 @@ impl PlayingState {
 
         self.target_dummy.update(delta);
 
-        self.update_remote_players(delta, config);
+        self.update_remote_players(delta, config, maze);
         self.tick_timers(delta, maze);
 
         self.update_stamina(config, delta);

@@ -80,7 +80,7 @@ impl PlayingState {
             return None;
         }
 
-        if config.bind_settings.is_pressed() {
+        if config.pause_pressed() {
             return Some(GameState::Paused);
         }
 
@@ -170,6 +170,14 @@ impl PlayingState {
                     fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 
                     self.fire_hitscan(&mut maze);
+                } else if config.bind_fire.is_pressed()
+                    && weapon.id != crate::weapons::stats::WeaponId::Knife
+                    && weapon.ammo == 0
+                    && weapon.reserve == 0
+                    && !weapon.is_reloading
+                {
+                    // out of ammo entirely: the trigger only clicks
+                    self.audio.play_cue(crate::audio::catalog::DRY_FIRE);
                 }
                 // `fire_hitscan` borrowed all of `self`; take the active weapon again
                 let weapon = self.weapons.active_mut();
@@ -191,10 +199,7 @@ impl PlayingState {
         return None;
     }
 
-    fn play_weapon_shot_sound(&self, sound_key: &str, config: &GameConfig) {
-        if config.mute_audio {
-            return;
-        }
+    fn play_weapon_shot_sound(&self, sound_key: &str, _config: &GameConfig) {
         let pitch = gen_range(0.94f32, 1.06f32);
         let volume = gen_range(0.7f32, 0.82f32);
         self.audio.play(sound_key, pitch, volume);
