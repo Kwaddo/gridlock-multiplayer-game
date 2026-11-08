@@ -4,7 +4,7 @@ use super::cache::{asset_loaded, has_ext};
 use super::constants::PREFETCH_AHEAD;
 use super::entry::load_asset_entry;
 use super::paths::resolve_runtime_asset_path;
-use super::prefetch::{Prefetcher, PREFETCHED};
+use super::prefetch::{release_decoded, Prefetcher, PREFETCHED};
 
 /// The game's assets, loaded in priority order a few frames at a time, so a
 /// player can be in the game before all of them are here.
@@ -51,6 +51,7 @@ impl AssetQueue {
         let essential_total = pending.iter().filter(|p| essential.contains(p.key())).count();
         // Downloads left over from an earlier game are not wanted any more.
         PREFETCHED.with(|p| p.borrow_mut().clear());
+        release_decoded();
         AssetQueue { total: pending.len(), essential_total, pending, essential, prefetcher: Prefetcher::default() }
     }
 
@@ -99,6 +100,10 @@ impl AssetQueue {
         let (key, path) = self.pending.remove(i).entry;
         // A failed load is dropped too: retrying would stall the queue.
         load_asset_entry(&key, &path, playing_state).await;
+        if self.pending.is_empty() {
+            // What was decoded ahead and not taken, no mesh used.
+            release_decoded();
+        }
         true
     }
 

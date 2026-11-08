@@ -1,4 +1,4 @@
-// Gridlock's browser plugin, part 7 of 8: player sockets opened ahead of a
+// Gridlock's browser plugin, part 7 of 9: player sockets opened ahead of a
 // join. (See ../gridlock_web.js.)
 "use strict";
 
