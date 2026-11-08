@@ -1,10 +1,10 @@
 // Browser networking for Gridlock, as a miniquad plugin (no wasm-bindgen).
 //
 // WebRTC: one data channel per peer, negotiated through the HTTP signalling
-// mailboxes of the Gridlock registry (registry/dcs/index.js). The host is the
-// offerer for every player; players only ever connect to the host. ICE servers
-// (STUN, plus TURN relay credentials when configured) come from the registry's
-// /ice route.
+// mailboxes of the Gridlock registry (registry/dcs/index.js). Each player
+// offers, with its join request; players only ever connect to the host. ICE
+// servers (STUN, plus TURN relay credentials when configured) come from the
+// registry's /ice route, fetched ahead of time.
 //
 // HTTP: fetch() for the host list.
 //
@@ -25,33 +25,58 @@
     // ?nodirect makes the direct attempt fail, to check the fallback to TURN.
     const NO_DIRECT = new URLSearchParams(location.search).has("nodirect");
     const STUN_FALLBACK = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }];
-    // An idle host polls this often to notice newcomers: half the interval is
-    // the average wait before a join even starts.
+    // Poll intervals for a registry that answers polls at once (without long
+    // polling, see LONG_POLL_HEADER). An idle host polls this often to notice
+    // newcomers: half the interval is the average wait before a join even starts.
     const POLL_HOST_MS = 1000;
     const POLL_CONNECTING_MS = 500;
     const POLL_CONNECTED_MS = 1000; // a connected player only checks whether to resume
     const HOST_KEEP_MS = 20000; // how often the host renews its claim on the room
     // A player not connected yet re-announces itself this often, so a
-    // signalling write the registry lost (it has no atomic updates) only
-    // costs a few seconds: the host resends its offer, the player its answer.
-    const HELLO_MS = 6000;
-    // An offer or answer goes out once its ICE candidates are gathered, or
-    // after this long regardless; candidates found later follow on their own
-    // (trickled), so a slow STUN server no longer holds up the handshake.
-    const GATHER_MS = 400;
-    // A registry that holds polls until something arrives (the local one,
-    // registry/local/server.mjs) marks its replies with this header; the page
-    // then polls again at once instead of waiting out an interval.
+    // signalling message that went missing only costs a few seconds: the
+    // host resends its answer (or offer), or offers anew if it has nothing.
+    const HELLO_MS = 3000;
+    // A registry that holds polls until something arrives (both registries
+    // do) marks its replies with this header; the page then polls again at
+    // once instead of waiting out an interval.
     const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
     // Least time between two long polls, so a registry answering at once
     // (nothing held) can't spin the loop.
-    const LONG_POLL_GAP_MS = 50;
-    const SEND_BATCH_MS = 50;
+    const LONG_POLL_GAP_MS = 10;
+    // A poll that failed (the registry's host turns away the odd request) is
+    // tried again after this, doubling with each failure in a row up to the
+    // usual poll interval, instead of waiting out a whole interval at once.
+    const POLL_RETRY_MS = 100;
+    // A poll names the messages it already has from this far back of the
+    // newest one, so a registry listing a little early (isolate clocks differ)
+    // does not hand them out again.
+    const HAVE_WINDOW = 2500;
+    const HAVE_MAX = 40;
+    // An offer or answer goes out once its ICE candidates are gathered (host
+    // and STUN ones, which takes a STUN round trip), or after this long
+    // regardless; later ones follow on their own (trickled). Each trip
+    // through the registry costs far more than this, so candidates riding
+    // along with the description beats sending them after it.
+    const GATHER_MS = 250;
+    // ICE candidates come in bursts; signals queued within this long go out
+    // as one request.
+    const SEND_BATCH_MS = 20;
     const DISCONNECT_GRACE_MS = 3000;
     // TURN is the last resort: a connection first tries direct paths only
-    // (STUN), and the host starts over with the relay when no direct path
+    // (STUN), and the offerer starts over with the relay when no direct path
     // opened this long after the answer arrived, or the attempt failed.
-    const DIRECT_ATTEMPT_MS = 4000;
+    const DIRECT_ATTEMPT_MS = 2500;
+    // ICE servers are fetched ahead of a join and reused this long (TURN
+    // credentials are minted for a day).
+    const ICE_CACHE_MS = 30 * 60 * 1000;
+    // Packets bigger than this need several SCTP chunks, and losing any one
+    // loses the whole packet on the unreliable channel; they go on a second,
+    // reliable (but still unordered) channel instead: the maze, player lists.
+    const RELIABLE_MIN_BYTES = 1100;
+    // ...unless that channel is backed up this far, when they take their chances.
+    const RELIABLE_MAX_BUFFERED = 256 * 1024;
+    const CHANNEL = "gridlock";
+    const RELIABLE_CHANNEL = "gridlock-r";
 
     const decoder = new TextDecoder();
     const sockets = new Map(); // handle -> RtcSocket
@@ -90,16 +115,21 @@
 
     // ------------------------------------------------------------ WebRTC
 
+    // Who offers: the player, which sends its offer with its join request, so
+    // the host learns of the player and gets its offer in one message and the
+    // whole handshake is two signalling trips (offer, answer). The host still
+    // offers to a player that joined without one (a page from before this),
+    // and a player takes the host's offer when one comes (an older host page).
     class RtcSocket {
         constructor(roomUrl, isHost) {
             this.isHost = isHost;
             this.events = [];
             this.taken = null; // payload of the event last returned by next()
-            this.peers = new Map(); // small id -> { remoteId, pc, channel, pending }
+            this.peers = new Map(); // small id -> peer (see connect)
             this.byRemote = new Map(); // signalling id -> small id
             this.nextPeer = 1;
             this.closed = false;
-            this.me = null; // { id, token } from the room's join
+            this.me = null; // { id, token, host?, via? } from the room's join
             this.outbox = []; // signals waiting for the next send
             this.flushing = false;
             this.start(roomUrl);
@@ -109,10 +139,25 @@
         // join the room, then poll it for messages and post signals to it.
         async start(roomUrl) {
             this.room = roomHttpUrl(roomUrl);
-            this.iceServers = await fetchIceServers(this.room);
+            this.iceServers = await iceServersFor(this.room);
             if (this.closed) return;
+            let signals = [];
+            if (!this.isHost) {
+                const peer = this.peers.get(this.connect(null, true));
+                try {
+                    await peer.offered;
+                } catch (e) {
+                    console.warn("gridlock_web: could not make an offer", e);
+                    return this.shutdown();
+                }
+                if (this.closed) return;
+                signals = [{ data: this.describe(peer) }];
+            }
             try {
-                const resp = await fetch(this.room + "/join" + (this.isHost ? "?host" : ""), { method: "POST" });
+                const resp = await fetch(this.room + "/join" + (this.isHost ? "?host" : ""), {
+                    method: "POST",
+                    body: JSON.stringify({ signals }),
+                });
                 if (!resp.ok) throw new Error("join refused: " + resp.status);
                 this.me = await resp.json();
             } catch (e) {
@@ -120,17 +165,36 @@
                 return this.shutdown();
             }
             if (this.closed) return this.leave();
+            if (!this.isHost && this.me.host) this.adoptHost(this.me.host);
             this.onPageHide = () => this.leave();
             window.addEventListener("pagehide", this.onPageHide);
+            // candidates found while the join was on its way
+            if (this.outbox.length && !this.flushing) {
+                this.flushing = true;
+                this.flush();
+            }
             this.poll();
+        }
+
+        // The player's offer went out before it knew its host's signalling
+        // id: file that peer under it.
+        adoptHost(remoteId) {
+            for (const [id, peer] of this.peers) {
+                if (peer.remoteId !== null) continue;
+                peer.remoteId = remoteId;
+                this.byRemote.set(remoteId, id);
+                return id;
+            }
+            return undefined;
         }
 
         async poll() {
             let lastKeep = Date.now();
             let lastHello = Date.now();
-            const seen = new Set(); // ids of messages already handled
+            const seen = new Map(); // id -> seq of messages already handled
             let longPoll = false; // the registry holds polls (see LONG_POLL_HEADER)
             let lastSeq = 0; // newest message seq seen, for a long poll's `after`
+            let failures = 0; // polls failed in a row
             while (!this.closed) {
                 // A connected player needs no signalling: if the host goes,
                 // the WebRTC connection itself reports it.
@@ -147,22 +211,36 @@
                         }
                         // Ask to be held until something new arrives; a registry
                         // without long polling ignores this.
-                        q += `&wait&after=${lastSeq}`;
+                        const have = [...seen].filter(([, seq]) => seq >= lastSeq - HAVE_WINDOW).slice(-HAVE_MAX);
+                        q += `&wait&after=${lastSeq}&have=${have.map(([id]) => encodeURIComponent(id)).join(",")}`;
                         const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
                         longPoll = resp.headers.has(LONG_POLL_HEADER);
+                        failures = 0;
                         // A host whose claim was lost claims the room again;
                         // players already connected are not affected.
                         if (resp.status === 410 && this.isHost && (await this.reclaim())) continue;
                         // 410: the host left; 403/404: this room is gone for us.
                         if (resp.status === 410 || resp.status === 403 || resp.status === 404) return this.shutdown();
                         if (resp.ok) {
-                            for (const msg of await resp.json()) {
+                            const batch = await resp.json();
+                            // Players that sent their offer along with their join:
+                            // the host answers those instead of offering.
+                            const offering = new Set(
+                                batch.filter((m) => m.Signal?.data?.sdp?.type === "offer").map((m) => m.Signal.sender),
+                            );
+                            for (const msg of batch) {
                                 // Messages carry ids (repeated until they expire);
                                 // a registry without ids sends each one once.
+                                // A message with several parts numbers them
+                                // "<id>.<n>"; the registry knows it by <id>.
+                                const base = msg.id === undefined ? undefined : String(msg.id).split(".")[0];
                                 if (typeof msg.seq === "number") lastSeq = Math.max(lastSeq, msg.seq);
-                                if (this.closed || (msg.id !== undefined && seen.has(msg.id))) continue;
-                                if (msg.id !== undefined) seen.add(msg.id);
-                                this.onSignal(msg);
+                                if (this.closed || (msg.id !== undefined && seen.has(String(msg.id)))) continue;
+                                if (msg.id !== undefined) {
+                                    seen.set(String(msg.id), msg.seq ?? 0);
+                                    seen.set(base, msg.seq ?? 0);
+                                }
+                                this.onSignal(msg, offering);
                             }
                         }
                         if (!this.isHost && Date.now() - lastHello >= HELLO_MS) {
@@ -170,10 +248,15 @@
                             this.post("/hello", {});
                         }
                     } catch {
-                        longPoll = false; // network blip: try again on the next poll
+                        failures++; // network blip: try again shortly
                     }
                 }
-                await sleep(longPoll && !connected ? LONG_POLL_GAP_MS : this.pollDelay(connected));
+                const delay = failures
+                    ? Math.min(POLL_RETRY_MS * 2 ** (failures - 1), this.pollDelay(connected))
+                    : longPoll && !connected
+                      ? LONG_POLL_GAP_MS
+                      : this.pollDelay(connected);
+                await sleep(delay);
             }
         }
 
@@ -187,7 +270,7 @@
 
         async reclaim() {
             try {
-                const resp = await fetch(this.room + "/join?host", { method: "POST" });
+                const resp = await fetch(this.room + "/join?host", { method: "POST", body: "{}" });
                 if (!resp.ok) return false;
                 this.me = await resp.json();
                 return true;
@@ -196,8 +279,15 @@
             }
         }
 
+        // Who we are, and for a player which host it joined (saves the
+        // registry a read on every send).
+        credentials() {
+            const { id, token, host, via } = this.me;
+            return { id, token, host: this.isHost, ...(!this.isHost && host && via ? { to: host, via } : {}) };
+        }
+
         post(path, fields) {
-            const body = JSON.stringify({ id: this.me.id, token: this.me.token, host: this.isHost, ...fields });
+            const body = JSON.stringify({ ...this.credentials(), ...fields });
             return fetch(this.room + path, { method: "POST", body }).catch(() => {});
         }
 
@@ -205,7 +295,9 @@
             if (!msg.Signal || this.closed) return;
             this.outbox.push(msg.Signal);
             // ICE candidates come in bursts; send each burst as one request.
-            if (!this.flushing) {
+            // Before the join is answered there is nowhere to send them yet:
+            // start() sends what piled up.
+            if (!this.flushing && this.me) {
                 this.flushing = true;
                 setTimeout(() => this.flush(), SEND_BATCH_MS);
             }
@@ -217,7 +309,7 @@
                 if (signals.length && this.me && !this.closed) {
                     await fetch(this.room + "/send", {
                         method: "POST",
-                        body: JSON.stringify({ id: this.me.id, token: this.me.token, host: this.isHost, signals }),
+                        body: JSON.stringify({ ...this.credentials(), signals }),
                     });
                 }
             } catch {}
@@ -228,45 +320,67 @@
         leave() {
             if (!this.me || this.left) return;
             this.left = true;
-            const body = JSON.stringify({ id: this.me.id, token: this.me.token, host: this.isHost });
+            const body = JSON.stringify(this.credentials());
             // sendBeacon still goes out while the tab is closing.
             if (!navigator.sendBeacon(this.room + "/leave", body)) {
                 fetch(this.room + "/leave", { method: "POST", body, keepalive: true }).catch(() => {});
             }
         }
 
-        onSignal(msg) {
+        // `offering`: senders whose offer came in the same poll.
+        onSignal(msg, offering = new Set()) {
             if (msg.NewPeer) {
-                // Heard again from a player already being offered to: the offer
-                // (or its answer) went missing, so send the offer again.
+                if (!this.isHost) return;
                 const known = this.peers.get(this.byRemote.get(msg.NewPeer));
-                if (known && !known.open) this.sendDescription(known);
-                else if (!known) this.connect(msg.NewPeer, true);
+                // Heard again from a player not connected yet: what we sent it
+                // (offer or answer) may have gone missing, so send it again.
+                // A player we know nothing of (its attempt failed, or it sent
+                // no offer with its join) gets an offer from us, and takes it.
+                if (known) {
+                    if (!known.open) this.sendDescription(known);
+                } else if (!offering.has(msg.NewPeer)) {
+                    this.connect(msg.NewPeer, true);
+                }
             } else if (msg.PeerLeft) {
                 const id = this.byRemote.get(msg.PeerLeft);
                 if (id !== undefined) this.drop(id);
             } else if (msg.Signal) {
                 const { sender, data } = msg.Signal;
                 let id = this.byRemote.get(sender);
-                // The host offers to every player it learned of through NewPeer;
-                // a signal from anyone else is a leftover of a dropped peer.
-                if (id === undefined && this.isHost) return;
-                // A newer offer (the host retrying through the relay) replaces
-                // an attempt that never opened.
+                // A registry that did not name the host at join: the first
+                // signal for a player comes from it.
+                if (id === undefined && !this.isHost) id = this.adoptHost(sender);
+                const isOffer = data?.sdp?.type === "offer";
                 const gen = data?.gen ?? 0;
-                if (id !== undefined && data?.sdp?.type === "offer" && gen > this.peers.get(id).gen && !this.peers.get(id).open) {
-                    this.discard(id);
-                    id = undefined;
+                if (id !== undefined && isOffer) {
+                    const peer = this.peers.get(id);
+                    // Both sides offered (the host heard of the player before
+                    // its offer): the player takes the host's, so the host
+                    // keeps its own.
+                    if (this.isHost && peer.offerer && gen <= peer.gen) return;
+                    // An offer replaces an attempt that never opened when it
+                    // is newer (a retry through the relay), or when a player
+                    // that offered hears an offer from its host (an older
+                    // host page, which always offers): take the host's.
+                    if (!peer.open && (gen > peer.gen || (peer.offerer && !this.isHost && gen >= peer.gen))) {
+                        this.discard(id);
+                        id = undefined;
+                    }
                 }
+                // Anything else from someone unknown is a leftover of a dropped peer.
+                if (id === undefined && !isOffer) return;
                 id ??= this.connect(sender, false, gen);
                 this.onPeerSignal(this.peers.get(id), data);
             }
             // IdAssigned needs no action: we never address ourselves.
         }
 
-        // `gen` counts attempts for this peer: 0 is direct only, 1 adds the
-        // TURN relay. Signals carry it, so ones from an abandoned attempt are
-        // ignored.
+        // A peer: { remoteId, pc, channel, reliable, pending, open, gen,
+        // offerer, described, offered }. `remoteId` is the other side's
+        // signalling id; a player's first offer goes out before it knows it
+        // (null until the join answers). `gen` counts attempts for this peer:
+        // 0 is direct only, 1 adds the TURN relay. Signals carry it, so ones
+        // from an abandoned attempt are ignored.
         connect(remoteId, offerer, gen = 0) {
             const id = this.nextPeer++;
             const relay = gen > 0 || FORCE_RELAY;
@@ -277,15 +391,15 @@
             });
             // `described`: our offer/answer went out, so candidates found from
             // now on are sent on their own
-            const peer = { remoteId, pc, channel: null, pending: [], open: false, gen, offerer, described: false };
+            const peer = { remoteId, pc, channel: null, reliable: null, pending: [], open: false, gen, offerer, described: false };
             this.peers.set(id, peer);
-            this.byRemote.set(remoteId, id);
+            if (remoteId !== null) this.byRemote.set(remoteId, id);
 
             // Trickle ICE: a candidate gathered before the description went out
             // is already in it; later ones are sent as they come.
             pc.onicecandidate = (e) => {
                 if (!e.candidate || !peer.described || this.peers.get(id) !== peer) return;
-                this.signal({ Signal: { receiver: remoteId, data: { candidate: e.candidate.toJSON(), gen } } });
+                this.signal({ Signal: { receiver: peer.remoteId, data: { candidate: e.candidate.toJSON(), gen } } });
             };
 
             pc.onconnectionstatechange = () => {
@@ -303,23 +417,29 @@
             };
 
             if (offerer) {
-                // Game traffic is UDP-like: unordered, no retransmits.
-                this.attach(id, pc.createDataChannel("gridlock", { ordered: false, maxRetransmits: 0 }));
-                pc.createOffer()
+                // Game traffic is UDP-like: unordered, no retransmits. Big
+                // packets get a reliable channel of their own (RELIABLE_MIN_BYTES).
+                this.attach(id, pc.createDataChannel(CHANNEL, { ordered: false, maxRetransmits: 0 }));
+                this.attach(id, pc.createDataChannel(RELIABLE_CHANNEL, { ordered: false }));
+                peer.offered = pc
+                    .createOffer()
                     .then((offer) => pc.setLocalDescription(offer))
-                    .then(() => gathered(pc))
-                    .then(() => this.sendDescription(peer))
-                    .catch(() => this.drop(id));
+                    .then(() => gathered(pc));
+                // A player's first offer goes with its join (start); every
+                // other one is sent as a signal.
+                peer.offered.then(() => remoteId !== null && this.sendDescription(peer)).catch(() => this.drop(id));
             } else {
                 pc.ondatachannel = (e) => this.attach(id, e.channel);
             }
             return id;
         }
 
-        // The host's direct attempt failed: start over with the TURN relay.
+        // The direct attempt failed: the offerer starts over with the TURN relay.
         retryWithRelay(id) {
             const peer = this.peers.get(id);
-            if (!peer || !peer.offerer || peer.open || peer.gen > 0 || FORCE_RELAY || this.closed) return false;
+            if (!peer || !peer.offerer || peer.open || peer.gen > 0 || peer.remoteId === null || FORCE_RELAY || this.closed) {
+                return false;
+            }
             this.discard(id);
             this.connect(peer.remoteId, true, 1);
             return true;
@@ -330,17 +450,22 @@
             const peer = this.peers.get(id);
             if (!peer) return;
             this.peers.delete(id);
-            this.byRemote.delete(peer.remoteId);
+            if (this.byRemote.get(peer.remoteId) === id) this.byRemote.delete(peer.remoteId);
             try {
                 peer.pc.close();
             } catch {}
         }
 
         // Our offer or answer, with every ICE candidate gathered so far in it.
+        // Candidates found after this are trickled.
+        describe(peer) {
+            peer.described = true;
+            return { sdp: peer.pc.localDescription.toJSON(), gen: peer.gen };
+        }
+
         sendDescription(peer) {
             if (!peer.pc.localDescription || this.closed) return;
-            peer.described = true;
-            this.signal({ Signal: { receiver: peer.remoteId, data: { sdp: peer.pc.localDescription.toJSON(), gen: peer.gen } } });
+            this.signal({ Signal: { receiver: peer.remoteId, data: this.describe(peer) } });
         }
 
         async onPeerSignal(peer, data) {
@@ -353,7 +478,7 @@
                         if (pc.localDescription) this.sendDescription(peer);
                         return;
                     }
-                    // An answer we already have (the host resent its offer).
+                    // An answer we already have (the offer was resent).
                     if (data.sdp.type === "answer" && pc.remoteDescription) return;
                     await pc.setRemoteDescription(data.sdp);
                     for (const c of peer.pending) await pc.addIceCandidate(c);
@@ -363,7 +488,7 @@
                         await gathered(pc);
                         this.sendDescription(peer);
                     } else if (peer.offerer && peer.gen === 0) {
-                        // The answer is in: give the direct attempt a few seconds.
+                        // The answer is in: give the direct attempt a moment.
                         const id = this.byRemote.get(peer.remoteId);
                         setTimeout(() => {
                             if (this.peers.get(id) === peer && !peer.open) this.retryWithRelay(id);
@@ -382,28 +507,44 @@
         attach(id, channel) {
             const peer = this.peers.get(id);
             if (!peer) return;
-            peer.channel = channel;
             channel.binaryType = "arraybuffer";
+            channel.onmessage = (e) => {
+                if (e.data instanceof ArrayBuffer && this.peers.get(id) === peer) {
+                    this.events.push({ kind: EV_PACKET, peer: id, data: new Uint8Array(e.data) });
+                }
+            };
+            // The reliable channel only helps big packets along; the game's
+            // link is the main one, and lives and dies with it.
+            if (channel.label === RELIABLE_CHANNEL) {
+                peer.reliable = channel;
+                channel.onclose = () => {
+                    if (peer.reliable === channel) peer.reliable = null;
+                };
+                return;
+            }
+            peer.channel = channel;
             channel.onopen = () => {
                 peer.open = true;
                 this.events.push({ kind: EV_PEER_JOINED, peer: id, data: null });
-            };
-            channel.onmessage = (e) => {
-                if (e.data instanceof ArrayBuffer) {
-                    this.events.push({ kind: EV_PACKET, peer: id, data: new Uint8Array(e.data) });
-                }
             };
             channel.onclose = () => this.drop(id);
         }
 
         send(id, bytes) {
             const peer = this.peers.get(id);
-            if (peer && peer.open && peer.channel.readyState === "open") {
-                try {
-                    peer.channel.send(bytes);
-                } catch {
-                    // send buffer full: drop the packet, like UDP would
-                }
+            if (!peer || !peer.open) return;
+            const reliable = peer.reliable;
+            const channel =
+                bytes.length > RELIABLE_MIN_BYTES &&
+                reliable?.readyState === "open" &&
+                reliable.bufferedAmount < RELIABLE_MAX_BUFFERED
+                    ? reliable
+                    : peer.channel;
+            if (channel.readyState !== "open") return;
+            try {
+                channel.send(bytes);
+            } catch {
+                // send buffer full: drop the packet, like UDP would
             }
         }
 
@@ -411,7 +552,7 @@
             const peer = this.peers.get(id);
             if (!peer) return;
             this.peers.delete(id);
-            this.byRemote.delete(peer.remoteId);
+            if (this.byRemote.get(peer.remoteId) === id) this.byRemote.delete(peer.remoteId);
             try {
                 peer.pc.close();
             } catch {}
@@ -483,11 +624,30 @@
         return [].concat(server.urls).every((u) => u.startsWith("stun:"));
     }
 
-    async function fetchIceServers(room) {
+    // ICE servers by registry origin: { at, servers: Promise }. Fetched as
+    // soon as the game first talks to a registry (the host list, see
+    // gridlock_http_start), so a join does not wait for them.
+    const iceCache = new Map();
+
+    function iceServersFor(anyUrl) {
+        let origin;
         try {
-            const url = new URL(room);
-            url.pathname = "/ice";
-            const resp = await fetch(url);
+            origin = new URL(anyUrl).origin;
+        } catch {
+            return Promise.resolve(STUN_FALLBACK);
+        }
+        const cached = iceCache.get(origin);
+        if (cached && Date.now() - cached.at < ICE_CACHE_MS) return cached.servers;
+        const servers = fetchIceServers(origin);
+        iceCache.set(origin, { at: Date.now(), servers });
+        // A failed fetch is not kept: the next join asks again.
+        servers.then((s) => s === STUN_FALLBACK && iceCache.get(origin)?.servers === servers && iceCache.delete(origin));
+        return servers;
+    }
+
+    async function fetchIceServers(origin) {
+        try {
+            const resp = await fetch(origin + "/ice");
             const body = await resp.json();
             // An empty list is deliberate: the local server (registry/local/) has
             // no STUN to offer offline, and LAN peers connect without one.
@@ -843,12 +1003,16 @@
 
         env.gridlock_http_start = function (methodPtr, methodLen, urlPtr, urlLen, bodyPtr, bodyLen, authPtr, authLen) {
             const id = nextHandle++;
+            const url = readString(urlPtr, urlLen);
+            // The game asking a registry for its host list is about to join or
+            // host through it: have its ICE servers ready by then.
+            if (/\/servers\/?$/.test(url)) iceServersFor(url);
             const req = { done: false, status: 0, body: new Uint8Array(0) };
             requests.set(id, req);
             const headers = { "Content-Type": "application/json" };
             if (authLen > 0) headers.Authorization = readString(authPtr, authLen);
             const method = readString(methodPtr, methodLen);
-            fetch(readString(urlPtr, urlLen), {
+            fetch(url, {
                 method,
                 headers,
                 body: bodyLen > 0 ? readBytes(bodyPtr, bodyLen) : undefined,
