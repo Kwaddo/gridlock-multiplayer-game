@@ -178,6 +178,7 @@ pub(super) fn apply_player_list(
     // track local deaths from the player list
     if let Some(me) = list.iter().find(|(id, ..)| *id == player_id) {
         playing_state.local_deaths = me.3;
+        playing_state.local_team = me.7;
     }
 
     // remove 3D models of players who are no longer in the server's player list
