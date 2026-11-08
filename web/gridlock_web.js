@@ -1,8 +1,10 @@
 // Browser networking for Gridlock, as a miniquad plugin (no wasm-bindgen).
 //
 // WebRTC: one data channel per peer, negotiated through the HTTP signalling
-// mailboxes of the Gridlock registry (registry/dcs/index.js). Each player
-// offers, with its join request; players only ever connect to the host. ICE
+// mailboxes of the Gridlock registry (registry/dcs/index.js). The host
+// publishes offers made ahead ("spares"); a player answers one and sends the
+// answer with its join request (or, without a spare, sends its own offer
+// with it). Players only ever connect to the host. ICE
 // servers (STUN, plus TURN relay credentials when configured) come from the
 // registry's /ice route, fetched ahead of time.
 //
@@ -57,7 +59,23 @@
     // regardless; later ones follow on their own (trickled). Each trip
     // through the registry costs far more than this, so candidates riding
     // along with the description beats sending them after it.
+    // (It goes out sooner, once a server reflexive candidate is in: the
+    // address the other side needs to punch through a NAT.)
     const GATHER_MS = 250;
+    // A host keeps this many offers made ahead of any join ("spares") on the
+    // registry. A player answers one and sends the answer with its join, so
+    // the handshake is one signalling trip, and the host gathers nothing on it.
+    const SPARE_COUNT = 2;
+    // Spares are made anew this often (a NAT forgets an idle mapping after a
+    // while); the ones they replace still take answers this much longer.
+    const SPARE_ROTATE_MS = 30000;
+    const SPARE_GRACE_MS = 30000;
+    const SPARE_TICK_MS = 5000;
+    // Nobody waits on a spare, so it goes out with every candidate (up to this long).
+    const SPARE_GATHER_MS = 3000;
+    // A player fetches a room's spare when it points at the room (before it
+    // clicks join), and uses what it fetched for this long.
+    const PREWARM_MS = 15000;
     // ICE candidates come in bursts; signals queued within this long go out
     // as one request.
     const SEND_BATCH_MS = 20;
@@ -132,7 +150,18 @@
             this.me = null; // { id, token, host?, via? } from the room's join
             this.outbox = []; // signals waiting for the next send
             this.flushing = false;
+            // Host: offers made ahead of any join, oid -> { id, peer, at, live }
+            // (see keepSpares). `live` ones are published.
+            this.spares = new Map();
+            this.makingSpares = 0;
+            // How long each step of a join took, logged once it connects.
+            this.t0 = performance.now();
+            this.marks = [];
             this.start(roomUrl);
+        }
+
+        mark(step) {
+            this.marks.push(`${step} +${Math.round(performance.now() - this.t0)}`);
         }
 
         // Signalling goes through HTTP mailboxes on the registry (registry/dcs/index.js):
@@ -140,17 +169,28 @@
         async start(roomUrl) {
             this.room = roomHttpUrl(roomUrl);
             this.iceServers = await iceServersFor(this.room);
+            this.mark("ice servers");
             if (this.closed) return;
             let signals = [];
             if (!this.isHost) {
-                const peer = this.peers.get(this.connect(null, true));
-                try {
-                    await peer.offered;
-                } catch (e) {
-                    console.warn("gridlock_web: could not make an offer", e);
-                    return this.shutdown();
-                }
+                // Answer the host's spare offer if it has one (fetched ahead
+                // when the player pointed at the room); offer otherwise.
+                const spare = await spareFor(this.room);
                 if (this.closed) return;
+                let peer = spare && (await this.answerSpare(spare));
+                if (this.closed) return;
+                this.mark(peer ? "answered spare" : spare ? "spare failed" : "no spare");
+                if (!peer) {
+                    peer = this.peers.get(this.connect(null, true));
+                    try {
+                        await peer.offered;
+                    } catch (e) {
+                        console.warn("gridlock_web: could not make an offer", e);
+                        return this.shutdown();
+                    }
+                    if (this.closed) return;
+                    this.mark("offered");
+                }
                 signals = [{ data: this.describe(peer) }];
             }
             try {
@@ -165,6 +205,7 @@
                 return this.shutdown();
             }
             if (this.closed) return this.leave();
+            this.mark("joined");
             if (!this.isHost && this.me.host) this.adoptHost(this.me.host);
             this.onPageHide = () => this.leave();
             window.addEventListener("pagehide", this.onPageHide);
@@ -173,13 +214,40 @@
                 this.flushing = true;
                 this.flush();
             }
+            if (this.isHost) this.keepSpares();
             this.poll();
         }
 
+        // A player: take the host's spare offer and answer it. The peer is
+        // filed under the host named with the spare; null if that failed.
+        async answerSpare(spare) {
+            const id = this.connect(spare.host, false, spare.data.gen ?? 0);
+            const peer = this.peers.get(id);
+            peer.spare = spare.oid;
+            try {
+                await peer.pc.setRemoteDescription(spare.data.sdp);
+                await peer.pc.setLocalDescription(await peer.pc.createAnswer());
+                await gathered(peer.pc, { full: peer.gen > 0 || FORCE_RELAY });
+                return peer;
+            } catch (e) {
+                console.warn("gridlock_web: could not answer the spare offer", e);
+                this.discard(id);
+                return null;
+            }
+        }
+
         // The player's offer went out before it knew its host's signalling
-        // id: file that peer under it.
+        // id: file that peer under it. (A spare names its host, but the room
+        // may have changed hands since it was fetched: the new host offers
+        // anew, and the peer must be filed under it to take that offer.)
         adoptHost(remoteId) {
             for (const [id, peer] of this.peers) {
+                if (peer.spare !== undefined && peer.remoteId !== remoteId && !peer.open) {
+                    if (this.byRemote.get(peer.remoteId) === id) this.byRemote.delete(peer.remoteId);
+                    peer.remoteId = remoteId;
+                    this.byRemote.set(remoteId, id);
+                    return id;
+                }
                 if (peer.remoteId !== null) continue;
                 peer.remoteId = remoteId;
                 this.byRemote.set(remoteId, id);
@@ -218,15 +286,24 @@
                         failures = 0;
                         // A host whose claim was lost claims the room again;
                         // players already connected are not affected.
-                        if (resp.status === 410 && this.isHost && (await this.reclaim())) continue;
+                        if (resp.status === 410 && this.isHost && (await this.reclaim())) {
+                            this.publishSpares(); // they name the host by its new id
+                            continue;
+                        }
                         // 410: the host left; 403/404: this room is gone for us.
                         if (resp.status === 410 || resp.status === 403 || resp.status === 404) return this.shutdown();
                         if (resp.ok) {
                             const batch = await resp.json();
-                            // Players that sent their offer along with their join:
-                            // the host answers those instead of offering.
+                            // Players that sent their offer (or their answer to a
+                            // spare) along with their join: the host answers
+                            // those, or takes their answer, instead of offering.
                             const offering = new Set(
-                                batch.filter((m) => m.Signal?.data?.sdp?.type === "offer").map((m) => m.Signal.sender),
+                                batch
+                                    .filter((m) => {
+                                        const data = m.Signal?.data;
+                                        return data?.sdp?.type === "offer" || (data?.sdp?.type === "answer" && data.spare !== undefined);
+                                    })
+                                    .map((m) => m.Signal.sender),
                             );
                             for (const msg of batch) {
                                 // Messages carry ids (repeated until they expire);
@@ -277,6 +354,114 @@
             } catch {
                 return false;
             }
+        }
+
+        // ---- spares (host): offers made ahead of any join, published on the
+        // registry; a player fetches one, answers it and joins with the
+        // answer (answerSpare), and the host claims it (claimSpare). SPARE_COUNT
+        // are kept live (published); each is replaced after SPARE_ROTATE_MS and
+        // still takes answers for SPARE_GRACE_MS after that.
+        async keepSpares() {
+            while (!this.closed && !this.noSpares) {
+                this.tendSpares();
+                await sleep(SPARE_TICK_MS);
+            }
+            this.dropSpares();
+        }
+
+        tendSpares() {
+            const now = Date.now();
+            let changed = false;
+            for (const [oid, spare] of this.spares) {
+                if (now - spare.at > SPARE_ROTATE_MS + SPARE_GRACE_MS) {
+                    this.spares.delete(oid);
+                    try {
+                        spare.peer.pc.close();
+                    } catch {}
+                } else if (spare.live && now - spare.at > SPARE_ROTATE_MS) {
+                    spare.live = false;
+                    changed = true;
+                }
+            }
+            const live = [...this.spares.values()].filter((s) => s.live).length + this.makingSpares;
+            for (let i = live; i < SPARE_COUNT; i++) this.makeSpare();
+            if (changed) this.publishSpares();
+        }
+
+        async makeSpare() {
+            this.makingSpares++;
+            const oid = randomHex(6);
+            const { id, peer } = this.newPeer(null, true, 0, oid);
+            try {
+                await peer.offered;
+            } catch {
+                try {
+                    peer.pc.close();
+                } catch {}
+                this.makingSpares--;
+                return;
+            }
+            this.makingSpares--;
+            if (this.closed || this.noSpares) {
+                try {
+                    peer.pc.close();
+                } catch {}
+                return;
+            }
+            this.spares.set(oid, { id, peer, at: Date.now(), live: true });
+            this.publishSpares();
+        }
+
+        // Tell the registry which spares are live. One request at a time;
+        // changes meanwhile go out in one more after it.
+        async publishSpares() {
+            if (!this.me || this.closed || this.noSpares) return;
+            if (this.publishing) {
+                this.republish = true;
+                return;
+            }
+            this.publishing = true;
+            do {
+                this.republish = false;
+                const offers = [...this.spares]
+                    .filter(([, s]) => s.live)
+                    .map(([oid, s]) => ({ oid, data: this.describe(s.peer) }));
+                try {
+                    const resp = await fetch(this.room + "/spare", {
+                        method: "POST",
+                        body: JSON.stringify({ ...this.credentials(), offers }),
+                    });
+                    // A registry from before spares: players offer, as before.
+                    if (resp.status === 404 || resp.status === 405) this.noSpares = true;
+                } catch {}
+            } while (this.republish && !this.closed && !this.noSpares);
+            this.publishing = false;
+        }
+
+        // A player answered spare `oid`: it becomes that player's peer. Its
+        // id, or undefined when that spare is gone (taken, or expired).
+        claimSpare(oid, sender) {
+            const spare = this.spares.get(oid);
+            if (!spare) return undefined;
+            this.spares.delete(oid);
+            const { id, peer } = spare;
+            peer.remoteId = sender;
+            peer.t0 = performance.now();
+            this.peers.set(id, peer);
+            this.byRemote.set(sender, id);
+            // Off the list before anyone else takes it, and a new one made.
+            if (spare.live) this.publishSpares();
+            this.tendSpares();
+            return id;
+        }
+
+        dropSpares() {
+            for (const { peer } of this.spares.values()) {
+                try {
+                    peer.pc.close();
+                } catch {}
+            }
+            this.spares.clear();
         }
 
         // Who we are, and for a player which host it joined (saves the
@@ -346,6 +531,20 @@
                 if (id !== undefined) this.drop(id);
             } else if (msg.Signal) {
                 const { sender, data } = msg.Signal;
+                // A player's answer to one of our spares: that spare becomes
+                // its connection. Taken by someone else meanwhile, or gone:
+                // offer to the player instead (it takes our offer).
+                if (this.isHost && data?.sdp?.type === "answer" && data.spare !== undefined) {
+                    const known = this.peers.get(this.byRemote.get(sender));
+                    if (known) {
+                        if (known.spare === data.spare) this.onPeerSignal(known, data);
+                        return;
+                    }
+                    const claimed = this.claimSpare(data.spare, sender);
+                    if (claimed !== undefined) this.onPeerSignal(this.peers.get(claimed), data);
+                    else this.connect(sender, true);
+                    return;
+                }
                 let id = this.byRemote.get(sender);
                 // A registry that did not name the host at join: the first
                 // signal for a player comes from it.
@@ -361,8 +560,15 @@
                     // An offer replaces an attempt that never opened when it
                     // is newer (a retry through the relay), or when a player
                     // that offered hears an offer from its host (an older
-                    // host page, which always offers): take the host's.
-                    if (!peer.open && (gen > peer.gen || (peer.offerer && !this.isHost && gen >= peer.gen))) {
+                    // host page, which always offers): take the host's. A
+                    // player that answered a spare takes any offer but that
+                    // spare's own (resent: it is answered again): the spare
+                    // went to someone else, or the host retries.
+                    const replaces =
+                        gen > peer.gen ||
+                        (!this.isHost && peer.offerer && gen >= peer.gen) ||
+                        (!this.isHost && peer.spare !== undefined && data.spare !== peer.spare);
+                    if (!peer.open && replaces) {
                         this.discard(id);
                         id = undefined;
                     }
@@ -380,8 +586,15 @@
         // signalling id; a player's first offer goes out before it knows it
         // (null until the join answers). `gen` counts attempts for this peer:
         // 0 is direct only, 1 adds the TURN relay. Signals carry it, so ones
-        // from an abandoned attempt are ignored.
+        // from an abandoned attempt are ignored. `spare`: one of the
+        // host's spares (see keepSpares), tagged with its oid, kept out of
+        // `peers` until a player claims it; a player's peer answering one
+        // carries its oid too.
         connect(remoteId, offerer, gen = 0) {
+            return this.newPeer(remoteId, offerer, gen).id;
+        }
+
+        newPeer(remoteId, offerer, gen = 0, spare = undefined) {
             const id = this.nextPeer++;
             const relay = gen > 0 || FORCE_RELAY;
             const pc = new RTCPeerConnection({
@@ -391,9 +604,13 @@
             });
             // `described`: our offer/answer went out, so candidates found from
             // now on are sent on their own
-            const peer = { remoteId, pc, channel: null, reliable: null, pending: [], open: false, gen, offerer, described: false };
-            this.peers.set(id, peer);
-            if (remoteId !== null) this.byRemote.set(remoteId, id);
+            const peer = { remoteId, pc, channel: null, reliable: null, pending: [], open: false, gen, offerer, described: false, spare };
+            // when the host heard of this player, for the log
+            peer.t0 = performance.now();
+            if (spare === undefined) {
+                this.peers.set(id, peer);
+                if (remoteId !== null) this.byRemote.set(remoteId, id);
+            }
 
             // Trickle ICE: a candidate gathered before the description went out
             // is already in it; later ones are sent as they come.
@@ -404,6 +621,7 @@
 
             pc.onconnectionstatechange = () => {
                 const state = pc.connectionState;
+                if (state === "connected" && !this.isHost && this.peers.get(id) === peer) this.mark("ice connected");
                 if (state === "failed" && this.retryWithRelay(id)) return;
                 if (state === "failed" || state === "closed") this.drop(id);
                 // A closed or crashed browser shows up as "disconnected" within
@@ -419,19 +637,19 @@
             if (offerer) {
                 // Game traffic is UDP-like: unordered, no retransmits. Big
                 // packets get a reliable channel of their own (RELIABLE_MIN_BYTES).
-                this.attach(id, pc.createDataChannel(CHANNEL, { ordered: false, maxRetransmits: 0 }));
-                this.attach(id, pc.createDataChannel(RELIABLE_CHANNEL, { ordered: false }));
+                this.attach(id, peer, pc.createDataChannel(CHANNEL, { ordered: false, maxRetransmits: 0 }));
+                this.attach(id, peer, pc.createDataChannel(RELIABLE_CHANNEL, { ordered: false }));
                 peer.offered = pc
                     .createOffer()
                     .then((offer) => pc.setLocalDescription(offer))
-                    .then(() => gathered(pc));
+                    .then(() => gathered(pc, spare === undefined ? { full: relay } : { full: true, ms: SPARE_GATHER_MS }));
                 // A player's first offer goes with its join (start); every
                 // other one is sent as a signal.
                 peer.offered.then(() => remoteId !== null && this.sendDescription(peer)).catch(() => this.drop(id));
             } else {
-                pc.ondatachannel = (e) => this.attach(id, e.channel);
+                pc.ondatachannel = (e) => this.attach(id, peer, e.channel);
             }
-            return id;
+            return { id, peer };
         }
 
         // The direct attempt failed: the offerer starts over with the TURN relay.
@@ -460,7 +678,9 @@
         // Candidates found after this are trickled.
         describe(peer) {
             peer.described = true;
-            return { sdp: peer.pc.localDescription.toJSON(), gen: peer.gen };
+            const data = { sdp: peer.pc.localDescription.toJSON(), gen: peer.gen };
+            if (peer.spare !== undefined) data.spare = peer.spare;
+            return data;
         }
 
         sendDescription(peer) {
@@ -485,7 +705,7 @@
                     peer.pending = [];
                     if (data.sdp.type === "offer") {
                         await pc.setLocalDescription(await pc.createAnswer());
-                        await gathered(pc);
+                        await gathered(pc, { full: peer.gen > 0 || FORCE_RELAY });
                         this.sendDescription(peer);
                     } else if (peer.offerer && peer.gen === 0) {
                         // The answer is in: give the direct attempt a moment.
@@ -504,9 +724,7 @@
             }
         }
 
-        attach(id, channel) {
-            const peer = this.peers.get(id);
-            if (!peer) return;
+        attach(id, peer, channel) {
             channel.binaryType = "arraybuffer";
             channel.onmessage = (e) => {
                 if (e.data instanceof ArrayBuffer && this.peers.get(id) === peer) {
@@ -524,8 +742,18 @@
             }
             peer.channel = channel;
             channel.onopen = () => {
+                if (this.peers.get(id) !== peer) return;
                 peer.open = true;
                 this.events.push({ kind: EV_PEER_JOINED, peer: id, data: null });
+                const how = peer.spare !== undefined ? "spare" : peer.offerer ? "our offer" : "its offer";
+                if (this.isHost) {
+                    const ms = Math.round(performance.now() - peer.t0);
+                    console.info(`gridlock_web: player connected ${ms} ms after its join reached us (${how}, gen ${peer.gen})`);
+                } else {
+                    this.mark("open");
+                    const total = Math.round(performance.now() - this.t0);
+                    console.info(`gridlock_web: connected to host in ${total} ms (${how}, gen ${peer.gen}): ${this.marks.join(", ")}`);
+                }
             };
             channel.onclose = () => this.drop(id);
         }
@@ -563,6 +791,7 @@
             if (this.closed) return;
             this.closed = true;
             for (const id of [...this.peers.keys()]) this.drop(id);
+            this.dropSpares();
             if (this.onPageHide) window.removeEventListener("pagehide", this.onPageHide);
             this.leave();
             this.events.push({ kind: EV_CLOSED, peer: 0, data: null });
@@ -606,18 +835,33 @@
     }
 
     // Resolves once a connection has gathered its ICE candidates, or after
-    // GATHER_MS, whichever comes first.
-    function gathered(pc) {
+    // `ms`, whichever comes first; unless `full`, already once a server
+    // reflexive candidate is in (the rest trickle). (A candidate is in the
+    // local description by the time its event fires.)
+    function gathered(pc, { full = false, ms = GATHER_MS } = {}) {
         if (pc.iceGatheringState === "complete") return Promise.resolve();
         return new Promise((resolve) => {
             const done = () => {
+                clearTimeout(timer);
                 pc.removeEventListener("icegatheringstatechange", check);
+                pc.removeEventListener("icecandidate", candidate);
                 resolve();
             };
             const check = () => pc.iceGatheringState === "complete" && done();
+            const candidate = (e) => !full && isReflexive(e.candidate) && done();
             pc.addEventListener("icegatheringstatechange", check);
-            setTimeout(done, GATHER_MS);
+            pc.addEventListener("icecandidate", candidate);
+            const timer = setTimeout(done, ms);
         });
+    }
+
+    function isReflexive(candidate) {
+        return Boolean(candidate) && (candidate.type === "srflx" || / typ srflx /.test(candidate.candidate));
+    }
+
+    function randomHex(bytes) {
+        // (getRandomValues, unlike randomUUID, works on a plain-http LAN page)
+        return [...crypto.getRandomValues(new Uint8Array(bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
     }
 
     function isStunOnly(server) {
@@ -643,6 +887,39 @@
         // A failed fetch is not kept: the next join asks again.
         servers.then((s) => s === STUN_FALLBACK && iceCache.get(origin)?.servers === servers && iceCache.delete(origin));
         return servers;
+    }
+
+    // A room's spare offer, fetched ahead of a join: room http url ->
+    // { at, spare: Promise<{ host, oid, data } | null> }.
+    const prewarmed = new Map();
+
+    // The player points at a room (hovers it in the list): have its ICE
+    // servers and the host's spare offer ready for when it joins.
+    function prewarm(room) {
+        const hit = prewarmed.get(room);
+        if (hit && Date.now() - hit.at < PREWARM_MS) return;
+        iceServersFor(room);
+        prewarmed.set(room, { at: Date.now(), spare: fetchSpare(room) });
+    }
+
+    // The spare to join with: the one fetched ahead (each is used once), or
+    // one fetched now.
+    function spareFor(room) {
+        const hit = prewarmed.get(room);
+        prewarmed.delete(room);
+        return hit && Date.now() - hit.at < PREWARM_MS ? hit.spare : fetchSpare(room);
+    }
+
+    async function fetchSpare(room) {
+        try {
+            const resp = await fetch(room + "/spare", { cache: "no-store" });
+            if (!resp.ok) return null;
+            const spare = await resp.json();
+            const valid = typeof spare?.host === "string" && typeof spare.oid === "string" && spare.data?.sdp?.type === "offer";
+            return valid ? spare : null;
+        } catch {
+            return null; // no spare (an older registry or host page): the player offers
+        }
     }
 
     async function fetchIceServers(origin) {
@@ -970,6 +1247,12 @@
             sockets.set(handle, new RtcSocket(readString(urlPtr, urlLen), isHost !== 0));
             keepRunningWhenHidden();
             return handle;
+        };
+
+        env.gridlock_rtc_prewarm = function (urlPtr, urlLen) {
+            try {
+                prewarm(roomHttpUrl(readString(urlPtr, urlLen)));
+            } catch {}
         };
 
         env.gridlock_rtc_send = function (handle, peer, ptr, len) {

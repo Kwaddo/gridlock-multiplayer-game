@@ -28,8 +28,9 @@ use super::world_sync::sync_world;
 /// Time the loading screen may spend loading assets each frame; it keeps the
 /// screen drawing (and a game hosted in this tab answering) at about 60 fps.
 const LOADING_FRAME_BUDGET: Duration = Duration::from_millis(12);
-/// The same while a join is still connecting: less, so the connection's own
-/// work (signalling, the join handshake) keeps its frames.
+/// The same on the title screen and while a join is still connecting: less,
+/// so the menus and the connection's own work (signalling, the join
+/// handshake) keep their frames.
 const CONNECTING_FRAME_BUDGET: Duration = Duration::from_millis(8);
 
 // asset quality selector used when resolving which version of a model to
@@ -102,11 +103,13 @@ pub async fn run() {
     // Joining waits only for what spawning needs; the rest of the game's
     // assets keep loading in the background while playing.
     let mut asset_queue = AssetQueue::default();
-    // Whether `asset_queue` was started for a join still connecting: the
-    // game's assets do not depend on which game it is, so loading starts
-    // while the connection is set up, and the loading screen after it has
+    // Whether `asset_queue` was started on the title screen: the game's
+    // assets do not depend on which game it is, so loading starts before
+    // the player even picks one, and the loading screen after the join has
     // little or nothing left to do.
-    let mut queued_while_connecting = false;
+    let mut queued_early = false;
+    // When the join's Welcome came in, for the log of how long loading took.
+    let mut joined_at: Option<Instant> = None;
 
     // Everything a game loads: the asset manifest (one list for every game,
     // kept with the assets) plus the first-person viewmodels. Downloading
@@ -175,17 +178,18 @@ pub async fn run() {
                 if macroquad::input::is_key_pressed(macroquad::input::KeyCode::Escape) {
                     state = GameState::Exit;
                 }
-                if login_screen.is_connecting() {
-                    if !queued_while_connecting {
-                        asset_queue = AssetQueue::start(&game_assets, spawn_assets(&loadout), &playing_state);
-                        queued_while_connecting = true;
-                    }
-                    let frame_start = Instant::now();
-                    while asset_queue.pump(&mut playing_state).await
-                        && frame_start.elapsed() < CONNECTING_FRAME_BUDGET
-                        && !asset_queue.ready_to_play()
-                    {}
+                // Load in the background while the player picks a game, and
+                // while it connects; within a frame budget, so the title
+                // screen (and the connection's own work) keeps its frames.
+                if !queued_early {
+                    asset_queue = AssetQueue::start(&game_assets, spawn_assets(&loadout), &playing_state);
+                    queued_early = true;
                 }
+                let frame_start = Instant::now();
+                while asset_queue.pump(&mut playing_state).await
+                    && frame_start.elapsed() < CONNECTING_FRAME_BUDGET
+                    && !asset_queue.ready_to_play()
+                {}
                 if let Some(joined) = login_screen.update() {
                     playing_state.chat.clear();
                     pause_menu.reset();
@@ -197,7 +201,7 @@ pub async fn run() {
 
                     preset_manager = CrosshairPresetManager::new(&username);
 
-                    if queued_while_connecting {
+                    if queued_early {
                         // The loadout may have changed since loading started.
                         asset_queue.require(spawn_assets(&loadout));
                     } else {
@@ -207,7 +211,8 @@ pub async fn run() {
                             &playing_state
                         );
                     }
-                    queued_while_connecting = false;
+                    queued_early = false;
+                    joined_at = Some(Instant::now());
                     state = GameState::Loading;
                 }
                 login_screen.draw();
@@ -287,6 +292,9 @@ pub async fn run() {
                 }
 
                 if asset_queue.ready_to_play() {
+                    if let Some(at) = joined_at.take() {
+                        macroquad::miniquad::info!("gridlock: in game {} ms after the join (loading screen)", at.elapsed().as_millis());
+                    }
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
                     state = GameState::Playing;
                     // Loading paused this loop, so time spent there is not silence from the server.

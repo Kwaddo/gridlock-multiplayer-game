@@ -146,10 +146,24 @@ impl Connector {
             LinkStatus::Connecting if self.started.elapsed() >= LINK_TIMEOUT => return FAILED,
             LinkStatus::Connecting => {}
             LinkStatus::Open => {
+                if self.opened.is_none() {
+                    macroquad::miniquad::info!(
+                        "gridlock: link to {} open after {} ms",
+                        self.address,
+                        self.started.elapsed().as_millis()
+                    );
+                }
                 let opened = *self.opened.get_or_insert_with(Instant::now);
                 let mut packets = self.link.recv().into_iter();
                 while let Some(packet) = packets.next() {
                     if let Some(ServerMsg::Welcome { id, username }) = ServerMsg::decode(&packet) {
+                        macroquad::miniquad::info!(
+                            "gridlock: joined {} after {} ms (Welcome {} ms after the link opened, {} join request(s))",
+                            self.address,
+                            self.started.elapsed().as_millis(),
+                            opened.elapsed().as_millis(),
+                            self.attempts
+                        );
                         // Whatever came around the Welcome (assets, state) belongs to the game.
                         let mut backlog = std::mem::take(&mut self.early);
                         backlog.extend(packets);

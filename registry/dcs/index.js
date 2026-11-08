@@ -47,6 +47,12 @@
 //   GET    /room/:code/poll?id&token[&host][&keep][&wait][&after=<seq>][&have=<ids>]
 //                                  -> [{ id, seq, NewPeer | PeerLeft | Signal: { sender, data } }]
 //   POST   /room/:code/leave       { id, token, host?, to?, via? }
+//   POST   /room/:code/spare       { id, token, host: true, offers: [{ oid, data }] }
+//                                  the host's offers made ahead of any join
+//   GET    /room/:code/spare       -> { host, oid, data }   one of them, at random (404: none)
+//   A player answers a spare offer and sends the answer (tagged with its
+//   `oid`) with its join, so a join is one signalling trip; the host
+//   republishes its spares as they are taken and every 30 s or so.
 //   A poll returns the caller's messages from the last MESSAGE_TTL_MS, newer
 //   than `after` (the newest seq it has) and not among `have` (ids it has
 //   from around then); with `wait` it is held until there is one, for up to
@@ -78,7 +84,7 @@ const LONG_POLL_MS = 6000; // the function itself times out at 10 s
 const LONG_POLL_ACTIVE_MS = 10000;
 // (Each look itself takes an S3 round trip, ~150 ms from the edge, on top.)
 const LONG_POLL_CHECK_MS = 25;
-const LONG_POLL_IDLE_CHECK_MS = 150;
+const LONG_POLL_IDLE_CHECK_MS = 50;
 const LONG_POLL_CLAIM_CHECK_MS = 2000;
 const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
 // How far apart two isolates' clocks may be, for a poll's `after`.
@@ -92,6 +98,11 @@ const SWEEP_EVERY_MS = 10 * 60 * 1000;
 const SWEEP_MARGIN_MS = 60 * 1000;
 const SWEEP_MAX_PAGES = 20;
 const DELETE_PARALLEL = 16;
+// A host rewrites its spares every 30 s; ones older than this are gone.
+const SPARE_TTL_MS = 75000;
+const SPARE_MAX_OFFERS = 4;
+const SPARE_MAX_BYTES = 64 * 1024;
+const SPARE_ID = /^[0-9a-f]{6,32}$/;
 const STATE_KEY = "state.json";
 const MAX_LISTINGS = 500;
 const MAX_PER_IP = 4;
@@ -380,6 +391,34 @@ async function room(request, env, ctx, code, action) {
     return resp;
   }
 
+  // The host's spare offers: rooms/<code>/spare.json = { host, at, offers },
+  // written only by the host, so a player can fetch one before it joins
+  // (web/gridlock_web.js does so when the room is pointed at) and join with
+  // its answer. One read, no claim check: a leaving host deletes the file
+  // with its room, and a crashed host's file ages out (SPARE_TTL_MS).
+  const spareKey = `rooms/${code}/spare.json`;
+  if (action === "spare" && request.method === "GET") {
+    const spare = await store.get(spareKey).catch(() => null);
+    const offers = spare?.at > now - SPARE_TTL_MS && Array.isArray(spare.offers) ? spare.offers : [];
+    if (!offers.length) return json({ error: "no spare offer" }, 404);
+    const offer = offers[Math.floor(Math.random() * offers.length)];
+    const resp = json({ host: spare.host, oid: offer.oid, data: offer.data });
+    resp.headers.set("Cache-Control", "no-store");
+    return resp;
+  }
+  if (action === "spare" && request.method === "POST") {
+    const body = await readJson(request);
+    const id = typeof body?.id === "string" ? body.id : "";
+    if (!body?.host || !(await validPeer(env, code, id, body?.token, true))) return json({ error: "bad token" }, 403);
+    const offers = (Array.isArray(body?.offers) ? body.offers.slice(0, SPARE_MAX_OFFERS) : [])
+      .filter((o) => typeof o?.oid === "string" && SPARE_ID.test(o.oid) && o.data?.sdp?.type === "offer")
+      .map((o) => ({ oid: o.oid, data: o.data }));
+    if (JSON.stringify(offers).length > SPARE_MAX_BYTES) return json({ error: "too big" }, 413);
+    if (offers.length) await store.put(spareKey, { host: id, at: now, offers });
+    else await store.delete(spareKey).catch(() => {});
+    return new Response(null, { status: 204 });
+  }
+
   if (["hello", "send", "leave"].includes(action) && request.method === "POST") {
     const body = await readJson(request);
     const id = typeof body?.id === "string" ? body.id : "";
@@ -502,8 +541,8 @@ async function unseen(store, ctx, prefix, after, have, deleting) {
 // Messages are deleted as soon as their receiver has them (unseen) or leaves
 // (a player its mailbox, a host the whole room). What a tab that crashed or
 // lost its connection leaves behind goes in a sweep of everything under
-// rooms/: messages past MESSAGE_TTL_MS, and claims not renewed for
-// HOST_TTL_SECONDS (a host renews every 20 s). Sweeps run in the background
+// rooms/: messages past MESSAGE_TTL_MS, claims not renewed for
+// HOST_TTL_SECONDS (a host renews every 20 s), and spare offers past SPARE_TTL_MS. Sweeps run in the background
 // of a hosting player's requests, at most every SWEEP_EVERY_MS per isolate.
 let lastSweep = 0;
 
@@ -524,6 +563,9 @@ async function sweep(store) {
       const message = key.match(/^rooms\/[^/]+\/(?:host|to\/[^/]+)\/(\d{15})-[0-9a-f]{8}\.json$/);
       if (message) {
         if (Number(message[1]) < now - MESSAGE_TTL_MS - SWEEP_MARGIN_MS) stale.push(key);
+      } else if (/^rooms\/[^/]+\/spare\.json$/.test(key)) {
+        // A host rewrites its spares every 30 s or so.
+        if (now - Date.parse(modified || "") > SPARE_TTL_MS + SWEEP_MARGIN_MS) stale.push(key);
       } else if (/^rooms\/[^/]+\.json$/.test(key)) {
         const age = now - Date.parse(modified || "");
         if (age > HOST_TTL_SECONDS * 1000 + SWEEP_MARGIN_MS) stale.push(key);
