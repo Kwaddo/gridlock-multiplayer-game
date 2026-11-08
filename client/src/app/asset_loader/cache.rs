@@ -1,14 +1,19 @@
 use client::screens::PlayingState;
 
-use super::paths::resolve_runtime_asset_path;
-
 /// Whether the asset `key` is already loaded from `path`.
 pub fn asset_loaded(playing_state: &PlayingState, key: &str, path: &str) -> bool {
-    let lower = resolve_runtime_asset_path(path).to_lowercase();
-    let is_obj = lower.ends_with(".obj");
-    let is_gltf = lower.ends_with(".glb") || lower.ends_with(".gltf");
-    let is_sound = lower.ends_with(".ogg") || lower.ends_with(".wav") || lower.ends_with(".mp3");
+    // Resolving only puts a directory in front of the path, so the raw path
+    // has the same extension: no file probing or allocation per check.
+    let is_obj = has_ext(path, ".obj");
+    let is_gltf = has_ext(path, ".glb") || has_ext(path, ".gltf");
+    let is_sound = has_ext(path, ".ogg") || has_ext(path, ".wav") || has_ext(path, ".mp3");
     is_asset_cached(playing_state, key, path, is_obj, is_gltf, is_sound)
+}
+
+/// Whether `path` ends in `ext` (given in lowercase), in any case.
+pub(super) fn has_ext(path: &str, ext: &str) -> bool {
+    path.len() >= ext.len()
+        && path.as_bytes()[path.len() - ext.len()..].eq_ignore_ascii_case(ext.as_bytes())
 }
 
 pub(super) fn is_asset_cached(
