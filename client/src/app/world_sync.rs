@@ -9,12 +9,14 @@ use client::types::maze::Maze;
 
 mod combat;
 mod gun_game;
+mod merge;
 mod players;
 mod world_change;
 
 use combat::{apply_damage, apply_death, apply_kill_feed, spawn_bot_shots};
 use gun_game::apply_gun_level;
-use players::{apply_player_list, apply_team_colors, merge_players};
+use merge::{apply_player_info, merge_players};
+use players::{apply_player_list, apply_team_colors};
 use world_change::enter_world;
 
 pub struct SyncResult {
@@ -38,7 +40,7 @@ pub fn sync_world(
     };
 
     if let Some(link) = link {
-        let updates = poll_updates(link, player_id);
+        let updates = poll_updates(link, player_id, &mut playing_state.player_info);
 
         // mark that we saw traffic from server during this poll
         result.server_seen = updates.received_any;
@@ -55,6 +57,9 @@ pub fn sync_world(
         }
         if let Some(players) = updates.players {
             merge_players(playing_state, players);
+        }
+        if updates.player_info_changed {
+            apply_player_info(playing_state);
         }
 
         // Update local player's kill count when server provides it via MSG_STATE

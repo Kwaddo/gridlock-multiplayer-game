@@ -4,8 +4,11 @@ use crate::*;
 /// Client -> server.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientMsg {
-    /// Username is the raw remainder of the packet (no length prefix).
-    Join { username: String },
+    /// Username is the raw remainder of the packet (no length prefix), then
+    /// `version` (`PROTOCOL_VERSION`; `None` from builds before the check)
+    /// written as whitespace, see [`write_join_version`]: servers from before
+    /// the check trim it off and still see the plain name.
+    Join { username: String, version: Option<u16> },
     Position { position: Vec3, yaw: f32, state_flags: Option<u8>, event_flags: Option<u8> },
     Disconnect,
     WorldChange { target: u8 },
@@ -38,10 +41,49 @@ pub enum ClientMsg {
     EndMatch,
 }
 
+/// Marks the version at the end of a `Join`; 16 bits follow, see [`write_join_version`].
+const JOIN_VERSION_MARK: &[u8] = b"\r\n";
+const JOIN_VERSION_LEN: usize = 2 + 16;
+
+/// The version as `\r\n` plus 16 bits, most significant first, each a
+/// space (0) or a tab (1). All of it is whitespace, which servers from before
+/// the version check trim off the name, so they still greet the player by it
+/// (and the joiner sees no version in the reply, and leaves).
+fn write_join_version(w: &mut Writer, version: u16) {
+    w.bytes(JOIN_VERSION_MARK);
+    for bit in (0..16).rev() {
+        w.u8(if version >> bit & 1 == 1 { b'\t' } else { b' ' });
+    }
+}
+
+/// Splits a `Join` payload into the name bytes and the version, if it has one.
+fn read_join_version(payload: &[u8]) -> (&[u8], Option<u16>) {
+    let Some(at) = payload.len().checked_sub(JOIN_VERSION_LEN) else { return (payload, None) };
+    let (name, tail) = payload.split_at(at);
+    let (mark, bits) = tail.split_at(JOIN_VERSION_MARK.len());
+    if mark != JOIN_VERSION_MARK || !bits.iter().all(|b| *b == b' ' || *b == b'\t') {
+        return (payload, None);
+    }
+    let version = bits.iter().fold(0u16, |v, b| v << 1 | (*b == b'\t') as u16);
+    (name, Some(version))
+}
+
 impl ClientMsg {
+    /// The `Join` this build sends: its name and its `PROTOCOL_VERSION`.
+    pub fn join(username: impl Into<String>) -> Self {
+        ClientMsg::Join { username: username.into(), version: Some(PROTOCOL_VERSION) }
+    }
+
     pub fn encode(&self) -> Vec<u8> {
         match self {
-            ClientMsg::Join { username } => Writer::new(MSG_JOIN).bytes(username.as_bytes()).finish(),
+            ClientMsg::Join { username, version } => {
+                let mut w = Writer::new(MSG_JOIN);
+                w.bytes(username.as_bytes());
+                if let Some(v) = version {
+                    write_join_version(&mut w, *v);
+                }
+                w.finish()
+            }
             ClientMsg::Position { position, yaw, state_flags, event_flags } => {
                 let mut w = Writer::new(MSG_POSITION);
                 w.vec3(*position).f32(*yaw);
@@ -108,9 +150,10 @@ impl ClientMsg {
         let (&msg_type, payload) = packet.split_first()?;
         let mut r = Reader::new(payload);
         let msg = match msg_type {
-            MSG_JOIN => ClientMsg::Join {
-                username: String::from_utf8_lossy(r.rest()).trim().to_string(),
-            },
+            MSG_JOIN => {
+                let (name, version) = read_join_version(r.rest());
+                ClientMsg::Join { username: String::from_utf8_lossy(name).trim().to_string(), version }
+            }
             MSG_POSITION => ClientMsg::Position {
                 position: r.vec3()?,
                 yaw: r.f32()?,

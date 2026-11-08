@@ -4,8 +4,12 @@ use crate::*;
 /// Server -> client.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerMsg {
-    Welcome { id: u32, username: String },
-    State(Vec<PlayerState>),
+    /// `version` (`PROTOCOL_VERSION`) trails the packet: builds from before
+    /// the version check never send it, and ignore it when they get it. Id 0
+    /// turns the joiner away (another version); see `ClientMsg::Join`.
+    Welcome { id: u32, username: String, version: Option<u16> },
+    /// Everyone in the receiver's `world`.
+    State { world: u8, players: Vec<PlayerState> },
     Maze(MazeLayout),
     WorldChange {
         world: u8,
@@ -16,8 +20,8 @@ pub enum ServerMsg {
         match_timer: Option<u16>,
     },
     Assets { world: u8, entries: Vec<(String, String)> },
-    /// LAN discovery reply.
-    Discover { players: u8, max_players: u8, name: String },
+    /// LAN discovery reply; `version` trails it as in `Welcome`.
+    Discover { players: u8, max_players: u8, name: String, version: Option<u16> },
     WallBroken { x: u8, y: u8 },
     Death { killer_id: u32, weapon: String },
     Respawn { position: Vec3, kind: Option<u8> }, // kind: 0=random, 1=teleporter fallback
@@ -32,7 +36,10 @@ pub enum ServerMsg {
     MatchTimer { secs: u16 },
     SndRoundState(SndRound),
     LobbyLeader { id: u32 }, // 0 = no leader
-    BotShot { shooter_id: u32, victim_id: u32, start: Vec3, end: Vec3 },
+    /// Every shot bots fired in one bot tick.
+    BotShots(Vec<BotShot>),
+    /// What rarely changes about players, see `PlayerInfo`.
+    PlayerInfo(Vec<PlayerInfo>),
     Chat { from_id: u32, name: String, text: String }, // from_id 0 = server notice
     PlayerJoined { id: u32, name: String },
     PlayerLeft { id: u32, name: String, reason: u8 },
@@ -44,18 +51,20 @@ pub enum ServerMsg {
 impl ServerMsg {
     pub fn encode(&self) -> Vec<u8> {
         match self {
-            ServerMsg::Welcome { id, username } => {
-                Writer::new(MSG_WELCOME).u32(*id).str8(username).finish()
+            ServerMsg::Welcome { id, username, version } => {
+                let mut w = Writer::new(MSG_WELCOME);
+                w.u32(*id).str8(username);
+                if let Some(v) = version {
+                    w.u16(*v);
+                }
+                w.finish()
             }
-            ServerMsg::State(players) => {
+            ServerMsg::State { world, players } => {
+                let count = players.len().min(u16::MAX as usize);
                 let mut w = Writer::new(MSG_STATE);
-                w.u32(players.len() as u32);
-                for p in players {
-                    w.u32(p.id).vec3(p.position).f32(p.yaw);
-                    w.u8(p.world).u8(p.state_flags).u8(p.event_flags);
-                    w.u32(p.kills).u8(p.gun_level).f32(p.health).f32(p.max_health);
-                    w.str8(&p.name).bool(p.alive).u8(p.freeze_secs);
-                    w.u8(p.team).str8(&p.weapon);
+                w.u8(*world).u16(count as u16);
+                for p in players.iter().take(count) {
+                    p.write(&mut w);
                 }
                 w.finish()
             }
@@ -98,8 +107,13 @@ impl ServerMsg {
                 }
                 w.finish()
             }
-            ServerMsg::Discover { players, max_players, name } => {
-                Writer::new(MSG_DISCOVER).u8(*players).u8(*max_players).str8(name).finish()
+            ServerMsg::Discover { players, max_players, name, version } => {
+                let mut w = Writer::new(MSG_DISCOVER);
+                w.u8(*players).u8(*max_players).str8(name);
+                if let Some(v) = version {
+                    w.u16(*v);
+                }
+                w.finish()
             }
             ServerMsg::WallBroken { x, y } => Writer::new(MSG_WALL_BROKEN).u8(*x).u8(*y).finish(),
             ServerMsg::Death { killer_id, weapon } => {
@@ -170,12 +184,22 @@ impl ServerMsg {
                 w.finish()
             }
             ServerMsg::LobbyLeader { id } => Writer::new(MSG_LOBBY_LEADER).u32(*id).finish(),
-            ServerMsg::BotShot { shooter_id, victim_id, start, end } => Writer::new(MSG_BOT_SHOT)
-                .u32(*shooter_id)
-                .u32(*victim_id)
-                .vec3(*start)
-                .vec3(*end)
-                .finish(),
+            ServerMsg::BotShots(shots) => {
+                let mut w = Writer::new(MSG_BOT_SHOT);
+                w.u8(shots.len().min(255) as u8);
+                for shot in shots.iter().take(255) {
+                    shot.write(&mut w);
+                }
+                w.finish()
+            }
+            ServerMsg::PlayerInfo(entries) => {
+                let mut w = Writer::new(MSG_PLAYER_INFO);
+                w.u8(entries.len().min(255) as u8);
+                for e in entries.iter().take(255) {
+                    e.write(&mut w);
+                }
+                w.finish()
+            }
             ServerMsg::Chat { from_id, name, text } => {
                 Writer::new(MSG_CHAT).u32(*from_id).str8(name).str8(text).finish()
             }
@@ -201,31 +225,18 @@ impl ServerMsg {
         let (&msg_type, payload) = packet.split_first()?;
         let mut r = Reader::new(payload);
         let msg = match msg_type {
-            MSG_WELCOME => ServerMsg::Welcome { id: r.u32()?, username: r.str8()? },
+            MSG_WELCOME => {
+                ServerMsg::Welcome { id: r.u32()?, username: r.str8()?, version: r.u16() }
+            }
             MSG_STATE => {
-                let count = r.u32()? as usize;
-                // cap the preallocation; a bogus count must not allocate gigabytes
-                let mut players = Vec::with_capacity(count.min(256));
+                let world = r.u8()?;
+                let count = r.u16()? as usize;
+                // cap the preallocation by what the packet can hold
+                let mut players = Vec::with_capacity(count.min(payload.len() / PlayerState::WIRE_BYTES));
                 for _ in 0..count {
-                    players.push(PlayerState {
-                        id: r.u32()?,
-                        position: r.vec3()?,
-                        yaw: r.f32()?,
-                        world: r.u8()?,
-                        state_flags: r.u8()?,
-                        event_flags: r.u8()?,
-                        kills: r.u32()?,
-                        gun_level: r.u8()?,
-                        health: r.f32()?,
-                        max_health: r.f32()?,
-                        name: r.str8()?,
-                        alive: r.bool()?,
-                        freeze_secs: r.u8()?,
-                        team: r.u8()?,
-                        weapon: r.str8()?,
-                    });
+                    players.push(PlayerState::read(&mut r)?);
                 }
-                ServerMsg::State(players)
+                ServerMsg::State { world, players }
             }
             MSG_MAZE => {
                 let width = r.u8()?;
@@ -261,9 +272,12 @@ impl ServerMsg {
                 }
                 ServerMsg::Assets { world, entries }
             }
-            MSG_DISCOVER => {
-                ServerMsg::Discover { players: r.u8()?, max_players: r.u8()?, name: r.str8()? }
-            }
+            MSG_DISCOVER => ServerMsg::Discover {
+                players: r.u8()?,
+                max_players: r.u8()?,
+                name: r.str8()?,
+                version: r.u16(),
+            },
             MSG_WALL_BROKEN => ServerMsg::WallBroken { x: r.u8()?, y: r.u8()? },
             MSG_DEATH => ServerMsg::Death { killer_id: r.u32()?, weapon: r.str8()? },
             MSG_RESPAWN => ServerMsg::Respawn { position: r.vec3()?, kind: r.u8() },
@@ -319,12 +333,20 @@ impl ServerMsg {
                 phase_timer: r.f32()?,
             }),
             MSG_LOBBY_LEADER => ServerMsg::LobbyLeader { id: r.u32()? },
-            MSG_BOT_SHOT => ServerMsg::BotShot {
-                shooter_id: r.u32()?,
-                victim_id: r.u32()?,
-                start: r.vec3()?,
-                end: r.vec3()?,
-            },
+            MSG_BOT_SHOT => {
+                let mut shots = Vec::new();
+                for _ in 0..r.u8()? {
+                    shots.push(BotShot::read(&mut r)?);
+                }
+                ServerMsg::BotShots(shots)
+            }
+            MSG_PLAYER_INFO => {
+                let mut entries = Vec::new();
+                for _ in 0..r.u8()? {
+                    entries.push(PlayerInfo::read(&mut r)?);
+                }
+                ServerMsg::PlayerInfo(entries)
+            }
             MSG_CHAT => ServerMsg::Chat { from_id: r.u32()?, name: r.str8()?, text: r.str8()? },
             MSG_PLAYER_JOINED => ServerMsg::PlayerJoined { id: r.u32()?, name: r.str8()? },
             MSG_PLAYER_LEFT => {

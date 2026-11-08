@@ -170,51 +170,47 @@ pub(crate) fn state_msg(
     include_events: bool,
     now: Instant,
 ) -> Vec<u8> {
-    let mut entries = Vec::new();
-    for player in players.values() {
-        if player.world != world {
-            continue;
-        }
-        let mut state_flags = 0u8;
-        if player.is_sprinting { state_flags |= FLAG_SPRINTING; }
-        if player.is_crouched  { state_flags |= FLAG_CROUCHING; }
-        if player.is_ads       { state_flags |= FLAG_ADS; }
-        if player.is_airborne  { state_flags |= FLAG_AIRBORNE; }
-        if player.is_prone     { state_flags |= FLAG_PRONE; }
-        if player.is_sliding   { state_flags |= FLAG_SLIDING; }
-        if player.is_bot       { state_flags |= FLAG_IS_BOT; }
-        if player.is_silent    { state_flags |= FLAG_SILENT; }
+    let entries = players
+        .values()
+        .filter(|p| p.world == world)
+        .map(|p| player_state(p, include_events, now))
+        .collect();
+    ServerMsg::State { world: world.as_u8(), players: entries }.encode()
+}
 
-        let mut event_flags = 0u8;
-        if include_events {
-            if player.evt_jump_start { event_flags |= EVT_JUMP_START; }
-            if player.evt_landed     { event_flags |= EVT_LANDED; }
-        }
+/// One player's `MSG_STATE` entry. What rarely changes goes in `MSG_PLAYER_INFO`.
+pub(crate) fn player_state(player: &Player, include_events: bool, now: Instant) -> PlayerState {
+    let mut state_flags = 0u8;
+    if player.is_sprinting { state_flags |= FLAG_SPRINTING; }
+    if player.is_crouched  { state_flags |= FLAG_CROUCHING; }
+    if player.is_ads       { state_flags |= FLAG_ADS; }
+    if player.is_airborne  { state_flags |= FLAG_AIRBORNE; }
+    if player.is_prone     { state_flags |= FLAG_PRONE; }
+    if player.is_sliding   { state_flags |= FLAG_SLIDING; }
+    if player.is_bot       { state_flags |= FLAG_IS_BOT; }
+    if player.is_silent    { state_flags |= FLAG_SILENT; }
 
-        let freeze_secs: u8 = match player.post_teleport_freeze_until {
-            Some(t) if t > now => t.saturating_duration_since(now).as_secs().min(255) as u8,
-            _ => 0u8,
-        };
-
-        entries.push(PlayerState {
-            id: player.id,
-            position: player.position,
-            yaw: player.yaw,
-            world: player.world.as_u8(),
-            state_flags,
-            event_flags,
-            kills: player.kills,
-            gun_level: player.gun_level as u8,
-            health: player.health as f32,
-            max_health: player.max_health as f32,
-            name: player.username.clone(),
-            alive: player.is_alive,
-            freeze_secs,
-            team: player.team.as_u8(),
-            weapon: player.current_weapon.clone(),
-        });
+    let mut event_flags = 0u8;
+    if include_events {
+        if player.evt_jump_start { event_flags |= EVT_JUMP_START; }
+        if player.evt_landed     { event_flags |= EVT_LANDED; }
     }
-    ServerMsg::State(entries).encode()
+
+    let freeze_secs: u8 = match player.post_teleport_freeze_until {
+        Some(t) if t > now => t.saturating_duration_since(now).as_secs().min(255) as u8,
+        _ => 0u8,
+    };
+
+    PlayerState {
+        id: player.id,
+        position: player.position,
+        yaw: player.yaw,
+        state_flags,
+        event_flags,
+        health: player.health.min(u16::MAX as u32) as u16,
+        alive: player.is_alive,
+        freeze_secs,
+    }
 }
 
 #[cfg(test)]
@@ -232,48 +228,13 @@ mod tests {
             if receiver.is_bot {
                 continue;
             }
-            let mut entries = Vec::new();
-            for player in players.values() {
-                if player.world != receiver.world {
-                    continue;
-                }
-                let mut state_flags = 0u8;
-                if player.is_sprinting { state_flags |= FLAG_SPRINTING; }
-                if player.is_crouched  { state_flags |= FLAG_CROUCHING; }
-                if player.is_ads       { state_flags |= FLAG_ADS; }
-                if player.is_airborne  { state_flags |= FLAG_AIRBORNE; }
-                if player.is_prone     { state_flags |= FLAG_PRONE; }
-                if player.is_sliding   { state_flags |= FLAG_SLIDING; }
-                if player.is_bot       { state_flags |= FLAG_IS_BOT; }
-                if player.is_silent    { state_flags |= FLAG_SILENT; }
-                let mut event_flags = 0u8;
-                if include_events {
-                    if player.evt_jump_start { event_flags |= EVT_JUMP_START; }
-                    if player.evt_landed     { event_flags |= EVT_LANDED; }
-                }
-                let freeze_secs: u8 = match player.post_teleport_freeze_until {
-                    Some(t) if t > now => t.saturating_duration_since(now).as_secs().min(255) as u8,
-                    _ => 0u8,
-                };
-                entries.push(PlayerState {
-                    id: player.id,
-                    position: player.position,
-                    yaw: player.yaw,
-                    world: player.world.as_u8(),
-                    state_flags,
-                    event_flags,
-                    kills: player.kills,
-                    gun_level: player.gun_level as u8,
-                    health: player.health as f32,
-                    max_health: player.max_health as f32,
-                    name: player.username.clone(),
-                    alive: player.is_alive,
-                    freeze_secs,
-                    team: player.team.as_u8(),
-                    weapon: player.current_weapon.clone(),
-                });
-            }
-            out.push((*recv_addr, ServerMsg::State(entries).encode()));
+            let entries = players
+                .values()
+                .filter(|p| p.world == receiver.world)
+                .map(|p| player_state(p, include_events, now))
+                .collect();
+            let world = receiver.world.as_u8();
+            out.push((*recv_addr, ServerMsg::State { world, players: entries }.encode()));
         }
         out
     }

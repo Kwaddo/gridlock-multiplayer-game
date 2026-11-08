@@ -7,10 +7,13 @@ mod client_msg;
 mod server_msg;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wire_tests;
 mod types;
 
 pub use client_msg::ClientMsg;
 pub use server_msg::ServerMsg;
 pub use types::{
-    LobbySettings, MazeLayout, MazeLight, MazeProp, MazeRoom, PlayerListEntry, PlayerState, SndRound,
+    BotShot, LobbySettings, MazeLayout, MazeLight, MazeProp, MazeRoom, PlayerInfo, PlayerListEntry,
+    PlayerState, SndRound,
 };
