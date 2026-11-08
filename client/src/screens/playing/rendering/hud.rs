@@ -91,9 +91,7 @@ impl PlayingState {
                 }
                 let dir_norm = dir / dist;
                 // check if any wall is between camera and target
-                if let Some((_, wall_dist)) = m.ray_test_walls(camera.position, dir_norm, dist) {
-                    return wall_dist < dist - 0.1;
-                }
+                return m.ray_hits_wall_before(camera.position, dir_norm, dist, dist - 0.1);
             }
             false
         };
@@ -114,14 +112,13 @@ impl PlayingState {
 
         // Other players
         for p in &self.other_players {
-            let display_name = if p.is_bot {
-                format!("[BOT] {}", p.username)
-            } else {
-                p.username.clone()
-            };
-
             let player_pos = p.render_position();
             let tag_pos = player_pos + vec3(0.0, 1.7, 0.0);
+
+            // Off-screen tags are skipped before the occlusion raycast.
+            let Some((sx, sy)) = project(tag_pos) else {
+                continue;
+            };
 
             // In team modes distinguish teammates from enemies:
             //   - teammates: always visible (no wall occlusion), shown in green
@@ -133,21 +130,20 @@ impl PlayingState {
                 continue;
             }
 
-            if let Some((sx, sy)) = project(tag_pos) {
-                if show_hp {
-                    Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
-                } else {
-                    let tag_color = if is_team_mode {
-                        if is_teammate {
-                            Color::from_rgba(80, 220, 120, 255) // green for teammates
-                        } else {
-                            Color::from_rgba(255, 120, 60, 255) // orange-red for enemies
-                        }
+            let display_name = Self::tag_label(p.is_bot, &p.username);
+            if show_hp {
+                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
+            } else {
+                let tag_color = if is_team_mode {
+                    if is_teammate {
+                        Color::from_rgba(80, 220, 120, 255) // green for teammates
                     } else {
-                        p.color
-                    };
-                    Self::draw_nametag(sx, sy, &display_name, tag_color);
-                }
+                        Color::from_rgba(255, 120, 60, 255) // orange-red for enemies
+                    }
+                } else {
+                    p.color
+                };
+                Self::draw_nametag(sx, sy, &display_name, tag_color);
             }
         }
 
@@ -157,22 +153,29 @@ impl PlayingState {
             let bot_pos = vec3(p.x, p.y, p.z);
             let tag_pos = bot_pos + vec3(0.0, 1.7, 0.0);
 
+            let Some((sx, sy)) = project(tag_pos) else {
+                continue;
+            };
+
             if is_occluded(bot_pos + vec3(0.0, 0.8, 0.0)) {
                 continue;
             }
 
-            if let Some((sx, sy)) = project(tag_pos) {
-                let display_name = if p.is_bot {
-                    format!("[BOT] {}", p.username)
-                } else {
-                    p.username.clone()
-                };
-                if show_hp {
-                    Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
-                } else {
-                    Self::draw_nametag(sx, sy, &display_name, p.color);
-                }
+            let display_name = Self::tag_label(p.is_bot, &p.username);
+            if show_hp {
+                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
+            } else {
+                Self::draw_nametag(sx, sy, &display_name, p.color);
             }
+        }
+    }
+
+    /// Overhead label: bots get a "[BOT] " prefix, players borrow their name.
+    fn tag_label(is_bot: bool, username: &str) -> std::borrow::Cow<'_, str> {
+        if is_bot {
+            std::borrow::Cow::Owned(format!("[BOT] {}", username))
+        } else {
+            std::borrow::Cow::Borrowed(username)
         }
     }
 

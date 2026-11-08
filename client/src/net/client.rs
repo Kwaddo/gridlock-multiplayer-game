@@ -1,5 +1,5 @@
 use crate::net::hosting::LocalHost;
-use crate::net::{ClientMsg, ServerMsg};
+use crate::net::{ClientMsg, ServerMsg, PROTOCOL_VERSION};
 use transport::{Backlogged, Link, LinkStatus};
 use platform::{Duration, Instant};
 
@@ -8,8 +8,10 @@ use platform::{Duration, Instant};
 const JOIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long WebRTC negotiation may take before the link opens.
 const LINK_TIMEOUT: Duration = Duration::from_secs(25);
-/// Join packets can be lost, so resend until the server answers.
-const JOIN_RESEND: Duration = Duration::from_millis(500);
+/// Join packets can be lost, so resend until the server answers. A resend
+/// is one small packet and the server answers a repeat with Welcome again,
+/// so resend often: a lost Join or Welcome then costs a moment, not half a second.
+const JOIN_RESEND: Duration = Duration::from_millis(150);
 
 /// A joined game: the link to its server, and the server itself when this
 /// client is the one hosting it. Dropping a hosted session ends the game.
@@ -33,6 +35,10 @@ pub struct Connector {
     last_sent: Option<Instant>,
     /// Join requests sent so far.
     attempts: u32,
+    /// What the server sent before its Welcome arrived (a Welcome can be
+    /// lost while what followed it gets through, e.g. the maze on its
+    /// reliable channel); it belongs to the game as much as what follows.
+    early: Vec<Box<[u8]>>,
 }
 
 /// Where a join stands, for the "Connecting" screen.
@@ -77,11 +83,12 @@ impl Connector {
             link,
             address,
             host,
-            join: ClientMsg::Join { username: username.to_string() }.encode(),
+            join: ClientMsg::join(username).encode(),
             started: Instant::now(),
             opened: None,
             last_sent: None,
             attempts: 0,
+            early: Vec::new(),
         }
     }
 
@@ -139,12 +146,42 @@ impl Connector {
             LinkStatus::Connecting if self.started.elapsed() >= LINK_TIMEOUT => return FAILED,
             LinkStatus::Connecting => {}
             LinkStatus::Open => {
+                if self.opened.is_none() {
+                    macroquad::miniquad::info!(
+                        "gridlock: link to {} open after {} ms",
+                        self.address,
+                        self.started.elapsed().as_millis()
+                    );
+                }
                 let opened = *self.opened.get_or_insert_with(Instant::now);
                 let mut packets = self.link.recv().into_iter();
                 while let Some(packet) = packets.next() {
-                    if let Some(ServerMsg::Welcome { id, username }) = ServerMsg::decode(&packet) {
-                        // Whatever followed the Welcome (assets, state) belongs to the game.
-                        let link = Box::new(Backlogged::new(self.link, packets.collect()));
+                    if let Some(ServerMsg::Welcome { id, username, version }) = ServerMsg::decode(&packet) {
+                        if let Some(reason) = version_mismatch(version) {
+                            macroquad::miniquad::info!(
+                                "gridlock: {} runs protocol {:?}, we run {}",
+                                self.address,
+                                version,
+                                PROTOCOL_VERSION
+                            );
+                            // An older host let us in; say we are going (twice, in
+                            // case one is lost) so it does not wait for us to time out.
+                            let bye = ClientMsg::Disconnect.encode();
+                            self.link.send(&bye);
+                            self.link.send(&bye);
+                            return ConnectPoll::Failed(reason);
+                        }
+                        macroquad::miniquad::info!(
+                            "gridlock: joined {} after {} ms (Welcome {} ms after the link opened, {} join request(s))",
+                            self.address,
+                            self.started.elapsed().as_millis(),
+                            opened.elapsed().as_millis(),
+                            self.attempts
+                        );
+                        // Whatever came around the Welcome (assets, state) belongs to the game.
+                        let mut backlog = std::mem::take(&mut self.early);
+                        backlog.extend(packets);
+                        let link = Box::new(Backlogged::new(self.link, backlog));
                         return ConnectPoll::Connected(Session {
                             link,
                             player_id: id,
@@ -153,6 +190,7 @@ impl Connector {
                             host: self.host,
                         });
                     }
+                    self.early.push(packet);
                 }
                 if opened.elapsed() >= JOIN_TIMEOUT {
                     return FAILED;
@@ -165,6 +203,18 @@ impl Connector {
             }
         }
         ConnectPoll::Pending(self)
+    }
+}
+
+/// Why a host whose `Welcome` carried `version` cannot be played with, if it
+/// cannot. Hosts from before the version check send none.
+pub fn version_mismatch(version: Option<u16>) -> Option<&'static str> {
+    match version {
+        Some(v) if v == PROTOCOL_VERSION => None,
+        Some(v) if v > PROTOCOL_VERSION => {
+            Some("This game runs a newer version of Gridlock. Update your game to join it.")
+        }
+        _ => Some("This game runs an older version of Gridlock. Both of you need the same version."),
     }
 }
 

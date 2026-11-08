@@ -1,0 +1,276 @@
+use std::collections::HashMap;
+use crate::net::PeerId;
+use crate::player::Player;
+use crate::maze::MazeData;
+use crate::maze::analysis::MazeAnalysis;
+use crate::bot::ai::{ BotState, BotBehavior };
+use crate::bot::personality::BotArchetype;
+use crate::maze::pathfinding::world_to_cell;
+use crate::server::game::MAZE_CELL_SIZE;
+use rand::Rng;
+
+mod routing;
+mod tactics;
+
+use routing::{dist2, find_enemy, is_enemy, route, route_to_player, route_to_pos};
+use tactics::{flank_behind_enemy, pick_hold_angle, retreat_from_enemy, roam_to_random_point};
+
+/*
+    The "brain" of the bot. Called every tick from manager.rs before tick_bot (the "legs").
+    Decides which BotBehavior the bot should be in based on:
+      - its archetype and personality weights
+      - whether it can see an enemy
+      - its health vs retreat threshold
+      - timers (repath, hold, give_up)
+
+    Returns Some(new_behavior) to switch, or None to keep current behavior.
+*/
+
+pub fn decide_behavior(
+    bot: &Player,
+    state: &BotState,
+    players: &HashMap<PeerId, Player>,
+    maze: &MazeData,
+    analysis: &MazeAnalysis
+) -> Option<BotBehavior> {
+    if !bot.is_alive {
+        return None;
+    }
+
+    // Navigation grid: maze cells with prop positions marked impassable, so
+    // bots route around props rather than through them. Cached on the maze.
+    let nav_cells = maze.nav_cells();
+
+    let bot_cell = match
+        world_to_cell(
+            bot.position.0,
+            bot.position.2,
+            MAZE_CELL_SIZE,
+            &maze.cells,
+            maze.width,
+            maze.height
+        )
+    {
+        Some(c) => c,
+        None => {
+            // Bot is in an invalid position — find any random walkable cell as fallback
+            let mut rng = rand::thread_rng();
+            let mut fallback = None;
+            for _ in 0..50 {
+                let x = rng.gen_range(1..maze.width - 1);
+                let y = rng.gen_range(1..maze.height - 1);
+                let idx = (y as usize) * (maze.width as usize) + (x as usize);
+                if maze.cells[idx] == 1 {
+                    fallback = Some((x, y));
+                    break;
+                }
+            }
+            match fallback {
+                Some(c) => c,
+                None => {
+                    return None;
+                }
+            }
+        }
+    };
+
+    // What the bot knows: the enemy it can see (shooting picked it), whoever
+    // shot it unseen, and where the nearest enemy is (bots always roughly know,
+    // which keeps them heading for the fight).
+    let visible = state.target_id.and_then(|id| find_enemy(players, bot, id));
+    let alerted = state.tactics.alert.map(|(id, pos, _)| (find_enemy(players, bot, id), pos));
+    let nearest_enemy = players
+        .values()
+        .filter(|p| is_enemy(bot, p))
+        .min_by(|a, b| {
+            let da = dist2(a.position, bot.position);
+            let db = dist2(b.position, bot.position);
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+    let threatened = visible.is_some() || alerted.is_some();
+
+    // retreat when hurt
+    let health_ratio = (bot.health as f32) / (bot.max_health.max(1) as f32);
+    if health_ratio < state.personality.retreat_health_threshold {
+        if let BotBehavior::Retreat { path, path_index } = &state.behavior {
+            if *path_index < path.len() {
+                return None; // keep retreating
+            }
+            // got away: hold an angle back toward them
+            return pick_hold_angle(bot_cell, visible.or(nearest_enemy), analysis, maze, state, &nav_cells);
+        }
+        if !matches!(state.behavior, BotBehavior::HoldAngle { .. }) {
+            return retreat_from_enemy(bot_cell, visible.or(nearest_enemy), maze, &nav_cells);
+        }
+    }
+
+    // keep doing what we are doing unless it is finished or something more
+    // urgent came up
+    match &state.behavior {
+        BotBehavior::Hunt { repath_timer, target_player_id, path, path_idx } => {
+            let path_done = *path_idx >= path.len();
+            match find_enemy(players, bot, *target_player_id) {
+                Some(enemy) if *repath_timer <= 0.0 || path_done => {
+                    // the target moved on: path to where they are now
+                    if let Some(new_path) = route_to_player(&nav_cells, maze, bot_cell, enemy) {
+                        return Some(BotBehavior::Hunt {
+                            path: new_path,
+                            path_idx: 0,
+                            target_player_id: enemy.id,
+                            repath_timer: state.personality.base_repath_interval,
+                        });
+                    }
+                }
+                Some(_) => return None, // still on the way
+                None => {} // target dead or gone: pick something new
+            }
+        }
+
+        BotBehavior::Flank { repath_timer, target_player_id, path, path_index } => {
+            let path_done = *path_index >= path.len();
+            match find_enemy(players, bot, *target_player_id) {
+                Some(enemy) if *repath_timer <= 0.0 || path_done => {
+                    if path_done {
+                        // made it round the back: go straight for them
+                        if let Some(new_path) = route_to_player(&nav_cells, maze, bot_cell, enemy) {
+                            return Some(BotBehavior::Hunt {
+                                path: new_path,
+                                path_idx: 0,
+                                target_player_id: enemy.id,
+                                repath_timer: state.personality.base_repath_interval,
+                            });
+                        }
+                    }
+                    return flank_behind_enemy(bot_cell, enemy, state, maze, &nav_cells);
+                }
+                Some(_) => return None,
+                None => {}
+            }
+        }
+
+        BotBehavior::HoldAngle { hold_timer, max_hold_time, .. } => {
+            if let Some(enemy) = visible {
+                if dist2(enemy.position, bot.position).sqrt() <= state.personality.range_max {
+                    return None; // they walked into our angle: fight from here
+                }
+                // seen but out of reach: go after them
+            } else if alerted.is_none() && *hold_timer < *max_hold_time {
+                return None; // keep holding
+            }
+            // shot from somewhere unseen, or held long enough: move
+        }
+
+        BotBehavior::Investigate { give_up_timer, path, path_index } => {
+            if !threatened && *give_up_timer > 0.0 && *path_index < path.len() {
+                return None; // still investigating
+            }
+        }
+
+        BotBehavior::Retreat { path, path_index } => {
+            if *path_index < path.len() {
+                return None; // still retreating
+            }
+        }
+
+        BotBehavior::Reposition { path, path_index, hold_face } => {
+            let destination = path.last().copied();
+            if *path_index < path.len() {
+                if !threatened {
+                    return None; // still on the way
+                }
+            } else if threatened {
+                // something came up on the way: deal with it below
+            } else if destination.is_some_and(|d| d != bot_cell) {
+                // the path was dropped (blocked or pushed off it): plan again
+                if let Some(path) = destination.and_then(|d| route(&nav_cells, maze, bot_cell, d)) {
+                    return Some(BotBehavior::Reposition { path, path_index: 0, hold_face: *hold_face });
+                }
+            } else if let Some(face) = hold_face {
+                // arrived: hold the angle we came for
+                return Some(BotBehavior::HoldAngle {
+                    face_direction: *face,
+                    hold_timer: 0.0,
+                    max_hold_time: state.personality.reposition_interval,
+                });
+            }
+        }
+
+        BotBehavior::Static => {}
+
+        // Patrol is only used in shooting range, don't override
+        BotBehavior::Patrol { .. } => {
+            return None;
+        }
+    }
+
+    // --- Pick a new behavior ---
+
+    // someone we can't see shot us: go and find them
+    if visible.is_none() {
+        if let Some((attacker, pos)) = alerted {
+            if let Some(enemy) = attacker {
+                if let Some(path) = route_to_player(&nav_cells, maze, bot_cell, enemy) {
+                    return Some(BotBehavior::Hunt {
+                        path,
+                        path_idx: 0,
+                        target_player_id: enemy.id,
+                        repath_timer: state.personality.base_repath_interval,
+                    });
+                }
+            }
+            if let Some(path) = route_to_pos(&nav_cells, maze, bot_cell, pos) {
+                return Some(BotBehavior::Investigate { path, path_index: 0, give_up_timer: 5.0 });
+            }
+        }
+    }
+
+    if let Some(enemy) = visible.or(nearest_enemy) {
+        let roll = rand::thread_rng().gen::<f32>();
+        let total = (state.personality.push_weight
+            + state.personality.flank_weight
+            + state.personality.hold_angle_weight)
+            .max(0.001);
+
+        let push_chance = state.personality.push_weight / total;
+        let flank_chance = state.personality.flank_weight / total;
+
+        if roll < push_chance {
+            // HUNT — A* directly to the enemy
+            let path = route_to_player(&nav_cells, maze, bot_cell, enemy)?;
+            return Some(BotBehavior::Hunt {
+                path,
+                path_idx: 0,
+                target_player_id: enemy.id,
+                repath_timer: state.personality.base_repath_interval,
+            });
+        } else if roll < push_chance + flank_chance {
+            // FLANK — path to cell behind the enemy
+            return flank_behind_enemy(bot_cell, enemy, state, maze, &nav_cells);
+        } else {
+            // HOLD ANGLE — find a strategic position
+            return pick_hold_angle(bot_cell, Some(enemy), analysis, maze, state, &nav_cells);
+        }
+    }
+
+    // no enemy — check last known position for investigation
+    if let Some(last_pos) = state.last_known_enemy_pos {
+        let roll = rand::thread_rng().gen::<f32>();
+        if roll < state.personality.noise_investigation_weight {
+            if let Some(path) = route_to_pos(&nav_cells, maze, bot_cell, last_pos) {
+                return Some(BotBehavior::Investigate {
+                    path,
+                    path_index: 0,
+                    give_up_timer: 5.0,
+                });
+            }
+        }
+    }
+
+    // idle behavior based on archetype
+    match state.personality.archetype {
+        BotArchetype::Camper | BotArchetype::Sniper => {
+            pick_hold_angle(bot_cell, None, analysis, maze, state, &nav_cells)
+        }
+        _ => { roam_to_random_point(bot_cell, analysis, maze, &nav_cells) }
+    }
+}

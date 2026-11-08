@@ -17,6 +17,14 @@ pub struct MazeData {
     pub lights: Vec<MazeLight>,
     pub teleporter: (u8, u8),
     pub analysis: MazeAnalysis,
+    /// Per cell: whether a prop stands there.
+    prop_cells: Vec<bool>,
+    /// `cells` with prop cells blocked too: the grid bots route on. Kept in
+    /// step with `cells` by [`MazeData::break_wall`].
+    nav_cells: Vec<u8>,
+    /// The encoded `ServerMsg::Maze`, built on the first send and shared by
+    /// every recipient until a wall breaks.
+    encoded: std::cell::OnceCell<Vec<u8>>,
 }
 
 impl MazeData {
@@ -24,6 +32,19 @@ impl MazeData {
         let seed = rand::thread_rng().gen();
         let (cells, rooms, props, lights, teleporter) = generate_maze(width, height, seed);
         let maze_analysis = analysis::compute(&cells, width, height, &rooms);
+        let mut prop_cells = vec![false; cells.len()];
+        for prop in &props {
+            let idx = (prop.y as usize) * (width as usize) + (prop.x as usize);
+            if idx < prop_cells.len() {
+                prop_cells[idx] = true;
+            }
+        }
+        // Bots route around props rather than through them.
+        let nav_cells = cells
+            .iter()
+            .zip(&prop_cells)
+            .map(|(&cell, &prop)| if prop { 0 } else { cell })
+            .collect();
         Self {
             width,
             height,
@@ -34,10 +55,28 @@ impl MazeData {
             lights,
             teleporter,
             analysis: maze_analysis,
+            prop_cells,
+            nav_cells,
+            encoded: std::cell::OnceCell::new(),
         }
     }
 
+    /// Per cell (row-major, like `cells`): whether a prop stands there.
+    pub fn prop_cells(&self) -> &[bool] {
+        &self.prop_cells
+    }
+
+    /// Navigation grid: `cells` with prop cells marked impassable.
+    pub fn nav_cells(&self) -> &[u8] {
+        &self.nav_cells
+    }
+
     pub fn send(&self, socket: &Outbox, addr: PeerId) {
+        let msg = self.encoded.get_or_init(|| self.encode());
+        let _ = socket.send_to(msg, addr);
+    }
+
+    fn encode(&self) -> Vec<u8> {
         let layout = wire::MazeLayout {
             width: self.width,
             height: self.height,
@@ -55,8 +94,7 @@ impl MazeData {
                 .collect(),
             cells: self.cells.clone(),
         };
-        let msg = ServerMsg::Maze(layout).encode();
-        let _ = socket.send_to(&msg, addr);
+        ServerMsg::Maze(layout).encode()
     }
 
     pub fn teleporter_world(&self, cell_size: f32) -> (f32, f32, f32) {
@@ -314,6 +352,10 @@ impl MazeData {
         }
         if self.cells[idx] == 0 {
             self.cells[idx] = 1;
+            self.encoded = std::cell::OnceCell::new();
+            if !self.prop_cells[idx] {
+                self.nav_cells[idx] = 1;
+            }
             return true;
         }
         false

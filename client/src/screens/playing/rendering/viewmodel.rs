@@ -3,6 +3,8 @@ use crate::weapons::stats::{CrosshairStyle, WeaponCategory, WeaponId};
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
 use macroquad::window::get_internal_gl;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use super::super::PlayingState;
 
@@ -83,37 +85,33 @@ impl PlayingState {
         let draw_hands = !matches!(weapon.id, WeaponId::Sawnoff | WeaponId::Minigun);
 
         if let Some(model_key) = stats.viewmodel_model {
-            // Hands and muzzle flash go with the first mesh only: a weapon
-            // made of many meshes used to redraw the hands for every one.
+            // All of a weapon's meshes are drawn in one call, under one
+            // camera and model matrix, so a weapon made of many meshes (the
+            // SPAS-12 has 38) batches into a few draw calls instead of
+            // flushing the batch several times per mesh.
             if let Some(meshes) = self.models.get(model_key) {
-                for (i, mesh) in meshes.iter().enumerate() {
-                    self.draw_3d_viewmodel(
-                        mesh,
-                        1.0,
-                        0.0,
-                        hands_anim,
-                        hands_static,
-                        weapon,
-                        stats,
-                        draw_hands,
-                        i == 0,
-                    );
-                }
+                self.draw_3d_viewmodel(
+                    meshes.iter(),
+                    1.0,
+                    0.0,
+                    hands_anim,
+                    hands_static,
+                    weapon,
+                    stats,
+                    draw_hands,
+                );
                 return;
             } else if let Some(animated_model) = self.animated_models.get(model_key) {
-                for (i, mesh) in animated_model.meshes().enumerate() {
-                    self.draw_3d_viewmodel(
-                        mesh,
-                        animated_model.normalize_scale,
-                        animated_model.y_offset,
-                        hands_anim,
-                        hands_static,
-                        weapon,
-                        stats,
-                        draw_hands,
-                        i == 0,
-                    );
-                }
+                self.draw_3d_viewmodel(
+                    animated_model.meshes(),
+                    animated_model.normalize_scale,
+                    animated_model.y_offset,
+                    hands_anim,
+                    hands_static,
+                    weapon,
+                    stats,
+                    draw_hands,
+                );
                 return;
             }
             // Not loaded yet (it arrives in the background after joining) or
@@ -137,9 +135,10 @@ impl PlayingState {
         }
     }
 
-    fn draw_3d_viewmodel(
+    /// Draw the weapon's `meshes`, then the hands and muzzle flash once.
+    fn draw_3d_viewmodel<'m>(
         &self,
-        mesh: &Mesh,
+        meshes: impl IntoIterator<Item = &'m Mesh>,
         mesh_normalize_scale: f32,
         mesh_y_offset: f32,
         hands_anim: Option<&crate::types::animated_model::AnimatedModel>,
@@ -147,7 +146,6 @@ impl PlayingState {
         weapon: &crate::weapons::WeaponState,
         stats: &crate::weapons::stats::WeaponStats,
         should_draw_hands: bool,
-        first_mesh: bool,
     ) {
         let force_ads_preview = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
         if stats.crosshair_style == CrosshairStyle::Scope
@@ -262,7 +260,9 @@ impl PlayingState {
 
         // avoid allocating a transformed mesh every frame by using the GL model matrix
         gl.quad_gl.push_model_matrix(transform);
-        draw_mesh(mesh);
+        for mesh in meshes {
+            draw_mesh(mesh);
+        }
         gl.quad_gl.pop_model_matrix();
 
         /*
@@ -301,23 +301,11 @@ impl PlayingState {
             // Viewmodel hands should be fully opaque regardless of source material
             // alpha; only a mesh that is not needs its own copy.
             gl.quad_gl.push_model_matrix(hands_transform);
-            if hands_mesh.vertices.iter().all(|v| v.color[3] == 255) {
-                draw_mesh(hands_mesh);
-            } else {
-                let mut hands_verts = hands_mesh.vertices.clone();
-                for v in &mut hands_verts {
-                    v.color[3] = 255;
-                }
-                draw_mesh(&Mesh {
-                    vertices: hands_verts,
-                    indices: hands_mesh.indices.clone(),
-                    texture: hands_mesh.texture.clone(),
-                });
-            }
+            draw_mesh_opaque(hands_mesh);
             gl.quad_gl.pop_model_matrix();
         };
 
-        if should_draw_hands && first_mesh {
+        if should_draw_hands {
             if let Some(hands_model) = hands_anim {
                 for mesh in hands_model.meshes() {
                     draw_hands(mesh, hands_model.normalize_scale, hands_model.y_offset);
@@ -338,7 +326,7 @@ impl PlayingState {
 
         set_default_camera();
 
-        if weapon.muzzle_flash_timer > 0.0 && first_mesh {
+        if weapon.muzzle_flash_timer > 0.0 {
             if let Some((fx, fy)) = Self::project_to_screen(&vm_camera, muzzle_world) {
                 let t = (weapon.muzzle_flash_timer / 0.08).min(1.0);
                 let alpha = (220.0 * t) as u8;
@@ -432,4 +420,48 @@ impl PlayingState {
             );
         }
     }
+}
+
+/// Opacity checks kept at most; one per hands mesh drawn.
+const OPAQUE_CACHE_LIMIT: usize = 256;
+
+thread_local! {
+    /// Whether every vertex of a mesh is already opaque, by its vertex buffer.
+    /// Vertex colours never change after load (CPU skinning only moves
+    /// positions and normals), so the answer holds for the buffer's life.
+    static ALL_OPAQUE: RefCell<HashMap<(usize, usize), bool>> = RefCell::new(HashMap::new());
+    /// Reused copy for drawing a mesh that is not opaque, so it is not
+    /// allocated every frame.
+    static OPAQUE_COPY: RefCell<Mesh> =
+        RefCell::new(Mesh { vertices: Vec::new(), indices: Vec::new(), texture: None });
+}
+
+/// Draw `mesh` with every vertex alpha forced to 255.
+fn draw_mesh_opaque(mesh: &Mesh) {
+    let key = (mesh.vertices.as_ptr() as usize, mesh.vertices.len());
+    let opaque = ALL_OPAQUE.with_borrow_mut(|cache| {
+        if !cache.contains_key(&key) && cache.len() >= OPAQUE_CACHE_LIMIT {
+            cache.clear();
+        }
+        *cache
+            .entry(key)
+            .or_insert_with(|| mesh.vertices.iter().all(|v| v.color[3] == 255))
+    });
+    if opaque {
+        draw_mesh(mesh);
+        return;
+    }
+    OPAQUE_COPY.with_borrow_mut(|copy| {
+        copy.vertices.clear();
+        copy.vertices.extend(mesh.vertices.iter().map(|v| {
+            let mut v = *v;
+            v.color[3] = 255;
+            v
+        }));
+        copy.indices.clear();
+        copy.indices.extend_from_slice(&mesh.indices);
+        copy.texture = mesh.texture.clone();
+        draw_mesh(copy);
+        copy.texture = None;
+    });
 }

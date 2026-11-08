@@ -180,12 +180,38 @@ fn cornering_speed(to_turn: f32, acceleration: f32) -> f32 {
     (2.0 * acceleration * (to_turn - 0.3).max(0.0)).sqrt() + TURN_SPEED
 }
 
+/// Whether a bot footprint (a square of half-size `radius` at x/z) overlaps
+/// a cell holding a prop. Only props in the cells around the footprint can
+/// touch it (one cell of slack either way); each gets the exact box test.
+pub(crate) fn footprint_hits_prop(prop_cells: &[bool], width: u8, height: u8, x: f32, z: f32, radius: f32) -> bool {
+    let cell = |v: f32| (v / MAZE_CELL_SIZE).floor() as i32;
+    for cz in cell(z - radius) - 1..=cell(z + radius) + 1 {
+        for cx in cell(x - radius) - 1..=cell(x + radius) + 1 {
+            if cx < 0 || cz < 0 || cx >= width as i32 || cz >= height as i32 {
+                continue;
+            }
+            if !prop_cells.get(cz as usize * width as usize + cx as usize).copied().unwrap_or(false) {
+                continue;
+            }
+            let px = cx as f32 * MAZE_CELL_SIZE;
+            let pz = cz as f32 * MAZE_CELL_SIZE;
+            if x + radius > px && x - radius < px + MAZE_CELL_SIZE
+                && z + radius > pz && z - radius < pz + MAZE_CELL_SIZE
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn tick_bot(
     bot: &mut Player,
     state: &mut BotState,
     dt: f32,
     physics: &PhysicsConfig,
-    maze_cells: Option<(&[u8], u8, u8, &[crate::maze::types::Prop])>,
+    // cells, width, height, and per cell whether a prop stands there
+    maze_cells: Option<(&[u8], u8, u8, &[bool])>,
     engage: Option<Engagement>,
 ) {
     let mut desired_dir = Vec3::ZERO; // movement we intend to apply every tick
@@ -282,7 +308,7 @@ pub fn tick_bot(
     );
 
     // axis-separated wall + prop sliding with radius-based corner checks
-    if let Some((cells, width, height, props)) = maze_cells {
+    if let Some((cells, width, height, prop_cells)) = maze_cells {
         // Direct cell lookup — no fallback search so walls are always detected.
         let cell_is_wall = |x: f32, z: f32| -> bool {
             let cx = (x / MAZE_CELL_SIZE).floor() as i16;
@@ -296,18 +322,7 @@ pub fn tick_bot(
         // Check all 4 corners of the bot's footprint so body width is respected.
         const BOT_RADIUS: f32 = 0.28;
 
-        let hits_prop = |x: f32, z: f32| -> bool {
-            for prop in props {
-                let px = prop.x as f32 * MAZE_CELL_SIZE;
-                let pz = prop.y as f32 * MAZE_CELL_SIZE;
-                if x + BOT_RADIUS > px && x - BOT_RADIUS < px + MAZE_CELL_SIZE
-                    && z + BOT_RADIUS > pz && z - BOT_RADIUS < pz + MAZE_CELL_SIZE
-                {
-                    return true;
-                }
-            }
-            false
-        };
+        let hits_prop = |x: f32, z: f32| footprint_hits_prop(prop_cells, width, height, x, z, BOT_RADIUS);
 
         let hits_wall = |x: f32, z: f32| -> bool {
             cell_is_wall(x - BOT_RADIUS, z - BOT_RADIUS)

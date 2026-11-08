@@ -27,6 +27,8 @@ mkdir -p "$DIST"
 cp "$SCRIPT_DIR/target/$TARGET/release/client.wasm" "$DIST/gridlock.wasm"
 cp "$SCRIPT_DIR/web/index.html" "$SCRIPT_DIR/web/mq_js_bundle.js" "$SCRIPT_DIR/web/gridlock_web.js" \
     "$SCRIPT_DIR/web/favicon.png" "$SCRIPT_DIR/web/apple-touch-icon.png" "$SCRIPT_DIR/web/og-image.jpg" "$DIST/"
+# The plugin's modules, loaded by index.html before gridlock_web.js.
+rsync -a --delete --exclude '.DS_Store' "$SCRIPT_DIR/web/gridlock_web/" "$DIST/gridlock_web/"
 # Only what the game loads at run time. --delete keeps removed assets from lingering.
 if [ -n "$GRIDLOCK_MODELS_URL" ]; then
     # Models are hosted separately (they exceed most static hosts' size limits),
