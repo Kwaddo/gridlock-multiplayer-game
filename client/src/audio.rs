@@ -4,11 +4,17 @@
 
 use std::collections::HashMap;
 
+/// A native sample: decoded once, on the mixer thread the first time it plays,
+/// and shared by every later play. Cloning it is a refcount bump, so a shot
+/// costs no copy and no decoder setup on the main thread.
+#[cfg(not(target_arch = "wasm32"))]
+type Sample = rodio::source::Buffered<rodio::Decoder<std::io::Cursor<Vec<u8>>>>;
+
 pub struct Audio {
     #[cfg(not(target_arch = "wasm32"))]
     output: Option<(rodio::OutputStream, rodio::OutputStreamHandle)>,
     #[cfg(not(target_arch = "wasm32"))]
-    samples: HashMap<String, std::sync::Arc<[u8]>>,
+    samples: HashMap<String, Sample>,
 
     #[cfg(target_arch = "wasm32")]
     sounds: HashMap<String, u32>,
@@ -40,7 +46,10 @@ impl Audio {
     pub async fn insert(&mut self, key: String, bytes: Vec<u8>) -> Result<(), String> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.samples.insert(key, std::sync::Arc::from(bytes.into_boxed_slice()));
+            use rodio::Source;
+            let decoder = rodio::Decoder::new(std::io::Cursor::new(bytes))
+                .map_err(|e| format!("{key}: {e}"))?;
+            self.samples.insert(key, decoder.buffered());
             Ok(())
         }
 
@@ -57,20 +66,12 @@ impl Audio {
     pub fn play(&self, key: &str, speed: f32, volume: f32) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            use rodio::{Decoder, Sink};
-            let (Some(bytes), Some((_, handle))) = (self.samples.get(key), &self.output) else {
+            use rodio::Source;
+            let (Some(sample), Some((_, handle))) = (self.samples.get(key), &self.output) else {
                 return;
             };
-            let Ok(source) = Decoder::new(std::io::Cursor::new(bytes.to_vec())) else {
-                return;
-            };
-            let Ok(sink) = Sink::try_new(handle) else {
-                return;
-            };
-            sink.set_speed(speed);
-            sink.set_volume(volume);
-            sink.append(source);
-            sink.detach();
+            let source = sample.clone().speed(speed).amplify(volume).convert_samples::<f32>();
+            let _ = handle.play_raw(source);
         }
 
         #[cfg(target_arch = "wasm32")]

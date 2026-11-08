@@ -260,22 +260,33 @@ fn lift_dark_untextured_color(mut color: [u8; 4]) -> [u8; 4] {
     color
 }
 
+/// Load a static GLB mesh. When no primitive has a texture, lighting is baked
+/// into the vertex colors.  This is mostly useful for untextured models
+/// (view‑models, props) so they still have visible depth without requiring a
+/// custom shader. Deciding up front parses the file once, not twice.
 pub async fn load_gltf_static_mesh(path: &str, bytes: &[u8]) -> Result<Vec<Mesh>, String> {
-    load_gltf_static_mesh_impl(path, bytes, false).await
-}
-
-/// Load a static mesh with lighting baked into the vertex colors.  This is
-/// mostly useful for untextured models (view‑models, props) so they still have
-/// visible depth without requiring a custom shader.  The resulting meshes still
-/// carry the original `texture` field when present; the material multiply will
-/// dim them according to the baked colours.
-pub async fn load_gltf_static_mesh_lit(path: &str, bytes: &[u8]) -> Result<Vec<Mesh>, String> {
-    load_gltf_static_mesh_impl(path, bytes, true).await
-}
-
-async fn load_gltf_static_mesh_impl(path: &str, bytes: &[u8], bake_lighting: bool) -> Result<Vec<Mesh>, String> {
     let (doc, buffers, images) = client::types::animated_model::import_glb(path, bytes)?;
+    let any_textured = doc.meshes().flat_map(|mesh| mesh.primitives()).any(|prim| {
+        let has_positions = prim.reader(|buffer| Some(&buffers[buffer.index()])).read_positions().is_some();
+        has_positions && base_texture_index(&prim.material()).and_then(|i| images.texture(i)).is_some()
+    });
+    load_gltf_static_mesh_impl(doc, buffers, images, !any_textured)
+}
 
+/// The base colour texture's image index, whichever material model is used.
+fn base_texture_index(mat: &gltf::Material) -> Option<usize> {
+    match mat.pbr_specular_glossiness() {
+        Some(sg) => sg.diffuse_texture().map(|t| t.texture().source().index()),
+        None => mat.pbr_metallic_roughness().base_color_texture().map(|t| t.texture().source().index()),
+    }
+}
+
+fn load_gltf_static_mesh_impl(
+    doc: gltf::Document,
+    buffers: Vec<gltf::buffer::Data>,
+    images: client::types::animated_model::GlbImages,
+    bake_lighting: bool,
+) -> Result<Vec<Mesh>, String> {
     // we'll accumulate one mesh per primitive so that each texture can be
     // preserved.  vertices/indices for a prim are stored temporarily until the
     // normalization pass at the end.

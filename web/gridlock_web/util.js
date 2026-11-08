@@ -1,4 +1,4 @@
-// Gridlock's browser plugin, part 2 of 8: wasm memory access, the open
+// Gridlock's browser plugin, part 2 of 9: wasm memory access, the open
 // sockets, timers that keep running in hidden tabs, and small WebRTC
 // helpers. (See ../gridlock_web.js.)
 "use strict";

@@ -4,7 +4,8 @@
 //! live on the GPU; each frame only culls them and issues one draw call per
 //! visible mesh. Only cells are culled by distance; the roof, pipes,
 //! fixtures and props draw at any distance, as before. A wall breaking re-bakes the chunks around it; a light
-//! going out re-bakes everything, since every light reaches every cube.
+//! going out re-bakes everything, since every light reaches every cube, a
+//! few pieces per frame (nearest the light first) so it never hitches.
 
 mod cache;
 mod cells;

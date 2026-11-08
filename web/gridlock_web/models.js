@@ -1,4 +1,4 @@
-// Gridlock's browser plugin, part 8 of 8: models from GRIDLOCK_MODELS_URL,
+// Gridlock's browser plugin, part 8 of 9: models from GRIDLOCK_MODELS_URL,
 // through Cache Storage, and their preloading. registerModels adds their
 // imports. (See ../gridlock_web.js.)
 "use strict";
@@ -87,6 +87,29 @@
         await loadModel(path);
     }
 
+    // The game loading models itself: stop starting preloads.
+    function pausePreload() {
+        if (preloadPaused) return;
+        preloadPaused = true;
+        // The queued preloads will never start now; drop them from the
+        // count so the title screen's progress note does not stay up.
+        preloadTotal -= preloadQueue.length;
+        preloadQueue.length = 0;
+    }
+
+    // A file the game loads, as fs_load_file would: models from
+    // GRIDLOCK_MODELS_URL (when set), everything else from the page. Null if
+    // it could not be loaded.
+    function loadFile(path) {
+        if (MODELS_URL && path.startsWith(MODELS_PREFIX)) {
+            pausePreload();
+            return loadModel(path).catch(() => null);
+        }
+        return fetch(path)
+            .then((resp) => (resp.ok ? resp.arrayBuffer().then((b) => new Uint8Array(b)) : null))
+            .catch(() => null);
+    }
+
     async function fetchModel(path) {
         const url = modelUrl(path);
         const cache = await openModelsCache();
@@ -134,19 +157,10 @@
                 const path = UTF8ToString(ptr, len);
                 if (!path.startsWith(MODELS_PREFIX)) return loadFromPage(ptr, len);
                 const id = FS.unique_id++;
-                if (!preloadPaused) {
-                    preloadPaused = true;
-                    // The queued preloads will never start now; drop them from the
-                    // count so the title screen's progress note does not stay up.
-                    preloadTotal -= preloadQueue.length;
-                    preloadQueue.length = 0;
-                }
-                loadModel(path)
-                    .catch(() => null)
-                    .then((bytes) => {
-                        FS.loaded_files[id] = bytes;
-                        wasm_exports.file_loaded(id);
-                    });
+                loadFile(path).then((bytes) => {
+                    FS.loaded_files[id] = bytes;
+                    wasm_exports.file_loaded(id);
+                });
                 return id;
             };
         }
@@ -175,5 +189,5 @@
         };
     }
 
-    Object.assign(gridlockWeb, { registerModels });
+    Object.assign(gridlockWeb, { registerModels, loadFile });
 })((window.gridlockWeb = window.gridlockWeb || {}));
