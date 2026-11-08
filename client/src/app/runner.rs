@@ -5,7 +5,10 @@ use platform::Instant;
 
 use client::core::{ GameConfig, GameState };
 use client::screens::dev_mode::DevModeState;
-use client::screens::{ LobbyInventoryScreen, LoginScreen, PauseMenu, PlayingState };
+use client::screens::{
+    ControlsAction, LobbyInventoryScreen, LoginScreen, MenuRequest, PauseMenu, PlayingState,
+};
+use client::settings::SettingsTab;
 use client::settings::SettingsScreen;
 use client::types::maze::Maze;
 use client::ui::fonts;
@@ -95,6 +98,8 @@ pub async fn run() {
     }
 
     let mut was_on_login = true;
+    // The controls reference is open over the main menu.
+    let mut controls_open = false;
 
     loop {
         // Keys pressed while playing (WASD...) also queue up as typed text;
@@ -127,7 +132,10 @@ pub async fn run() {
 
         match state {
             GameState::Login => {
-                if macroquad::input::is_key_pressed(macroquad::input::KeyCode::Escape) {
+                // (Esc on the controls overlay closes the overlay instead)
+                if !controls_open
+                    && macroquad::input::is_key_pressed(macroquad::input::KeyCode::Escape)
+                {
                     state = GameState::Exit;
                 }
                 // Load in the background while the player picks a game, and
@@ -142,7 +150,14 @@ pub async fn run() {
                     && frame_start.elapsed() < CONNECTING_FRAME_BUDGET
                     && !asset_queue.ready_to_play()
                 {}
-                if let Some(joined) = login_screen.update() {
+                let joined = if controls_open {
+                    // the menu underneath takes no typing or clicks
+                    login_screen.update_background();
+                    None
+                } else {
+                    login_screen.update()
+                };
+                if let Some(joined) = joined {
                     playing_state.chat.clear();
                     // ids belong to the server that handed them out
                     playing_state.player_info.clear();
@@ -169,9 +184,52 @@ pub async fn run() {
                     joined_at = Some(Instant::now());
                     state = GameState::Loading;
                 }
-                login_screen.draw();
-                if let Some((done, total)) = preload_status().filter(|(done, total)| done < total) {
-                    login_screen.draw_preload(done, total);
+                if controls_open {
+                    login_screen.draw_backdrop();
+                    match login_screen.draw_controls(&config) {
+                        Some(ControlsAction::Close) => controls_open = false,
+                        Some(ControlsAction::EditKeys) => {
+                            controls_open = false;
+                            settings_screen.open(&config, SettingsTab::Keybinds, false);
+                            state = GameState::MenuSettings;
+                        }
+                        None => {}
+                    }
+                } else {
+                    login_screen.draw();
+                    if let Some((done, total)) = preload_status().filter(|(done, total)| done < total) {
+                        login_screen.draw_preload(done, total);
+                    }
+                }
+                if matches!(state, GameState::Login) {
+                    match login_screen.take_request() {
+                        Some(MenuRequest::Settings) => {
+                            settings_screen.open(&config, SettingsTab::General, false);
+                            state = GameState::MenuSettings;
+                        }
+                        Some(MenuRequest::Controls) => controls_open = true,
+                        None => {}
+                    }
+                }
+            }
+
+            GameState::MenuSettings => {
+                // Keep loading in the background, as the menu does.
+                let frame_start = Instant::now();
+                while asset_queue.pump(&mut playing_state).await
+                    && frame_start.elapsed() < CONNECTING_FRAME_BUDGET
+                    && !asset_queue.ready_to_play()
+                {}
+                login_screen.update_background();
+                login_screen.draw_backdrop();
+                settings_screen.draw(
+                    &config,
+                    &playing_state.weapons,
+                    &preset_manager,
+                    &playing_state.assets,
+                );
+                if settings_screen.update(&mut config, &mut playing_state.weapons, &mut preset_manager) {
+                    state = GameState::Login;
                 }
             }
 
@@ -396,7 +454,7 @@ pub async fn run() {
                     next_frame().await;
                     continue;
                 }
-                if config.bind_settings.is_pressed() {
+                if config.pause_pressed() {
                     state = GameState::Paused;
                     next_frame().await;
                     continue;
