@@ -1,7 +1,37 @@
 use macroquad::prelude::*;
+use std::cell::RefCell;
 
 use crate::physics::movement::MovementState;
 use crate::ui::fonts::text_params;
+
+/// A piece of HUD text kept between frames and rebuilt only when what it
+/// shows (`key`) changes, so drawing it needs no allocation.
+pub(super) struct CachedText<K> {
+    key: Option<K>,
+    text: String,
+}
+
+impl<K: PartialEq> CachedText<K> {
+    pub(super) const fn new() -> Self {
+        Self { key: None, text: String::new() }
+    }
+
+    /// The text for `key`, built with `build` if the key changed.
+    pub(super) fn get(&mut self, key: K, build: impl FnOnce() -> String) -> &str {
+        if self.key.as_ref() != Some(&key) {
+            self.text = build();
+            self.key = Some(key);
+        }
+        &self.text
+    }
+}
+
+thread_local! {
+    static TIME_TEXT: RefCell<CachedText<u32>> = const { RefCell::new(CachedText::new()) };
+    // keyed by the HP's bits: the same value always prints the same
+    static HP_TEXT: RefCell<CachedText<u32>> = const { RefCell::new(CachedText::new()) };
+    static STATUS_TEXT: RefCell<CachedText<[bool; 4]>> = const { RefCell::new(CachedText::new()) };
+}
 
 pub(super) fn draw_status_panels(
     movement_state: &MovementState,
@@ -14,21 +44,25 @@ pub(super) fn draw_status_panels(
     // when the server has sent a time.  infinite matches show as “∞”.
     if !config.hide_match_timer && match_time_left > 0.0 {
         let secs = match_time_left.ceil() as u32;
-        let time_text = if secs == u16::MAX as u32 {
-            // sentinel value used by server to indicate “infinite” duration
-            "∞".to_string()
-        } else {
-            let mins = secs / 60;
-            let s = secs % 60;
-            format!("{:02}:{:02}", mins, s)
-        };
-        let tw = crate::ui::fonts::measure_game_text(&time_text, 20);
-        draw_text_ex(
-            &time_text,
-            (screen_width() - tw) / 2.0,
-            32.0,
-            text_params(20, Color::from_rgba(220, 220, 220, 220)),
-        );
+        TIME_TEXT.with_borrow_mut(|cache| {
+            let time_text = cache.get(secs, || {
+                if secs == u16::MAX as u32 {
+                    // sentinel value used by server to indicate “infinite” duration
+                    "∞".to_string()
+                } else {
+                    let mins = secs / 60;
+                    let s = secs % 60;
+                    format!("{:02}:{:02}", mins, s)
+                }
+            });
+            let tw = crate::ui::fonts::measure_game_text(time_text, 20);
+            draw_text_ex(
+                time_text,
+                (screen_width() - tw) / 2.0,
+                32.0,
+                text_params(20, Color::from_rgba(220, 220, 220, 220)),
+            );
+        });
     }
 
     let hp_bar_x = 20.0;
@@ -56,13 +90,15 @@ pub(super) fn draw_status_panels(
 
     draw_rectangle_lines(hp_bar_x, hp_bar_y, hp_bar_w, hp_bar_h, 2.0, WHITE);
 
-    let hp_text = format!("{:.0} HP", hp);
-    draw_text_ex(
-        &hp_text,
-        hp_bar_x + 5.0,
-        hp_bar_y + 15.0,
-        text_params(16, WHITE),
-    );
+    HP_TEXT.with_borrow_mut(|cache| {
+        let hp_text = cache.get(hp.to_bits(), || format!("{:.0} HP", hp));
+        draw_text_ex(
+            hp_text,
+            hp_bar_x + 5.0,
+            hp_bar_y + 15.0,
+            text_params(16, WHITE),
+        );
+    });
 
     let bar_width = 200.0;
     let bar_height = 8.0;
@@ -84,27 +120,36 @@ pub(super) fn draw_status_panels(
     draw_rectangle(bar_x, bar_y, bar_width * fill, bar_height, bar_color);
     draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, GRAY);
 
-    let mut status_labels: Vec<&str> = Vec::new();
-    if movement_state.is_sliding {
-        status_labels.push("SLIDING");
-    }
-    if movement_state.is_slow_walking {
-        status_labels.push("SLOW WALK");
-    }
-    if movement_state.is_prone {
-        status_labels.push("PRONE");
-    }
-    if movement_state.is_crouching {
-        status_labels.push("CROUCHING");
-    }
-
-    if !status_labels.is_empty() {
-        let status_text = status_labels.join(" | ");
-        draw_text_ex(
-            &status_text,
-            20.0,
-            screen_height() - 20.0,
-            text_params(16, Color::from_rgba(150, 150, 150, 255)),
-        );
+    let flags = [
+        movement_state.is_sliding,
+        movement_state.is_slow_walking,
+        movement_state.is_prone,
+        movement_state.is_crouching,
+    ];
+    if flags.contains(&true) {
+        STATUS_TEXT.with_borrow_mut(|cache| {
+            let status_text = cache.get(flags, || {
+                let mut status_labels: Vec<&str> = Vec::new();
+                if movement_state.is_sliding {
+                    status_labels.push("SLIDING");
+                }
+                if movement_state.is_slow_walking {
+                    status_labels.push("SLOW WALK");
+                }
+                if movement_state.is_prone {
+                    status_labels.push("PRONE");
+                }
+                if movement_state.is_crouching {
+                    status_labels.push("CROUCHING");
+                }
+                status_labels.join(" | ")
+            });
+            draw_text_ex(
+                status_text,
+                20.0,
+                screen_height() - 20.0,
+                text_params(16, Color::from_rgba(150, 150, 150, 255)),
+            );
+        });
     }
 }

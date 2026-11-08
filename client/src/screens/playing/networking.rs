@@ -8,6 +8,8 @@ use transport::Link;
 use super::PlayingState;
 
 const POSITION_SEND_INTERVAL: platform::Duration = platform::Duration::from_millis(33);
+/// How often to repeat a bomb pickup request while standing on the dropped bomb.
+const BOMB_PICKUP_INTERVAL: platform::Duration = platform::Duration::from_millis(200);
 
 impl PlayingState {
     pub fn send_network(
@@ -109,13 +111,21 @@ impl PlayingState {
 
             // S&D interactions: bomb pickup, plant, defuse
             if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY) {
-                // Auto bomb pickup: if bomb is dropped and we're close, try to pick it up
-                if !self.is_dead {
+                // Auto bomb pickup: if bomb is dropped and we're close, try to pick it up.
+                // The server only lets living attackers pick it up, so only they ask,
+                // and at most every BOMB_PICKUP_INTERVAL rather than every frame.
+                let is_attacker =
+                    self.snd_attacking_team != 0 && self.local_team == self.snd_attacking_team;
+                if !self.is_dead && is_attacker {
                     if let Some((bx, _by, bz)) = self.snd_bomb_dropped {
                         let dx = self.position.x - bx;
                         let dz = self.position.z - bz;
-                        if (dx * dx + dz * dz).sqrt() <= 2.5 {
+                        let due = self
+                            .snd_last_pickup_sent
+                            .map_or(true, |t| t.elapsed() >= BOMB_PICKUP_INTERVAL);
+                        if (dx * dx + dz * dz).sqrt() <= 2.5 && due {
                             s.send(&ClientMsg::SndBombPickup.encode());
+                            self.snd_last_pickup_sent = Some(platform::Instant::now());
                         }
                     }
                 }

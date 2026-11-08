@@ -1,13 +1,80 @@
 use macroquad::prelude::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
+use super::status::CachedText;
+use crate::core::config::InputBinding;
 use crate::ui::fonts::{measure_game_text, text_params};
 use crate::ui::OtherPlayer;
 use crate::weapons::stats::WeaponId;
 use crate::weapons::WeaponInventory;
 
+/// The text of one kill-feed line, built once rather than on every frame.
+struct FeedText {
+    killer: String,
+    weapon: String,
+    victim: String,
+    weapon_display: String,
+    full_text: String,
+    weapon_icon_key: String,
+}
+
+/// More than the feed shows, so the lines on screen stay cached.
+const FEED_TEXT_CACHE: usize = 8;
+
+thread_local! {
+    static FEED_TEXTS: RefCell<Vec<FeedText>> = const { RefCell::new(Vec::new()) };
+    static AMMO_TEXTS: RefCell<[CachedText<(u32, u32)>; 2]> =
+        const { RefCell::new([CachedText::new(), CachedText::new()]) };
+    static TOGGLE_HINT: RefCell<CachedText<(bool, InputBinding)>> =
+        const { RefCell::new(CachedText::new()) };
+}
+
+/// The cached text of the line `killer [weapon] victim`, built if new.
+fn feed_text<'a>(
+    texts: &'a mut Vec<FeedText>,
+    entry: &crate::screens::playing::KillFeedEntry,
+) -> &'a FeedText {
+    let found = texts.iter().position(|t| {
+        t.killer == entry.killer_name && t.weapon == entry.weapon && t.victim == entry.victim_name
+    });
+    let i = match found {
+        Some(i) => i,
+        None => {
+            if texts.len() >= FEED_TEXT_CACHE {
+                texts.remove(0);
+            }
+            let weapon_display = format!("[{}]", entry.weapon);
+            let full_text =
+                format!("{}  {}  {}", entry.killer_name, weapon_display, entry.victim_name);
+            texts.push(FeedText {
+                killer: entry.killer_name.clone(),
+                weapon: entry.weapon.clone(),
+                victim: entry.victim_name.clone(),
+                weapon_display,
+                full_text,
+                weapon_icon_key: format!("{}_icon", entry.weapon.to_lowercase()),
+            });
+            texts.len() - 1
+        }
+    };
+    &texts[i]
+}
+
 /// Standalone kill feed renderer — can be called independently (e.g. on death screen).
 pub fn draw_kill_feed(
+    kill_feed: &[crate::screens::playing::KillFeedEntry],
+    assets: &HashMap<String, Texture2D>,
+    local_player_id: u32,
+    local_team: u8,
+) {
+    FEED_TEXTS.with_borrow_mut(|texts| {
+        draw_feed_lines(texts, kill_feed, assets, local_player_id, local_team)
+    });
+}
+
+fn draw_feed_lines(
+    texts: &mut Vec<FeedText>,
     kill_feed: &[crate::screens::playing::KillFeedEntry],
     assets: &HashMap<String, Texture2D>,
     local_player_id: u32,
@@ -42,9 +109,10 @@ pub fn draw_kill_feed(
             Color::from_rgba(255, 255, 255, alpha)
         };
 
-        let weapon_display = format!("[{}]", entry.weapon);
-        let full_text = format!("{}  {}  {}", killer_name, weapon_display, victim_name);
-        let full_w = measure_game_text(&full_text, 14);
+        let text = feed_text(texts, entry);
+        let weapon_display = &text.weapon_display;
+        let full_text = &text.full_text;
+        let full_w = measure_game_text(full_text, 14);
         draw_rectangle(
             feed_x - 4.0,
             feed_y - 14.0,
@@ -58,8 +126,8 @@ pub fn draw_kill_feed(
         draw_text_ex(killer_name, x_offset, feed_y, text_params(14, killer_color));
         x_offset += measure_game_text(killer_name, 14) + 4.0;
 
-        let weapon_icon_key = format!("{}_icon", entry.weapon.to_lowercase());
-        if let Some(icon_tex) = assets.get(&weapon_icon_key) {
+        let weapon_icon_key = &text.weapon_icon_key;
+        if let Some(icon_tex) = assets.get(weapon_icon_key) {
             draw_texture_ex(
                 icon_tex,
                 x_offset,
@@ -72,8 +140,8 @@ pub fn draw_kill_feed(
             );
             x_offset += 20.0;
         } else {
-            draw_text_ex(&weapon_display, x_offset, feed_y, text_params(14, weapon_color));
-            x_offset += measure_game_text(&weapon_display, 14) + 4.0;
+            draw_text_ex(weapon_display, x_offset, feed_y, text_params(14, weapon_color));
+            x_offset += measure_game_text(weapon_display, 14) + 4.0;
         }
 
         draw_text_ex(victim_name, x_offset, feed_y, text_params(14, victim_color));
@@ -102,13 +170,17 @@ pub(super) fn draw_weapon_and_kill_feed(
 
     // In Gun Game only slot 0 exists; hide slot 1 to avoid showing the default secondary.
     let gun_game = weapons.locked_slot.is_some();
-    let slots: Vec<(&crate::weapons::WeaponState, &str, bool)> = if gun_game {
-        vec![(&weapons.weapons[0], "1", !weapons.knife_active)]
+    let gun_game_slots;
+    let both_slots;
+    let slots: &[(&crate::weapons::WeaponState, &str, bool)] = if gun_game {
+        gun_game_slots = [(&weapons.weapons[0], "1", !weapons.knife_active)];
+        &gun_game_slots
     } else {
-        vec![
+        both_slots = [
             (&weapons.weapons[0], "1", !weapons.knife_active && weapons.active_slot == 0),
             (&weapons.weapons[1], "2", !weapons.knife_active && weapons.active_slot == 1),
-        ]
+        ];
+        &both_slots
     };
 
     let base_x = screen_width() - slot_width - margin_right;
@@ -156,38 +228,47 @@ pub(super) fn draw_weapon_and_kill_feed(
             } else {
                 "REVOLVER"
             };
-            let key_name = config.bind_taurus_toggle.display_name();
-            let toggle_hint = format!("{} · {} to toggle", mode_text, key_name);
-            draw_text_ex(
-                &toggle_hint,
-                base_x + 44.0,
-                y + 56.0,
-                text_params(18, Color::from_rgba(230, 210, 150, alpha)),
-            );
+            let bind = config.bind_taurus_toggle;
+            TOGGLE_HINT.with_borrow_mut(|cache| {
+                let toggle_hint = cache.get((weapon.taurus_shotgun_mode, bind), || {
+                    let key_name = bind.display_name();
+                    format!("{} · {} to toggle", mode_text, key_name)
+                });
+                draw_text_ex(
+                    toggle_hint,
+                    base_x + 44.0,
+                    y + 56.0,
+                    text_params(18, Color::from_rgba(230, 210, 150, alpha)),
+                );
+            });
         }
 
         // ammo (skip for knife)
         if weapon.id != WeaponId::Knife {
-            let ammo_text = if weapon.is_reloading {
-                "RELOADING".to_string()
-            } else {
-                format!("{} / {}", weapon.ammo, weapon.reserve)
-            };
             let ammo_color = if weapon.ammo == 0 && !weapon.is_reloading {
                 Color::from_rgba(255, 80, 80, alpha)
             } else {
                 Color::from_rgba(180, 180, 190, alpha)
             };
-            draw_text_ex(
-                &ammo_text,
-                if *is_active && weapon.id == WeaponId::TaurusRaging {
-                    base_x + 236.0
+            AMMO_TEXTS.with_borrow_mut(|caches| {
+                let ammo_text = if weapon.is_reloading {
+                    "RELOADING"
                 } else {
-                    base_x + 44.0
-                },
-                y + slot_height - 8.0,
-                text_params(24, ammo_color),
-            );
+                    caches[i].get((weapon.ammo, weapon.reserve), || {
+                        format!("{} / {}", weapon.ammo, weapon.reserve)
+                    })
+                };
+                draw_text_ex(
+                    ammo_text,
+                    if *is_active && weapon.id == WeaponId::TaurusRaging {
+                        base_x + 236.0
+                    } else {
+                        base_x + 44.0
+                    },
+                    y + slot_height - 8.0,
+                    text_params(24, ammo_color),
+                );
+            });
         }
 
         // weapon icon (right side)
