@@ -15,8 +15,12 @@ pub const DEFAULT_PORT: u16 = 7878;
 
 const PRUNE_INTERVAL: Duration = Duration::from_secs(5);
 const PEER_IDLE_TTL: Duration = Duration::from_secs(10);
-/// Upper bound on how long a recv waits before the server ticks again.
-const TICK_WAIT: Duration = Duration::from_millis(100);
+/// The server ticks at a fixed 60 Hz however many packets arrive; packets
+/// between ticks are handled (and answered) as they come. This also bounds
+/// how long stopping waits for the loop.
+const TICK_INTERVAL: Duration = Duration::from_micros(16_667);
+/// `set_read_timeout` rejects zero; the shortest wait used instead.
+const MIN_WAIT: Duration = Duration::from_millis(1);
 
 /// A [`Server`] bound to a UDP socket, mapping socket addresses to peer ids.
 pub struct UdpHost {
@@ -27,13 +31,14 @@ pub struct UdpHost {
     last_seen: HashMap<PeerId, Instant>,
     next_peer: u32,
     last_prune: Instant,
+    next_tick: Instant,
 }
 
 impl UdpHost {
     /// Bind `0.0.0.0:port` (0 picks a free port).
     pub fn bind(port: u16, server: Server) -> io::Result<Self> {
         let socket = UdpSocket::bind(("0.0.0.0", port))?;
-        socket.set_read_timeout(Some(TICK_WAIT))?;
+        socket.set_read_timeout(Some(TICK_INTERVAL))?;
         Ok(UdpHost {
             socket,
             server,
@@ -42,6 +47,7 @@ impl UdpHost {
             last_seen: HashMap::new(),
             next_peer: 1,
             last_prune: Instant::now(),
+            next_tick: Instant::now(),
         })
     }
 
@@ -62,8 +68,28 @@ impl UdpHost {
         Ok(())
     }
 
-    /// Wait for at most one packet, then tick and flush the outbox.
+    /// Tick if one is due; otherwise wait (until the next tick at most) for
+    /// one packet and handle it. The outbox is flushed either way, so replies
+    /// to a packet do not wait for the tick.
     fn step(&mut self, buffer: &mut [u8]) -> io::Result<()> {
+        let now = Instant::now();
+        if now >= self.next_tick {
+            self.next_tick += TICK_INTERVAL;
+            // Fell more than a tick behind (a slow tick, a suspended
+            // machine): resume from now rather than ticking to catch up.
+            if self.next_tick <= now {
+                self.next_tick = now + TICK_INTERVAL;
+            }
+            self.server.tick();
+            self.flush();
+            if self.last_prune.elapsed() >= PRUNE_INTERVAL {
+                self.last_prune = Instant::now();
+                self.prune();
+            }
+            return Ok(());
+        }
+
+        self.socket.set_read_timeout(Some((self.next_tick - now).max(MIN_WAIT)))?;
         match self.socket.recv_from(buffer) {
             Ok((0, _)) => {}
             Ok((n, src)) => {
@@ -81,19 +107,16 @@ impl UdpHost {
                 ) => {}
             Err(e) => return Err(e),
         }
+        self.flush();
+        Ok(())
+    }
 
-        self.server.tick();
+    fn flush(&mut self) {
         for (peer, bytes) in self.server.drain_outbox() {
             if let Some(addr) = self.addr_of.get(&peer) {
                 let _ = self.socket.send_to(&bytes, addr);
             }
         }
-
-        if self.last_prune.elapsed() >= PRUNE_INTERVAL {
-            self.last_prune = Instant::now();
-            self.prune();
-        }
-        Ok(())
     }
 
     fn peer_for(&mut self, src: SocketAddr) -> PeerId {

@@ -8,7 +8,7 @@ use super::cache::is_asset_cached;
 use super::paths::resolve_runtime_asset_path;
 use super::prefetch::read_bytes;
 use crate::app::obj_loader::{
-    load_gltf_static_mesh, load_gltf_static_mesh_lit, load_obj_mesh_with_materials,
+    load_gltf_static_mesh, load_obj_mesh_with_materials,
 };
 
 pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut PlayingState) {
@@ -81,14 +81,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                 if !animated.has_any_texture() {
                     // animated model produced but no texture; try static loader
                     match load_gltf_static_mesh(&resolved_path, &bytes).await {
-                        Ok(mut meshes) => {
-                            let all_untextured = meshes.iter().all(|m| m.texture.is_none());
-                            if all_untextured {
-                                if let Ok(lit) = load_gltf_static_mesh_lit(&resolved_path, &bytes).await {
-                                    meshes = lit;
-                                }
-                            }
-
+                        Ok(meshes) => {
                             let total_verts: usize = meshes.iter().map(|m| m.vertices.len()).sum();
                             let entry = playing_state.models.entry(key_string.clone()).or_default();
                             for mesh in meshes {
@@ -108,6 +101,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                         Err(static_err) => {
                             // static path failed; keep the textureless animated mesh
                             let vertex_count = animated.total_vertex_count();
+                            animated.prepare_gpu();
                             playing_state
                                 .animated_models
                                 .insert(key_string.clone(), animated);
@@ -122,6 +116,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                     }
                 } else {
                     let vertex_count = animated.total_vertex_count();
+                    animated.prepare_gpu();
                     playing_state
                         .animated_models
                         .insert(key_string.clone(), animated);
@@ -136,16 +131,9 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
             Err(anim_err) => {
                 match load_gltf_static_mesh(&resolved_path, &bytes).await {
-                    Ok(mut meshes) => {
-                        // if no primitive had a texture, try the lit variant to give
-                        // the user some built‑in shading
-                        let all_untextured = meshes.iter().all(|m| m.texture.is_none());
-                        if all_untextured {
-                            if let Ok(lit) = load_gltf_static_mesh_lit(&resolved_path, &bytes).await {
-                                meshes = lit;
-                            }
-                        }
-
+                    Ok(meshes) => {
+                        // if no primitive had a texture, the loader bakes in
+                        // lighting to give the user some built‑in shading
                         let total_verts: usize = meshes.iter().map(|m| m.vertices.len()).sum();
                         let entry = playing_state.models.entry(key_string.clone()).or_default();
                         for mesh in meshes {
