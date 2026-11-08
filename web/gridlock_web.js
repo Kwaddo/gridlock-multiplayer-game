@@ -78,11 +78,12 @@
     // A player fetches a room's spare when it points at the room (before it
     // clicks join), and uses what it fetched for this long.
     const PREWARM_MS = 15000;
-    // Games on the player's own network are connected to as soon as they are
-    // listed (see preconnect), so joining one only waits for the game's own
-    // Join and Welcome. A connection nobody asked for in this long is closed.
+    // Listed games (every LAN one, the first few online, the one pointed at)
+    // are connected to ahead (see preconnect), so joining one only waits for
+    // the game's own Join and Welcome. A connection nobody asked for in this
+    // long is closed.
     const PRECONNECT_IDLE_MS = 10000;
-    const PRECONNECT_MAX = 4;
+    const PRECONNECT_MAX = 8;
     // A connection ahead that failed (the host just left, still listed) is
     // tried again after this, not on every frame.
     const PRECONNECT_RETRY_MS = 5000;
