@@ -1,8 +1,10 @@
 mod bullet_holes;
+pub(super) use bullet_holes::BakedBulletHole;
 mod hud;
 mod mirror_pass;
 mod world_pass;
 mod players;
+mod self_avatar;
 mod snd_hud;
 mod tracers;
 mod viewmodel;

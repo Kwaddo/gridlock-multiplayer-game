@@ -85,7 +85,18 @@
     <!-- where models are hosted when they are not next to the page (build_web.sh fills these in) -->
     <script>window.GRIDLOCK_MODELS_URL = ""; window.GRIDLOCK_MODELS_VERSION = "";</script>
     <!-- miniquad/macroquad loader, then Gridlock's plugin (network, audio, clock) -->
+    <!-- the plugin's modules in this order (each needs the ones before it), then
+         gridlock_web.js, which registers the plugin -->
     <script src="mq_js_bundle.js"></script>
+    <script src="gridlock_web/constants.js"></script>
+    <script src="gridlock_web/util.js"></script>
+    <script src="gridlock_web/ice.js"></script>
+    <script src="gridlock_web/rtc_signalling.js"></script>
+    <script src="gridlock_web/rtc_spares.js"></script>
+    <script src="gridlock_web/rtc_peers.js"></script>
+    <script src="gridlock_web/preconnect.js"></script>
+    <script src="gridlock_web/models.js"></script>
+    <script src="gridlock_web/decode.js"></script>
     <script src="gridlock_web.js"></script>
     <script>
         // The game needs a keyboard and a mouse (or trackpad). Browsers cannot

@@ -42,6 +42,26 @@ pub fn open(target: &str) -> std::io::Result<Box<dyn Link>> {
     return Ok(Box::new(RtcLink::open(target)));
 }
 
+/// Get ready to join `target` (the player is pointing at it), so the join
+/// itself is quicker: in the browser, the room's spare offer is fetched
+/// ahead. Nothing to do on native builds.
+pub fn prewarm(target: &str) {
+    #[cfg(target_arch = "wasm32")]
+    web::prewarm(target);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = target;
+}
+
+/// Connect to `target` now, before the player joins it, so the join itself
+/// does not wait for the connection (see [`web::preconnect`]). Nothing to do
+/// on native builds, whose links need no setup.
+pub fn preconnect(target: &str) {
+    #[cfg(target_arch = "wasm32")]
+    web::preconnect(target);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = target;
+}
+
 /// A link that first replays packets read before it was handed over
 /// (e.g. everything that arrived in the same batch as the join reply).
 pub struct Backlogged {

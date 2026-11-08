@@ -90,6 +90,11 @@ impl LoginScreen {
         }
     }
 
+    /// A join (or our own server) is being set up: the "Connecting" panel is up.
+    pub fn is_connecting(&self) -> bool {
+        self.connector.is_some()
+    }
+
     pub fn draw(&mut self) {
         self.draw_background();
         self.draw_title();

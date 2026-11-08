@@ -11,7 +11,6 @@ impl PlayingState {
     pub(crate) fn render_mirror_pass(
         &mut self,
         camera: &Camera3D,
-        config: &crate::core::GameConfig,
         maze: Option<&crate::types::maze::Maze>,
         player_id: u32,
     ) -> Vec<usize> {
@@ -51,7 +50,7 @@ impl PlayingState {
             );
             clear_background(Color::from_rgba(16, 20, 28, 255));
             // the whole world, seen from the mirrored eye
-            self.draw_world(config, maze, mirror.reflect_point(camera.position));
+            self.draw_world(maze, mirror.reflect_point(camera.position));
             // you: only in the mirror, never in the main view
             self.draw_self_avatar(player_id);
             // other mirrors seen inside this reflection become plain tinted panels

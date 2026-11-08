@@ -8,6 +8,9 @@ use super::{in_rect, LoginScreen, ACCENT, INPUT_BG, INPUT_BORDER, ROW_BG, ROW_HO
 
 const LAN_BADGE: Color = Color::new(0.30, 0.90, 0.45, 1.0);
 const ONLINE_BADGE: Color = Color::new(0.35, 0.65, 1.0, 1.0);
+/// Online games connected to while listed (the first ones in the list), on
+/// top of every LAN game and whichever game the player points at.
+const ONLINE_AHEAD: usize = 4;
 
 impl LoginScreen {
     pub(super) fn draw_browse_tab(&mut self, px: f32, cy: f32, pw: f32, ch: f32, pad: f32) {
@@ -41,6 +44,7 @@ impl LoginScreen {
         }
 
         let row_h = 50.0;
+        let mut online_ahead = 0;
         for (i, server) in self.browser.entries().iter().enumerate() {
             let ry = ly + row_h * i as f32;
             if ry + row_h > ly + lh {
@@ -78,6 +82,22 @@ impl LoginScreen {
             let pc_color = if full { Color::new(1.0, 0.35, 0.35, 1.0) } else { TEXT_LABEL };
             draw_text_ex(&pc, lx + lw - pcw - col_pad, ry + 30.0, text_params(15, pc_color));
 
+            // Games are connected to while listed, so joining one is instant
+            // (see transport::preconnect): every LAN game, the first
+            // ONLINE_AHEAD online ones, and the one the player points at.
+            // (Not while a join is under way: that one has the connection.)
+            if !full && self.connector.is_none() {
+                let ahead = match server.origin {
+                    Origin::Lan => true,
+                    Origin::Online => {
+                        online_ahead += 1;
+                        online_ahead <= ONLINE_AHEAD
+                    }
+                };
+                if ahead || hover {
+                    transport::preconnect(&server.target);
+                }
+            }
             if hover && clicked && !full {
                 join_addr = Some(server.target.clone());
             }
