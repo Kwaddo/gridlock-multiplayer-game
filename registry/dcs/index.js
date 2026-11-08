@@ -2,21 +2,24 @@
 // ICE and models routes as ../src/index.js (the Cloudflare Worker), but a DCS
 // function has no Durable Objects and no memory shared between requests, so:
 //
-// - All state is one object, state.json, in a private bucket reached through
-//   the S3 API (STATE_BUCKET): the host list, and each open room with the
-//   signalling messages waiting in it. Nothing else is ever created there.
-//   Reading is one GET; polls only read. Writes happen on joins, offers and
-//   answers, leaves, heartbeats and a host's claim renewal.
-// - The bucket has no conditional writes, so two writes at once can overwrite
-//   each other. Every change is checked after a moment and applied again on
-//   top of the other one if it went missing (commit). Few writes happen at
-//   all (one complete offer and one complete answer per connection, in turn),
-//   and the clients heal what still slips through: a player not connected
-//   yet re-announces itself every few seconds, and a host whose listing went
-//   missing gets 404 on its next heartbeat and registers again.
-// - WebRTC signalling uses these mailboxes instead of WebSocket rooms, since
-//   two sockets can land in different isolates and never meet. Players stop
-//   polling once connected; the host polls every few seconds when idle.
+// - State lives in a private bucket reached through the S3 API (STATE_BUCKET).
+//   The host list is one object, state.json. The bucket has no conditional
+//   writes, so two writes at once can overwrite each other: every change to
+//   it is checked after a moment and applied again on top of the other one if
+//   it went missing (commit). A host whose listing still went missing gets
+//   404 on its next heartbeat and registers again.
+// - WebRTC signalling never touches state.json, since it is on the path of
+//   every join: each room's claim and each message are objects of their own
+//   under rooms/ (see "signalling" below), written once and never read back,
+//   so nothing can be lost to a write at the same moment and nothing waits.
+//   Two sockets can land in different isolates and never meet, so messages
+//   go through mailboxes instead of WebSocket rooms; polls are held open
+//   until something arrives (long polling). Players stop polling once
+//   connected.
+// - The function cleans up after itself (see "cleanup" below): a poll
+//   deletes the messages its caller already has, leaving deletes the
+//   leaver's mailbox (a host's, the whole room), and now and then a sweep
+//   deletes whatever a crashed tab left behind.
 //
 // Host list. Game hosts announce themselves with a heartbeat; clients fetch the list.
 //   GET    /servers        -> [{ id, name, addr | room, players, max_players, lan? }]
@@ -36,17 +39,22 @@
 //
 // WebRTC signalling (client-server topology; web/gridlock_web.js is the client).
 //   POST   /room/:code/join?host   -> { id, token }   claim the room (409 if taken)
-//   POST   /room/:code/join        -> { id, token }   join it (404 without a host)
-//   POST   /room/:code/hello       { id, token }      a player re-announcing itself
-//   POST   /room/:code/send        { id, token, host?, signals: [{ receiver, data }] }
-//   GET    /room/:code/poll?id&token[&host][&keep]
-//                                  -> [{ id, NewPeer | PeerLeft | Signal: { sender, data } }]
-//   POST   /room/:code/leave       { id, token, host? }
-//   A poll returns every message for the caller from the last MESSAGE_TTL_MS,
-//   each with an id; clients skip the ones they have seen. The host's polls
+//   POST   /room/:code/join        { signals? }  -> { id, token, host, via }
+//                                  join it (404 without a host); `signals` (the
+//                                  player's offer) reach the host with the join
+//   POST   /room/:code/hello       { id, token, to?, via?, signals? }  a player re-announcing itself
+//   POST   /room/:code/send        { id, token, host?, to?, via?, signals: [{ receiver, data }] }
+//   GET    /room/:code/poll?id&token[&host][&keep][&wait][&after=<seq>][&have=<ids>]
+//                                  -> [{ id, seq, NewPeer | PeerLeft | Signal: { sender, data } }]
+//   POST   /room/:code/leave       { id, token, host?, to?, via? }
+//   A poll returns the caller's messages from the last MESSAGE_TTL_MS, newer
+//   than `after` (the newest seq it has) and not among `have` (ids it has
+//   from around then); with `wait` it is held until there is one, for up to
+//   LONG_POLL_MS, and the reply carries LONG_POLL_HEADER. The host's polls
 //   carry ?host (its token is a host token) and, every so often, ?keep to
 //   renew its claim; a room not renewed for HOST_TTL_SECONDS closes, and a
-//   joining player's polls get 410.
+//   joining player's polls get 410. (`to` and `via` from a join are accepted
+//   for older pages; a player's messages always go to the room's host.)
 //   Players are only ever introduced to the host, never to each other.
 //
 // Game models, for the browser build.
@@ -60,6 +68,30 @@
 const TTL_SECONDS = 60;
 const HOST_TTL_SECONDS = 120;
 const MESSAGE_TTL_MS = 60000;
+// Long polling (see room): how long a poll is held, how often it looks for
+// new messages, and how often it checks that the room is still open. A
+// player's mailbox, or a host's that had a message in the last
+// LONG_POLL_ACTIVE_MS, is in the middle of a handshake and is looked at more
+// often; an idle host's (waiting for someone to join) less, since each look
+// is an S3 request.
+const LONG_POLL_MS = 6000; // the function itself times out at 10 s
+const LONG_POLL_ACTIVE_MS = 10000;
+// (Each look itself takes an S3 round trip, ~150 ms from the edge, on top.)
+const LONG_POLL_CHECK_MS = 25;
+const LONG_POLL_IDLE_CHECK_MS = 150;
+const LONG_POLL_CLAIM_CHECK_MS = 2000;
+const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
+// How far apart two isolates' clocks may be, for a poll's `after`.
+const CLOCK_SKEW_MS = 2000;
+// How long a host claiming a room waits before checking its claim stuck.
+const CLAIM_SETTLE_MS = 150;
+// Sweeps (see sweep): at most this often per isolate, and only from requests
+// of a hosting player; leftovers are deleted once this much older than they
+// could still be used.
+const SWEEP_EVERY_MS = 10 * 60 * 1000;
+const SWEEP_MARGIN_MS = 60 * 1000;
+const SWEEP_MAX_PAGES = 20;
+const DELETE_PARALLEL = 16;
 const STATE_KEY = "state.json";
 const MAX_LISTINGS = 500;
 const MAX_PER_IP = 4;
@@ -91,19 +123,13 @@ export default {
 
 // ---------------------------------------------------------------- state
 
-// { listings: { id: { tokenHash, ip, expires, entry } },
-//   rooms: { code: { host, expires, messages: [{ id, to, at, body }] } } }
-// with anything expired already dropped.
+// { listings: { id: { tokenHash, ip, expires, entry } } }, with anything
+// expired already dropped. (Rooms live in objects of their own: see room.)
 async function loadState(store) {
   const now = Date.now();
   const state = (await store.get(STATE_KEY)) || {};
   const listings = Object.fromEntries(Object.entries(state.listings || {}).filter(([, l]) => l?.expires > now));
-  const rooms = {};
-  for (const [code, r] of Object.entries(state.rooms || {})) {
-    if (!(r?.expires > now)) continue;
-    rooms[code] = { ...r, messages: (r.messages || []).filter((m) => now - m.at < MESSAGE_TTL_MS) };
-  }
-  return { listings, rooms };
+  return { listings };
 }
 
 // Apply a change to state.json and make sure it stuck: a write made at the
@@ -253,41 +279,58 @@ async function iceServers(env) {
 
 // ---------------------------------------------------------------- signalling
 
-// A room in state.json: { host: <host's peer id>, expires, messages }. A
-// peer's token is an HMAC of the room, its id and its role, so nothing per
-// player is stored, and the host is known without reading anything.
+// Signalling stays out of state.json: a room's claim is its own object,
+// rooms/<code>.json = { host, expires }, written only by its host, and every
+// message is an object of its own in its receiver's mailbox, as
+// <mailbox><at>-<mid>.json = { at, sender, bodies }, written once and never
+// changed. Nothing is read, modified and written back, so no write can
+// overwrite another and nothing has to be checked after a moment. A poll
+// lists the caller's mailbox and reads only what is new.
+//
+// Mailboxes: the room's host has rooms/<code>/host/ (whoever hosts it, so a
+// player can write there without reading the claim first), each player
+// rooms/<code>/to/<player>/. Every S3 request costs ~150 ms from the edge,
+// so the path of a join is kept to as few, and as parallel, requests as can be.
+//
+// A peer's token is an HMAC of the room, its id and its role, so nothing per
+// player is stored. A joining player also gets `via`, an HMAC naming the host
+// it joined (older pages send it back with their signals).
 async function room(request, env, ctx, code, action) {
   const store = new Store(env);
   const url = new URL(request.url);
   const now = Date.now();
-  // A message is made once, so re-applying it after a lost write adds no copy.
-  const message = (to, body) => ({ id: crypto.randomUUID(), to, at: now, body });
-  const deliver = (messages) =>
-    commit(
-      store,
-      (s) => {
-        const r = s.rooms[code];
-        if (r) for (const m of messages) if (!r.messages.some((x) => x.id === m.id)) r.messages.push(m);
-      },
-      (s) => !s.rooms[code] || messages.every((m) => s.rooms[code].messages.some((x) => x.id === m.id)),
-    );
+  const claimKey = `rooms/${code}.json`;
+  const loadClaim = async () => {
+    const claim = await store.get(claimKey);
+    return claim?.expires > Date.now() ? claim : null;
+  };
 
   if (action === "join" && request.method === "POST") {
     const asHost = url.searchParams.has("host");
-    const state = await loadState(store);
-    const room = state.rooms[code];
     const id = crypto.randomUUID();
     const token = await peerToken(env, code, id, asHost);
     if (asHost) {
-      if (room) return json({ error: "room already has a host" }, 409);
-      const claim = { host: id, expires: now + HOST_TTL_SECONDS * 1000, messages: [] };
-      await commit(store, (s) => (s.rooms[code] ??= claim), (s) => s.rooms[code]?.host === id);
-    } else {
-      if (!room) return json({ error: "no host in this room" }, 404);
-      // The host is the offerer for every player, so only it hears about newcomers.
-      await deliver([message(room.host, { NewPeer: id })]);
+      if (await loadClaim()) return json({ error: "room already has a host" }, 409);
+      await store.put(claimKey, { host: id, expires: now + HOST_TTL_SECONDS * 1000 });
+      // Two hosts claiming one code at the same moment: the later write wins,
+      // and the other is told the room is taken. Codes are random, so this
+      // is rare, and it is only on the host's own start, never on a join.
+      await delay(CLAIM_SETTLE_MS);
+      if ((await loadClaim())?.host !== id) return json({ error: "room already has a host" }, 409);
+      maybeSweep(store, ctx);
+      return json({ id, token });
     }
-    return json({ id, token });
+    // A player sends its offer with the join (see web/gridlock_web.js), so the
+    // host hears of it and gets the offer in one message. The message goes
+    // out while the claim is read: a room without a host takes it back.
+    const body = await readJson(request);
+    const bodies = [{ NewPeer: id }, ...signalBodies(id, body?.signals)];
+    const [claim, key] = await Promise.all([loadClaim(), deliver(store, hostMailbox(code), id, bodies)]);
+    if (!claim) {
+      ctx.waitUntil(store.delete(key).catch(() => {}));
+      return json({ error: "no host in this room" }, 404);
+    }
+    return json({ id, token, host: claim.host, via: await hostVia(env, code, id, claim.host) });
   }
 
   if (action === "poll" && request.method === "GET") {
@@ -296,16 +339,45 @@ async function room(request, env, ctx, code, action) {
     if (!(await validPeer(env, code, id, url.searchParams.get("token"), asHost))) {
       return json({ error: "bad token" }, 403);
     }
-    const state = await loadState(store);
-    const room = state.rooms[code];
-    if (!room || (asHost && room.host !== id)) return json({ error: "room closed" }, 410);
-    // The host renews its claim now and then; every other poll only reads.
+    const after = Number(url.searchParams.get("after")) || 0;
+    // A page that sends no `have` (from before it) gets only what is newer
+    // than `after`, or it would be handed the same messages on every poll.
+    const have = url.searchParams.has("have")
+      ? new Set(url.searchParams.get("have").split(",").filter(Boolean))
+      : null;
+    const wait = url.searchParams.has("wait");
+    const open = (claim) => claim && (!asHost || claim.host === id);
+
+    // Messages the caller has are deleted once (not on every look of a held poll).
+    const deleting = new Set();
+    const box = asHost ? hostMailbox(code) : mailbox(code, id);
+    const look = () => unseen(store, ctx, box, after, have, deleting);
+    let [claim, messages] = await Promise.all([loadClaim(), look()]);
+    if (!open(claim)) return json({ error: "room closed" }, 410);
+    // The host renews its claim now and then; it is the only one writing it.
     if (asHost && url.searchParams.has("keep")) {
-      const expires = now + HOST_TTL_SECONDS * 1000;
-      const renew = (s) => s.rooms[code]?.host === id && (s.rooms[code].expires = expires);
-      ctx.waitUntil(commit(store, renew, (s) => s.rooms[code]?.expires >= expires).catch(() => {}));
+      ctx.waitUntil(store.put(claimKey, { ...claim, expires: now + HOST_TTL_SECONDS * 1000 }).catch(() => {}));
+      maybeSweep(store, ctx);
     }
-    return json(room.messages.filter((m) => m.to === id).map((m) => ({ id: m.id, ...m.body })));
+    // Long poll: hold the request until something arrives, looking again
+    // every LONG_POLL_CHECK_MS (or at once when a write in this same isolate
+    // wakes us), and checking now and then that the room is still open.
+    let lastClaimCheck = Date.now();
+    // (A player only polls while it connects.)
+    const active = !asHost || now - after < LONG_POLL_ACTIVE_MS;
+    const check = active ? LONG_POLL_CHECK_MS : LONG_POLL_IDLE_CHECK_MS;
+    while (wait && !messages.length && Date.now() - now < LONG_POLL_MS) {
+      await nextMessage(box, check);
+      // A look that failed (the store has the odd hiccup) is tried again.
+      messages = await look().catch(() => []);
+      if (!messages.length && Date.now() - lastClaimCheck >= LONG_POLL_CLAIM_CHECK_MS) {
+        lastClaimCheck = Date.now();
+        if (!open(await loadClaim())) return json({ error: "room closed" }, 410);
+      }
+    }
+    const resp = json(messages);
+    resp.headers.set(LONG_POLL_HEADER, "1");
+    return resp;
   }
 
   if (["hello", "send", "leave"].includes(action) && request.method === "POST") {
@@ -313,44 +385,216 @@ async function room(request, env, ctx, code, action) {
     const id = typeof body?.id === "string" ? body.id : "";
     const asHost = Boolean(body?.host);
     if (!(await validPeer(env, code, id, body?.token, asHost))) return json({ error: "bad token" }, 403);
-    const room = (await loadState(store)).rooms[code];
-    if (!room) return action === "leave" ? new Response(null, { status: 204 }) : json({ error: "room closed" }, 410);
 
-    if (action === "hello" && !asHost) {
-      await deliver([message(room.host, { NewPeer: id })]);
-    } else if (action === "send") {
-      // Signals only flow between the host and a player: the host addresses
-      // players; a player's signals always go to the host.
-      const signals = Array.isArray(body?.signals) ? body.signals.slice(0, MAX_SIGNALS) : [];
-      const messages = [];
-      for (const s of signals) {
-        const receiver = asHost ? s?.receiver : room.host;
-        if (typeof receiver !== "string" || !PEER_ID.test(receiver) || receiver === id) continue;
-        messages.push(message(receiver, { Signal: { sender: id, data: s.data } }));
-      }
-      if (messages.length) await deliver(messages);
-    } else if (action === "leave") {
-      if (asHost && room.host === id) {
+    if (asHost) {
+      if (action === "send") {
+        // The host addresses players; one message per player.
+        const byReceiver = new Map();
+        for (const s of Array.isArray(body?.signals) ? body.signals.slice(0, MAX_SIGNALS) : []) {
+          const receiver = s?.receiver;
+          if (typeof receiver !== "string" || !PEER_ID.test(receiver) || receiver === id) continue;
+          if (!byReceiver.has(receiver)) byReceiver.set(receiver, []);
+          byReceiver.get(receiver).push({ Signal: { sender: id, data: s.data } });
+        }
+        await Promise.all([...byReceiver].map(([to, bodies]) => deliver(store, mailbox(code, to), id, bodies)));
+      } else if (action === "leave") {
         // A leaving host closes the room, and takes its listing off the host list.
-        const close = (s) => {
-          if (s.rooms[code]?.host === id) delete s.rooms[code];
-          for (const [lid, l] of Object.entries(s.listings)) if (l.entry.room === code) delete s.listings[lid];
-        };
-        const closed = (s) => s.rooms[code]?.host !== id && !Object.values(s.listings).some((l) => l.entry.room === code);
-        await commit(store, close, closed);
-      } else if (!asHost) {
-        await deliver([message(room.host, { PeerLeft: id })]);
+        const claim = await store.get(claimKey);
+        if (claim?.host === id) {
+          await store.delete(claimKey);
+          // Everyone's mailboxes go with the room.
+          ctx.waitUntil(deletePrefix(store, `rooms/${code}/`).catch(() => {}));
+        }
+        await commit(
+          store,
+          (s) => {
+            for (const [lid, l] of Object.entries(s.listings)) if (l.entry.room === code) delete s.listings[lid];
+          },
+          (s) => !Object.values(s.listings).some((l) => l.entry.room === code),
+        );
       }
+      return new Response(null, { status: 204 });
     }
+
+    // A player's messages only ever go to the room's host.
+    let bodies = [];
+    if (action === "hello") bodies = [{ NewPeer: id }, ...signalBodies(id, body?.signals)];
+    else if (action === "send") bodies = signalBodies(id, body?.signals);
+    else if (action === "leave") bodies = [{ PeerLeft: id }];
+    if (bodies.length) await deliver(store, hostMailbox(code), id, bodies);
+    // A player leaving needs its mailbox no more.
+    if (action === "leave") ctx.waitUntil(deletePrefix(store, mailbox(code, id)).catch(() => {}));
     return new Response(null, { status: 204 });
   }
 
   return json({ error: "not found" }, 404);
 }
 
+function signalBodies(sender, signals) {
+  return (Array.isArray(signals) ? signals.slice(0, MAX_SIGNALS) : [])
+    .filter((s) => s && typeof s === "object")
+    .map((s) => ({ Signal: { sender, data: s.data } }));
+}
+
+// Mailbox keys sort by time: a fixed-width ms timestamp, then a random id.
+function mailbox(code, player) {
+  return `rooms/${code}/to/${player}/`;
+}
+
+function hostMailbox(code) {
+  return `rooms/${code}/host/`;
+}
+
+// Put a message in `box`; returns its key.
+async function deliver(store, box, sender, bodies) {
+  const at = Date.now();
+  const mid = crypto.randomUUID().slice(0, 8);
+  const key = `${box}${String(at).padStart(15, "0")}-${mid}.json`;
+  await store.put(key, { at, sender, bodies });
+  wakeLocal(box);
+  return key;
+}
+
+// Messages in mailbox `box` its owner does not have yet, oldest first, as
+// [{ id, seq, ...body }]: those from a little before `after` on, in case
+// clocks of two isolates disagree by a moment, except the ids in `have`.
+// Without `have`, only messages newer than `after`.
+//
+// The whole mailbox is listed (it holds only a handful of messages): those
+// in `have` (the caller has them) and expired ones are deleted, in the
+// background and once each (`deleting`).
+async function unseen(store, ctx, prefix, after, have, deleting) {
+  const now = Date.now();
+  const from = Math.max(have ? after - CLOCK_SKEW_MS : after + 1, now - MESSAGE_TTL_MS, 0);
+  const { items } = await store.list(prefix);
+  const fresh = [];
+  const done = [];
+  for (const { key } of items) {
+    const name = key.slice(prefix.length).replace(/\.json$/, "");
+    if (!/^\d{15}-[0-9a-f]{8}$/.test(name)) continue;
+    const at = Number(name.slice(0, 15));
+    const had = have?.has(name.slice(16));
+    if (had || at < now - MESSAGE_TTL_MS) {
+      if (!deleting.has(key)) done.push(key);
+    } else if (at >= from) {
+      fresh.push({ key, name });
+    }
+  }
+  if (done.length) {
+    for (const key of done) deleting.add(key);
+    ctx.waitUntil(deleteKeys(store, done).catch(() => {}));
+  }
+  const objects = await Promise.all(fresh.map(({ key }) => store.get(key).catch(() => null)));
+  const out = [];
+  fresh.forEach(({ name }, i) => {
+    const object = objects[i];
+    if (!object || !Array.isArray(object.bodies)) return;
+    const seq = Number(name.slice(0, 15));
+    const mid = name.slice(16);
+    // One id per message; a message with several bodies numbers them.
+    object.bodies.forEach((body, n) => out.push({ id: n ? `${mid}.${n}` : mid, seq, ...body }));
+  });
+  return out;
+}
+
+// ---------------------------------------------------------------- cleanup
+
+// Messages are deleted as soon as their receiver has them (unseen) or leaves
+// (a player its mailbox, a host the whole room). What a tab that crashed or
+// lost its connection leaves behind goes in a sweep of everything under
+// rooms/: messages past MESSAGE_TTL_MS, and claims not renewed for
+// HOST_TTL_SECONDS (a host renews every 20 s). Sweeps run in the background
+// of a hosting player's requests, at most every SWEEP_EVERY_MS per isolate.
+let lastSweep = 0;
+
+function maybeSweep(store, ctx) {
+  if (Date.now() - lastSweep < SWEEP_EVERY_MS) return;
+  lastSweep = Date.now();
+  ctx.waitUntil(sweep(store).catch((e) => console.error("gridlock-registry: sweep:", e && e.stack ? e.stack : e)));
+}
+
+async function sweep(store) {
+  const now = Date.now();
+  const stale = [];
+  const claimsToCheck = [];
+  let token;
+  for (let page = 0; page < SWEEP_MAX_PAGES; page++) {
+    const { items, next } = await store.list("rooms/", { token, maxKeys: 1000 });
+    for (const { key, modified } of items) {
+      const message = key.match(/^rooms\/[^/]+\/(?:host|to\/[^/]+)\/(\d{15})-[0-9a-f]{8}\.json$/);
+      if (message) {
+        if (Number(message[1]) < now - MESSAGE_TTL_MS - SWEEP_MARGIN_MS) stale.push(key);
+      } else if (/^rooms\/[^/]+\.json$/.test(key)) {
+        const age = now - Date.parse(modified || "");
+        if (age > HOST_TTL_SECONDS * 1000 + SWEEP_MARGIN_MS) stale.push(key);
+        else if (Number.isNaN(age)) claimsToCheck.push(key);
+      }
+    }
+    if (!next) break;
+    token = next;
+  }
+  // A store that gives no modification times: read the claim's own expiry.
+  for (const key of claimsToCheck) {
+    const claim = await store.get(key).catch(() => null);
+    if (claim && !(claim.expires > now - SWEEP_MARGIN_MS)) stale.push(key);
+  }
+  await deleteKeys(store, stale);
+}
+
+async function deletePrefix(store, prefix) {
+  let token;
+  for (let page = 0; page < SWEEP_MAX_PAGES; page++) {
+    const { items, next } = await store.list(prefix, { token, maxKeys: 1000 });
+    await deleteKeys(store, items.map((i) => i.key));
+    if (!next) return;
+    token = next;
+  }
+}
+
+async function deleteKeys(store, keys) {
+  for (let i = 0; i < keys.length; i += DELETE_PARALLEL) {
+    await Promise.all(keys.slice(i, i + DELETE_PARALLEL).map((key) => store.delete(key).catch(() => {})));
+  }
+}
+
+// Held polls in this isolate, by mailbox. Requests can land in any isolate,
+// so this only helps when sender and receiver happen to share one; otherwise
+// the poll sees the message on its next look.
+const localWaiters = new Map();
+
+function nextMessage(key, ms) {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      localWaiters.get(key)?.delete(done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    if (!localWaiters.has(key)) localWaiters.set(key, new Set());
+    localWaiters.get(key).add(done);
+  });
+}
+
+function wakeLocal(box) {
+  const waiters = localWaiters.get(box);
+  if (waiters) for (const done of [...waiters]) done();
+}
+
+function delay(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function peerToken(env, code, id, asHost) {
-  const key = await crypto.subtle.importKey("raw", utf8(env.SIGNAL_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return hex(await crypto.subtle.sign("HMAC", key, utf8(`${code}:${id}:${asHost ? "host" : "player"}`)));
+  return hmacHex(env.SIGNAL_SECRET, `${code}:${id}:${asHost ? "host" : "player"}`);
+}
+
+async function hostVia(env, code, id, host) {
+  return hmacHex(env.SIGNAL_SECRET, `${code}:${id}>${host}`);
+}
+
+async function hmacHex(secret, message) {
+  const key = await crypto.subtle.importKey("raw", utf8(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", key, utf8(message)));
 }
 
 async function validPeer(env, code, id, token, asHost) {
@@ -402,6 +646,29 @@ class Store {
     if (!resp.ok) throw new Error(`S3 PUT ${key}: ${resp.status}`);
   }
 
+  async delete(key) {
+    const resp = await this.send("DELETE", `/${key}`);
+    if (!resp.ok && resp.status !== 404) throw new Error(`S3 DELETE ${key}: ${resp.status}`);
+  }
+
+  // One page of the keys under `prefix`, in order (ListObjectsV2), as
+  // { items: [{ key, modified }], next }: `next` is the token for the page
+  // after, if there is one.
+  async list(prefix, { token, maxKeys = 200 } = {}) {
+    const query = { "list-type": "2", prefix, "max-keys": String(maxKeys) };
+    if (token) query["continuation-token"] = token;
+    const resp = await this.send("GET", "/", query);
+    if (!resp.ok) throw new Error(`S3 LIST ${prefix}: ${resp.status}`);
+    const xml = await resp.text();
+    const items = [...xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)].map(([, c]) => ({
+      key: xmlText(c.match(/<Key>([^<]*)<\/Key>/)?.[1] ?? ""),
+      modified: c.match(/<LastModified>([^<]*)<\/LastModified>/)?.[1],
+    }));
+    const truncated = /<IsTruncated>\s*true\s*<\/IsTruncated>/.test(xml);
+    const next = truncated ? xmlText(xml.match(/<NextContinuationToken>([^<]*)<\/NextContinuationToken>/)?.[1] ?? "") : "";
+    return { items: items.filter((i) => i.key), next: next || null };
+  }
+
   async send(method, path, query = {}, body = "") {
     const url = new URL(this.base + path);
     const params = Object.keys(query).sort().map((k) => `${rfc3986(k)}=${rfc3986(query[k])}`).join("&");
@@ -432,6 +699,10 @@ class Store {
       },
     });
   }
+}
+
+function xmlText(text) {
+  return text.replace(/&(lt|gt|quot|apos|amp);/g, (_, e) => ({ lt: "<", gt: ">", quot: '"', apos: "'", amp: "&" })[e]);
 }
 
 async function hmac(key, message) {
@@ -507,5 +778,7 @@ function cors(response) {
   headers.set("Access-Control-Allow-Origin", "*");
   headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  // The page reads this one to know its polls are held (see room).
+  headers.set("Access-Control-Expose-Headers", LONG_POLL_HEADER);
   return new Response(response.body, { status: response.status, headers });
 }

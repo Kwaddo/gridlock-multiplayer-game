@@ -8,8 +8,10 @@ use platform::{Duration, Instant};
 const JOIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long WebRTC negotiation may take before the link opens.
 const LINK_TIMEOUT: Duration = Duration::from_secs(25);
-/// Join packets can be lost, so resend until the server answers.
-const JOIN_RESEND: Duration = Duration::from_millis(500);
+/// Join packets can be lost, so resend until the server answers. A resend
+/// is one small packet and the server answers a repeat with Welcome again,
+/// so resend often: a lost Join or Welcome then costs a moment, not half a second.
+const JOIN_RESEND: Duration = Duration::from_millis(150);
 
 /// A joined game: the link to its server, and the server itself when this
 /// client is the one hosting it. Dropping a hosted session ends the game.
@@ -33,6 +35,10 @@ pub struct Connector {
     last_sent: Option<Instant>,
     /// Join requests sent so far.
     attempts: u32,
+    /// What the server sent before its Welcome arrived (a Welcome can be
+    /// lost while what followed it gets through, e.g. the maze on its
+    /// reliable channel); it belongs to the game as much as what follows.
+    early: Vec<Box<[u8]>>,
 }
 
 /// Where a join stands, for the "Connecting" screen.
@@ -82,6 +88,7 @@ impl Connector {
             opened: None,
             last_sent: None,
             attempts: 0,
+            early: Vec::new(),
         }
     }
 
@@ -143,8 +150,10 @@ impl Connector {
                 let mut packets = self.link.recv().into_iter();
                 while let Some(packet) = packets.next() {
                     if let Some(ServerMsg::Welcome { id, username }) = ServerMsg::decode(&packet) {
-                        // Whatever followed the Welcome (assets, state) belongs to the game.
-                        let link = Box::new(Backlogged::new(self.link, packets.collect()));
+                        // Whatever came around the Welcome (assets, state) belongs to the game.
+                        let mut backlog = std::mem::take(&mut self.early);
+                        backlog.extend(packets);
+                        let link = Box::new(Backlogged::new(self.link, backlog));
                         return ConnectPoll::Connected(Session {
                             link,
                             player_id: id,
@@ -153,6 +162,7 @@ impl Connector {
                             host: self.host,
                         });
                     }
+                    self.early.push(packet);
                 }
                 if opened.elapsed() >= JOIN_TIMEOUT {
                     return FAILED;
