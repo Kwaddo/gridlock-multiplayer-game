@@ -14,7 +14,7 @@ use super::obj_loader::{
 };
 
 /// How many assets [`Prefetcher`] downloads ahead of the one being loaded.
-pub const PREFETCH_AHEAD: usize = 4;
+pub const PREFETCH_AHEAD: usize = 6;
 
 thread_local! {
     /// What [`Prefetcher`] downloaded (or why it could not), by resolved path,
@@ -129,9 +129,23 @@ impl AssetQueue {
         }
     }
 
+    /// Mark `keys` (those still pending) as needed before spawning too, and
+    /// move them to the front: for a queue started before the loadout was final.
+    pub fn require<'a>(&mut self, keys: impl IntoIterator<Item = &'a str>) {
+        let keys: Vec<&str> = keys.into_iter().collect();
+        for key in &keys {
+            if !self.essential.contains(*key) && self.pending.iter().any(|(k, _)| k == key) {
+                self.essential.insert(key.to_string());
+                self.essential_total += 1;
+            }
+        }
+        self.prioritize(keys);
+    }
+
     /// Load at most one asset whose bytes are already here (no frame waits on
     /// the network) and keep the next few downloading. Returns whether it
-    /// loaded one.
+    /// loaded one. Takes the first of the next few that has arrived, so one
+    /// slow download does not hold up the ones behind it.
     pub async fn pump(&mut self, playing_state: &mut PlayingState) -> bool {
         // Something else loaded these meanwhile (e.g. the player list asking
         // for a model): nothing left to do for them.
@@ -139,15 +153,13 @@ impl AssetQueue {
         for (_, path) in self.pending.iter().take(PREFETCH_AHEAD) {
             self.prefetcher.start(path);
         }
-        let Some((key, path)) = self.pending.first().cloned() else {
+        let window = self.pending.len().min(PREFETCH_AHEAD);
+        let Some(i) = (0..window).find(|&i| self.prefetcher.ready(&self.pending[i].1)) else {
             return false;
         };
-        if !self.prefetcher.ready(&path) {
-            return false;
-        }
-        load_asset_entry(&key, &path, playing_state).await;
+        let (key, path) = self.pending.remove(i);
         // A failed load is dropped too: retrying would stall the queue.
-        self.pending.remove(0);
+        load_asset_entry(&key, &path, playing_state).await;
         true
     }
 

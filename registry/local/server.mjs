@@ -43,8 +43,8 @@ const PEER_ID = /^[0-9a-f-]{36}$/;
 // Long polling: a poll with `wait` and nothing new for the caller is held
 // this long, answered the moment a message for it arrives. Signalling then
 // costs one LAN round trip instead of a poll interval. The reply carries
-// LONG_POLL_HEADER so the page knows it may poll again at once; the live
-// registry does not hold polls, and the page keeps its intervals there.
+// LONG_POLL_HEADER so the page knows it may poll again at once (the live
+// registry holds polls too, looking for new messages every few ms).
 const LONG_POLL_MS = 15000;
 const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
 
@@ -205,12 +205,15 @@ function wake(id) {
 function room(req, res, body, url, code, action) {
   prune();
   const now = Date.now();
-  const deliver = (to, msgBody) => {
+  // Several bodies for one receiver land together, before its held poll is
+  // answered: a join's NewPeer and offer must reach the host in one reply.
+  const deliver = (to, ...bodies) => {
     const r = rooms.get(code);
     if (!r) return;
-    r.messages.push({ id: randomUUID(), seq: nextSeq++, to, at: now, body: msgBody });
+    for (const msgBody of bodies) r.messages.push({ id: randomUUID(), seq: nextSeq++, to, at: now, body: msgBody });
     wake(to);
   };
+  const signalBodies = (sender, data) => signalsOf(data).map((s) => ({ Signal: { sender, data: s.data } }));
 
   if (action === "join" && req.method === "POST") {
     const asHost = url.searchParams.has("host");
@@ -223,8 +226,10 @@ function room(req, res, body, url, code, action) {
       log(`room ${code} opened`);
     } else {
       if (!r) return json({ error: "no host in this room" }, 404);
-      // The host is the offerer for every player, so only it hears about newcomers.
-      deliver(r.host, { NewPeer: id });
+      // Only the host hears about newcomers. A player sends its offer with
+      // the join, so the host gets both in the same poll.
+      deliver(r.host, { NewPeer: id }, ...signalBodies(id, parseJson(body)));
+      return json({ id, token, host: r.host, via: hostVia(code, id, r.host) });
     }
     return json({ id, token });
   }
@@ -276,7 +281,7 @@ function room(req, res, body, url, code, action) {
     if (!r) return action === "leave" ? empty() : json({ error: "room closed" }, 410);
 
     if (action === "hello" && !asHost) {
-      deliver(r.host, { NewPeer: id });
+      deliver(r.host, { NewPeer: id }, ...signalBodies(id, data));
     } else if (action === "send") {
       // Signals only flow between the host and a player.
       const signals = Array.isArray(data?.signals) ? data.signals.slice(0, MAX_SIGNALS) : [];
@@ -301,6 +306,16 @@ function room(req, res, body, url, code, action) {
   }
 
   return json({ error: "not found" }, 404);
+}
+
+function signalsOf(data) {
+  return (Array.isArray(data?.signals) ? data.signals.slice(0, MAX_SIGNALS) : []).filter((s) => s && typeof s === "object");
+}
+
+// Names the host a player joined, as on the live registry (where it saves a
+// read on each send; here the room's host is always at hand).
+function hostVia(code, id, host) {
+  return createHmac("sha256", SIGNAL_SECRET).update(`${code}:${id}>${host}`).digest("hex");
 }
 
 function peerToken(code, id, asHost) {
