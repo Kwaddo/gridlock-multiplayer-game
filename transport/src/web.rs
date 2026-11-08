@@ -100,8 +100,9 @@ pub fn prewarm(room_url: &str) {
 
 /// Connect to the room at `room_url` now, ahead of a join: the next
 /// [`RtcLink::open`] for it takes over the connection, open already. Call
-/// every frame while the join is likely (the room is listed as on the
-/// player's own network); one not asked for in a few seconds is closed.
+/// every frame while the join is likely (the room is listed, or pointed
+/// at); one not asked for in a few seconds is closed. The host learns the
+/// player's address from the connection, as it would from a join.
 pub fn preconnect(room_url: &str) {
     unsafe { ffi::gridlock_rtc_preconnect(room_url.as_ptr(), room_url.len() as u32) }
 }
