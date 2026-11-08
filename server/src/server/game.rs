@@ -225,8 +225,8 @@ pub fn process_auto_respawns(
 ) {
     let now = Instant::now();
     // include a bool indicating whether the teleporter fallback was used
-    let mut to_respawn: Vec<(PeerId, f32, f32, f32, bool, String)> =
-        Vec::with_capacity(players.len());
+    // (allocates only once someone actually respawns: this runs every tick)
+    let mut to_respawn: Vec<(PeerId, f32, f32, f32, bool, String)> = Vec::new();
 
     // first pass: gather respawn candidates without mutating `players`
     let mut spawn_info: Vec<(PeerId, (f32, f32, f32, bool))> = Vec::new();
@@ -394,13 +394,22 @@ pub fn lobby_team_counts(players: &HashMap<PeerId, Player>) -> (usize, usize) {
 /// more bigger, its newest player moves across. Returns whether anyone moved.
 pub fn balance_lobby_teams(players: &mut HashMap<PeerId, Player>) -> bool {
     use crate::player::Team;
+    // Fast path (every tick): nobody to place and the teams are balanced, so
+    // the full pass below would change nothing.
+    let (red, blue) = lobby_team_counts(players);
+    let unplaced = players
+        .values()
+        .any(|p| p.world == WorldId::Lobby && !p.is_bot && p.team == Team::Spectator);
+    if !unplaced && red.abs_diff(blue) <= 1 {
+        return false;
+    }
     let mut lobby: Vec<(u32, PeerId)> = players
         .iter()
         .filter(|(_, p)| p.world == WorldId::Lobby && !p.is_bot)
         .map(|(addr, p)| (p.id, *addr))
         .collect();
     lobby.sort();
-    let (mut red, mut blue) = lobby_team_counts(players);
+    let (mut red, mut blue) = (red, blue);
     let mut changed = false;
 
     for (_, addr) in &lobby {

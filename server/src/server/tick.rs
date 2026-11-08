@@ -6,6 +6,9 @@ use platform::Instant;
 use super::{broadcast, game, handlers, Server};
 use crate::protocols::*;
 
+/// Cadence of the per-tick bookkeeping that has no need to run per packet.
+const BOOKKEEPING_INTERVAL: Duration = game::STATE_BROADCAST_INTERVAL;
+
 impl Server {
     /// Periodic simulation step; call after each packet and at least every 100ms.
     pub fn tick(&mut self) {
@@ -80,14 +83,22 @@ impl Server {
             }
         }
 
-        let timed_out = game::cleanup_inactive_players(&mut self.players);
-        if !timed_out.is_empty() {
-            for p in &timed_out {
-                handlers::announce_left(&self.outbox, &self.players, p, LEAVE_TIMED_OUT);
+        // Timeouts are seconds long: checking them on every packet (the
+        // native host ticks after each one) buys nothing over a fixed cadence.
+        let bookkeeping_due = self
+            .last_bookkeeping
+            .map_or(true, |t| t.elapsed() >= BOOKKEEPING_INTERVAL);
+        if bookkeeping_due {
+            self.last_bookkeeping = Some(Instant::now());
+            let timed_out = game::cleanup_inactive_players(&mut self.players);
+            if !timed_out.is_empty() {
+                for p in &timed_out {
+                    handlers::announce_left(&self.outbox, &self.players, p, LEAVE_TIMED_OUT);
+                }
+                // players were removed — broadcast so other clients drop their characters
+                broadcast::broadcast_state(&self.outbox, &self.players);
+                broadcast::broadcast_player_list(&self.outbox, &self.players);
             }
-            // players were removed — broadcast so other clients drop their characters
-            broadcast::broadcast_state(&self.outbox, &self.players);
-            broadcast::broadcast_player_list(&self.outbox, &self.players);
         }
         if self.last_chat.len() > self.players.len() {
             let players = &self.players;
@@ -165,6 +176,7 @@ impl Server {
                 &mut self.match_running,
                 &mut self.match_start_time,
                 &mut self.last_match_time_sent,
+                &mut self.last_match_heartbeat,
                 &mut self.match_total_maze_entries,
                 &mut self.match_end_pending,
                 self.match_mode,

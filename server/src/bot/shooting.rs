@@ -4,8 +4,8 @@ use rand::Rng;
 use crate::bot::personality::difficulty_mods;
 use crate::maze::MazeData;
 use crate::player::{Player, WorldId};
-use crate::server::game::MAZE_CELL_SIZE;
 use crate::bot::ai::BotState;
+use crate::bot::sight::has_line_of_sight;
 use crate::weapons_stats::get_weapon_stats;
 
 /// Weapons with a shorter range than this are melee: no hit beyond their reach.
@@ -58,24 +58,35 @@ pub fn try_shoot(
     // find target: who can we see and shoot at?
     let runtime_fov = bot_state.personality.base_fov_degrees.max(mods.fov_degrees);
     let range = bot_state.shooting_config.detection_range.unwrap_or(weapon_stats.range);
+    // everything but the sight line, cheapest first: teammates never get a raycast
     let can_engage = |p: &Player| {
         p.id != bot.id
             && p.is_alive
             && p.world == bot.world
-            && distance(bot.position, p.position) <= range
-            && is_in_fov(bot, p, runtime_fov)
-            && has_line_of_sight(bot, p, maze)
             && (if bot.world == WorldId::Lobby {
                 !p.is_bot
             } else {
                 bot.is_hostile_to(p)
             })
+            && distance(bot.position, p.position) <= range
+            && is_in_fov(bot, p, runtime_fov)
     };
+    // the current target's sight line, worked out once for both lookups
+    let mut current_seen: Option<(u32, bool)> = None;
     let current = bot_state
         .target_id
         .and_then(|id| players.values().find(|p| p.id == id))
-        .filter(|p| can_engage(p));
-    let nearest = players.values().filter(|p| can_engage(p)).min_by(|a, b| {
+        .filter(|p| can_engage(p))
+        .filter(|p| {
+            let seen = has_line_of_sight(bot, p, maze);
+            current_seen = Some((p.id, seen));
+            seen
+        });
+    let in_sight = |p: &Player| match current_seen {
+        Some((id, seen)) if id == p.id => seen,
+        _ => has_line_of_sight(bot, p, maze),
+    };
+    let nearest = players.values().filter(|p| can_engage(p) && in_sight(p)).min_by(|a, b| {
         let da = distance(bot.position, a.position);
         let db = distance(bot.position, b.position);
         da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
@@ -220,44 +231,4 @@ fn is_in_fov(bot: &Player, target: &Player, fov_degrees: f32) -> bool {
     let forward = (bot.yaw.cos(), bot.yaw.sin());
     let dot = to_target.0 * forward.0 + to_target.1 * forward.1;
     dot >= half_fov_cos
-}
-
-fn has_line_of_sight(bot: &Player, target: &Player, maze: Option<&MazeData>) -> bool {
-    // Lobby has no server-side wall grid representation; only maze mode is occluded here.
-    if bot.world != WorldId::Maze {
-        return true;
-    }
-    let Some(maze) = maze else {
-        return true;
-    };
-
-    let x0 = bot.position.0;
-    let z0 = bot.position.2;
-    let dx = target.position.0 - x0;
-    let dz = target.position.2 - z0;
-    let dist = (dx * dx + dz * dz).sqrt();
-    if dist <= 1e-5 {
-        return true;
-    }
-
-    // Sample several points per cell along the segment and reject as soon as it enters a wall cell.
-    let steps = ((dist / (MAZE_CELL_SIZE * 0.2)).ceil() as i32).max(1);
-    for i in 1..steps {
-        let t = i as f32 / steps as f32;
-        let x = x0 + dx * t;
-        let z = z0 + dz * t;
-        let cx = (x / MAZE_CELL_SIZE).floor() as i32;
-        let cy = (z / MAZE_CELL_SIZE).floor() as i32;
-
-        if cx < 0 || cy < 0 || cx >= maze.width as i32 || cy >= maze.height as i32 {
-            return false;
-        }
-
-        let idx = cy as usize * maze.width as usize + cx as usize;
-        if maze.cells.get(idx).copied().unwrap_or(0) == 0 {
-            return false;
-        }
-    }
-
-    true
 }

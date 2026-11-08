@@ -11,6 +11,8 @@ use crate::protocols::ServerMsg;
 use crate::server::handlers::other;
 /// Seconds between a match bot's decisions (plus up to 0.1 s jitter).
 const DECISION_INTERVAL: f32 = 0.2;
+/// Longest step (seconds) one bot tick simulates, however long it has been.
+const MAX_BOT_DT: f32 = 0.1;
 
 pub struct BotManager {
     bot_addrs: Vec<PeerId>,
@@ -195,12 +197,16 @@ impl BotManager {
         maze: Option<&crate::maze::MazeData>,
         team_score: &mut crate::server::game::TeamScore,
     ) {
-        if self.last_tick.elapsed() < self.tick_interval {
+        let elapsed = self.last_tick.elapsed();
+        if elapsed < self.tick_interval {
             return;
         } else {
             self.last_tick = Instant::now();
         }
-        let dt = self.tick_interval.as_secs_f32();
+        // Step by the real time since the last bot tick: the host may tick
+        // less often than the gate allows (an idle native host waits up to
+        // 100 ms for a packet). Capped so a stall doesn't make bots jump.
+        let dt = elapsed.as_secs_f32().min(MAX_BOT_DT);
 
         // ── Brain: run decide_behavior for maze-world bots ──
         // A few times a second rather than every tick: decisions with random
@@ -271,7 +277,7 @@ impl BotManager {
                     let dz = pos.2 - bot.position.2;
                     ai::Engagement { target_pos: pos, distance: (dx * dx + dz * dz).sqrt() }
                 });
-                let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height, m.props.as_slice()));
+                let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height, m.prop_cells()));
                 ai::tick_bot(bot, state, dt, &PhysicsConfig::default(), maze_cells, engage);
 
                 if let Some(target_pos) = target_pos {
