@@ -21,10 +21,15 @@ How it differs from the Worker:
 - **Signalling over HTTP.** Two WebSockets in different isolates can never
   meet, so a room is a set of mailboxes: peers `POST /room/:code/send` and
   `GET /room/:code/poll`. A poll is held open (long polling) until a message
-  arrives, listing the mailbox every 80 ms while a handshake is going on
-  (250 ms for an idle host waiting for players). A player sends its offer
-  with its join, and the host answers: two trips in all. A player that has
-  not connected re-announces itself (`/hello`) every few seconds.
+  arrives, listing the mailbox every 25 ms while a handshake is going on
+  (50 ms for an idle host waiting for players). The host keeps two offers
+  made ahead of any join in `rooms/<code>/spare.json` (`POST`/`GET
+  /room/:code/spare`, rewritten every 30 s and as they are taken). A player
+  fetches one when it points at the room, answers it, and sends the answer
+  with its join: one trip in all. Without a spare (an older host page), the
+  player sends its offer with its join and the host answers: two trips. A
+  player that has not connected re-announces itself (`/hello`) every few
+  seconds.
   `web/gridlock_web.js` speaks this protocol only; the Worker's WebSocket
   rooms no longer match it.
 - **Cleanup.** The function deletes what it no longer needs, with no
