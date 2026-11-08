@@ -1,4 +1,6 @@
+mod cell_kinds;
 mod raycast;
+mod snapshot;
 mod walls;
 
 use ::rand::{thread_rng, Rng};
@@ -6,6 +8,8 @@ use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+pub use cell_kinds::{classify_cells, CellKind, CellKindCache};
+pub use snapshot::{MazeChange, MazeSnapshot};
 pub use walls::BreakableWall;
 
 #[derive(Clone, Copy)]
