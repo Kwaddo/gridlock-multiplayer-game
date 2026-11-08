@@ -1,4 +1,4 @@
-// Gridlock's browser plugin, part 6 of 8: RtcSocket's peers, one
+// Gridlock's browser plugin, part 6 of 9: RtcSocket's peers, one
 // RTCPeerConnection and its data channels each. (See rtc_signalling.js
 // and ../gridlock_web.js.)
 "use strict";

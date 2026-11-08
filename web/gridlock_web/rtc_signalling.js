@@ -1,4 +1,4 @@
-// Gridlock's browser plugin, part 4 of 8: RtcSocket's signalling, through
+// Gridlock's browser plugin, part 4 of 9: RtcSocket's signalling, through
 // the registry's HTTP mailboxes. RtcSocket is built up over three parts:
 // RtcSignalling (here), RtcSpares (rtc_spares.js) and RtcSocket itself
 // (rtc_peers.js). (See ../gridlock_web.js.)

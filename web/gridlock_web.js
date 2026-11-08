@@ -21,7 +21,7 @@
 (function (gridlockWeb) {
     const {
         PLUGIN_VERSION, sockets, readString, readBytes, writeU32, writeBytes, roomHttpUrl, iceServersFor, prewarm,
-        RtcSocket, preconnect, takePreconnected, registerModels,
+        RtcSocket, preconnect, takePreconnected, registerModels, registerDecode,
     } = gridlockWeb;
 
     const requests = new Map(); // id -> { done, status, body }
@@ -75,6 +75,10 @@
         // ---- models: file loading and download progress (gridlock_web/models.js)
 
         registerModels(env);
+
+        // ---- image decoding in a worker, after file loading (gridlock_web/decode.js)
+
+        registerDecode(env);
 
         // ---- platform crate: clocks and randomness (platform/src/lib.rs)
 

@@ -1,4 +1,4 @@
-// Gridlock's browser plugin, part 5 of 8: RtcSocket's spare offers (host).
+// Gridlock's browser plugin, part 5 of 9: RtcSocket's spare offers (host).
 // (See rtc_signalling.js and ../gridlock_web.js.)
 "use strict";
 

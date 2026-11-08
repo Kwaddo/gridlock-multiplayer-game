@@ -1,4 +1,4 @@
-// Gridlock's browser plugin, part 3 of 8: ICE servers and the host's spare
+// Gridlock's browser plugin, part 3 of 9: ICE servers and the host's spare
 // offers, fetched ahead of a join. (See ../gridlock_web.js.)
 "use strict";
 

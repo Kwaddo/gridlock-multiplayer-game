@@ -7,6 +7,8 @@ mod loader;
 mod nodes;
 mod parts;
 mod playback;
+#[cfg(target_arch = "wasm32")]
+pub mod web_decoded;
 
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
@@ -18,6 +20,9 @@ use gpu::GpuGeometry;
 use joints::JointRoleTable;
 
 pub use glb::{import_glb, GlbImages};
+#[cfg(not(target_arch = "wasm32"))]
+pub use glb::predecode_glb_images;
+pub use glb::release_predecoded;
 pub use joints::JointRole;
 pub use loader::{
     load_gltf_animated_model, load_gltf_animated_model_with_clip_index,

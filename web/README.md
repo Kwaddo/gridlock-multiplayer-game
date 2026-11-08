@@ -10,7 +10,7 @@ few networks that block direct connections, once a TURN key is set).
 |---|---|
 | `index.html` | The page: a full-window canvas and the three scripts below. |
 | `mq_js_bundle.js` | macroquad's loader (vendored from `macroquad-0.4.14/js/`). Update it together with the macroquad version. |
-| `gridlock_web.js` | Gridlock's plugin for that loader: WebRTC + signalling, fetch, Web Audio, clocks, randomness, localStorage, pointer lock. It registers the plugin; the code is split into modules under `gridlock_web/` (constants, helpers, ICE servers and spares, the WebRTC socket in three parts, connecting ahead, models), which `index.html` loads before it, in order. |
+| `gridlock_web.js` | Gridlock's plugin for that loader: WebRTC + signalling, fetch, Web Audio, clocks, randomness, localStorage, pointer lock. It registers the plugin; the code is split into modules under `gridlock_web/` (constants, helpers, ICE servers and spares, the WebRTC socket in three parts, connecting ahead, models, image decoding in a worker), which `index.html` loads before it, in order. |
 
 Why a plugin instead of wasm-bindgen: miniquad's loader instantiates the wasm
 module itself and cannot provide wasm-bindgen's imports, so crates that need
