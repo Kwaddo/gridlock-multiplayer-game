@@ -42,6 +42,7 @@ pub fn handle_discover(
         players: players.len().min(255) as u8,
         max_players: game::MATCH_MAX_PLAYERS as u8,
         name: name.to_string(),
+        version: Some(PROTOCOL_VERSION),
     }
     .encode();
     let _ = socket.send_to(&resp, src_addr);

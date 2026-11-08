@@ -5,6 +5,17 @@ mod messages;
 
 pub use messages::*;
 
+/// Wire format version. Bump it whenever any message changes shape: a client
+/// and a host only play together when theirs match (see `ClientMsg::Join`,
+/// `ServerMsg::Welcome`). Builds from before the check have no version on
+/// the wire and count as 1.
+pub const PROTOCOL_VERSION: u16 = 2;
+
+/// What the server tells a client of another version once it has let it in
+/// far enough to be heard: a chat notice is all an old build can show.
+pub const VERSION_MISMATCH_NOTICE: &str =
+    "This game runs a different version of Gridlock. Update your game to join it.";
+
 // MESSAGE TYPES
 
 // Message types - first byte of every packet
@@ -39,6 +50,8 @@ pub const MSG_TEAM_SCORE: u8 = 40; // server -> all, team modes: [red:u16][blue:
                                   // kills each team has scored this match; sent on change and every few seconds
 pub const MSG_LOBBY_SETTINGS: u8 = 41; // both ways, see `LobbySettings`: the host -> server when it changes
                                        // its lobby console; server -> all on change and to each joiner
+pub const MSG_PLAYER_INFO: u8 = 42; // server -> client: what rarely changes about players (see `PlayerInfo`):
+                                    // the changed ones as they change, everyone to a joiner and every few seconds
 
 // MSG_MATCH_STATUS values
 pub const MATCH_STATUS_NONE: u8 = 0; // lobby only: the host can start a match
@@ -114,7 +127,7 @@ pub const MSG_SND_DEFUSE_STOP: u8 = 32; // client -> server: stop defusing bomb
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;
 pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
-pub const MSG_BOT_SHOT: u8 = 52; // server -> client: bot fired (shooter_id, victim_id)
+pub const MSG_BOT_SHOT: u8 = 52; // server -> client: every shot bots fired in one bot tick, see `BotShot`
 
 pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
 pub const FLAG_SILENT: u8 = 1 << 7; // no footstep sounds

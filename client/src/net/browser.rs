@@ -18,6 +18,9 @@ pub struct ServerEntry {
     pub players: u8,
     pub max_players: u8,
     pub origin: Origin,
+    /// False when the host is known to run another protocol version (LAN
+    /// replies say; the online list cannot, so those count as compatible).
+    pub compatible: bool,
 }
 
 pub struct ServerBrowser {
@@ -128,7 +131,7 @@ fn online_entry(listed: Listed) -> Option<ServerEntry> {
         let origin = if lan { Origin::Lan } else { Origin::Online };
         (registry::room_url(&registry::registry_url()?, &room), format!("room {room}"), origin)
     };
-    Some(ServerEntry { name, target, detail, players, max_players, origin })
+    Some(ServerEntry { name, target, detail, players, max_players, origin, compatible: true })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -137,7 +140,7 @@ mod lan {
     use std::time::{Duration, Instant};
 
     use super::{Origin, ServerEntry};
-    use crate::net::{ClientMsg, ServerMsg};
+    use crate::net::{version_mismatch, ClientMsg, ServerMsg};
 
     /// How long to wait for LAN replies after a broadcast.
     const SCAN_TIME: Duration = Duration::from_secs(2);
@@ -169,15 +172,21 @@ mod lan {
             let mut found = Vec::new();
             let mut buf = [0u8; 512];
             while let Ok((n, from)) = self.socket.recv_from(&mut buf) {
-                if let Some(ServerMsg::Discover { players, max_players, name }) = ServerMsg::decode(&buf[..n]) {
+                if let Some(ServerMsg::Discover { players, max_players, name, version }) =
+                    ServerMsg::decode(&buf[..n])
+                {
                     let addr = from.to_string();
+                    // hosts from before the version check reply without one
+                    let compatible = version_mismatch(version).is_none();
+                    let detail = if compatible { addr.clone() } else { format!("{addr} - different version") };
                     found.push(ServerEntry {
                         name,
-                        target: addr.clone(),
-                        detail: addr,
+                        target: addr,
+                        detail,
                         players,
                         max_players,
                         origin: Origin::Lan,
+                        compatible,
                     });
                 }
             }

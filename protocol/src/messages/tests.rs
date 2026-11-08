@@ -11,25 +11,21 @@ fn rt_client(m: ClientMsg) {
 
 #[test]
 fn server_messages_round_trip() {
+    // on the fixed-point grid (1/64 m, 1/65536 turn), so it comes back exact
     let ps = PlayerState {
         id: 7,
-        position: (1.0, 2.0, 3.0),
-        yaw: 0.5,
-        world: 1,
+        position: (1.0, 2.5, -3.25),
+        yaw: -std::f32::consts::FRAC_PI_2,
         state_flags: FLAG_ADS | FLAG_IS_BOT,
         event_flags: EVT_LANDED,
-        kills: 3,
-        gun_level: 2,
-        health: 80.0,
-        max_health: 100.0,
-        name: "alice".into(),
+        health: 80,
         alive: true,
         freeze_secs: 2,
-        team: 1,
-        weapon: "M4A1".into(),
     };
-    rt_server(ServerMsg::State(vec![ps.clone(), PlayerState { id: 8, ..ps }]));
-    rt_server(ServerMsg::Welcome { id: 1, username: "bob".into() });
+    rt_server(ServerMsg::State { world: 1, players: vec![ps, PlayerState { id: 8, ..ps }] });
+    rt_server(ServerMsg::State { world: 0, players: Vec::new() });
+    rt_server(ServerMsg::Welcome { id: 1, username: "bob".into(), version: None });
+    rt_server(ServerMsg::Welcome { id: 1, username: "bob".into(), version: Some(PROTOCOL_VERSION) });
     rt_server(ServerMsg::Maze(MazeLayout {
         width: 2,
         height: 2,
@@ -45,7 +41,8 @@ fn server_messages_round_trip() {
         rt_server(ServerMsg::WorldChange { world: 1, spawn: (1.0, 0.0, 2.0), mode, freeze_secs, match_timer });
     }
     rt_server(ServerMsg::Assets { world: 255, entries: vec![("k".into(), "a/b.glb".into())] });
-    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "Gridlock".into() });
+    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "Gridlock".into(), version: None });
+    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "G".into(), version: Some(PROTOCOL_VERSION) });
     rt_server(ServerMsg::Respawn { position: (1.0, 2.0, 3.0), kind: Some(1) });
     rt_server(ServerMsg::Damage { amount: 12.5, attacker_id: 4, stun: true });
     rt_server(ServerMsg::StartDenied { reason: None });
@@ -64,7 +61,20 @@ fn server_messages_round_trip() {
         is_bot: true,
     }]));
     rt_server(ServerMsg::MatchTimer { secs: 65535 });
-    rt_server(ServerMsg::BotShot { shooter_id: 1, victim_id: 2, start: (0.0, 1.2, 0.0), end: (1.0, 1.0, 1.0) });
+    let shot = BotShot { shooter_id: 1, victim_id: 2, start: (0.0, 1.25, 0.0), end: (1.0, 1.0, 76.5) };
+    rt_server(ServerMsg::BotShots(vec![shot, BotShot { shooter_id: 3, ..shot }]));
+    rt_server(ServerMsg::BotShots(Vec::new()));
+    let info = PlayerInfo {
+        id: 9001,
+        name: "Viper".into(),
+        team: 2,
+        weapon: "AK-47".into(),
+        kills: 70_000,
+        gun_level: 9,
+        max_health: 500,
+    };
+    rt_server(ServerMsg::PlayerInfo(vec![info.clone(), PlayerInfo { id: 1, weapon: String::new(), ..info }]));
+    rt_server(ServerMsg::PlayerInfo(Vec::new()));
     rt_server(ServerMsg::Chat { from_id: 3, name: "alice".into(), text: "gg".into() });
     rt_server(ServerMsg::Chat { from_id: 0, name: String::new(), text: "Match ended".into() });
     rt_server(ServerMsg::PlayerJoined { id: 4, name: "bob".into() });
@@ -99,7 +109,10 @@ fn snd_round_state_is_48_bytes() {
 
 #[test]
 fn client_messages_round_trip() {
-    rt_client(ClientMsg::Join { username: "alice".into() });
+    rt_client(ClientMsg::Join { username: "alice".into(), version: None });
+    rt_client(ClientMsg::join("alice"));
+    rt_client(ClientMsg::Join { username: "bob".into(), version: Some(0) });
+    rt_client(ClientMsg::Join { username: "bob".into(), version: Some(u16::MAX) });
     rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: Some(1), event_flags: Some(2) });
     rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: None, event_flags: None });
     rt_client(ClientMsg::Hit { victim_id: 2, damage: 30.0, weapon: Some("AK".into()), backstab: Some(false) });
@@ -125,7 +138,7 @@ fn truncated_packets_are_rejected() {
 fn long_strings_are_clamped() {
     let long = "x".repeat(300);
     let ServerMsg::Welcome { username, .. } =
-        ServerMsg::decode(&ServerMsg::Welcome { id: 1, username: long }.encode()).unwrap()
+        ServerMsg::decode(&ServerMsg::Welcome { id: 1, username: long, version: None }.encode()).unwrap()
     else {
         panic!()
     };

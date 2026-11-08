@@ -68,6 +68,8 @@ impl Server {
             game::process_lobby_regen(&mut self.players);
             self.last_regen_tick = Instant::now();
         }
+        // what rarely changes goes out ahead of the state that may first show it
+        self.sync_player_info();
         let due = self
             .last_state_broadcast
             .map_or(true, |t| t.elapsed() >= game::STATE_BROADCAST_INTERVAL);
@@ -90,6 +92,7 @@ impl Server {
             .map_or(true, |t| t.elapsed() >= BOOKKEEPING_INTERVAL);
         if bookkeeping_due {
             self.last_bookkeeping = Some(Instant::now());
+            self.forget_rejected();
             let timed_out = game::cleanup_inactive_players(&mut self.players);
             if !timed_out.is_empty() {
                 for p in &timed_out {

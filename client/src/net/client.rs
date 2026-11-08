@@ -1,5 +1,5 @@
 use crate::net::hosting::LocalHost;
-use crate::net::{ClientMsg, ServerMsg};
+use crate::net::{ClientMsg, ServerMsg, PROTOCOL_VERSION};
 use transport::{Backlogged, Link, LinkStatus};
 use platform::{Duration, Instant};
 
@@ -83,7 +83,7 @@ impl Connector {
             link,
             address,
             host,
-            join: ClientMsg::Join { username: username.to_string() }.encode(),
+            join: ClientMsg::join(username).encode(),
             started: Instant::now(),
             opened: None,
             last_sent: None,
@@ -156,7 +156,21 @@ impl Connector {
                 let opened = *self.opened.get_or_insert_with(Instant::now);
                 let mut packets = self.link.recv().into_iter();
                 while let Some(packet) = packets.next() {
-                    if let Some(ServerMsg::Welcome { id, username }) = ServerMsg::decode(&packet) {
+                    if let Some(ServerMsg::Welcome { id, username, version }) = ServerMsg::decode(&packet) {
+                        if let Some(reason) = version_mismatch(version) {
+                            macroquad::miniquad::info!(
+                                "gridlock: {} runs protocol {:?}, we run {}",
+                                self.address,
+                                version,
+                                PROTOCOL_VERSION
+                            );
+                            // An older host let us in; say we are going (twice, in
+                            // case one is lost) so it does not wait for us to time out.
+                            let bye = ClientMsg::Disconnect.encode();
+                            self.link.send(&bye);
+                            self.link.send(&bye);
+                            return ConnectPoll::Failed(reason);
+                        }
                         macroquad::miniquad::info!(
                             "gridlock: joined {} after {} ms (Welcome {} ms after the link opened, {} join request(s))",
                             self.address,
@@ -189,6 +203,18 @@ impl Connector {
             }
         }
         ConnectPoll::Pending(self)
+    }
+}
+
+/// Why a host whose `Welcome` carried `version` cannot be played with, if it
+/// cannot. Hosts from before the version check send none.
+pub fn version_mismatch(version: Option<u16>) -> Option<&'static str> {
+    match version {
+        Some(v) if v == PROTOCOL_VERSION => None,
+        Some(v) if v > PROTOCOL_VERSION => {
+            Some("This game runs a newer version of Gridlock. Update your game to join it.")
+        }
+        _ => Some("This game runs an older version of Gridlock. Both of you need the same version."),
     }
 }
 
