@@ -1,18 +1,18 @@
 use crate::weapons::combat::HitZone;
 
 use macroquad::prelude::*;
-use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
+use macroquad::miniquad::{ BlendFactor, BlendState, BlendValue, Equation };
 use macroquad::window::get_internal_gl;
 
 use super::super::PlayingState;
 
-const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
+const WORLD_PLAYER_RENDER_SCALE: f32 = 0.9;
 // Mixamo-style rigs are authored facing +Z, while gameplay yaw uses +X as forward.
 // Keep this offset centralized so yaw logic and movement math stay in gameplay space.
 const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;
 // additional yaw (radians) to rotate world weapons rightwards
 const WORLD_WEAPON_YAW_ADJUST: f32 = std::f32::consts::PI / 2.0; // 45° right
-                                                                 // additional forward translation in world space to push guns away from hand
+// additional forward translation in world space to push guns away from hand
 const WORLD_WEAPON_FORWARD_OFFSET: f32 = 0.1; // units, tweak for desired spacing
 
 impl PlayingState {
@@ -25,6 +25,51 @@ impl PlayingState {
         for bot in &self.practice_bots {
             self.draw_player_model(&bot.player);
         }
+    }
+
+    // which anim body plays for mirror shit
+    pub(crate) fn self_avatar_skin(&self) -> crate::types::player::PlayerSkin {
+        use crate::types::animation_state::AnimState;
+        let m = &self.movement_state;
+        // where you'd have been 0.1 s ago at this speed = your move direction
+        let prev = self.position - m.velocity * 0.1;
+        let state = AnimState::from_movement(
+            prev.x,
+            prev.z,
+            self.position.x,
+            self.position.z,
+            self.yaw,
+            m.is_sprinting,
+            self.weapons.active().is_aiming,
+            m.is_crouching,
+            m.is_prone,
+            m.is_sliding,
+            false
+        );
+        AnimState::skin_from_state(state, None)
+    }
+
+    // your own body as others see it for the mirror
+        pub(crate) fn draw_self_avatar(&self, player_id: u32) {
+        if self.is_dead {
+            return; // the death camera draws your corpse instead
+        }
+        let mut me = crate::types::player::OtherPlayer::new(
+            player_id,
+            String::new(),
+            self.current_world
+        );
+        me.render_x = self.position.x;
+        me.render_y = self.position.y;
+        me.render_z = self.position.z;
+        me.render_yaw = self.yaw;
+        me.skin_type = self.self_avatar_skin();
+        me.is_sprinting = self.movement_state.is_sprinting;
+        me.is_crouching = self.movement_state.is_crouching;
+        me.is_prone = self.movement_state.is_prone;
+        me.is_ads = self.weapons.active().is_aiming;
+        me.current_weapon = self.weapons.active().stats().name.to_string();
+        self.draw_player_model(&me);
     }
 
     fn draw_player_model(&self, p: &crate::types::player::OtherPlayer) {
@@ -53,9 +98,10 @@ impl PlayingState {
                 anim_scale = s;
                 let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
                 _anim_y_offset = y_offset;
-                let transform = Mat4::from_translation(render_pos + vec3(0.0, y_offset, 0.0))
-                    * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
-                    * Mat4::from_scale(vec3(s, s, s));
+                let transform =
+                    Mat4::from_translation(render_pos + vec3(0.0, y_offset, 0.0)) *
+                    Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET) *
+                    Mat4::from_scale(vec3(s, s, s));
                 // Tint model by player color when a skin texture isn't used, on
                 // the GPU, so textured and untextured meshes both receive it
                 // without copying the whole mesh every frame. Skinning happens
@@ -83,33 +129,38 @@ impl PlayingState {
 
                 // compute hand pos from joint (set hand_world_pos later when
                 // drawing weapon)
-                if let Some(r_hand) = anim
-                    .joint_position_with_tokens(&[&"right", &"hand"])
-                    .or_else(|| anim.joint_position_with_tokens(&[&"right", &"wrist"]))
+                if
+                    let Some(r_hand) = anim
+                        .joint_position_with_tokens(&[&"right", &"hand"])
+                        .or_else(|| anim.joint_position_with_tokens(&[&"right", &"wrist"]))
                 {
-                    let offset = Mat3::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
-                        * (r_hand * s)
-                        + vec3(0.0, y_offset, 0.0);
+                    let offset =
+                        Mat3::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET) *
+                            (r_hand * s) +
+                        vec3(0.0, y_offset, 0.0);
                     hand_world_pos = Some(render_pos + offset);
                 }
             } else if let Some(meshes) = static_mesh_list {
                 drawn_body = true;
-                let transform = Mat4::from_translation(render_pos)
-                    * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
-                    * Mat4::from_scale(vec3(
-                        WORLD_PLAYER_RENDER_SCALE,
-                        WORLD_PLAYER_RENDER_SCALE,
-                        WORLD_PLAYER_RENDER_SCALE,
-                    ));
+                let transform =
+                    Mat4::from_translation(render_pos) *
+                    Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET) *
+                    Mat4::from_scale(
+                        vec3(
+                            WORLD_PLAYER_RENDER_SCALE,
+                            WORLD_PLAYER_RENDER_SCALE,
+                            WORLD_PLAYER_RENDER_SCALE
+                        )
+                    );
                 let gl = unsafe { get_internal_gl() };
                 gl.quad_gl.push_model_matrix(transform);
                 for mesh in meshes {
                     if p.color != WHITE {
                         let mut verts = mesh.vertices.clone();
                         for v in &mut verts {
-                            let r = (v.color[0] as f32 / 255.0) * p.color.r;
-                            let g = (v.color[1] as f32 / 255.0) * p.color.g;
-                            let b = (v.color[2] as f32 / 255.0) * p.color.b;
+                            let r = ((v.color[0] as f32) / 255.0) * p.color.r;
+                            let g = ((v.color[1] as f32) / 255.0) * p.color.g;
+                            let b = ((v.color[2] as f32) / 255.0) * p.color.b;
                             let a = v.color[3];
                             v.color[0] = (r.clamp(0.0, 1.0) * 255.0) as u8;
                             v.color[1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
@@ -132,18 +183,8 @@ impl PlayingState {
 
         if !drawn_body {
             let color = if p.skin.is_some() { WHITE } else { p.color };
-            draw_cube(
-                render_pos + vec3(0.0, 0.6, 0.0),
-                vec3(0.6, 1.2, 0.4),
-                None,
-                color,
-            );
-            draw_cube(
-                render_pos + vec3(0.0, 1.4, 0.0),
-                vec3(0.4, 0.4, 0.4),
-                None,
-                color,
-            );
+            draw_cube(render_pos + vec3(0.0, 0.6, 0.0), vec3(0.6, 1.2, 0.4), None, color);
+            draw_cube(render_pos + vec3(0.0, 1.4, 0.0), vec3(0.4, 0.4, 0.4), None, color);
         }
 
         // === weapon rendering (runs regardless of body type) ===
@@ -151,8 +192,9 @@ impl PlayingState {
             // no joint calculated earlier; use generic shoulder/hand offset
             let forward = vec3(render_yaw.cos(), 0.0, render_yaw.sin());
             let right = vec3(-forward.z, 0.0, forward.x);
-            hand_world_pos =
-                Some(render_pos + right * 0.3 * anim_scale + vec3(0.0, 1.0 * anim_scale, 0.0));
+            hand_world_pos = Some(
+                render_pos + right * 0.3 * anim_scale + vec3(0.0, 1.0 * anim_scale, 0.0)
+            );
         }
 
         if let Some(weapon_id) = crate::weapons::stats::WeaponId::from_name(&p.current_weapon) {
@@ -189,21 +231,22 @@ impl PlayingState {
                     // is moving (walking/sprinting) or aiming down sights. idle
                     // players should not have the yaw adjustment applied.
                     let mut yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
-                    let is_moving = p.is_sprinting
-                        || p.is_crouching
-                        || matches!(
+                    let is_moving =
+                        p.is_sprinting ||
+                        p.is_crouching ||
+                        matches!(
                             p.skin_type,
-                            crate::types::player::PlayerSkin::RifleWalk
-                                | crate::types::player::PlayerSkin::WalkBack
-                                | crate::types::player::PlayerSkin::WalkLeft
-                                | crate::types::player::PlayerSkin::WalkRight
-                                | crate::types::player::PlayerSkin::SprintForward
-                                | crate::types::player::PlayerSkin::SprintLeft
-                                | crate::types::player::PlayerSkin::SprintRight
-                                | crate::types::player::PlayerSkin::CrouchForward
-                                | crate::types::player::PlayerSkin::CrouchBack
-                                | crate::types::player::PlayerSkin::CrouchLeft
-                                | crate::types::player::PlayerSkin::CrouchRight
+                            crate::types::player::PlayerSkin::RifleWalk |
+                                crate::types::player::PlayerSkin::WalkBack |
+                                crate::types::player::PlayerSkin::WalkLeft |
+                                crate::types::player::PlayerSkin::WalkRight |
+                                crate::types::player::PlayerSkin::SprintForward |
+                                crate::types::player::PlayerSkin::SprintLeft |
+                                crate::types::player::PlayerSkin::SprintRight |
+                                crate::types::player::PlayerSkin::CrouchForward |
+                                crate::types::player::PlayerSkin::CrouchBack |
+                                crate::types::player::PlayerSkin::CrouchLeft |
+                                crate::types::player::PlayerSkin::CrouchRight
                         );
                     if is_moving || p.is_ads {
                         let adjust = if self.dev_mode.is_unlocked() {
@@ -231,8 +274,9 @@ impl PlayingState {
                     // weapons that use hand animations shouldn't be moved at all – they
                     // already include their own translation in the glTF data. revert to
                     // the previous behavior by simply using hand_world in that case.
-                    let weapon_pos = if world_key.contains("sawnoff")
-                        || world_key.contains("minigun")
+                    let weapon_pos = if
+                        world_key.contains("sawnoff") ||
+                        world_key.contains("minigun")
                     {
                         hand_world
                     } else {
@@ -249,10 +293,11 @@ impl PlayingState {
                         };
                         let zval = if is_moving || p.is_ads { off_z } else { -off_z };
                         let right_dir = vec3(-forward_dir.z, 0.0, forward_dir.x);
-                        let pos = hand_world
-                            + forward_dir * zval
-                            + right_dir * off_x
-                            + vec3(0.0, 1.0, 0.0) * off_y;
+                        let pos =
+                            hand_world +
+                            forward_dir * zval +
+                            right_dir * off_x +
+                            vec3(0.0, 1.0, 0.0) * off_y;
                         let dyn_forward = if is_moving || p.is_ads {
                             WORLD_WEAPON_FORWARD_OFFSET
                         } else {
@@ -262,15 +307,15 @@ impl PlayingState {
                     };
                     let weapon_transform = if self.dev_mode.is_unlocked() {
                         let (rp, _, rr) = self.dev_mode.weapon_rot_offset;
-                        Mat4::from_translation(weapon_pos)
-                            * Mat4::from_rotation_y(yaw_rot)
-                            * Mat4::from_rotation_x(rp)
-                            * Mat4::from_rotation_z(rr)
-                            * Mat4::from_scale(Vec3::splat(scale_factor))
+                        Mat4::from_translation(weapon_pos) *
+                            Mat4::from_rotation_y(yaw_rot) *
+                            Mat4::from_rotation_x(rp) *
+                            Mat4::from_rotation_z(rr) *
+                            Mat4::from_scale(Vec3::splat(scale_factor))
                     } else {
-                        Mat4::from_translation(weapon_pos)
-                            * Mat4::from_rotation_y(yaw_rot)
-                            * Mat4::from_scale(Vec3::splat(scale_factor))
+                        Mat4::from_translation(weapon_pos) *
+                            Mat4::from_rotation_y(yaw_rot) *
+                            Mat4::from_scale(Vec3::splat(scale_factor))
                     };
                     wgl.quad_gl.push_model_matrix(weapon_transform);
                     if let Some(weapon_meshes) = self.models.get(world_key) {
@@ -335,9 +380,11 @@ impl PlayingState {
         use crate::screens::playing::state::DeathCameraPhase;
 
         let (corpse_pos, corpse_yaw) = match self.death_camera_phase {
-            DeathCameraPhase::ZoomOut { corpse_pos, corpse_yaw, .. }
+            | DeathCameraPhase::ZoomOut { corpse_pos, corpse_yaw, .. }
             | DeathCameraPhase::Watching { corpse_pos, corpse_yaw, .. } => (corpse_pos, corpse_yaw),
-            _ => return,
+            _ => {
+                return;
+            }
         };
 
         // Determine death animation based on what stance we were in when we died
@@ -353,7 +400,7 @@ impl PlayingState {
         let mut corpse = crate::types::player::OtherPlayer::new(
             u32::MAX, // dummy ID
             String::new(),
-            self.current_world,
+            self.current_world
         );
         corpse.x = corpse_pos.x;
         corpse.y = corpse_pos.y;
@@ -394,20 +441,22 @@ thread_local! {
             pipeline_params: PipelineParams {
                 depth_write: true,
                 depth_test: Comparison::LessOrEqual,
-                color_blend: Some(BlendState::new(
-                    Equation::Add,
-                    BlendFactor::Value(BlendValue::SourceAlpha),
-                    BlendFactor::OneMinusValue(BlendValue::SourceAlpha),
-                )),
+                color_blend: Some(
+                    BlendState::new(
+                        Equation::Add,
+                        BlendFactor::Value(BlendValue::SourceAlpha),
+                        BlendFactor::OneMinusValue(BlendValue::SourceAlpha)
+                    )
+                ),
                 ..Default::default()
             },
             ..Default::default()
-        },
-    )
-    .expect("player tint shader failed to compile");
+        }
+    ).expect("player tint shader failed to compile");
 }
 
-const TINT_VERTEX: &str = r#"#version 100
+const TINT_VERTEX: &str =
+    r#"#version 100
 attribute vec3 position;
 attribute vec2 texcoord;
 attribute vec4 color0;
@@ -425,7 +474,8 @@ void main() {
     uv = texcoord;
 }"#;
 
-const TINT_FRAGMENT: &str = r#"#version 100
+const TINT_FRAGMENT: &str =
+    r#"#version 100
 varying lowp vec4 color;
 varying lowp vec2 uv;
 

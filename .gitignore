@@ -30,3 +30,7 @@ registry/node_modules/
 
 # Per-player settings saved by the game
 client/settings.json
+
+
+# Local planning notes (never commit)
+planning/
