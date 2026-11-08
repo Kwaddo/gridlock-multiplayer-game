@@ -154,7 +154,6 @@
                 } catch {}
             }
         };
-        canvas.addEventListener("mousedown", lock);
         env.sapp_set_cursor_grab = function (grab) {
             const want = grab !== 0;
             if (want === wantLock) return;
@@ -162,6 +161,89 @@
             if (want) lock();
             else if (document.pointerLockElement === canvas) document.exitPointerLock();
         };
+
+        // ---- keeping the keyboard in the game
+        // Browsers keep some keys for themselves: Esc leaves pointer lock
+        // without the page ever seeing it, and Ctrl+W/T/N close or open tabs
+        // (Ctrl is crouch, so Ctrl+W is crouch-walking). No page can cancel
+        // those, except through the Keyboard Lock API (Chrome, Edge, Opera),
+        // which only works in fullscreen. So the click that grabs the mouse
+        // for play also goes fullscreen with the keyboard locked: Esc then
+        // reaches the game (holding Esc still leaves fullscreen) and Ctrl
+        // shortcuts stay movement keys.
+        // Browsers without it (Firefox, Safari) get the fallbacks below: the
+        // tab asks before closing during a game, and losing pointer lock to
+        // Esc pauses the game as the Esc key would.
+
+        const keyboardLock = navigator.keyboard && navigator.keyboard.lock ? navigator.keyboard : null;
+        // false once the game itself leaves fullscreen (its fullscreen key),
+        // so play stays windowed until it asks for fullscreen again
+        let autoFullscreen = true;
+
+        const lockKeys = () => {
+            if (!keyboardLock) return;
+            const p = keyboardLock.lock();
+            if (p && p.catch) p.catch(() => {});
+        };
+        const enterPlay = () => {
+            if (!wantLock || !keyboardLock || !autoFullscreen || document.fullscreenElement) return;
+            if (!canvas.requestFullscreen) return;
+            try {
+                const p = canvas.requestFullscreen({ navigationUI: "hide" });
+                if (p && p.then) p.then(lockKeys, () => {});
+            } catch {}
+        };
+        document.addEventListener("fullscreenchange", () => {
+            if (document.fullscreenElement) lockKeys();
+            else if (keyboardLock) keyboardLock.unlock();
+        });
+
+        canvas.addEventListener("mousedown", () => {
+            enterPlay(); // first: fullscreen needs the click's user activation
+            lock();
+        });
+
+        // miniquad's fullscreen toggle, remembering what the game chose
+        env.sapp_set_fullscreen = function (on) {
+            autoFullscreen = on !== 0;
+            try {
+                if (on) {
+                    const p = canvas.requestFullscreen();
+                    if (p && p.catch) p.catch(() => {});
+                } else if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                }
+            } catch {}
+        };
+
+        // Shortcuts a page may cancel (Ctrl+S, Ctrl+D, Ctrl+F, Ctrl+R, Ctrl+P...)
+        // stay with the game while it is played. The key still reaches the game.
+        window.addEventListener(
+            "keydown",
+            (e) => {
+                if (wantLock && (e.ctrlKey || e.metaKey || e.altKey)) e.preventDefault();
+            },
+            { capture: true },
+        );
+
+        // During a game, closing the tab (Ctrl+W where nothing else can stop
+        // it) asks first instead of dropping the player out of the match.
+        window.addEventListener("beforeunload", (e) => {
+            const inGame = [...sockets.values()].some((s) => !s.closed);
+            if (!inGame) return;
+            e.preventDefault();
+            e.returnValue = "";
+        });
+
+        // Without the keyboard lock, Esc takes pointer lock away and the game
+        // never hears the key: pass it on, so it pauses as Esc does natively.
+        // (With the lock, Esc reaches the game itself and pointer lock stays.)
+        const ESCAPE = 256; // miniquad's key code
+        document.addEventListener("pointerlockchange", () => {
+            if (document.pointerLockElement === canvas || !wantLock || !wasm_exports) return;
+            wasm_exports.key_down(ESCAPE, 0, false);
+            wasm_exports.key_up(ESCAPE, 0);
+        });
 
         // ---- client audio (client/src/audio.rs): Web Audio, with pitch via playbackRate
 
@@ -176,7 +258,8 @@
         };
 
         // Plays nothing until decoding finishes (it is fast for short effects).
-        env.gridlock_audio_play = function (id, speed, volume) {
+        // `pan` is -1 (left) to 1 (right), for sounds placed around the player.
+        env.gridlock_audio_play = function (id, speed, volume, pan) {
             const buffer = sounds.get(id);
             if (!buffer) return;
             const ctx = audio();
@@ -185,7 +268,13 @@
             source.buffer = buffer;
             source.playbackRate.value = speed;
             gain.gain.value = volume;
-            source.connect(gain).connect(ctx.destination);
+            let node = source.connect(gain);
+            if (pan && ctx.createStereoPanner) {
+                const panner = ctx.createStereoPanner();
+                panner.pan.value = Math.max(-1, Math.min(1, pan));
+                node = node.connect(panner);
+            }
+            node.connect(ctx.destination);
             source.start();
         };
 

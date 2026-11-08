@@ -87,7 +87,7 @@ impl PauseMenu {
     /// "End the match for everyone?": Cancel or End Match. `armed`: clicks count.
     fn draw_confirm_end(&mut self, config: &GameConfig, armed: bool) -> Option<PauseAction> {
         // ESC backs out of the question, not out of the menu
-        if config.bind_settings.is_pressed() {
+        if config.pause_pressed() {
             self.confirm_end = None;
             return None;
         }
@@ -173,7 +173,7 @@ fn draw_main(
 
     // ESC to resume (is_key_pressed is consumed by the Playing state's check,
     // so this only fires on a *second* ESC press while paused as to not immediately unpause when you open the menu)
-    if config.bind_settings.is_pressed() {
+    if config.pause_pressed() {
         return Some(Button::Resume);
     }
 

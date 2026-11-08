@@ -94,6 +94,8 @@ pub struct GameConfig {
     pub minimap_shape: u8,
     // Audio
     pub mute_audio: bool,
+    /// Master volume, 0..1.
+    pub master_volume: f32,
     // Match timer override: None = use server/default, Some(seconds) = show this local timer
     pub match_time_override_secs: Option<u32>,
     // If true, hide the match timer (treat as infinite locally)
@@ -102,6 +104,13 @@ pub struct GameConfig {
 }
 
 impl GameConfig {
+    /// Pause / back: the bound key, or Esc, which always works too (natively,
+    /// and in browsers that hand it to the game; elsewhere losing the mouse
+    /// to Esc is passed on as an Esc press, see web/gridlock_web.js).
+    pub fn pause_pressed(&self) -> bool {
+        self.bind_settings.is_pressed() || is_key_pressed(KeyCode::Escape)
+    }
+
     pub fn defaults() -> Self {
         Self {
             // Mouse - UI value, converted to internal with raw_sensitivity()
@@ -119,12 +128,15 @@ impl GameConfig {
             bind_left: InputBinding::Key(KeyCode::A),
             bind_right: InputBinding::Key(KeyCode::D),
             bind_sprint: InputBinding::Key(KeyCode::LeftShift),
-            bind_crouch: InputBinding::Key(KeyCode::LeftControl),
+            // C, not Ctrl: in a browser Ctrl+W (crouch-walking) closes the tab
+            bind_crouch: InputBinding::Key(KeyCode::C),
             crouch_toggle: false, // default to hold
             slow_walk_toggle: false, // default to hold
             prone_toggle: false, // default to hold
             bind_jump: InputBinding::Key(KeyCode::Space),
-            bind_settings: InputBinding::Key(KeyCode::Escape),
+            // P, not Esc: browsers keep Esc to release the mouse. Esc still
+            // pauses as well (see `pause_pressed`).
+            bind_settings: InputBinding::Key(KeyCode::P),
             bind_reload: InputBinding::Key(KeyCode::R),
             bind_fire: InputBinding::Mouse(MouseButton::Left),
             bind_aim: InputBinding::Mouse(MouseButton::Right),
@@ -155,7 +167,8 @@ impl GameConfig {
             minimap_size: 1,  // Medium
             minimap_shape: 0, // Circle
             // Audio
-            mute_audio: true,
+            mute_audio: false,
+            master_volume: 0.75,
             match_time_override_secs: None,
             hide_match_timer: false,
         }
@@ -230,6 +243,7 @@ impl GameConfig {
             ("Reload", self.bind_reload),
             ("Fire", self.bind_fire),
             ("Aim", self.bind_aim),
+            ("Pause", self.bind_settings),
             ("Weapon 1", self.bind_weapon1),
             ("Weapon 2", self.bind_weapon2),
             ("Weapon 3", self.bind_weapon3),

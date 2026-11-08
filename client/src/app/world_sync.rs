@@ -143,7 +143,7 @@ pub fn sync_world(
             apply_damage(playing_state, damage, attacker_id, is_stun);
         }
         if let Some(bot_shots) = updates.bot_shots {
-            spawn_bot_shots(playing_state, bot_shots);
+            spawn_bot_shots(playing_state, bot_shots, maze.as_ref());
         }
         if let Some(kills) = updates.kill_feed {
             apply_kill_feed(playing_state, kills, player_id, username);

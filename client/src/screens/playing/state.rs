@@ -71,6 +71,8 @@ pub struct PlayingState {
     pub movement_config: MovementConfig,
     pub bob_timer: f32,
     pub audio: crate::audio::Audio,
+    /// Last frame's state, for sounds played on state changes.
+    pub event_sounds: super::simulation::EventSoundState,
     pub assets: HashMap<String, Texture2D>,
     // static meshes keyed by logical asset name; some glTF files contain multiple
     // primitives with different textures, so we now store a vector of meshes
@@ -287,6 +289,7 @@ impl PlayingState {
             movement_config: MovementConfig::new(),
             bob_timer: 0.0,
             audio: crate::audio::Audio::new(),
+            event_sounds: Default::default(),
             assets: HashMap::new(),
             models: HashMap::new(),
             animated_models: HashMap::new(),

@@ -7,6 +7,18 @@ use macroquad::prelude::*;
 const GUI_SCALE_OPTIONS: &[(&str, u8)] = &[("Auto", 0), ("1", 1), ("2", 2), ("3", 3)];
 const MINIMAP_SIZE_OPTIONS: &[(&str, u8)] = &[("Small", 0), ("Medium", 1), ("Large", 2)];
 const MINIMAP_SHAPE_OPTIONS: &[(&str, u8)] = &[("Circle", 0), ("Square", 1)];
+/// Master volume in percent; "Off" mutes.
+const VOLUME_OPTIONS: &[(&str, u8)] =
+    &[("Off", 0), ("25%", 25), ("50%", 50), ("75%", 75), ("100%", 100)];
+
+/// The volume button that is lit for the current settings.
+fn volume_choice(config: &GameConfig) -> u8 {
+    if config.mute_audio {
+        0
+    } else {
+        (config.master_volume * 100.0).round() as u8
+    }
+}
 
 pub fn update_sliders(
     config: &mut GameConfig,
@@ -93,6 +105,24 @@ pub fn update_sliders(
                 && mouse.1 <= shape_row_y + gui_btn_h
             {
                 config.minimap_shape = value;
+            }
+        }
+    }
+
+    // Volume row
+    let volume_row_y = shape_row_y + gui_btn_h + 12.0 * s;
+    if clicked {
+        for (i, &(_, value)) in VOLUME_OPTIONS.iter().enumerate() {
+            let bx = gui_start_x + (gui_btn_w + gui_btn_gap) * (i as f32);
+            if mouse.0 >= bx
+                && mouse.0 <= bx + gui_btn_w
+                && mouse.1 >= volume_row_y
+                && mouse.1 <= volume_row_y + gui_btn_h
+            {
+                config.mute_audio = value == 0;
+                if value > 0 {
+                    config.master_volume = value as f32 / 100.0;
+                }
             }
         }
     }
@@ -199,6 +229,25 @@ pub fn draw_sliders(
         config.minimap_shape,
         slider_x,
         shape_row_y,
+        gui_btn_w,
+        gui_btn_h,
+        gui_btn_gap,
+        btn_fs,
+    );
+
+    // Volume row (draw)
+    let volume_row_y = shape_row_y + gui_btn_h + 12.0 * s;
+    draw_text_ex(
+        "Volume",
+        label_x,
+        volume_row_y + 20.0 * s,
+        text_params(label_fs, WHITE),
+    );
+    draw_button_row(
+        VOLUME_OPTIONS,
+        volume_choice(config),
+        slider_x,
+        volume_row_y,
         gui_btn_w,
         gui_btn_h,
         gui_btn_gap,
