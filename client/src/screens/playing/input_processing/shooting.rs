@@ -6,7 +6,6 @@ use crate::weapons::recoil::apply_shot_recoil;
 
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
-use std::collections::HashMap;
 
 use super::PlayingState;
 
@@ -82,8 +81,9 @@ impl PlayingState {
         let mut total_dmg = 0.0f32;
         let mut any_headshot = false;
         let mut pellet_mask: u16 = 0;
-        let mut player_damage_by_id: HashMap<u32, f32> = HashMap::new();
-        let mut player_backstab_by_id: HashMap<u32, bool> = HashMap::new();
+        // (victim id, damage, backstab) per player hit this shot; a shot has
+        // at most a few pellets, so a linear scan beats two hash maps.
+        let mut player_hits: Vec<(u32, f32, bool)> = Vec::new();
 
         for i in 0..stats.pellet_count as usize {
             // per-pellet nearest-target (reset for each pellet)
@@ -134,34 +134,31 @@ impl PlayingState {
                 });
 
                 // collect all hits as (distance, normal, Option<wall_cell>, is_light_cell)
-                let mut candidates: Vec<(
+                let candidates: [Option<(
                     f32,
                     Vec3,
                     Option<(u8, u8)>,
                     Option<(u8, u8)>,
-                )> = Vec::new();
+                )>; 4] = [
+                    wall_hit.map(|((wx, wy), d, n)| (d, n, Some((wx, wy)), None)),
+                    prop_hit.map(|(d, n)| (d, n, None, None)),
+                    fc_hit.map(|(d, n)| (d, n, None, None)),
+                    light_hit.map(|((lx, ly), d, n)| (d, n, None, Some((lx, ly)))),
+                ];
 
-                if let Some(((wx, wy), d, n)) = wall_hit {
-                    candidates.push((d, n, Some((wx, wy)), None));
-                }
-                if let Some((d, n)) = prop_hit {
-                    candidates.push((d, n, None, None));
-                }
-                if let Some((d, n)) = fc_hit {
-                    candidates.push((d, n, None, None));
-                }
-                if let Some(((lx, ly), d, n)) = light_hit {
-                    candidates.push((d, n, None, Some((lx, ly))));
-                }
+                // pick the closest; on equal distance the earlier candidate
+                // wins, as the stable sort this replaces did
+                let nearest = candidates.into_iter().flatten().fold(
+                    None,
+                    |best: Option<(f32, Vec3, Option<(u8, u8)>, Option<(u8, u8)>)>, c| {
+                        match best {
+                            Some(b) if !(c.0 < b.0) => Some(b),
+                            _ => Some(c),
+                        }
+                    },
+                );
 
-                // pick the closest
-                candidates.sort_by(|a, b| {
-                    a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
-                });
-
-                if let Some((dist, norm, wall_cell, light_cell)) =
-                    candidates.first().copied()
-                {
+                if let Some((dist, norm, wall_cell, light_cell)) = nearest {
                     // if closest hit is a wall, damage it
                     if let Some((wx, wy)) = wall_cell {
                         if let Some(m) = maze.as_mut() {
@@ -310,7 +307,14 @@ impl PlayingState {
                     }
                     EntityKind::Player => {
                         if let Some(victim_id) = self.other_players[idx].entity_id() {
-                            *player_damage_by_id.entry(victim_id).or_insert(0.0) += dmg;
+                            let slot = match player_hits.iter().position(|h| h.0 == victim_id) {
+                                Some(i) => i,
+                                None => {
+                                    player_hits.push((victim_id, 0.0, false));
+                                    player_hits.len() - 1
+                                }
+                            };
+                            player_hits[slot].1 += dmg;
                             let victim_pos = Vec3::new(
                                 self.other_players[idx].x,
                                 self.other_players[idx].y,
@@ -320,7 +324,7 @@ impl PlayingState {
                             let atk_dir = (self.position - victim_pos).normalize_or_zero();
                             let fwd = Vec3::new(victim_yaw.cos(), 0.0, victim_yaw.sin());
                             let is_backstab = atk_dir.dot(fwd) < -0.5;
-                            player_backstab_by_id.insert(victim_id, is_backstab);
+                            player_hits[slot].2 = is_backstab;
                         }
                     }
                     EntityKind::Bot => {
@@ -351,12 +355,8 @@ impl PlayingState {
         }
 
         // Send hit reports in all worlds; server enforces lobby combat rules.
-        for (victim_id, damage) in player_damage_by_id {
+        for (victim_id, damage, is_backstab) in player_hits {
             if damage > 0.0 {
-                let is_backstab = player_backstab_by_id
-                    .get(&victim_id)
-                    .copied()
-                    .unwrap_or(false);
                 self.pending_hits.push((victim_id, damage, is_backstab));
             }
         }
