@@ -41,6 +41,8 @@ pub struct Chat {
     draft: String,
     outgoing: Vec<String>,
     backspace_repeat: f32,
+    /// Lines pushed since the connection began (drives the chat sound).
+    received: u32,
 }
 
 impl Chat {
@@ -53,6 +55,12 @@ impl Chat {
             self.lines.pop_front();
         }
         self.lines.push_back(FeedLine { name, text, age: 0.0 });
+        self.received = self.received.wrapping_add(1);
+    }
+
+    /// How many lines have arrived; grows by one per line.
+    pub fn received(&self) -> u32 {
+        self.received
     }
 
     /// Forget everything (a new connection starts with an empty chat).

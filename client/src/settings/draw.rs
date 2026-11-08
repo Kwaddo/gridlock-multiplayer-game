@@ -23,11 +23,7 @@ impl SettingsScreen {
         let tab_h = 36.0 * s;
         let tab_gap = 10.0 * s;
         let tab_fs = (16.0 * s) as u16;
-        let tabs = [
-            (SettingsTab::General, "General"),
-            (SettingsTab::Keybinds, "Keybinds"),
-            (SettingsTab::Crosshair, "Crosshair"),
-        ];
+        let tabs = self.tabs();
         let total_tabs_w =
             tab_w * tabs.len() as f32 + tab_gap * (tabs.len() as f32 - 1.0);
         let tabs_start_x = (screen_width() - total_tabs_w) / 2.0;

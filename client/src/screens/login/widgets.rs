@@ -2,7 +2,7 @@ use crate::ui::fonts::{measure_game_text, text_params};
 
 use macroquad::prelude::*;
 
-use super::{in_rect, LoginScreen, ACCENT, ACCENT_HOVER, INPUT_BG, INPUT_BORDER, TEXT_DIM, TEXT_LABEL};
+use super::{in_rect, LoginScreen, ACCENT, ACCENT_HOVER, INPUT_BG, INPUT_BORDER, PANEL_BG, TEXT_DIM, TEXT_LABEL};
 use crate::core::game_state::LoginField;
 
 pub(super) const FIELD_H: f32 = 34.0;
@@ -57,6 +57,17 @@ pub(super) fn button(label: &str, size: u16, x: f32, y: f32, w: f32, h: f32) -> 
     draw_rectangle(x, y, w, h, if hover { ACCENT_HOVER } else { ACCENT });
     let tw = measure_game_text(label, size);
     draw_text_ex(label, x + (w - tw) / 2.0, y + h / 2.0 + size as f32 * 0.35, text_params(size, BUTTON_TEXT));
+    hover && is_mouse_button_pressed(MouseButton::Left)
+}
+
+/// Outlined secondary button; returns true on the frame it is clicked.
+pub(super) fn outline_button(label: &str, size: u16, x: f32, y: f32, w: f32, h: f32) -> bool {
+    let hover = in_rect(mouse_position(), x, y, w, h);
+    draw_rectangle(x, y, w, h, PANEL_BG);
+    draw_rectangle_lines(x, y, w, h, if hover { 2.0 } else { 1.0 }, if hover { ACCENT } else { INPUT_BORDER });
+    let tw = measure_game_text(label, size);
+    let color = if hover { WHITE } else { TEXT_LABEL };
+    draw_text_ex(label, x + (w - tw) / 2.0, y + h / 2.0 + size as f32 * 0.35, text_params(size, color));
     hover && is_mouse_button_pressed(MouseButton::Left)
 }
 
