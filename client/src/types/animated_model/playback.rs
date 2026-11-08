@@ -177,16 +177,8 @@ impl AnimatedModel {
     }
     // lets us find a joint position by matching tokens within the joint name (head, hips, etc) so we can create hitboxes for the player
     pub fn joint_position_with_tokens(&self, tokens: &[&str]) -> Option<Vec3> {
-        self.joint_names
-            .iter()
-            .zip(self.joint_positions.iter())
-            .find_map(|(name, pos)| {
-                if tokens.iter().all(|t| name.contains(t)) {
-                    Some(*pos)
-                } else {
-                    None
-                }
-            })
+        super::joints::find_joint(&self.joint_names, tokens)
+            .and_then(|i| self.joint_positions.get(i).copied())
     }
 
     pub fn duration(&self) -> f32 {

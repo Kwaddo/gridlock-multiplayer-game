@@ -16,20 +16,30 @@ use macroquad::prelude::*;
 
 use super::PlayingState;
 
+thread_local! {
+    /// The set `player_anims_in_use` fills, kept between frames so it is
+    /// cleared and refilled instead of allocated every frame.
+    static PLAYER_ANIMS_IN_USE: std::cell::RefCell<std::collections::HashSet<&'static str>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 impl PlayingState {
     /// Player animations something is drawing now: other players, practice
     /// bots, and our own corpse during the death camera. Only these need
     /// skinning; their joints also drive those players' hitboxes.
     fn player_anims_in_use(&self) -> std::collections::HashSet<&'static str> {
+        let mut keys = PLAYER_ANIMS_IN_USE.take();
+        keys.clear();
         let skins = self
             .other_players
             .iter()
             .map(|p| p.skin_type)
             .chain(self.practice_bots.iter().map(|b| b.player.skin_type));
-        let mut keys: std::collections::HashSet<&'static str> = skins
-            .filter_map(|skin| skin.model_key())
-            .map(|key| if self.animated_models.contains_key(key) { key } else { "anim_rifle_idle" })
-            .collect();
+        keys.extend(
+            skins
+                .filter_map(|skin| skin.model_key())
+                .map(|key| if self.animated_models.contains_key(key) { key } else { "anim_rifle_idle" }),
+        );
         // Players drawn with a missing model fall back to the idle clip.
         keys.insert("anim_rifle_idle");
         if !matches!(self.death_camera_phase, super::state::DeathCameraPhase::None) {
@@ -40,6 +50,11 @@ impl PlayingState {
             );
         }
         keys
+    }
+
+    /// Hand the set from `player_anims_in_use` back for the next frame.
+    fn recycle_player_anims_in_use(keys: std::collections::HashSet<&'static str>) {
+        PLAYER_ANIMS_IN_USE.set(keys);
     }
 
     #[inline(always)]
@@ -248,6 +263,7 @@ impl PlayingState {
                 model.advance(delta);
             }
         }
+        Self::recycle_player_anims_in_use(in_use);
         for bot in &mut self.practice_bots {
             bot.simulate_yaw(delta, Some(self.position));
             bot.update(delta);

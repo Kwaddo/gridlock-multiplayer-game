@@ -1,4 +1,4 @@
-use crate::types::animated_model::AnimatedModel;
+use crate::types::animated_model::{AnimatedModel, JointRole};
 use crate::types::player::OtherPlayer;
 use crate::weapons::combat::{default_player_hitboxes, HitZone, Hitbox};
 
@@ -38,7 +38,9 @@ pub(super) fn refresh_player_hitboxes(
     if let Some(hitboxes) =
         build_standing_hitboxes_from_joints(anim, player.render_yaw, scale, y_offset)
     {
-        player.hitboxes = hitboxes;
+        // reuse the vec's allocation rather than building a new one every frame
+        player.hitboxes.clear();
+        player.hitboxes.extend(hitboxes);
     } else {
         player.hitboxes = default_player_hitboxes();
     }
@@ -49,12 +51,9 @@ fn build_standing_hitboxes_from_joints(
     yaw: f32,
     scale: f32,
     y_offset: f32,
-) -> Option<Vec<Hitbox>> {
-    fn any_joint(anim: &AnimatedModel, patterns: &[&[&str]]) -> Option<Vec3> {
-        patterns
-            .iter()
-            .find_map(|tokens| anim.joint_position_with_tokens(tokens))
-    }
+) -> Option<[Hitbox; 10]> {
+    // joint indices are matched by name once at load (see `JointRole::patterns`)
+    let joint = |role: JointRole| anim.joint_role_position(role);
     /*
         Here we are using the same model scaling as the render so visual hitbox indicators line up with the actual hitboxes, and we also apply the same scaling to
         the y_offset which is used to adjust the hitbox positions up or down based on the players height (crouching, standing, etc)
@@ -64,38 +63,18 @@ fn build_standing_hitboxes_from_joints(
         rotated + vec3(0.0, y_offset, 0.0)
     };
 
-    let head = any_joint(anim, &[&["head"], &["neck", "head"]])?;
-    let chest = any_joint(anim, &[&["spine2"], &["chest"], &["spine1"]])?;
-    let hips = any_joint(anim, &[&["hips"], &["pelvis"]])?;
+    let head = joint(JointRole::Head)?;
+    let chest = joint(JointRole::Chest)?;
+    let hips = joint(JointRole::Hips)?;
 
-    let l_foot = any_joint(anim, &[&["left", "foot"], &["left", "toe"]]).unwrap_or(hips);
-    let r_foot = any_joint(anim, &[&["right", "foot"], &["right", "toe"]]).unwrap_or(hips);
-    let l_shoulder =
-        any_joint(anim, &[&["left", "shoulder"], &["left", "arm"]]).unwrap_or(chest);
-    let r_shoulder =
-        any_joint(anim, &[&["right", "shoulder"], &["right", "arm"]]).unwrap_or(chest);
-    let l_elbow = any_joint(
-        anim,
-        &[
-            &["left", "forearm"],
-            &["left", "lowerarm"],
-            &["left", "elbow"],
-        ],
-    )
-    .unwrap_or(l_shoulder);
-    let r_elbow = any_joint(
-        anim,
-        &[
-            &["right", "forearm"],
-            &["right", "lowerarm"],
-            &["right", "elbow"],
-        ],
-    )
-    .unwrap_or(r_shoulder);
-    let l_hand =
-        any_joint(anim, &[&["left", "hand"], &["left", "wrist"]]).unwrap_or(l_elbow);
-    let r_hand =
-        any_joint(anim, &[&["right", "hand"], &["right", "wrist"]]).unwrap_or(r_elbow);
+    let l_foot = joint(JointRole::LeftFoot).unwrap_or(hips);
+    let r_foot = joint(JointRole::RightFoot).unwrap_or(hips);
+    let l_shoulder = joint(JointRole::LeftShoulder).unwrap_or(chest);
+    let r_shoulder = joint(JointRole::RightShoulder).unwrap_or(chest);
+    let l_elbow = joint(JointRole::LeftElbow).unwrap_or(l_shoulder);
+    let r_elbow = joint(JointRole::RightElbow).unwrap_or(r_shoulder);
+    let l_hand = joint(JointRole::LeftHand).unwrap_or(l_elbow);
+    let r_hand = joint(JointRole::RightHand).unwrap_or(r_elbow);
 
     let head_o = to_offset(head);
     let chest_o = to_offset(chest);
@@ -136,7 +115,7 @@ fn build_standing_hitboxes_from_joints(
     let head_up = (head_o - chest_o).normalize_or_zero();
     let head_center = head_o + head_up * (head_radius * 0.25);
 
-    let mut hitboxes = vec![
+    let body = [
         Hitbox {
             center_offset: head_center,
             half_extents: vec3(head_radius, head_radius, head_radius),
@@ -184,34 +163,41 @@ fn build_standing_hitboxes_from_joints(
     /*
         For each segment we creeated earlier, we push into the hitbox list by creating an AABB that encapsulates all of it
     */
-    hitboxes.push(segment_box(
-        l_shoulder_o,
-        l_elbow_o,
-        arm_pad,
-        arm_min,
-        HitZone::Limbs,
-    ));
-    hitboxes.push(segment_box(
-        l_elbow_o,
-        l_hand_o,
-        arm_pad,
-        arm_min,
-        HitZone::Limbs,
-    ));
-    hitboxes.push(segment_box(
-        r_shoulder_o,
-        r_elbow_o,
-        arm_pad,
-        arm_min,
-        HitZone::Limbs,
-    ));
-    hitboxes.push(segment_box(
-        r_elbow_o,
-        r_hand_o,
-        arm_pad,
-        arm_min,
-        HitZone::Limbs,
-    ));
+    let arms = [
+        segment_box(
+            l_shoulder_o,
+            l_elbow_o,
+            arm_pad,
+            arm_min,
+            HitZone::Limbs,
+        ),
+        segment_box(
+            l_elbow_o,
+            l_hand_o,
+            arm_pad,
+            arm_min,
+            HitZone::Limbs,
+        ),
+        segment_box(
+            r_shoulder_o,
+            r_elbow_o,
+            arm_pad,
+            arm_min,
+            HitZone::Limbs,
+        ),
+        segment_box(
+            r_elbow_o,
+            r_hand_o,
+            arm_pad,
+            arm_min,
+            HitZone::Limbs,
+        ),
+    ];
 
-    Some(hitboxes)
+    let [head_box, torso, l_torso, r_torso, l_leg, r_leg] = body;
+    let [l_upper_arm, l_forearm, r_upper_arm, r_forearm] = arms;
+    Some([
+        head_box, torso, l_torso, r_torso, l_leg, r_leg, l_upper_arm, l_forearm, r_upper_arm,
+        r_forearm,
+    ])
 }

@@ -2,6 +2,7 @@ mod clip_select;
 mod constants;
 mod glb;
 mod gpu;
+mod joints;
 mod loader;
 mod nodes;
 mod parts;
@@ -14,8 +15,10 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use gpu::GpuGeometry;
+use joints::JointRoleTable;
 
 pub use glb::{import_glb, GlbImages};
+pub use joints::JointRole;
 pub use loader::{
     load_gltf_animated_model, load_gltf_animated_model_with_clip_index,
     load_gltf_animated_model_with_mode, load_gltf_animated_model_with_unskinned,
@@ -95,6 +98,8 @@ pub struct AnimatedModel {
     node_tracks: Vec<NodeAnimationTrack>,
     joint_nodes: Vec<usize>,
     joint_names: Vec<String>,
+    /// Joint index of each `JointRole`, matched by name once at load.
+    joint_roles: JointRoleTable,
     // here we have joint positions, we cache them every frame so we can detect hitboxes precisely everytime the animation moves
     joint_positions: Vec<Vec3>,
     inverse_bind: Vec<Mat4>,
