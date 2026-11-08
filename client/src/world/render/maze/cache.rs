@@ -40,7 +40,9 @@ pub(super) fn chunks_touched(m: &Maze, changed: &[(u8, u8)]) -> Vec<usize> {
 
 /// Props split into runs drawn together: consecutive in the prop list (the
 /// order they always drew in, which matters for their see-through glows)
-/// and in the same chunk, so each run can be culled as a whole.
+/// and in the same chunk, so each run can be frustum-culled as a whole.
+/// Props are never distance-culled: they always drew at any distance, so
+/// at low render distances they stay visible past the culled floor.
 pub(super) fn prop_groups(m: &Maze) -> Vec<Range<usize>> {
     let (chunks_x, _) = chunk_grid(m);
     let chunk = |i: usize| chunk_of(m.props[i].x as usize, m.props[i].y as usize, chunks_x);
@@ -55,7 +57,8 @@ pub(super) fn prop_groups(m: &Maze) -> Vec<Range<usize>> {
 }
 
 pub(super) fn bake_prop_group(m: &Maze, index: &PropIndex, lighting: &Lighting, group: Range<usize>) -> Vec<MeshData> {
-    let mut out = MeshBuilder::new(true);
+    // Not cullable by distance (only by the frustum).
+    let mut out = MeshBuilder::new(false);
     let lit = |c: Color, p: Vec3| lighting.lit(c, p);
     for prop in &m.props[group] {
         let c = m.cell_to_world(prop.x as i32, prop.y as i32);

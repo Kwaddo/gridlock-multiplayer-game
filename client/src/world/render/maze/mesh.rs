@@ -46,7 +46,7 @@ pub(in crate::world::render) struct Bounds {
     /// Bounds of every item's cull centre.
     pub cull_min: Vec2,
     pub cull_max: Vec2,
-    /// False: drawn whatever the distance (roof, pipes, light fixtures).
+    /// False: drawn whatever the distance (roof, pipes, fixtures, props).
     pub cullable: bool,
 }
 

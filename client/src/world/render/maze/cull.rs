@@ -51,11 +51,27 @@ pub(super) struct DistanceCull {
 }
 
 impl DistanceCull {
-    /// Whether the cell (or prop) centred at `c` is drawn.
+    /// Whether the cell centred at `c` is drawn.
     pub fn keeps(&self, c: Vec2) -> bool {
         let dx = c.x - self.viewer.x;
         let dz = c.y - self.viewer.y;
         dx * dx + dz * dz <= self.max_dist_sq
+    }
+
+    /// Whether geometry centred at `c` in a mesh with bounds `b` is drawn
+    /// (always, when the mesh is not culled by distance).
+    pub fn keeps_in(&self, b: &Bounds, c: Vec2) -> bool {
+        !b.cullable || self.keeps(c)
+    }
+
+    /// The squared distance the vertex shader culls past, for a mesh with
+    /// bounds `b`.
+    pub fn shader_limit(&self, b: &Bounds) -> f32 {
+        if b.cullable {
+            self.max_dist_sq
+        } else {
+            f32::MAX
+        }
     }
 
     /// Whether any cull centre of `mesh` can be within range.

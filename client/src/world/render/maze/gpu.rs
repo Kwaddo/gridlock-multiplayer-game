@@ -147,10 +147,7 @@ pub(super) fn release(meshes: Vec<StoredMesh>) {
 pub(super) fn draw(meshes: &[&StoredMesh], dist: &DistanceCull) {
     let mut gl = unsafe { get_internal_gl() };
     let projection = gl.quad_gl.get_projection_matrix();
-    let cull_of = |b: &Bounds| {
-        let max = if b.cullable { dist.max_dist_sq } else { f32::MAX };
-        [dist.viewer.x, dist.viewer.y, max, 0.0]
-    };
+    let cull_of = |b: &Bounds| [dist.viewer.x, dist.viewer.y, dist.shader_limit(b), 0.0];
 
     if meshes.iter().any(|m| matches!(m, StoredMesh::Gpu { .. })) {
         if let Some(pipeline) = pipeline(gl.quad_context) {
@@ -182,7 +179,7 @@ pub(super) fn draw(meshes: &[&StoredMesh], dist: &DistanceCull) {
     for m in meshes {
         let StoredMesh::Cpu(mesh) = m else { continue };
         for item in &mesh.items {
-            if mesh.bounds.cullable && !dist.keeps(item.cull) {
+            if !dist.keeps_in(&mesh.bounds, item.cull) {
                 continue;
             }
             scratch_v.clear();
