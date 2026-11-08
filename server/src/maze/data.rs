@@ -22,6 +22,9 @@ pub struct MazeData {
     /// `cells` with prop cells blocked too: the grid bots route on. Kept in
     /// step with `cells` by [`MazeData::break_wall`].
     nav_cells: Vec<u8>,
+    /// The encoded `ServerMsg::Maze`, built on the first send and shared by
+    /// every recipient until a wall breaks.
+    encoded: std::cell::OnceCell<Vec<u8>>,
 }
 
 impl MazeData {
@@ -54,6 +57,7 @@ impl MazeData {
             analysis: maze_analysis,
             prop_cells,
             nav_cells,
+            encoded: std::cell::OnceCell::new(),
         }
     }
 
@@ -68,6 +72,11 @@ impl MazeData {
     }
 
     pub fn send(&self, socket: &Outbox, addr: PeerId) {
+        let msg = self.encoded.get_or_init(|| self.encode());
+        let _ = socket.send_to(msg, addr);
+    }
+
+    fn encode(&self) -> Vec<u8> {
         let layout = wire::MazeLayout {
             width: self.width,
             height: self.height,
@@ -85,8 +94,7 @@ impl MazeData {
                 .collect(),
             cells: self.cells.clone(),
         };
-        let msg = ServerMsg::Maze(layout).encode();
-        let _ = socket.send_to(&msg, addr);
+        ServerMsg::Maze(layout).encode()
     }
 
     pub fn teleporter_world(&self, cell_size: f32) -> (f32, f32, f32) {
@@ -344,6 +352,7 @@ impl MazeData {
         }
         if self.cells[idx] == 0 {
             self.cells[idx] = 1;
+            self.encoded = std::cell::OnceCell::new();
             if !self.prop_cells[idx] {
                 self.nav_cells[idx] = 1;
             }

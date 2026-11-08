@@ -39,6 +39,9 @@ pub(super) const LIGHT_INTENSITY: f32 = 0.38;
 pub(super) const CHUNK_CELLS: usize = 8;
 /// Consecutive props (same chunk) baked into one draw call at most.
 pub(super) const PROPS_PER_GROUP: usize = 16;
+/// Frame time spent recolouring the maze after a light goes out; the rest
+/// waits for later frames.
+pub(super) const RELIGHT_BUDGET_SECS: f64 = 0.002;
 /// The render distance never drops below this many cells.
 pub(super) const MIN_RENDER_CELLS: f32 = 10.0;
 /// Cells are drawn up to this many cells past the render distance.

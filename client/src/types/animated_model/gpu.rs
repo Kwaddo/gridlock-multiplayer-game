@@ -175,31 +175,46 @@ fn gpu_parts(ctx: &mut dyn miniquad::RenderingBackend, parts: &[AnimatedPart]) -
 }
 
 impl AnimatedModel {
+    /// Compile the skinning shader and upload this model's buffers now (at
+    /// load) rather than in the first frame that draws it, which would hitch.
+    pub fn prepare_gpu(&self) {
+        let gl = unsafe { get_internal_gl() };
+        let _ = self.ensure_gpu(gl.quad_context);
+    }
+
+    /// The skinning pipeline and white texture once this model's buffers are
+    /// on the GPU (uploading them the first time); `None` when this model or
+    /// GPU cannot skin on the GPU.
+    fn ensure_gpu(
+        &self,
+        ctx: &mut dyn miniquad::RenderingBackend,
+    ) -> Option<(miniquad::Pipeline, miniquad::TextureId)> {
+        if self.skin_mats.len() > MAX_GPU_JOINTS || force_cpu_skinning() {
+            return None;
+        }
+        let skinning = GPU_SKINNING
+            .with(|s| s.get_or_init(|| gpu_skinning_setup(ctx)).as_ref().map(|s| (s.pipeline, s.white)))?;
+        let mut gpu = self.geometry.gpu.borrow_mut();
+        if matches!(*gpu, GpuGeometry::Untried) {
+            *gpu = match gpu_parts(ctx, &self.geometry.parts) {
+                Some(parts) => GpuGeometry::Ready(parts),
+                None => GpuGeometry::Unavailable,
+            };
+        }
+        matches!(*gpu, GpuGeometry::Ready(_)).then_some(skinning)
+    }
+
     /// Draw the model skinned by the GPU at `model` (its world transform),
     /// multiplied by `tint`, from buffers uploaded once. Returns false when
     /// this model or GPU cannot (rigid parts, too many joints, no shader);
     /// draw `meshes()` then, which `update` keeps skinned on the CPU.
     pub fn draw_gpu(&self, model: Mat4, tint: Color) -> bool {
-        if self.skin_mats.len() > MAX_GPU_JOINTS || force_cpu_skinning() {
-            self.gpu_drawn.set(false);
-            return false;
-        }
         let mut gl = unsafe { get_internal_gl() };
-        let Some(skinning) = GPU_SKINNING.with(|s| {
-            s.get_or_init(|| gpu_skinning_setup(gl.quad_context))
-                .as_ref()
-                .map(|s| (s.pipeline, s.white))
-        }) else {
+        let Some(skinning) = self.ensure_gpu(gl.quad_context) else {
             self.gpu_drawn.set(false);
             return false;
         };
-        let mut gpu = self.geometry.gpu.borrow_mut();
-        if matches!(*gpu, GpuGeometry::Untried) {
-            *gpu = match gpu_parts(gl.quad_context, &self.geometry.parts) {
-                Some(parts) => GpuGeometry::Ready(parts),
-                None => GpuGeometry::Unavailable,
-            };
-        }
+        let gpu = self.geometry.gpu.borrow();
         let GpuGeometry::Ready(parts) = &*gpu else {
             self.gpu_drawn.set(false);
             return false;
