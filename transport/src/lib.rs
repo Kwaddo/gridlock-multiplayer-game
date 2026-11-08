@@ -52,6 +52,16 @@ pub fn prewarm(target: &str) {
     let _ = target;
 }
 
+/// Connect to `target` now, before the player joins it, so the join itself
+/// does not wait for the connection (see [`web::preconnect`]). Nothing to do
+/// on native builds, whose links need no setup.
+pub fn preconnect(target: &str) {
+    #[cfg(target_arch = "wasm32")]
+    web::preconnect(target);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = target;
+}
+
 /// A link that first replays packets read before it was handed over
 /// (e.g. everything that arrived in the same batch as the join reply).
 pub struct Backlogged {

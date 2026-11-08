@@ -11,6 +11,7 @@ mod ffi {
         pub fn gridlock_rtc_take(handle: u32, buf: *mut u8);
         pub fn gridlock_rtc_close(handle: u32);
         pub fn gridlock_rtc_prewarm(url: *const u8, url_len: u32);
+        pub fn gridlock_rtc_preconnect(url: *const u8, url_len: u32);
 
         pub fn gridlock_http_start(
             method: *const u8,
@@ -95,6 +96,14 @@ impl Drop for RtcSocket {
 /// every frame; repeats are ignored for a while.
 pub fn prewarm(room_url: &str) {
     unsafe { ffi::gridlock_rtc_prewarm(room_url.as_ptr(), room_url.len() as u32) }
+}
+
+/// Connect to the room at `room_url` now, ahead of a join: the next
+/// [`RtcLink::open`] for it takes over the connection, open already. Call
+/// every frame while the join is likely (the room is listed as on the
+/// player's own network); one not asked for in a few seconds is closed.
+pub fn preconnect(room_url: &str) {
+    unsafe { ffi::gridlock_rtc_preconnect(room_url.as_ptr(), room_url.len() as u32) }
 }
 
 /// A player's link to the host of a signalling room.

@@ -22,7 +22,7 @@ How it differs from the Worker:
   meet, so a room is a set of mailboxes: peers `POST /room/:code/send` and
   `GET /room/:code/poll`. A poll is held open (long polling) until a message
   arrives, listing the mailbox every 25 ms while a handshake is going on
-  (50 ms for an idle host waiting for players). The host keeps two offers
+  (50 ms for an idle host waiting for players). The host keeps four offers
   made ahead of any join in `rooms/<code>/spare.json` (`POST`/`GET
   /room/:code/spare`, rewritten every 30 s and as they are taken). A player
   fetches one when it points at the room, answers it, and sends the answer
