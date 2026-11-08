@@ -271,7 +271,7 @@ impl BotManager {
                     let dz = pos.2 - bot.position.2;
                     ai::Engagement { target_pos: pos, distance: (dx * dx + dz * dz).sqrt() }
                 });
-                let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height, m.props.as_slice()));
+                let maze_cells = maze.map(|m| (m.cells.as_slice(), m.width, m.height, m.prop_cells()));
                 ai::tick_bot(bot, state, dt, &PhysicsConfig::default(), maze_cells, engage);
 
                 if let Some(target_pos) = target_pos {

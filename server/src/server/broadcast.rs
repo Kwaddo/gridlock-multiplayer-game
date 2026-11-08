@@ -143,58 +143,170 @@ pub fn broadcast_state_with_events(socket: &Outbox, players: &HashMap<PeerId, Pl
 
 fn send_state(socket: &Outbox, players: &HashMap<PeerId, Player>, include_events: bool) {
     let now = Instant::now();
+    // The message only depends on the receiver's world: encode it once per
+    // world (at most a couple) and send the same bytes to everyone in it.
+    let mut by_world: Vec<(WorldId, Vec<u8>)> = Vec::with_capacity(2);
 
     for (recv_addr, receiver) in players.iter() {
         if receiver.is_bot {
             continue;
         }
+        let at = match by_world.iter().position(|(w, _)| *w == receiver.world) {
+            Some(at) => at,
+            None => {
+                by_world.push((receiver.world, state_msg(players, receiver.world, include_events, now)));
+                by_world.len() - 1
+            }
+        };
+        let _ = socket.send_to(&by_world[at].1, *recv_addr);
+    }
+}
 
-        let mut entries = Vec::new();
-        for player in players.values() {
-            if player.world != receiver.world {
+/// The encoded `MSG_STATE` for a receiver in `world`: every player in that
+/// world, in the map's iteration order.
+pub(crate) fn state_msg(
+    players: &HashMap<PeerId, Player>,
+    world: WorldId,
+    include_events: bool,
+    now: Instant,
+) -> Vec<u8> {
+    let mut entries = Vec::new();
+    for player in players.values() {
+        if player.world != world {
+            continue;
+        }
+        let mut state_flags = 0u8;
+        if player.is_sprinting { state_flags |= FLAG_SPRINTING; }
+        if player.is_crouched  { state_flags |= FLAG_CROUCHING; }
+        if player.is_ads       { state_flags |= FLAG_ADS; }
+        if player.is_airborne  { state_flags |= FLAG_AIRBORNE; }
+        if player.is_prone     { state_flags |= FLAG_PRONE; }
+        if player.is_sliding   { state_flags |= FLAG_SLIDING; }
+        if player.is_bot       { state_flags |= FLAG_IS_BOT; }
+        if player.is_silent    { state_flags |= FLAG_SILENT; }
+
+        let mut event_flags = 0u8;
+        if include_events {
+            if player.evt_jump_start { event_flags |= EVT_JUMP_START; }
+            if player.evt_landed     { event_flags |= EVT_LANDED; }
+        }
+
+        let freeze_secs: u8 = match player.post_teleport_freeze_until {
+            Some(t) if t > now => t.saturating_duration_since(now).as_secs().min(255) as u8,
+            _ => 0u8,
+        };
+
+        entries.push(PlayerState {
+            id: player.id,
+            position: player.position,
+            yaw: player.yaw,
+            world: player.world.as_u8(),
+            state_flags,
+            event_flags,
+            kills: player.kills,
+            gun_level: player.gun_level as u8,
+            health: player.health as f32,
+            max_health: player.max_health as f32,
+            name: player.username.clone(),
+            alive: player.is_alive,
+            freeze_secs,
+            team: player.team.as_u8(),
+            weapon: player.current_weapon.clone(),
+        });
+    }
+    ServerMsg::State(entries).encode()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::net::BOT_PEER_BASE;
+    use crate::player::Team;
+    use std::time::Duration;
+
+    /// The previous `send_state`: one message built and encoded per receiver.
+    fn per_receiver(players: &HashMap<PeerId, Player>, include_events: bool) -> Vec<(PeerId, Vec<u8>)> {
+        let now = Instant::now();
+        let mut out = Vec::new();
+        for (recv_addr, receiver) in players.iter() {
+            if receiver.is_bot {
                 continue;
             }
-            let mut state_flags = 0u8;
-            if player.is_sprinting { state_flags |= FLAG_SPRINTING; }
-            if player.is_crouched  { state_flags |= FLAG_CROUCHING; }
-            if player.is_ads       { state_flags |= FLAG_ADS; }
-            if player.is_airborne  { state_flags |= FLAG_AIRBORNE; }
-            if player.is_prone     { state_flags |= FLAG_PRONE; }
-            if player.is_sliding   { state_flags |= FLAG_SLIDING; }
-            if player.is_bot       { state_flags |= FLAG_IS_BOT; }
-            if player.is_silent    { state_flags |= FLAG_SILENT; }
-
-            let mut event_flags = 0u8;
-            if include_events {
-                if player.evt_jump_start { event_flags |= EVT_JUMP_START; }
-                if player.evt_landed     { event_flags |= EVT_LANDED; }
+            let mut entries = Vec::new();
+            for player in players.values() {
+                if player.world != receiver.world {
+                    continue;
+                }
+                let mut state_flags = 0u8;
+                if player.is_sprinting { state_flags |= FLAG_SPRINTING; }
+                if player.is_crouched  { state_flags |= FLAG_CROUCHING; }
+                if player.is_ads       { state_flags |= FLAG_ADS; }
+                if player.is_airborne  { state_flags |= FLAG_AIRBORNE; }
+                if player.is_prone     { state_flags |= FLAG_PRONE; }
+                if player.is_sliding   { state_flags |= FLAG_SLIDING; }
+                if player.is_bot       { state_flags |= FLAG_IS_BOT; }
+                if player.is_silent    { state_flags |= FLAG_SILENT; }
+                let mut event_flags = 0u8;
+                if include_events {
+                    if player.evt_jump_start { event_flags |= EVT_JUMP_START; }
+                    if player.evt_landed     { event_flags |= EVT_LANDED; }
+                }
+                let freeze_secs: u8 = match player.post_teleport_freeze_until {
+                    Some(t) if t > now => t.saturating_duration_since(now).as_secs().min(255) as u8,
+                    _ => 0u8,
+                };
+                entries.push(PlayerState {
+                    id: player.id,
+                    position: player.position,
+                    yaw: player.yaw,
+                    world: player.world.as_u8(),
+                    state_flags,
+                    event_flags,
+                    kills: player.kills,
+                    gun_level: player.gun_level as u8,
+                    health: player.health as f32,
+                    max_health: player.max_health as f32,
+                    name: player.username.clone(),
+                    alive: player.is_alive,
+                    freeze_secs,
+                    team: player.team.as_u8(),
+                    weapon: player.current_weapon.clone(),
+                });
             }
-
-            let freeze_secs: u8 = match player.post_teleport_freeze_until {
-                Some(t) if t > now => t.saturating_duration_since(now).as_secs().min(255) as u8,
-                _ => 0u8,
-            };
-
-            entries.push(PlayerState {
-                id: player.id,
-                position: player.position,
-                yaw: player.yaw,
-                world: player.world.as_u8(),
-                state_flags,
-                event_flags,
-                kills: player.kills,
-                gun_level: player.gun_level as u8,
-                health: player.health as f32,
-                max_health: player.max_health as f32,
-                name: player.username.clone(),
-                alive: player.is_alive,
-                freeze_secs,
-                team: player.team.as_u8(),
-                weapon: player.current_weapon.clone(),
-            });
+            out.push((*recv_addr, ServerMsg::State(entries).encode()));
         }
-        let state_msg = ServerMsg::State(entries).encode();
+        out
+    }
 
-        let _ = socket.send_to(&state_msg, *recv_addr);
+    #[test]
+    fn shared_per_world_state_equals_per_receiver_state() {
+        let mut players = HashMap::new();
+        for i in 0..12u32 {
+            let bot = i % 4 == 3;
+            let addr = if bot { PeerId(BOT_PEER_BASE + i) } else { PeerId(i + 1) };
+            let mut p = Player::new(i + 1, format!("player{}", i));
+            p.is_bot = bot;
+            p.world = if i % 3 == 0 { WorldId::Lobby } else { WorldId::Maze };
+            p.team = if i % 2 == 0 { Team::Red } else { Team::Blue };
+            p.position = (i as f32 * 1.5, 0.25, -(i as f32));
+            p.yaw = i as f32 * 0.3;
+            p.kills = i;
+            p.is_sprinting = i % 2 == 1;
+            p.is_crouched = i % 5 == 0;
+            p.is_alive = i != 7;
+            p.evt_jump_start = i % 3 == 1;
+            p.evt_landed = i % 4 == 2;
+            p.current_weapon = if i % 2 == 0 { "M4A1".into() } else { "Shotgun".into() };
+            // far enough off that both versions round it the same
+            p.post_teleport_freeze_until = (i % 4 == 1).then(|| Instant::now() + Duration::from_millis(5500));
+            players.insert(addr, p);
+        }
+        for include_events in [false, true] {
+            let outbox = Outbox::default();
+            send_state(&outbox, &players, include_events);
+            let shared = outbox.drain();
+            assert_eq!(shared, per_receiver(&players, include_events));
+            assert_eq!(shared.len(), players.values().filter(|p| !p.is_bot).count());
+        }
     }
 }
