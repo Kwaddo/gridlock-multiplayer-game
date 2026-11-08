@@ -51,7 +51,7 @@ fn run(
                 manager.bot_states_mut().get_mut(&addr).unwrap().behavior = b;
             }
         }
-        let cells = Some((maze.cells.as_slice(), maze.width, maze.height, maze.props.as_slice()));
+        let cells = Some((maze.cells.as_slice(), maze.width, maze.height, maze.prop_cells()));
         let state = manager.bot_states_mut().get_mut(&addr).unwrap();
         let bot = players.get_mut(&addr).unwrap();
         ai::tick_bot(bot, state, DT, &PhysicsConfig::default(), cells, None);
@@ -171,4 +171,56 @@ fn teamless_bots_fight_everyone_in_gun_game() {
     let mut blue = Player::new(4, "blue".into());
     blue.team = Team::Blue;
     assert!(red.is_hostile_to(&blue));
+}
+
+/// The per-cell prop lookup collides exactly where the old loop over every
+/// prop did, including on cell edges.
+#[test]
+fn prop_lookup_matches_scanning_every_prop() {
+    const R: f32 = 0.28;
+    let old = |maze: &MazeData, x: f32, z: f32| {
+        maze.props.iter().any(|prop| {
+            let px = prop.x as f32 * MAZE_CELL_SIZE;
+            let pz = prop.y as f32 * MAZE_CELL_SIZE;
+            x + R > px && x - R < px + MAZE_CELL_SIZE && z + R > pz && z - R < pz + MAZE_CELL_SIZE
+        })
+    };
+    let mut hits = 0;
+    for side in maze_sizes() {
+        let maze = MazeData::new(side, side);
+        let extent = side as f32 * MAZE_CELL_SIZE;
+        // cell edges (plus and minus the radius) and points between
+        let steps = side as usize * 24;
+        for i in 0..=steps {
+            for j in 0..=steps {
+                let (x, z) = (i as f32 * extent / steps as f32, j as f32 * extent / steps as f32);
+                for (x, z) in [(x, z), (x - R, z + R), (x + R, z - R)] {
+                    let new = ai::footprint_hits_prop(maze.prop_cells(), maze.width, maze.height, x, z, R);
+                    assert_eq!(new, old(&maze, x, z), "at ({}, {})", x, z);
+                    hits += new as usize;
+                }
+            }
+        }
+    }
+    assert!(hits > 0, "no props were touched at all");
+}
+
+/// The cached navigation grid is the maze with props blocked, and follows
+/// broken walls.
+#[test]
+fn nav_cells_block_props_and_follow_broken_walls() {
+    let mut maze = MazeData::new(MAZE_MIN_SIDE, MAZE_MIN_SIDE);
+    let expected = |maze: &MazeData| {
+        let mut nav = maze.cells.clone();
+        for prop in &maze.props {
+            nav[prop.y as usize * maze.width as usize + prop.x as usize] = 0;
+        }
+        nav
+    };
+    assert_eq!(maze.nav_cells(), expected(&maze).as_slice());
+    let w = maze.width as usize;
+    let wall = (w + 1..maze.cells.len() - w - 1).find(|&i| maze.cells[i] == 0 && !maze.prop_cells()[i]).expect("an inner wall");
+    assert!(maze.break_wall((wall % w) as u8, (wall / w) as u8));
+    assert_eq!(maze.nav_cells()[wall], 1);
+    assert_eq!(maze.nav_cells(), expected(&maze).as_slice());
 }

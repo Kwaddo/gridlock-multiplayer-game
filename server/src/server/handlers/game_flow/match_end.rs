@@ -119,6 +119,9 @@ pub fn check_early_end_conditions(
     }
 }
 
+/// How often an infinite match re-sends its (unchanging) timer as a heartbeat.
+const MATCH_TIMER_HEARTBEAT: Duration = Duration::from_secs(1);
+
 /// Update the authoritative match timer and check for timeout-based end.
 pub fn update_match_timer(
     socket: &Outbox,
@@ -127,6 +130,7 @@ pub fn update_match_timer(
     match_running: &mut bool,
     match_start_time: &mut Option<Instant>,
     last_match_time_sent: &mut Option<u16>,
+    last_match_heartbeat: &mut Option<Instant>,
     _match_total_maze_entries: &mut usize,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
@@ -150,9 +154,14 @@ pub fn update_match_timer(
         // if the match is infinite we still need to send periodic
         // heartbeat packets so clients don't time out; finite matches are
         // already guaranteed to send every second as the value changes.
-        if match_duration.is_none() || *last_match_time_sent != Some(remaining_secs) {
+        // The heartbeat goes out at most once a second: well inside the
+        // client's connection-lost timeout, without a packet on every tick.
+        let heartbeat_due = match_duration.is_none()
+            && last_match_heartbeat.map_or(true, |at| at.elapsed() >= MATCH_TIMER_HEARTBEAT);
+        if heartbeat_due || *last_match_time_sent != Some(remaining_secs) {
             let _ = broadcast::broadcast_match_timer(socket, players, remaining_secs);
             *last_match_time_sent = Some(remaining_secs);
+            *last_match_heartbeat = Some(Instant::now());
         }
 
         // timeout -> show match-end screen then return to lobby after countdown
