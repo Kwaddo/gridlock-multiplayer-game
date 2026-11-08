@@ -40,6 +40,8 @@ pub struct Server {
     match_end_pending: Option<(Instant, u32, String)>,
     // last sent authoritative match timer (to avoid spamming identical values)
     last_match_time_sent: Option<u16>,
+    /// Last match timer sent: an infinite match repeats it as a 1 Hz heartbeat.
+    last_match_heartbeat: Option<Instant>,
     // last sent warmup countdown (MSG_MATCH_COUNTDOWN)
     last_warmup_sent: Option<u8>,
     // last sent match-end countdown (MSG_MATCH_END countdown byte)
@@ -63,6 +65,8 @@ pub struct Server {
     // Regen fires at most once per second to avoid per-packet health spikes
     last_regen_tick: Instant,
     last_state_broadcast: Option<Instant>,
+    /// Last run of the tick's rate-limited bookkeeping (inactivity timeouts).
+    last_bookkeeping: Option<Instant>,
     /// Player count at the last state broadcast: a join or leave sends at once.
     last_broadcast_players: usize,
     /// When each player last chatted (chat rate limit).
@@ -89,6 +93,7 @@ impl Server {
             match_warmup_end: None,
             match_end_pending: None,
             last_match_time_sent: None,
+            last_match_heartbeat: None,
             last_warmup_sent: None,
             last_end_countdown_sent: None,
             match_mode: MODE_TEAM_DEATHMATCH,
@@ -107,6 +112,7 @@ impl Server {
             last_tick: Instant::now(),
             last_regen_tick: Instant::now(),
             last_state_broadcast: None,
+            last_bookkeeping: None,
             last_broadcast_players: 0,
             last_chat: HashMap::new(),
             last_status_sent: None,

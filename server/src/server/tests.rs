@@ -269,3 +269,31 @@ fn only_the_host_sets_the_lobby_settings_and_everyone_hears() {
     server.handle_packet(c, &ClientMsg::Join { username: "cat".into() }.encode());
     assert!(to(&server.drain_outbox(), c).contains(&ServerMsg::LobbySettings(expected)));
 }
+
+#[test]
+fn an_endless_match_sends_its_timer_heartbeat_once_a_second() {
+    let mut server = Server::new();
+    let (a, b) = (PeerId(1), PeerId(2));
+    server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
+    server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+    start_match(&mut server, a);
+    server.match_duration = None;
+    let timers = |out: &[(PeerId, Vec<u8>)]| {
+        to(out, b).iter().filter(|m| matches!(m, ServerMsg::MatchTimer { secs: u16::MAX })).count()
+    };
+
+    server.tick();
+    server.drain_outbox();
+    // ticking after every packet sends no timer within the second
+    for _ in 0..50 {
+        server.tick();
+    }
+    assert_eq!(timers(&server.drain_outbox()), 0);
+
+    // a second on, exactly one heartbeat
+    server.last_match_heartbeat = Some(Instant::now() - Duration::from_millis(1100));
+    for _ in 0..50 {
+        server.tick();
+    }
+    assert_eq!(timers(&server.drain_outbox()), 1);
+}
