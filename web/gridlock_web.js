@@ -65,7 +65,9 @@
     // A host keeps this many offers made ahead of any join ("spares") on the
     // registry. A player answers one and sends the answer with its join, so
     // the handshake is one signalling trip, and the host gathers nothing on it.
-    const SPARE_COUNT = 2;
+    // (Enough that players joining in quick succession rarely pick one
+    // already taken, which costs them the slow way round.)
+    const SPARE_COUNT = 4;
     // Spares are made anew this often (a NAT forgets an idle mapping after a
     // while); the ones they replace still take answers this much longer.
     const SPARE_ROTATE_MS = 30000;
@@ -76,6 +78,14 @@
     // A player fetches a room's spare when it points at the room (before it
     // clicks join), and uses what it fetched for this long.
     const PREWARM_MS = 15000;
+    // Games on the player's own network are connected to as soon as they are
+    // listed (see preconnect), so joining one only waits for the game's own
+    // Join and Welcome. A connection nobody asked for in this long is closed.
+    const PRECONNECT_IDLE_MS = 10000;
+    const PRECONNECT_MAX = 4;
+    // A connection ahead that failed (the host just left, still listed) is
+    // tried again after this, not on every frame.
+    const PRECONNECT_RETRY_MS = 5000;
     // ICE candidates come in bursts; signals queued within this long go out
     // as one request.
     const SEND_BATCH_MS = 20;
@@ -910,6 +920,62 @@
         return hit && Date.now() - hit.at < PREWARM_MS ? hit.spare : fetchSpare(room);
     }
 
+    // Player sockets opened ahead of a join, by room http url:
+    // { socket, wanted, at }. The host takes no notice of a peer until it sends
+    // Join, so an open connection costs it nothing but the connection.
+    const preconnected = new Map();
+    let preconnectSweep = null;
+
+    function preconnect(roomUrl) {
+        const room = roomHttpUrl(roomUrl);
+        // Already in that game (or joining it): nothing to get ready.
+        for (const s of sockets.values()) if (!s.isHost && !s.closed && s.room === room) return;
+        const hit = preconnected.get(room);
+        if (hit && (!hit.socket.closed || Date.now() - hit.at < PRECONNECT_RETRY_MS)) {
+            hit.wanted = Date.now();
+            return;
+        }
+        if (hit) preconnected.delete(room);
+        if (preconnected.size >= PRECONNECT_MAX) return;
+        preconnected.set(room, { socket: new RtcSocket(roomUrl, false), wanted: Date.now(), at: Date.now() });
+        preconnectSweep ??= setInterval(sweepPreconnected, 2000);
+    }
+
+    function sweepPreconnected() {
+        for (const [room, p] of preconnected) {
+            if (Date.now() - p.wanted > PRECONNECT_IDLE_MS) {
+                p.socket.shutdown();
+                preconnected.delete(room);
+            }
+        }
+        if (!preconnected.size) {
+            clearInterval(preconnectSweep);
+            preconnectSweep = null;
+        }
+    }
+
+    // The socket opened ahead for this room, if it is still good.
+    function takePreconnected(roomUrl) {
+        let room;
+        try {
+            room = roomHttpUrl(roomUrl);
+        } catch {
+            return null;
+        }
+        const hit = preconnected.get(room);
+        preconnected.delete(room);
+        // (Not one whose host went away meanwhile: a fresh join instead.)
+        const lost = hit?.socket.events.some((e) => e.kind === EV_PEER_LEFT || e.kind === EV_CLOSED);
+        if (!hit || hit.socket.closed || lost) {
+            hit?.socket.shutdown();
+            return null;
+        }
+        const open = [...hit.socket.peers.values()].some((p) => p.open);
+        const ms = Math.round(performance.now() - hit.socket.t0);
+        console.info(`gridlock_web: joining over a connection opened ${ms} ms ago (${open ? "open" : "still connecting"})`);
+        return hit.socket;
+    }
+
     async function fetchSpare(room) {
         try {
             const resp = await fetch(room + "/spare", { cache: "no-store" });
@@ -1244,9 +1310,17 @@
 
         env.gridlock_rtc_open = function (urlPtr, urlLen, isHost) {
             const handle = nextHandle++;
-            sockets.set(handle, new RtcSocket(readString(urlPtr, urlLen), isHost !== 0));
+            const url = readString(urlPtr, urlLen);
+            const ahead = isHost === 0 ? takePreconnected(url) : null;
+            sockets.set(handle, ahead || new RtcSocket(url, isHost !== 0));
             keepRunningWhenHidden();
             return handle;
+        };
+
+        env.gridlock_rtc_preconnect = function (urlPtr, urlLen) {
+            try {
+                preconnect(readString(urlPtr, urlLen));
+            } catch {}
         };
 
         env.gridlock_rtc_prewarm = function (urlPtr, urlLen) {
