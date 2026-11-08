@@ -14,6 +14,10 @@ use crate::protocols::*;
 impl Server {
     /// Process one inbound packet (`[msg_type][payload]`) from `src_addr`.
     pub fn handle_packet(&mut self, src_addr: PeerId, packet: &[u8]) {
+        // a client of another version that was turned away gets no further
+        if self.handle_rejected(src_addr, packet) {
+            return;
+        }
         let Some(msg) = ClientMsg::decode(packet) else {
             if let Some(msg_type) = packet.first() {
                 log!("Unknown or malformed message type: {}", msg_type);
@@ -22,7 +26,12 @@ impl Server {
         };
 
         match msg {
-            ClientMsg::Join { username } => {
+            ClientMsg::Join { username, version } => {
+                if version != Some(PROTOCOL_VERSION) {
+                    self.reject_join(src_addr, &username, version);
+                    return;
+                }
+                self.rejected.remove(&src_addr);
                 handlers::handle_join(
                     &self.outbox,
                     &mut self.players,
@@ -82,7 +91,7 @@ impl Server {
                 // stay in sync.
                 if let Some(p) = self.players.get_mut(&src_addr) {
                     p.current_weapon = name;
-                    broadcast::broadcast_state(&self.outbox, &self.players);
+                    self.sync_player_info();
                 }
             },
             // client requests to start a match from the lobby (or join the running one)

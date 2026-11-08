@@ -64,6 +64,9 @@ pub struct PlayingState {
     pub player_index: HashMap<u32, usize>,
     /// temporary reuse for world sync to avoid reallocating each tick
     pub seen_player_ids: HashSet<u32>,
+    /// What `MSG_PLAYER_INFO` last said about each player (names, teams,
+    /// weapons..., which `MSG_STATE` leaves out), by id; ours included.
+    pub player_info: crate::net::PlayerInfoCache,
     pub movement_state: MovementState,
     pub movement_config: MovementConfig,
     pub bob_timer: f32,
@@ -279,6 +282,7 @@ impl PlayingState {
             other_players: Vec::with_capacity(Self::INIT_OTHER_PLAYERS),
             player_index: HashMap::with_capacity(Self::INIT_OTHER_PLAYERS),
             seen_player_ids: HashSet::with_capacity(Self::INIT_OTHER_PLAYERS),
+            player_info: HashMap::with_capacity(Self::INIT_OTHER_PLAYERS),
             movement_state: MovementState::new(),
             movement_config: MovementConfig::new(),
             bob_timer: 0.0,
