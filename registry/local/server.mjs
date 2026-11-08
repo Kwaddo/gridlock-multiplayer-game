@@ -9,7 +9,7 @@
 //
 //   GET/POST/PUT/DELETE /servers   host list (browser rooms and native UDP hosts)
 //   GET  /ice                      no ICE servers: LAN peers connect directly
-//   POST /room/:code/{join,hello,send,leave}, GET /room/:code/poll
+//   POST /room/:code/{join,hello,send,leave,spare}, GET /room/:code/{poll,spare}
 //                                  WebRTC signalling for the browser build
 //   GET  /models/<path>            the models, when the build does not bundle them
 //
@@ -270,6 +270,26 @@ function room(req, res, body, url, code, action) {
       // reports "close" as soon as its body is read, so watch the response)
       res.on("close", finish);
     });
+  }
+
+  // The host's offers made ahead of any join (same contract as the live registry).
+  if (action === "spare" && req.method === "GET") {
+    const offers = rooms.get(code)?.spare?.offers || [];
+    if (!offers.length) return json({ error: "no spare offer" }, 404);
+    const offer = offers[Math.floor(Math.random() * offers.length)];
+    return json({ host: rooms.get(code).spare.host, oid: offer.oid, data: offer.data });
+  }
+  if (action === "spare" && req.method === "POST") {
+    const data = parseJson(body);
+    const id = typeof data?.id === "string" ? data.id : "";
+    if (!data?.host || !validPeer(code, id, data?.token, true)) return json({ error: "bad token" }, 403);
+    const r = rooms.get(code);
+    if (!r || r.host !== id) return json({ error: "room closed" }, 410);
+    const offers = (Array.isArray(data?.offers) ? data.offers.slice(0, 4) : [])
+      .filter((o) => typeof o?.oid === "string" && /^[0-9a-f]{6,32}$/.test(o.oid) && o.data?.sdp?.type === "offer")
+      .map((o) => ({ oid: o.oid, data: o.data }));
+    r.spare = { host: id, offers };
+    return empty();
   }
 
   if (["hello", "send", "leave"].includes(action) && req.method === "POST") {

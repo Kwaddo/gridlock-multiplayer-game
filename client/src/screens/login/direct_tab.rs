@@ -23,7 +23,14 @@ impl LoginScreen {
 
         let bw = 220.0;
         let by = cy + 28.0 + 10.0 + FIELD_H + 24.0;
-        if button("JOIN", 20, px + (pw - bw) / 2.0, by, bw, 42.0) {
+        let bx = px + (pw - bw) / 2.0;
+        // Pointing at JOIN gets the join ready (see transport::prewarm).
+        if super::in_rect(mouse_position(), bx, by, bw, 42.0) {
+            if let Some(target) = crate::net::client::join_target(&self.address_input) {
+                transport::prewarm(&target);
+            }
+        }
+        if button("JOIN", 20, bx, by, bw, 42.0) {
             let address = self.address_input.trim().to_string();
             self.join(&address);
         }
