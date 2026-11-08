@@ -78,6 +78,10 @@ impl LoginScreen {
             let pc_color = if full { Color::new(1.0, 0.35, 0.35, 1.0) } else { TEXT_LABEL };
             draw_text_ex(&pc, lx + lw - pcw - col_pad, ry + 30.0, text_params(15, pc_color));
 
+            // Pointing at a game gets its join ready (see transport::prewarm).
+            if hover && !full {
+                transport::prewarm(&server.target);
+            }
             if hover && clicked && !full {
                 join_addr = Some(server.target.clone());
             }
