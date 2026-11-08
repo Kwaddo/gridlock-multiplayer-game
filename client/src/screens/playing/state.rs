@@ -64,6 +64,9 @@ pub struct PlayingState {
     pub player_index: HashMap<u32, usize>,
     /// temporary reuse for world sync to avoid reallocating each tick
     pub seen_player_ids: HashSet<u32>,
+    /// What `MSG_PLAYER_INFO` last said about each player (names, teams,
+    /// weapons..., which `MSG_STATE` leaves out), by id; ours included.
+    pub player_info: crate::net::PlayerInfoCache,
     pub movement_state: MovementState,
     pub movement_config: MovementConfig,
     pub bob_timer: f32,
@@ -143,6 +146,8 @@ pub struct PlayingState {
     pub tracers: Vec<BulletTracer>,
     pub world_muzzle_flashes: Vec<WorldMuzzleFlash>,
     pub bullet_holes: VecDeque<BulletHole>,
+    /// Each bullet hole's vertex positions, baked on its first draw.
+    pub(crate) bullet_hole_geometry: VecDeque<super::rendering::BakedBulletHole>,
 
     pub hit_marker_pellet_mask: u16,
 
@@ -221,6 +226,10 @@ pub struct PlayingState {
     pub snd_phase_timer: f32,
     pub snd_is_planting: bool, // client is currently holding plant
     pub snd_is_defusing: bool, // client is currently holding defuse
+    /// Our own team from the server's player list (0 = not known yet).
+    pub local_team: u8,
+    /// When we last asked to pick up the dropped bomb (rate limit).
+    pub snd_last_pickup_sent: Option<platform::Instant>,
 
     // local player footstep timer
     pub local_footstep_timer: f32,
@@ -273,6 +282,7 @@ impl PlayingState {
             other_players: Vec::with_capacity(Self::INIT_OTHER_PLAYERS),
             player_index: HashMap::with_capacity(Self::INIT_OTHER_PLAYERS),
             seen_player_ids: HashSet::with_capacity(Self::INIT_OTHER_PLAYERS),
+            player_info: HashMap::with_capacity(Self::INIT_OTHER_PLAYERS),
             movement_state: MovementState::new(),
             movement_config: MovementConfig::new(),
             bob_timer: 0.0,
@@ -318,6 +328,7 @@ impl PlayingState {
             tracers: Vec::with_capacity(Self::INIT_TRACERS),
             world_muzzle_flashes: Vec::new(),
             bullet_holes: VecDeque::with_capacity(Self::INIT_BULLET_HOLES),
+            bullet_hole_geometry: VecDeque::with_capacity(Self::INIT_BULLET_HOLES),
             hit_marker_pellet_mask: 0,
             dev_mode: DevModeState::new(),
             practice_bots: Vec::with_capacity(Self::INIT_PRACTICE_BOTS),
@@ -395,6 +406,8 @@ impl PlayingState {
             snd_phase_timer: 0.0,
             snd_is_planting: false,
             snd_is_defusing: false,
+            local_team: 0,
+            snd_last_pickup_sent: None,
 
             local_footstep_timer: 0.0,
             destroyed_lights: HashSet::new(),

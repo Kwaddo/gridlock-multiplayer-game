@@ -39,7 +39,7 @@ impl PlayingState {
                     draw_maze(
                         Some(m),
                         self.position,
-                        config.render_distance,
+                        crate::core::VIEW_DISTANCE,
                         self.dev_mode.show_hitboxes,
                         &self.destroyed_lights,
                     );

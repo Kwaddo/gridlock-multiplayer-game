@@ -19,8 +19,8 @@ fn start_match(server: &mut Server, host: PeerId) {
 fn host_ends_match_and_everyone_stays_connected() {
     let mut server = Server::new();
     let (a, b) = (PeerId(1), PeerId(2));
-    server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
-    server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
     start_match(&mut server, a);
     server.drain_outbox();
 
@@ -47,8 +47,8 @@ fn host_ends_match_and_everyone_stays_connected() {
 fn match_ends_once_every_human_has_left_it() {
     let mut server = Server::new();
     let (a, b) = (PeerId(1), PeerId(2));
-    server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
-    server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
     start_match(&mut server, a);
     server.drain_outbox();
 
@@ -77,8 +77,8 @@ fn statuses(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<u8> {
 fn two_players() -> (Server, PeerId, PeerId) {
     let mut server = Server::new();
     let (a, b) = (PeerId(1), PeerId(2));
-    server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
-    server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
     (server, a, b)
 }
 
@@ -209,8 +209,8 @@ fn teams(server: &Server) -> Vec<Team> {
 fn lobby_teams_stay_balanced_and_only_the_host_can_swap() {
     let mut server = Server::new();
     let (a, b, c) = (PeerId(1), PeerId(2), PeerId(3));
-    server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
-    server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
     assert_eq!(teams(&server), vec![Team::Red, Team::Blue]);
 
     // bob (not the host) cannot change sides
@@ -221,7 +221,7 @@ fn lobby_teams_stay_balanced_and_only_the_host_can_swap() {
     assert_eq!(teams(&server), vec![Team::Red, Team::Blue]);
 
     // with a third player, the host may swap to the smaller side
-    server.handle_packet(c, &ClientMsg::Join { username: "cat".into() }.encode());
+    server.handle_packet(c, &ClientMsg::join("cat").encode());
     assert_eq!(teams(&server), vec![Team::Red, Team::Blue, Team::Red]);
     server.handle_packet(a, &ClientMsg::SetTeam { team: 2 }.encode());
     assert_eq!(teams(&server), vec![Team::Blue, Team::Blue, Team::Red]);
@@ -237,8 +237,8 @@ fn lobby_teams_stay_balanced_and_only_the_host_can_swap() {
 fn match_teams_are_the_balanced_lobby_teams() {
     let mut server = Server::new();
     let (a, b) = (PeerId(1), PeerId(2));
-    server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
-    server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
     start_match(&mut server, a);
     assert_eq!(teams(&server), vec![Team::Red, Team::Blue]);
 }
@@ -247,8 +247,8 @@ fn match_teams_are_the_balanced_lobby_teams() {
 fn only_the_host_sets_the_lobby_settings_and_everyone_hears() {
     let mut server = Server::new();
     let (a, b) = (PeerId(1), PeerId(2));
-    server.handle_packet(a, &ClientMsg::Join { username: "alice".into() }.encode());
-    server.handle_packet(b, &ClientMsg::Join { username: "bob".into() }.encode());
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
     server.drain_outbox();
 
     let theirs = LobbySettings { mode: MODE_GUN_GAME, duration: 600, red_bots: 4, blue_bots: 0, diff_mask: 1 };
@@ -266,6 +266,34 @@ fn only_the_host_sets_the_lobby_settings_and_everyone_hears() {
 
     // a newcomer is told at once
     let c = PeerId(3);
-    server.handle_packet(c, &ClientMsg::Join { username: "cat".into() }.encode());
+    server.handle_packet(c, &ClientMsg::join("cat").encode());
     assert!(to(&server.drain_outbox(), c).contains(&ServerMsg::LobbySettings(expected)));
+}
+
+#[test]
+fn an_endless_match_sends_its_timer_heartbeat_once_a_second() {
+    let mut server = Server::new();
+    let (a, b) = (PeerId(1), PeerId(2));
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
+    start_match(&mut server, a);
+    server.match_duration = None;
+    let timers = |out: &[(PeerId, Vec<u8>)]| {
+        to(out, b).iter().filter(|m| matches!(m, ServerMsg::MatchTimer { secs: u16::MAX })).count()
+    };
+
+    server.tick();
+    server.drain_outbox();
+    // ticking after every packet sends no timer within the second
+    for _ in 0..50 {
+        server.tick();
+    }
+    assert_eq!(timers(&server.drain_outbox()), 0);
+
+    // a second on, exactly one heartbeat
+    server.last_match_heartbeat = Some(Instant::now() - Duration::from_millis(1100));
+    for _ in 0..50 {
+        server.tick();
+    }
+    assert_eq!(timers(&server.drain_outbox()), 1);
 }

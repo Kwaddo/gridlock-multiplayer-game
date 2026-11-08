@@ -15,19 +15,6 @@ mod tactics;
 use routing::{dist2, find_enemy, is_enemy, route, route_to_player, route_to_pos};
 use tactics::{flank_behind_enemy, pick_hold_angle, retreat_from_enemy, roam_to_random_point};
 
-/// Build a navigation grid from maze cells with prop positions marked impassable.
-/// Bots route around props rather than through them.
-fn make_nav_cells(maze: &MazeData) -> Vec<u8> {
-    let mut nav = maze.cells.clone();
-    for prop in &maze.props {
-        let idx = (prop.y as usize) * (maze.width as usize) + (prop.x as usize);
-        if idx < nav.len() {
-            nav[idx] = 0;
-        }
-    }
-    nav
-}
-
 /*
     The "brain" of the bot. Called every tick from manager.rs before tick_bot (the "legs").
     Decides which BotBehavior the bot should be in based on:
@@ -50,7 +37,9 @@ pub fn decide_behavior(
         return None;
     }
 
-    let nav_cells = make_nav_cells(maze);
+    // Navigation grid: maze cells with prop positions marked impassable, so
+    // bots route around props rather than through them. Cached on the maze.
+    let nav_cells = maze.nav_cells();
 
     let bot_cell = match
         world_to_cell(
