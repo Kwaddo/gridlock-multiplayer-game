@@ -8,7 +8,7 @@ pub fn make_camera(position: Vec3, forward: Vec3) -> Camera3D {
         fovy: 45.0,
         aspect: None,
         z_near: 0.01,
-        z_far: 100.0,
+        z_far: crate::core::VIEW_DISTANCE,
         projection: Projection::Perspective,
         render_target: None,
         viewport: None,

@@ -5,6 +5,11 @@
 
 use macroquad::prelude::*;
 
+/// How far every player sees, in world units: the camera's far plane and the
+/// maze's draw distance. One value for everyone, and the same for walls and
+/// players, so nobody sees players past walls that are not drawn.
+pub const VIEW_DISTANCE: f32 = 100.0;
+
 // A single input binding — can be a key OR a mouse button.
 // Future: add a Controller(u16) variant for gamepad.
 #[derive(Clone, Copy, PartialEq)]
@@ -79,9 +84,6 @@ pub struct GameConfig {
     // GUI Scale (0=Auto, 1-4=fixed scale)
     pub gui_scale: u8,
 
-    // World rendering
-    pub render_distance: f32, // how far to draw maze/props (world units)
-
     // Player
     pub standing_height: f32,
     pub crouch_height: f32,
@@ -144,9 +146,6 @@ impl GameConfig {
 
             // GUI Scale
             gui_scale: 0, // Auto
-
-            // World rendering
-            render_distance: 45.0,
 
             // Player
             standing_height: 1.0,
