@@ -85,37 +85,33 @@ impl PlayingState {
         let draw_hands = !matches!(weapon.id, WeaponId::Sawnoff | WeaponId::Minigun);
 
         if let Some(model_key) = stats.viewmodel_model {
-            // Hands and muzzle flash go with the first mesh only: a weapon
-            // made of many meshes used to redraw the hands for every one.
+            // All of a weapon's meshes are drawn in one call, under one
+            // camera and model matrix, so a weapon made of many meshes (the
+            // SPAS-12 has 38) batches into a few draw calls instead of
+            // flushing the batch several times per mesh.
             if let Some(meshes) = self.models.get(model_key) {
-                for (i, mesh) in meshes.iter().enumerate() {
-                    self.draw_3d_viewmodel(
-                        mesh,
-                        1.0,
-                        0.0,
-                        hands_anim,
-                        hands_static,
-                        weapon,
-                        stats,
-                        draw_hands,
-                        i == 0,
-                    );
-                }
+                self.draw_3d_viewmodel(
+                    meshes.iter(),
+                    1.0,
+                    0.0,
+                    hands_anim,
+                    hands_static,
+                    weapon,
+                    stats,
+                    draw_hands,
+                );
                 return;
             } else if let Some(animated_model) = self.animated_models.get(model_key) {
-                for (i, mesh) in animated_model.meshes().enumerate() {
-                    self.draw_3d_viewmodel(
-                        mesh,
-                        animated_model.normalize_scale,
-                        animated_model.y_offset,
-                        hands_anim,
-                        hands_static,
-                        weapon,
-                        stats,
-                        draw_hands,
-                        i == 0,
-                    );
-                }
+                self.draw_3d_viewmodel(
+                    animated_model.meshes(),
+                    animated_model.normalize_scale,
+                    animated_model.y_offset,
+                    hands_anim,
+                    hands_static,
+                    weapon,
+                    stats,
+                    draw_hands,
+                );
                 return;
             }
             // Not loaded yet (it arrives in the background after joining) or
@@ -139,9 +135,10 @@ impl PlayingState {
         }
     }
 
-    fn draw_3d_viewmodel(
+    /// Draw the weapon's `meshes`, then the hands and muzzle flash once.
+    fn draw_3d_viewmodel<'m>(
         &self,
-        mesh: &Mesh,
+        meshes: impl IntoIterator<Item = &'m Mesh>,
         mesh_normalize_scale: f32,
         mesh_y_offset: f32,
         hands_anim: Option<&crate::types::animated_model::AnimatedModel>,
@@ -149,7 +146,6 @@ impl PlayingState {
         weapon: &crate::weapons::WeaponState,
         stats: &crate::weapons::stats::WeaponStats,
         should_draw_hands: bool,
-        first_mesh: bool,
     ) {
         let force_ads_preview = self.dev_mode.is_unlocked() && self.dev_mode.force_ads;
         if stats.crosshair_style == CrosshairStyle::Scope
@@ -264,7 +260,9 @@ impl PlayingState {
 
         // avoid allocating a transformed mesh every frame by using the GL model matrix
         gl.quad_gl.push_model_matrix(transform);
-        draw_mesh(mesh);
+        for mesh in meshes {
+            draw_mesh(mesh);
+        }
         gl.quad_gl.pop_model_matrix();
 
         /*
@@ -307,7 +305,7 @@ impl PlayingState {
             gl.quad_gl.pop_model_matrix();
         };
 
-        if should_draw_hands && first_mesh {
+        if should_draw_hands {
             if let Some(hands_model) = hands_anim {
                 for mesh in hands_model.meshes() {
                     draw_hands(mesh, hands_model.normalize_scale, hands_model.y_offset);
@@ -328,7 +326,7 @@ impl PlayingState {
 
         set_default_camera();
 
-        if weapon.muzzle_flash_timer > 0.0 && first_mesh {
+        if weapon.muzzle_flash_timer > 0.0 {
             if let Some((fx, fy)) = Self::project_to_screen(&vm_camera, muzzle_world) {
                 let t = (weapon.muzzle_flash_timer / 0.08).min(1.0);
                 let alpha = (220.0 * t) as u8;
