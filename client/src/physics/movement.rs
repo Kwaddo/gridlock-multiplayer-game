@@ -41,7 +41,7 @@ impl MovementState {
             slide_direction: Vec3::ZERO,
             slide_speed_current: 0.0,
             stamina: 100.0,
-            height: 1.6, // default eye height
+            height: 1.2, // default eye height (matches standing_height)
             is_stamina_depleted: false,
         }
     }
@@ -99,7 +99,7 @@ impl MovementConfig {
             slide_stamina_cost: 30.0,
             slide_cooldown: 2.0,
             slide_friction: 12.0,
-            slide_height: 0.4,
+            slide_height: 0.8,
             slide_ads_time_mult: 3.0,
             acceleration: 10.0,
             friction: 8.0,

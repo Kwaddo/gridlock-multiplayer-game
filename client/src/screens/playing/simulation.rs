@@ -102,7 +102,16 @@ impl PlayingState {
             .map(|key| if self.animated_models.contains_key(key) { key } else { "anim_rifle_idle" })
             .collect();
         // Players drawn with a missing model fall back to the idle clip.
-        keys.insert("anim_rifle_idle");
+        keys.insert("anim_rifle_idle");       
+
+        if !self.mirrors.is_empty() {
+            if let Some(key) = self.self_avatar_skin().model_key() {
+                if self.animated_models.contains_key(key) {
+                    keys.insert(key);
+                }
+            }
+        }
+
         if !matches!(self.death_camera_phase, super::state::DeathCameraPhase::None) {
             keys.extend(
                 [PlayerSkin::StandDeath, PlayerSkin::CrouchDeath, PlayerSkin::ProneDeath]
@@ -827,6 +836,13 @@ impl PlayingState {
                 }
             }
         }
+        // mirrors are solid in every world
+        collision::resolve_mirrors(
+            &mut self.position,
+            &mut self.movement_state.velocity,
+            self.movement_state.height,
+            &self.mirrors,
+        );
 
         if !was_grounded && self.movement_state.is_grounded {
             self.just_landed = true;

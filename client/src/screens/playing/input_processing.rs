@@ -1,11 +1,11 @@
-use crate::core::{GameConfig, GameState};
+use crate::core::{ GameConfig, GameState };
 use crate::screens::input;
 use crate::types::maze::Maze;
 use crate::types::world::WorldId;
-use crate::weapons::combat::{damage_falloff, CombatEntity, EntityKind, HitZone};
+use crate::weapons::combat::{ damage_falloff, CombatEntity, EntityKind, HitZone };
 use crate::weapons::effects::DamageNumber;
-use crate::weapons::recoil::{apply_shot_recoil, recover};
-use crate::weapons::{recoil, SpreadContext};
+use crate::weapons::recoil::{ apply_shot_recoil, recover };
+use crate::weapons::{ recoil, SpreadContext };
 
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
@@ -14,8 +14,12 @@ use std::collections::HashMap;
 use super::PlayingState;
 
 use crate::weapons::stats::melee::{
-    KNIFE_LIGHT_ANIM_DURATION, KNIFE_MISS_MOVE_SLOW_DURATION, KNIFE_MISS_PENALTY_SECS,
-    KNIFE_SWITCH_FROM_TIME, KNIFE_SWITCH_TO_TIME, PUNCH_DAMAGE,
+    KNIFE_LIGHT_ANIM_DURATION,
+    KNIFE_MISS_MOVE_SLOW_DURATION,
+    KNIFE_MISS_PENALTY_SECS,
+    KNIFE_SWITCH_FROM_TIME,
+    KNIFE_SWITCH_TO_TIME,
+    PUNCH_DAMAGE,
 };
 
 impl PlayingState {
@@ -23,7 +27,7 @@ impl PlayingState {
     pub fn process_local_input(
         &mut self,
         config: &GameConfig,
-        mut maze: Option<&mut Maze>,
+        mut maze: Option<&mut Maze>
     ) -> Option<GameState> {
         let raw_delta = get_frame_time();
         if raw_delta > 0.2 {
@@ -86,9 +90,9 @@ impl PlayingState {
         }
 
         if self.is_dead {
-            let is_snd_spectating = self.match_mode
-                == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
-                && self.current_world == WorldId::Maze;
+            let is_snd_spectating =
+                self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY) &&
+                self.current_world == WorldId::Maze;
             if is_snd_spectating {
                 // Allow free look while spectating in S&D
                 let sens = config.raw_sensitivity();
@@ -96,16 +100,17 @@ impl PlayingState {
                     &mut self.last_mouse_pos,
                     &mut self.yaw,
                     &mut self.pitch,
-                    sens,
+                    sens
                 );
             } else {
                 // Consume the mouse delta so it doesn't accumulate and cause a
                 // camera jump on the first frame after respawning.
                 self.last_mouse_pos = mouse_position();
             }
-            if self.current_world == WorldId::Lobby
-                && self.death_timer <= 0.0
-                && is_key_pressed(KeyCode::Space)
+            if
+                self.current_world == WorldId::Lobby &&
+                self.death_timer <= 0.0 &&
+                is_key_pressed(KeyCode::Space)
             {
                 self.pending_respawn = true;
             }
@@ -122,12 +127,7 @@ impl PlayingState {
         let ads_factor = 1.0 + (fov_scale * ads_mult - 1.0) * weapon.ads_progress;
         let sens = config.raw_sensitivity() * ads_factor;
 
-        input::process_mouse(
-            &mut self.last_mouse_pos,
-            &mut self.yaw,
-            &mut self.pitch,
-            sens,
-        );
+        input::process_mouse(&mut self.last_mouse_pos, &mut self.yaw, &mut self.pitch, sens);
 
         self.move_dir = input::process_movement_keys(self.yaw, config);
         if self.dev_mode.ruler_set_start_requested {
@@ -138,23 +138,27 @@ impl PlayingState {
             self.dev_mode.ruler_end = Some(self.position);
             self.dev_mode.ruler_set_end_requested = false;
         }
-        self.movement_state.is_sprinting =
-            input::process_sprint(config, &self.movement_state, self.move_dir);
+        self.movement_state.is_sprinting = input::process_sprint(
+            config,
+            &self.movement_state,
+            self.move_dir
+        );
         self.movement_state.is_slow_walking = input::process_slow_walk(
             config,
             self.movement_state.is_slow_walking,
             self.movement_state.is_sprinting,
             self.movement_state.is_prone,
-            self.movement_state.is_sliding,
+            self.movement_state.is_sliding
         );
         let crouch_just_pressed = config.bind_crouch.is_pressed();
-        if crouch_just_pressed
-            && self.movement_state.is_sprinting
-            && !self.movement_state.is_sliding
-            && self.movement_state.slide_cooldown_timer <= 0.0
-            && self.movement_state.stamina >= self.movement_config.slide_stamina_cost
-            && self.movement_state.is_grounded
-            && !self.movement_state.is_prone
+        if
+            crouch_just_pressed &&
+            self.movement_state.is_sprinting &&
+            !self.movement_state.is_sliding &&
+            self.movement_state.slide_cooldown_timer <= 0.0 &&
+            self.movement_state.stamina >= self.movement_config.slide_stamina_cost &&
+            self.movement_state.is_grounded &&
+            !self.movement_state.is_prone
         {
             self.movement_state.is_sliding = true;
             self.movement_state.slide_timer = self.movement_config.slide_duration;
@@ -175,14 +179,20 @@ impl PlayingState {
             self.movement_state.is_slow_walking = false;
             self.movement_state.is_crouching = true;
         } else {
-            self.movement_state.is_crouching =
-                input::process_crouch(config, self.movement_state.is_crouching);
+            self.movement_state.is_crouching = input::process_crouch(
+                config,
+                self.movement_state.is_crouching
+            );
         }
-        self.jump_requested =
-            input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons);
+        self.jump_requested = input::process_jump(
+            config,
+            self.movement_state.is_grounded,
+            &mut self.weapons
+        );
 
-        if self.movement_state.is_sliding
-            && (self.jump_requested || self.movement_state.slide_timer <= 0.0)
+        if
+            self.movement_state.is_sliding &&
+            (self.jump_requested || self.movement_state.slide_timer <= 0.0)
         {
             self.movement_state.is_sliding = false;
             self.movement_state.slide_timer = 0.0;
@@ -239,10 +249,11 @@ impl PlayingState {
         if !weapon_input_locked {
             input::process_weapon_input(&mut self.weapons, config);
         }
-        if self.movement_state.is_stamina_depleted
-            && prev_switch_cooldown <= 0.0
-            && self.weapons.switch_cooldown > 0.0
-            && self.movement_config.stamina_depleted_speed_mult > 0.0
+        if
+            self.movement_state.is_stamina_depleted &&
+            prev_switch_cooldown <= 0.0 &&
+            self.weapons.switch_cooldown > 0.0 &&
+            self.movement_config.stamina_depleted_speed_mult > 0.0
         {
             // Depleted stamina penalty: slower weapon switching.
             self.weapons.switch_cooldown /= self.movement_config.stamina_depleted_speed_mult;
@@ -267,12 +278,13 @@ impl PlayingState {
 
         // Punch button: fire melee hit immediately, auto-return to gun when animation ends.
         let mut punch_fire_this_frame = false;
-        if (!weapon_input_locked)
-            && (self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze)
-            && !self.weapons.knife_active
-            && !self.knife_attack_locked
-            && self.weapons.switch_cooldown <= 0.0
-            && config.bind_punch.is_pressed()
+        if
+            !weapon_input_locked &&
+            (self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze) &&
+            !self.weapons.knife_active &&
+            !self.knife_attack_locked &&
+            self.weapons.switch_cooldown <= 0.0 &&
+            config.bind_punch.is_pressed()
         {
             self.weapons.knife_active = true;
             self.weapons.switch_cooldown = KNIFE_SWITCH_TO_TIME;
@@ -283,8 +295,9 @@ impl PlayingState {
         let weapon = self.weapons.active_mut();
 
         // Firing: blocked while in post-teleport freeze inside the Maze
-        if (!weapon_input_locked)
-            && (self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze)
+        if
+            !weapon_input_locked &&
+            (self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze)
         {
             // Burst weapons keep firing remaining shots even after trigger release
             let wants_to_fire =
@@ -320,12 +333,12 @@ impl PlayingState {
                     let eye = vec3(
                         self.position.x,
                         self.position.y + self.movement_state.height,
-                        self.position.z,
+                        self.position.z
                     );
                     let base_fwd = vec3(
                         self.yaw.cos() * self.pitch.cos(),
                         self.pitch.sin(),
-                        self.yaw.sin() * self.pitch.cos(),
+                        self.yaw.sin() * self.pitch.cos()
                     );
 
                     if !fsa_shot && !self.dev_mode.no_recoil {
@@ -337,9 +350,10 @@ impl PlayingState {
                             pattern[idx.min(pattern.len() - 1)]
                         };
 
-                        let rand = (stats.pattern_randomness
-                            + (idx as f32) * stats.randomness_growth)
-                            .clamp(0.0, 1.0);
+                        let rand = (
+                            stats.pattern_randomness +
+                            (idx as f32) * stats.randomness_growth
+                        ).clamp(0.0, 1.0);
 
                         self.pitch += ptrn_pitch;
                         let ptrn_h = ptrn_yaw * stats.recoil_horizontal;
@@ -374,20 +388,24 @@ impl PlayingState {
                         let mut fwd = base_fwd;
                         if spread > 0.0001 {
                             if let Some(ptrn) = stats.pellet_spread {
-                                let (angle, radius): (f32, f32) =
-                                    ptrn.get(i).copied().unwrap_or((0.0, 0.0));
+                                let (angle, radius): (f32, f32) = ptrn
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or((0.0, 0.0));
                                 let deviation = spread * radius;
-                                fwd = (fwd
-                                    + right_vec * (angle.cos() * deviation)
-                                    + up_vec * (angle.sin() * deviation))
-                                    .normalize();
+                                fwd = (
+                                    fwd +
+                                    right_vec * (angle.cos() * deviation) +
+                                    up_vec * (angle.sin() * deviation)
+                                ).normalize();
                             } else {
                                 let angle = gen_range(0.0f32, std::f32::consts::TAU);
                                 let radius = gen_range(0.0f32, spread);
-                                fwd = (fwd
-                                    + right_vec * (angle.cos() * radius)
-                                    + up_vec * (angle.sin() * radius))
-                                    .normalize();
+                                fwd = (
+                                    fwd +
+                                    right_vec * (angle.cos() * radius) +
+                                    up_vec * (angle.sin() * radius)
+                                ).normalize();
                             }
                         }
 
@@ -395,33 +413,44 @@ impl PlayingState {
                         let mut surface_hit = false;
                         let mut surface_normal: Option<Vec3> = None;
                         let mut hit_wall_cell: Option<(u8, u8)> = None;
-                        let closest_blocking_dist = if self.current_world == WorldId::Maze {
+                        // mirrors (any world) are checked first: the world is then only
+                        // tested up to the nearest mirror, so nothing behind a mirror
+                        // gets hit (no wall damage, no hole, no light broken).
+                        let mirror_dist = crate::world::mirror::nearest_mirror_hit(
+                            &self.mirrors,
+                            eye,
+                            fwd,
+                            range
+                        );
+                        let world_range = mirror_dist.unwrap_or(range);
+                        let world_dist = if self.current_world == WorldId::Maze {
                             // gather all candidate hits
                             let wall_hit = maze
                                 .as_ref()
-                                .and_then(|m| m.ray_test_walls_with_normal(eye, fwd, range));
+                                .and_then(|m| m.ray_test_walls_with_normal(eye, fwd, world_range));
                             let prop_hit = maze
                                 .as_ref()
-                                .and_then(|m| m.ray_test_props_with_normal(eye, fwd, range));
-                            let fc_hit = maze.as_ref().and_then(|m| {
-                                m.ray_test_floor_ceiling_with_normal(eye, fwd, range)
-                            });
-                            let light_hit = maze.as_ref().and_then(|m| {
-                                m.ray_test_ceiling_lights_with_normal(
-                                    eye,
-                                    fwd,
-                                    range,
-                                    &self.destroyed_lights,
-                                )
-                            });
+                                .and_then(|m| m.ray_test_props_with_normal(eye, fwd, world_range));
+                            let fc_hit = maze
+                                .as_ref()
+                                .and_then(|m| {
+                                    m.ray_test_floor_ceiling_with_normal(eye, fwd, world_range)
+                                });
+                            let light_hit = maze
+                                .as_ref()
+                                .and_then(|m| {
+                                    m.ray_test_ceiling_lights_with_normal(
+                                        eye,
+                                        fwd,
+                                        world_range,
+                                        &self.destroyed_lights
+                                    )
+                                });
 
                             // collect all hits as (distance, normal, Option<wall_cell>, is_light_cell)
-                            let mut candidates: Vec<(
-                                f32,
-                                Vec3,
-                                Option<(u8, u8)>,
-                                Option<(u8, u8)>,
-                            )> = Vec::new();
+                            let mut candidates: Vec<
+                                (f32, Vec3, Option<(u8, u8)>, Option<(u8, u8)>)
+                            > = Vec::new();
 
                             if let Some(((wx, wy), d, n)) = wall_hit {
                                 candidates.push((d, n, Some((wx, wy)), None));
@@ -441,8 +470,10 @@ impl PlayingState {
                                 a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
                             });
 
-                            if let Some((dist, norm, wall_cell, light_cell)) =
-                                candidates.first().copied()
+                            if
+                                let Some((dist, norm, wall_cell, light_cell)) = candidates
+                                    .first()
+                                    .copied()
                             {
                                 // if closest hit is a wall, damage it
                                 if let Some((wx, wy)) = wall_cell {
@@ -467,8 +498,13 @@ impl PlayingState {
                             }
                         } else if self.current_world == WorldId::Lobby {
                             // lobby: test against lobby cubes, console, ground
-                            if let Some((dist, n)) =
-                                crate::world::lobby::ray_test_lobby_with_normal(eye, fwd, range)
+                            if
+                                let Some((dist, n)) =
+                                    crate::world::lobby::ray_test_lobby_with_normal(
+                                        eye,
+                                        fwd,
+                                        world_range
+                                    )
                             {
                                 surface_hit = true;
                                 surface_normal = Some(n);
@@ -478,6 +514,16 @@ impl PlayingState {
                             }
                         } else {
                             None
+                        };
+                        // nothing in the world was closer, but a mirror was: the bullet
+                        // stops at the glass. No normal = no bullet hole.
+                        let closest_blocking_dist = match (world_dist, mirror_dist) {
+                            (Some(d), _) => Some(d),
+                            (None, Some(md)) => {
+                                surface_hit = true;
+                                Some(md)
+                            }
+                            (None, None) => None,
                         };
 
                         let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
@@ -489,11 +535,7 @@ impl PlayingState {
 
                         // when bullet hits a wall, set tracer lifetime to 0 so it disappears
                         // on impact rather than lingering
-                        let tracer_lifetime = if surface_hit {
-                            0.0
-                        } else {
-                            stats.tracer_lifetime
-                        };
+                        let tracer_lifetime = if surface_hit { 0.0 } else { stats.tracer_lifetime };
 
                         self.tracers.push(crate::weapons::effects::BulletTracer {
                             start: tracer_start,
@@ -508,8 +550,11 @@ impl PlayingState {
 
                         // spawn bullet hole on surface hit
                         if surface_hit {
-                            if let (Some(dist), Some(normal)) =
-                                (closest_blocking_dist, surface_normal)
+                            if
+                                let (Some(dist), Some(normal)) = (
+                                    closest_blocking_dist,
+                                    surface_normal,
+                                )
                             {
                                 let hit_point = eye + fwd * dist;
                                 // apply global scale to the configured radius so the
@@ -521,8 +566,8 @@ impl PlayingState {
                                     normal,
                                     lifetime: stats.bullet_hole_lifetime,
                                     max_lifetime: stats.bullet_hole_lifetime,
-                                    size: stats.bullet_hole_size
-                                        * crate::weapons::effects::BULLET_HOLE_SCALE,
+                                    size: stats.bullet_hole_size *
+                                    crate::weapons::effects::BULLET_HOLE_SCALE,
                                     color: stats.bullet_hole_color,
                                     wall_cell: hit_wall_cell,
                                 });
@@ -596,11 +641,17 @@ impl PlayingState {
                                         let victim_pos = Vec3::new(
                                             self.other_players[idx].x,
                                             self.other_players[idx].y,
-                                            self.other_players[idx].z,
+                                            self.other_players[idx].z
                                         );
                                         let victim_yaw = self.other_players[idx].yaw;
-                                        let atk_dir = (self.position - victim_pos).normalize_or_zero();
-                                        let fwd = Vec3::new(victim_yaw.cos(), 0.0, victim_yaw.sin());
+                                        let atk_dir = (
+                                            self.position - victim_pos
+                                        ).normalize_or_zero();
+                                        let fwd = Vec3::new(
+                                            victim_yaw.cos(),
+                                            0.0,
+                                            victim_yaw.sin()
+                                        );
                                         let is_backstab = atk_dir.dot(fwd) < -0.5;
                                         player_backstab_by_id.insert(victim_id, is_backstab);
                                     }

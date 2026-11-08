@@ -250,6 +250,10 @@ pub struct PlayingState {
     pub team_score: Option<crate::net::TeamScore>,
     /// Players in the running match (the rest are in the lobby).
     pub match_player_ids: HashSet<u32>,
+    /// Every mirror in the current world. Draw, collision and bullets loop over this.
+    pub mirrors: Vec<crate::world::mirror::Mirror>,
+    /// Off-screen textures the live reflections are rendered into, one per live mirror.
+    pub mirror_targets: Vec<RenderTarget>,
 }
 
 pub struct KillFeedEntry {
@@ -414,6 +418,8 @@ impl PlayingState {
             match_status: crate::net::protocols::MATCH_STATUS_NONE,
             team_score: None,
             match_player_ids: HashSet::new(),
+            mirrors: crate::world::mirror::mirrors_for_world(WorldId::Lobby),
+            mirror_targets: Vec::new(),
         }
     }
 }
