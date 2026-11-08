@@ -1,11 +1,11 @@
-// Gridlock's browser plugin, part 1 of 8: the protocol constants shared with
+// Gridlock's browser plugin, part 1 of 9: the protocol constants shared with
 // transport/src/web.rs and the networking tuning. Every part adds what it
 // defines to window.gridlockWeb; ../gridlock_web.js, loaded last, registers
 // the plugin (see the header there).
 "use strict";
 
 (function (gridlockWeb) {
-    const PLUGIN_VERSION = 3;
+    const PLUGIN_VERSION = 4;
 
     // Event kinds shared with transport/src/web.rs.
     const EV_PEER_JOINED = 1;

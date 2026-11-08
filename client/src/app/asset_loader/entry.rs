@@ -6,7 +6,7 @@ use macroquad::prelude::*;
 
 use super::cache::is_asset_cached;
 use super::paths::resolve_runtime_asset_path;
-use super::prefetch::read_bytes;
+use super::prefetch::{read_bytes, take_decoded_image};
 use crate::app::obj_loader::{
     load_gltf_static_mesh, load_obj_mesh_with_materials,
 };
@@ -180,11 +180,16 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
         }
     } else {
         // Decoded from bytes so a prefetched file is used without waiting.
-        let texture = read_bytes(&resolved_path).await.and_then(|bytes| {
-            Image::from_file_with_format(&bytes, None)
-                .map(|image| Texture2D::from_image(&image))
-                .map_err(|e| format!("{e:?}"))
-        });
+        // A worker thread may have decoded it already (native builds).
+        let bytes = read_bytes(&resolved_path).await;
+        let texture = match take_decoded_image(&resolved_path) {
+            Some(image) => Ok(Texture2D::from_image(&image)),
+            None => bytes.and_then(|bytes| {
+                Image::from_file_with_format(&bytes, None)
+                    .map(|image| Texture2D::from_image(&image))
+                    .map_err(|e| format!("{e:?}"))
+            }),
+        };
         match texture {
             Ok(tex) => {
                 tex.set_filter(FilterMode::Nearest);
