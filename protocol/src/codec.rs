@@ -3,6 +3,40 @@
 
 pub type Vec3 = (f32, f32, f32);
 
+/// Fixed-point position step on the wire: 1/64 m (15.6 mm), so a coordinate
+/// comes back within 7.8 mm of what was sent. In an `i16` that spans
+/// +-512 m on every axis. The worlds are far smaller: the lobby and shooting
+/// range sit within about +-41 m, the biggest maze (43 cells of 1.8 m) spans
+/// 0..77 m, and even the largest maze a `u8` side could describe (255 cells,
+/// 459 m) fits. Anything beyond saturates at the edge instead of wrapping.
+pub const POS_UNITS_PER_M: f32 = 64.0;
+
+/// Largest coordinate magnitude that survives [`quantize_coord`] unclamped.
+pub const POS_LIMIT_M: f32 = i16::MAX as f32 / POS_UNITS_PER_M;
+
+/// Metres to wire units. Saturates out of range; NaN becomes 0.
+pub fn quantize_coord(v: f32) -> i16 {
+    // float -> int `as` casts saturate and map NaN to 0
+    (v * POS_UNITS_PER_M).round() as i16
+}
+
+pub fn dequantize_coord(q: i16) -> f32 {
+    q as f32 / POS_UNITS_PER_M
+}
+
+/// Radians to a `u16` turn fraction (65536 steps per full circle, 0.0055
+/// degrees each). Any angle is accepted; non-finite ones become 0.
+pub fn quantize_yaw(yaw: f32) -> u16 {
+    let turns = yaw.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
+    // a turn that rounds up to 65536 is a full circle: wrap it to 0
+    ((turns * 65536.0).round() as u32 & 0xFFFF) as u16
+}
+
+/// Back to radians, in `[-PI, PI)`.
+pub fn dequantize_yaw(q: u16) -> f32 {
+    q as i16 as f32 * (std::f32::consts::PI / 32768.0)
+}
+
 /// Append-only packet builder.
 #[derive(Default)]
 pub struct Writer {
@@ -42,6 +76,14 @@ impl Writer {
 
     pub fn vec3(&mut self, v: Vec3) -> &mut Self {
         self.f32(v.0).f32(v.1).f32(v.2)
+    }
+
+    /// A position as three fixed-point `i16`s, see [`quantize_coord`].
+    pub fn pos16(&mut self, v: Vec3) -> &mut Self {
+        for c in [v.0, v.1, v.2] {
+            self.u16(quantize_coord(c) as u16);
+        }
+        self
     }
 
     /// Length-prefixed string; anything past 255 bytes is cut off.
@@ -112,6 +154,11 @@ impl<'a> Reader<'a> {
 
     pub fn vec3(&mut self) -> Option<Vec3> {
         Some((self.f32()?, self.f32()?, self.f32()?))
+    }
+
+    pub fn pos16(&mut self) -> Option<Vec3> {
+        let mut c = || self.u16().map(|q| dequantize_coord(q as i16));
+        Some((c()?, c()?, c()?))
     }
 
     pub fn str8(&mut self) -> Option<String> {

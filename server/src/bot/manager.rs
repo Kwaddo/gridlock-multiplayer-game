@@ -7,10 +7,12 @@ use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
 use crate::bot::personality::{ self, BotPersonalityId };
-use crate::protocols::ServerMsg;
+use crate::protocols::{BotShot, ServerMsg};
 use crate::server::handlers::other;
 /// Seconds between a match bot's decisions (plus up to 0.1 s jitter).
 const DECISION_INTERVAL: f32 = 0.2;
+/// Bot shots per `MSG_BOT_SHOT` packet: 20 bytes each, so one stays under 1100 bytes.
+const MAX_SHOTS_PER_PACKET: usize = 50;
 /// Longest step (seconds) one bot tick simulates, however long it has been.
 const MAX_BOT_DT: f32 = 0.1;
 
@@ -359,34 +361,11 @@ impl BotManager {
             }
         }
 
-        for (attacker_addr, victim_id, damage_opt, weapon) in pending_shots {
-            let shooter_id = players
-                .get(&attacker_addr)
-                .map(|p| p.id)
-                .unwrap_or(0);
-            let shooter_pos = players
-                .get(&attacker_addr)
-                .map(|p| p.position)
-                .unwrap_or((0.0, 0.0, 0.0));
-            let victim_pos = players
-                .values()
-                .find(|p| p.id == victim_id)
-                .map(|p| p.position)
-                .unwrap_or((0.0, 0.0, 0.0));
-            let shot_msg = ServerMsg::BotShot {
-                shooter_id,
-                victim_id,
-                start: (shooter_pos.0, shooter_pos.1 + 1.2, shooter_pos.2),
-                end: (victim_pos.0, victim_pos.1 + 1.0, victim_pos.2),
-            }
-            .encode();
-            for (addr, p) in players.iter() {
-                if p.is_bot {
-                    continue;
-                }
-                let _ = socket.send_to(&shot_msg, *addr);
-            }
+        // every tracer of this tick goes out ahead of the damage it deals
+        let fired: Vec<(PeerId, u32)> = pending_shots.iter().map(|(a, v, _, _)| (*a, *v)).collect();
+        send_bot_shots(socket, players, &fired);
 
+        for (attacker_addr, victim_id, damage_opt, weapon) in pending_shots {
             if let Some(damage) = damage_opt {
                 other::apply_damage(
                     socket,
@@ -402,6 +381,38 @@ impl BotManager {
                     maze,
                     team_score
                 );
+            }
+        }
+    }
+}
+
+/// Tell every human about `shots` (shooter, victim id) at once: one
+/// `MSG_BOT_SHOT` per player per bot tick, not one per shot. Damage moves
+/// nobody, so the tracer ends are where a shot-by-shot send found them too.
+pub(crate) fn send_bot_shots(socket: &Outbox, players: &HashMap<PeerId, Player>, shots: &[(PeerId, u32)]) {
+    if shots.is_empty() {
+        return;
+    }
+    let position_of_id = |id: u32| players.values().find(|p| p.id == id).map(|p| p.position);
+    let shots: Vec<BotShot> = shots
+        .iter()
+        .map(|(attacker_addr, victim_id)| {
+            let shooter = players.get(attacker_addr);
+            let from = shooter.map(|p| p.position).unwrap_or((0.0, 0.0, 0.0));
+            let to = position_of_id(*victim_id).unwrap_or((0.0, 0.0, 0.0));
+            BotShot {
+                shooter_id: shooter.map(|p| p.id).unwrap_or(0),
+                victim_id: *victim_id,
+                start: (from.0, from.1 + 1.2, from.2),
+                end: (to.0, to.1 + 1.0, to.2),
+            }
+        })
+        .collect();
+    for batch in shots.chunks(MAX_SHOTS_PER_PACKET) {
+        let msg = ServerMsg::BotShots(batch.to_vec()).encode();
+        for (addr, p) in players.iter() {
+            if !p.is_bot {
+                let _ = socket.send_to(&msg, *addr);
             }
         }
     }
