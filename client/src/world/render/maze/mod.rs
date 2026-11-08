@@ -2,7 +2,8 @@
 //! pipes and light fixtures, props in runs), each cube coloured by the
 //! ceiling lights at its centre exactly as the per-frame path did. Meshes
 //! live on the GPU; each frame only culls them and issues one draw call per
-//! visible mesh. A wall breaking re-bakes the chunks around it; a light
+//! visible mesh. Only cells are culled by distance; the roof, pipes,
+//! fixtures and props draw at any distance, as before. A wall breaking re-bakes the chunks around it; a light
 //! going out re-bakes everything, since every light reaches every cube.
 
 mod cache;

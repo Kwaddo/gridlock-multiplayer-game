@@ -251,6 +251,41 @@ fn frustum_only_drops_boxes_wholly_outside() {
     assert!(!f.may_see(vec3(-1.0, 0.0, -150.0), vec3(1.0, 2.0, -140.0)), "past the far plane");
 }
 
+/// The old path drew every prop whatever the distance, so at a low render
+/// distance a prop stays visible past its culled floor.
+#[test]
+fn far_props_stay_drawn_while_their_floor_is_culled() {
+    let m = test_maze();
+    let lighting = Lighting::new(&m, &HashSet::new());
+    let foosball = m.props.iter().position(|p| matches!(p.kind, PropKind::Foosball)).unwrap();
+    let (fx, fy) = (m.props[foosball].x as usize, m.props[foosball].y as usize);
+    let viewer = m.cell_to_world(1, 1);
+    let dist = DistanceCull { viewer: vec2(viewer.x, viewer.z), max_dist_sq: (3.0 * m.cell_size).powi(2) };
+    let far = m.cell_to_world(fx as i32, fy as i32);
+    assert!(!dist.keeps(vec2(far.x, far.z)), "fixture: the foosball must be out of range");
+
+    // Its floor: the chunk is skipped and the cell culled per vertex.
+    let (chunks_x, _) = chunk_grid(&m);
+    let c = chunk_of(fx, fy, chunks_x);
+    for mesh in bake_chunk(&m, &lighting, c % chunks_x, c / chunks_x) {
+        assert!(!dist.may_keep(&mesh.bounds));
+        let floor = mesh.items.iter().find(|i| i.cull == vec2(far.x, far.z)).unwrap();
+        assert!(!dist.keeps_in(&mesh.bounds, floor.cull));
+        assert_eq!(dist.shader_limit(&mesh.bounds), dist.max_dist_sq);
+    }
+
+    // The prop: kept by the pre-test, the CPU fallback and the shader.
+    let index = PropIndex::new(&m);
+    let group = prop_groups(&m).into_iter().find(|g| g.contains(&foosball)).unwrap();
+    let meshes = bake_prop_group(&m, &index, &lighting, group);
+    assert!(!meshes.is_empty());
+    for mesh in &meshes {
+        assert!(dist.may_keep(&mesh.bounds));
+        assert!(mesh.items.iter().all(|i| dist.keeps_in(&mesh.bounds, i.cull)));
+        assert_eq!(dist.shader_limit(&mesh.bounds), f32::MAX);
+    }
+}
+
 #[test]
 fn distance_pretest_never_drops_a_kept_cell() {
     let m = test_maze();
