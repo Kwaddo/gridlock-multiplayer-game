@@ -1,8 +1,11 @@
+use crate::types::animated_model::JointRole;
 use crate::weapons::combat::HitZone;
 
 use macroquad::prelude::*;
 use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
 use macroquad::window::get_internal_gl;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use super::super::PlayingState;
 
@@ -83,10 +86,7 @@ impl PlayingState {
 
                 // compute hand pos from joint (set hand_world_pos later when
                 // drawing weapon)
-                if let Some(r_hand) = anim
-                    .joint_position_with_tokens(&[&"right", &"hand"])
-                    .or_else(|| anim.joint_position_with_tokens(&[&"right", &"wrist"]))
-                {
+                if let Some(r_hand) = anim.joint_role_position(JointRole::RightHand) {
                     let offset = Mat3::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                         * (r_hand * s)
                         + vec3(0.0, y_offset, 0.0);
@@ -105,23 +105,7 @@ impl PlayingState {
                 gl.quad_gl.push_model_matrix(transform);
                 for mesh in meshes {
                     if p.color != WHITE {
-                        let mut verts = mesh.vertices.clone();
-                        for v in &mut verts {
-                            let r = (v.color[0] as f32 / 255.0) * p.color.r;
-                            let g = (v.color[1] as f32 / 255.0) * p.color.g;
-                            let b = (v.color[2] as f32 / 255.0) * p.color.b;
-                            let a = v.color[3];
-                            v.color[0] = (r.clamp(0.0, 1.0) * 255.0) as u8;
-                            v.color[1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
-                            v.color[2] = (b.clamp(0.0, 1.0) * 255.0) as u8;
-                            v.color[3] = a;
-                        }
-                        let temp = macroquad::models::Mesh {
-                            vertices: verts,
-                            indices: mesh.indices.clone(),
-                            texture: mesh.texture.clone(),
-                        };
-                        draw_mesh(&temp);
+                        draw_tinted_mesh(mesh, p.color);
                     } else {
                         draw_mesh(mesh);
                     }
@@ -164,24 +148,27 @@ impl PlayingState {
                 // compute an owned key string so that we can safely reference it
                 // for the duration of this block. `world_key` will borrow from the
                 // owned string via `as_str()` when used below.
-                let world_key_owned: String = if model_key.starts_with("fp_hands_") {
-                    let candidate = format!("{}_model", &model_key[9..]);
-                    if self.models.contains_key(&candidate) {
+                // the candidate key is built once per viewmodel key and kept,
+                // so this no longer allocates every frame.
+                let world_key: &str = if model_key.starts_with("fp_hands_") {
+                    let candidate = world_model_candidate(model_key);
+                    if self.models.contains_key(candidate) {
                         candidate
                     } else {
-                        model_key.to_string()
+                        model_key
                     }
                 } else {
-                    model_key.to_string()
+                    model_key
                 };
-                let world_key = world_key_owned.as_str();
+                let is_sawnoff = world_key.contains("sawnoff");
+                let is_hands_rig = is_sawnoff || world_key.contains("minigun");
 
                 let wgl = unsafe { get_internal_gl() };
                 if let Some(hand_world) = hand_world_pos {
                     // reduce overall model scale; sawnoff tends to come in huge so
                     // apply an additional shrink factor when its key is detected.
                     let mut scale_factor = anim_scale * 0.1;
-                    if world_key.contains("sawnoff") {
+                    if is_sawnoff {
                         scale_factor *= 0.1;
                     }
 
@@ -221,7 +208,7 @@ impl PlayingState {
                         yaw_rot -= adjust;
                     }
                     // exceptions that are already oriented correctly (hands-based)
-                    if world_key.contains("sawnoff") || world_key.contains("minigun") {
+                    if is_hands_rig {
                         yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
                     }
 
@@ -231,9 +218,7 @@ impl PlayingState {
                     // weapons that use hand animations shouldn't be moved at all – they
                     // already include their own translation in the glTF data. revert to
                     // the previous behavior by simply using hand_world in that case.
-                    let weapon_pos = if world_key.contains("sawnoff")
-                        || world_key.contains("minigun")
-                    {
+                    let weapon_pos = if is_hands_rig {
                         hand_world
                     } else {
                         // when the player is walking/running/aiming, use the smaller
@@ -382,6 +367,65 @@ impl PlayingState {
             draw_cube_wires(center, size, wire_color);
         }
     }
+}
+
+/// `fp_hands_x` -> `x_model`: the world model key tried for a viewmodel key.
+/// Built once per key (there are a handful) instead of every frame.
+fn world_model_candidate(model_key: &'static str) -> &'static str {
+    WORLD_MODEL_KEYS.with_borrow_mut(|keys| {
+        *keys.entry(model_key).or_insert_with(|| {
+            Box::leak(format!("{}_model", &model_key[9..]).into_boxed_str())
+        })
+    })
+}
+
+/// Draw `mesh` with its vertex colours multiplied by `color`, reusing the
+/// tinted copy made the first time this mesh was drawn in this colour.
+fn draw_tinted_mesh(mesh: &macroquad::models::Mesh, color: Color) {
+    let key = (
+        mesh.vertices.as_ptr() as usize,
+        mesh.vertices.len(),
+        [color.r.to_bits(), color.g.to_bits(), color.b.to_bits()],
+    );
+    TINTED_MESHES.with_borrow_mut(|cache| {
+        if !cache.contains_key(&key) && cache.len() >= TINTED_MESH_CACHE_LIMIT {
+            cache.clear();
+        }
+        let tinted = cache.entry(key).or_insert_with(|| {
+            let mut verts = mesh.vertices.clone();
+            for v in &mut verts {
+                let r = (v.color[0] as f32 / 255.0) * color.r;
+                let g = (v.color[1] as f32 / 255.0) * color.g;
+                let b = (v.color[2] as f32 / 255.0) * color.b;
+                let a = v.color[3];
+                v.color[0] = (r.clamp(0.0, 1.0) * 255.0) as u8;
+                v.color[1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
+                v.color[2] = (b.clamp(0.0, 1.0) * 255.0) as u8;
+                v.color[3] = a;
+            }
+            macroquad::models::Mesh {
+                vertices: verts,
+                indices: mesh.indices.clone(),
+                texture: mesh.texture.clone(),
+            }
+        });
+        draw_mesh(tinted);
+    });
+}
+
+/// Tinted copies kept at most; one per (static mesh, player colour) in use.
+const TINTED_MESH_CACHE_LIMIT: usize = 256;
+
+type TintKey = (usize, usize, [u32; 3]);
+
+thread_local! {
+    static WORLD_MODEL_KEYS: RefCell<HashMap<&'static str, &'static str>> =
+        RefCell::new(HashMap::new());
+    /// Tinted copies of static player meshes, by the mesh's vertex buffer
+    /// and the tint. Static meshes are kept for the whole session, so their
+    /// buffers are never freed and reused under the same key.
+    static TINTED_MESHES: RefCell<HashMap<TintKey, macroquad::models::Mesh>> =
+        RefCell::new(HashMap::new());
 }
 
 thread_local! {
