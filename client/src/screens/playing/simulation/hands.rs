@@ -347,6 +347,10 @@ impl PlayingState {
                 model.update(delta);
             }
         }
-        self.prev_hands_key = active_hands_key.map(|k| k.to_string());
+        Self::recycle_player_anims_in_use(in_use);
+        // only allocate a new key string when the active hands rig changes
+        if self.prev_hands_key.as_deref() != active_hands_key {
+            self.prev_hands_key = active_hands_key.map(|k| k.to_string());
+        }
     }
 }
