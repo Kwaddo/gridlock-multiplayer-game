@@ -109,6 +109,16 @@ Or use the platform scripts (produce a packaged `dist/` tarball/zip):
 
 Release profile is tuned for size: `opt-level = "z"`, LTO on, single codegen unit, stripped, panic = abort.
 
+### File size limit
+
+No source file (`.rs`, `.js`, `.mjs`, `.sh`) may be longer than 500 lines. Check with:
+
+```bash
+./scripts/check_line_limit.sh
+```
+
+When a file grows past the limit, split it into modules by responsibility, with its constants in their own module (for example `foo/constants.rs`), instead of raising the limit. The only exception is `registry/dcs/index.js`, which is deployed as a single inline file.
+
 ---
 
 ## Installing (Linux)
