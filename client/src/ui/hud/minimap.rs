@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 
 use crate::core::GameConfig;
-use crate::types::maze::Maze;
+use crate::types::maze::{CellKind, CellKindCache, Maze};
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
 use crate::weapons::combat::CombatEntity;
@@ -19,6 +19,11 @@ const BREAKABLE_COLOR: Color = Color::new(0.50, 0.38, 0.22, 1.0);
 const LOCAL_PLAYER_COLOR: Color = Color::new(0.3, 0.9, 0.4, 1.0);
 const BORDER_COLOR: Color = Color::new(0.45, 0.50, 0.60, 0.95);
 const BORDER_GLOW: Color = Color::new(0.30, 0.35, 0.45, 0.35);
+
+thread_local! {
+    /// Cell colours of the maze on the minimap, re-derived only when it changes.
+    static CELL_KINDS: std::cell::RefCell<CellKindCache> = const { std::cell::RefCell::new(CellKindCache::new()) };
+}
 
 // Match in-game lobby: floor is DARKGRAY, grid is Color::from_rgba(100,100,100,255)
 const LOBBY_FLOOR_COLOR: Color = Color::new(0.30, 0.30, 0.30, 1.0);
@@ -138,8 +143,7 @@ fn draw_maze_layer(
     let frac_x = player_cx - pcx as f32;
     let frac_z = player_cz - pcy as f32;
 
-    let room_set = build_room_set(maze);
-    let maze_w = maze.width as usize;
+    CELL_KINDS.with(|kinds| kinds.borrow_mut().sync(maze));
     let view_r = (half / cell_px).ceil() as i32 + 1;
 
     for dy in -view_r..=view_r {
@@ -156,20 +160,11 @@ fn draw_maze_layer(
                 continue;
             }
 
-            let is_open = maze.is_open(cx, cy);
-            let base = if is_open {
-                if is_in_room(&room_set, maze_w, cx, cy) {
-                    ROOM_FLOOR_COLOR
-                } else {
-                    FLOOR_COLOR
-                }
-            } else {
-                let breakable = cx >= 0 && cy >= 0 && maze.is_breakable(cx as u8, cy as u8);
-                if breakable {
-                    BREAKABLE_COLOR
-                } else {
-                    WALL_COLOR
-                }
+            let base = match CELL_KINDS.with(|kinds| kinds.borrow().kind_at(cx, cy)) {
+                CellKind::RoomFloor => ROOM_FLOOR_COLOR,
+                CellKind::Floor => FLOOR_COLOR,
+                CellKind::BreakableWall => BREAKABLE_COLOR,
+                CellKind::Wall => WALL_COLOR,
             };
 
             let color = Color::new(base.r, base.g, base.b, base.a * alpha);
@@ -426,28 +421,4 @@ fn smoothstep_fade(t: f32) -> f32 {
         let f = (1.0 - t) / (1.0 - FADE_START);
         f * f * (3.0 - 2.0 * f)
     }
-}
-
-fn build_room_set(maze: &Maze) -> Vec<bool> {
-    let len = maze.width as usize * maze.height as usize;
-    let mut set = vec![false; len];
-    for room in &maze.rooms {
-        for ry in room.y..(room.y + room.h) {
-            for rx in room.x..(room.x + room.w) {
-                let idx = ry as usize * maze.width as usize + rx as usize;
-                if idx < len {
-                    set[idx] = true;
-                }
-            }
-        }
-    }
-    set
-}
-
-fn is_in_room(room_set: &[bool], maze_w: usize, cx: i32, cy: i32) -> bool {
-    if cx < 0 || cy < 0 {
-        return false;
-    }
-    let idx = cy as usize * maze_w + cx as usize;
-    room_set.get(idx).copied().unwrap_or(false)
 }

@@ -3,7 +3,7 @@ use macroquad::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use super::paths::resolve_runtime_asset_path;
+use super::cache::has_ext;
 
 thread_local! {
     /// What [`Prefetcher`] downloaded (or why it could not), by resolved path,
@@ -22,42 +22,41 @@ pub(super) struct Prefetcher {
 }
 
 impl Prefetcher {
-    /// Start downloading `path` unless it is already on its way.
-    pub fn start(&mut self, path: &str) {
-        let resolved = resolve_runtime_asset_path(path);
-        if !prefetchable(&resolved) || self.pending.contains_key(&resolved) {
+    /// Start downloading `resolved` (a path already resolved) unless it is
+    /// already on its way.
+    pub fn start(&mut self, resolved: &str) {
+        if !prefetchable(resolved) || self.pending.contains_key(resolved) {
             return;
         }
-        let file = resolved.clone();
+        let file = resolved.to_string();
         let download = start_coroutine(async move { load_file(&file).await.map_err(|e| format!("{e:?}")) });
-        self.pending.insert(resolved, download);
+        self.pending.insert(resolved.to_string(), download);
     }
 
-    /// Whether `path` can be loaded now without waiting on the network.
-    /// Starts its download if nothing has yet.
-    pub fn ready(&mut self, path: &str) -> bool {
-        let resolved = resolve_runtime_asset_path(path);
-        if !prefetchable(&resolved) {
+    /// Whether `resolved` (a path already resolved) can be loaded now without
+    /// waiting on the network. Starts its download if nothing has yet.
+    pub fn ready(&mut self, resolved: &str) -> bool {
+        if !prefetchable(resolved) {
             return true;
         }
-        self.start(path);
-        let download = &self.pending[&resolved];
+        self.start(resolved);
+        let download = &self.pending[resolved];
         if !download.is_done() {
             return false;
         }
         // A failure is handed over too: retrying inline would wait on the
         // network inside a frame (a black flash on the loading screen).
         if let Some(result) = download.retrieve() {
-            PREFETCHED.with(|p| p.borrow_mut().insert(resolved.clone(), result));
+            PREFETCHED.with(|p| p.borrow_mut().insert(resolved.to_string(), result));
         }
-        self.pending.remove(&resolved);
+        self.pending.remove(resolved);
         true
     }
 
 }
 
 fn prefetchable(resolved_path: &str) -> bool {
-    !resolved_path.to_lowercase().ends_with(".obj")
+    !has_ext(resolved_path, ".obj")
 }
 
 /// The file's bytes: downloaded already by [`Prefetcher`], or read now.

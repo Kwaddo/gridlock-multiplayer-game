@@ -24,6 +24,7 @@ pub fn handle_join(
         let response = ServerMsg::Welcome {
             id: existing_player.id,
             username: existing_player.username.clone(),
+            version: Some(PROTOCOL_VERSION),
         }
         .encode();
         let _ = socket.send_to(&response, src_addr);
@@ -41,7 +42,8 @@ pub fn handle_join(
     );
     players.insert(src_addr, new_player);
 
-    let response = ServerMsg::Welcome { id, username: assigned_username.clone() }.encode();
+    let response =
+        ServerMsg::Welcome { id, username: assigned_username.clone(), version: Some(PROTOCOL_VERSION) }.encode();
     if socket.send_to(&response, src_addr).is_ok() {
         if match_running {
             if let Some(m) = maze {

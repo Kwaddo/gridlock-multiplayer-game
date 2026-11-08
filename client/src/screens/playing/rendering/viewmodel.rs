@@ -3,6 +3,8 @@ use crate::weapons::stats::{CrosshairStyle, WeaponCategory, WeaponId};
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
 use macroquad::window::get_internal_gl;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use super::super::PlayingState;
 
@@ -301,19 +303,7 @@ impl PlayingState {
             // Viewmodel hands should be fully opaque regardless of source material
             // alpha; only a mesh that is not needs its own copy.
             gl.quad_gl.push_model_matrix(hands_transform);
-            if hands_mesh.vertices.iter().all(|v| v.color[3] == 255) {
-                draw_mesh(hands_mesh);
-            } else {
-                let mut hands_verts = hands_mesh.vertices.clone();
-                for v in &mut hands_verts {
-                    v.color[3] = 255;
-                }
-                draw_mesh(&Mesh {
-                    vertices: hands_verts,
-                    indices: hands_mesh.indices.clone(),
-                    texture: hands_mesh.texture.clone(),
-                });
-            }
+            draw_mesh_opaque(hands_mesh);
             gl.quad_gl.pop_model_matrix();
         };
 
@@ -432,4 +422,48 @@ impl PlayingState {
             );
         }
     }
+}
+
+/// Opacity checks kept at most; one per hands mesh drawn.
+const OPAQUE_CACHE_LIMIT: usize = 256;
+
+thread_local! {
+    /// Whether every vertex of a mesh is already opaque, by its vertex buffer.
+    /// Vertex colours never change after load (CPU skinning only moves
+    /// positions and normals), so the answer holds for the buffer's life.
+    static ALL_OPAQUE: RefCell<HashMap<(usize, usize), bool>> = RefCell::new(HashMap::new());
+    /// Reused copy for drawing a mesh that is not opaque, so it is not
+    /// allocated every frame.
+    static OPAQUE_COPY: RefCell<Mesh> =
+        RefCell::new(Mesh { vertices: Vec::new(), indices: Vec::new(), texture: None });
+}
+
+/// Draw `mesh` with every vertex alpha forced to 255.
+fn draw_mesh_opaque(mesh: &Mesh) {
+    let key = (mesh.vertices.as_ptr() as usize, mesh.vertices.len());
+    let opaque = ALL_OPAQUE.with_borrow_mut(|cache| {
+        if !cache.contains_key(&key) && cache.len() >= OPAQUE_CACHE_LIMIT {
+            cache.clear();
+        }
+        *cache
+            .entry(key)
+            .or_insert_with(|| mesh.vertices.iter().all(|v| v.color[3] == 255))
+    });
+    if opaque {
+        draw_mesh(mesh);
+        return;
+    }
+    OPAQUE_COPY.with_borrow_mut(|copy| {
+        copy.vertices.clear();
+        copy.vertices.extend(mesh.vertices.iter().map(|v| {
+            let mut v = *v;
+            v.color[3] = 255;
+            v
+        }));
+        copy.indices.clear();
+        copy.indices.extend_from_slice(&mesh.indices);
+        copy.texture = mesh.texture.clone();
+        draw_mesh(copy);
+        copy.texture = None;
+    });
 }
