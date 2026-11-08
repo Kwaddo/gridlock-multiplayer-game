@@ -3,6 +3,10 @@ use std::collections::HashSet;
 
 use super::Maze;
 
+mod grid_walk;
+#[cfg(test)]
+mod tests;
+
 impl Maze {
     /// Test if a ray hits any props that block bullets
     /// Returns the distance to the closest blocking prop, or None if no hit
@@ -39,32 +43,100 @@ impl Maze {
     ) -> Option<((u8, u8), f32)> {
         use crate::weapons::combat::ray_hit_aabb;
 
-        let mut closest_hit: Option<((u8, u8), f32)> = None;
+        self.closest_wall_hit(origin, dir, max_dist, |center, half| {
+            ray_hit_aabb(origin, dir, center, half, max_dist).map(|d| (d, ()))
+        })
+        .map(|(cell, d, ())| (cell, d))
+    }
 
-        // Check each wall cell for collision
-        for y in 0..self.height {
-            for x in 0..self.width {
-                if self.cells[self.idx(x as usize, y as usize)] == 0 {
-                    // This is a wall
-                    let wall_center = self.cell_to_world(x as i32, y as i32);
-                    let box_center = wall_center + vec3(0.0, self.wall_height * 0.5, 0.0);
-                    let half_extents = vec3(
-                        self.cell_size * 0.5,
-                        self.wall_height * 0.5,
-                        self.cell_size * 0.5,
-                    );
+    /// True when some wall hit lies closer than `before` along the ray. Same
+    /// answer as `ray_test_walls(origin, dir, max_dist)` followed by
+    /// `wall_dist < before`, but returns at the first such wall instead of
+    /// finding the closest one.
+    pub fn ray_hits_wall_before(&self, origin: Vec3, dir: Vec3, max_dist: f32, before: f32) -> bool {
+        use crate::weapons::combat::ray_hit_aabb;
 
-                    if let Some(dist) =
-                        ray_hit_aabb(origin, dir, box_center, half_extents, max_dist)
-                    {
-                        let is_closer = closest_hit.map_or(true, |(_, d)| dist < d);
-                        if is_closer {
-                            closest_hit = Some(((x, y), dist));
-                        }
+        let (y0, y1) = match self.wall_slab_interval(origin, dir, max_dist) {
+            Some(range) => range,
+            None => return false,
+        };
+        let mut blocked = false;
+        self.walk_cells(origin, dir, y0, y1, |cx, cy, t_enter| {
+            if t_enter > before + grid_walk::walk_slack(before) {
+                return false;
+            }
+            for (x, y) in self.neighbourhood(cx, cy) {
+                if self.cells[self.idx(x as usize, y as usize)] != 0 {
+                    continue;
+                }
+                let (center, half) = self.wall_box(x, y);
+                if let Some(d) = ray_hit_aabb(origin, dir, center, half, max_dist) {
+                    if d < before {
+                        blocked = true;
+                        return false;
                     }
                 }
             }
-        }
+            true
+        });
+        blocked
+    }
+
+    /// Box of the full-height wall column at cell (x, y), as (center, half extents).
+    fn wall_box(&self, x: u8, y: u8) -> (Vec3, Vec3) {
+        let wall_center = self.cell_to_world(x as i32, y as i32);
+        let box_center = wall_center + vec3(0.0, self.wall_height * 0.5, 0.0);
+        let half_extents = vec3(
+            self.cell_size * 0.5,
+            self.wall_height * 0.5,
+            self.cell_size * 0.5,
+        );
+        (box_center, half_extents)
+    }
+
+    /// t-range (within [0, max_dist]) where the ray is at wall height, padded.
+    fn wall_slab_interval(&self, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<(f32, f32)> {
+        let m = grid_walk::CLIP_MARGIN;
+        let (a, b) = grid_walk::slab_interval(origin.y, dir.y, -m, self.wall_height + m)?;
+        let (t0, t1) = (a.max(0.0), b.min(max_dist));
+        (t0 <= t1).then_some((t0, t1))
+    }
+
+    /// Closest wall cell hit by the ray, walking only the cells along it.
+    /// `test` is the exact per-box ray test; ties keep the cell the old
+    /// row-major scan of every cell would have kept.
+    fn closest_wall_hit<T: Copy>(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_dist: f32,
+        test: impl Fn(Vec3, Vec3) -> Option<(f32, T)>,
+    ) -> Option<((u8, u8), f32, T)> {
+        let (y0, y1) = self.wall_slab_interval(origin, dir, max_dist)?;
+        let mut closest_hit: Option<((u8, u8), f32, T)> = None;
+
+        // Check each wall cell for collision
+        self.walk_cells(origin, dir, y0, y1, |cx, cy, t_enter| {
+            if let Some((_, d, _)) = closest_hit {
+                if t_enter > d + grid_walk::walk_slack(d) {
+                    return false;
+                }
+            }
+            for (x, y) in self.neighbourhood(cx, cy) {
+                if self.cells[self.idx(x as usize, y as usize)] != 0 {
+                    continue;
+                }
+                // This is a wall
+                let (center, half) = self.wall_box(x, y);
+                if let Some((dist, extra)) = test(center, half) {
+                    let best = closest_hit.map(|(c, d, _)| (c, d));
+                    if grid_walk::is_better(dist, (x, y), best) {
+                        closest_hit = Some(((x, y), dist, extra));
+                    }
+                }
+            }
+            true
+        });
 
         closest_hit
     }
@@ -100,32 +172,9 @@ impl Maze {
     ) -> Option<((u8, u8), f32, Vec3)> {
         use crate::weapons::combat::ray_hit_aabb_with_normal;
 
-        let mut closest_hit: Option<((u8, u8), f32, Vec3)> = None;
-
-        for y in 0..self.height {
-            for x in 0..self.width {
-                if self.cells[self.idx(x as usize, y as usize)] == 0 {
-                    let wall_center = self.cell_to_world(x as i32, y as i32);
-                    let box_center = wall_center + vec3(0.0, self.wall_height * 0.5, 0.0);
-                    let half_extents = vec3(
-                        self.cell_size * 0.5,
-                        self.wall_height * 0.5,
-                        self.cell_size * 0.5,
-                    );
-
-                    if let Some((dist, normal)) =
-                        ray_hit_aabb_with_normal(origin, dir, box_center, half_extents, max_dist)
-                    {
-                        let is_closer = closest_hit.map_or(true, |(_, d, _)| dist < d);
-                        if is_closer {
-                            closest_hit = Some(((x, y), dist, normal));
-                        }
-                    }
-                }
-            }
-        }
-
-        closest_hit
+        self.closest_wall_hit(origin, dir, max_dist, |center, half| {
+            ray_hit_aabb_with_normal(origin, dir, center, half, max_dist)
+        })
     }
 
     /// Ray-test the maze floor and ceiling panels. Returns closest hit distance and surface normal.
@@ -160,25 +209,52 @@ impl Maze {
         let panel_half_y = panel_thickness * 0.5;
 
         // Only check cells near the ray to avoid iterating the entire maze
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let idx = self.idx(x as usize, y as usize);
-                if self.cells[idx] == 0 {
-                    continue; // wall cells don't have ceiling panels
+        let panel_half = vec3(panel_half_xz, panel_half_y, panel_half_xz);
+        let m = grid_walk::CLIP_MARGIN;
+        let panel_span = grid_walk::slab_interval(
+            origin.y,
+            dir.y,
+            panel_y - panel_half_y - m,
+            panel_y + panel_half_y + m,
+        );
+        if let Some((a, b)) = panel_span {
+            let mut panel_best: Option<((u8, u8), f32, Vec3)> = None;
+            self.walk_cells(origin, dir, a.max(0.0), b.min(max_dist), |cx, cy, t_enter| {
+                // Panels only matter when strictly closer than the best so far.
+                let bound = match (panel_best, best) {
+                    (Some((_, pd, _)), _) => Some(pd),
+                    (None, Some((fd, _))) => Some(fd),
+                    (None, None) => None,
+                };
+                if bound.map_or(false, |d| t_enter > d + grid_walk::walk_slack(d)) {
+                    return false;
                 }
-                let center = vec3(
-                    (x as f32 + 0.5) * self.cell_size,
-                    panel_y,
-                    (y as f32 + 0.5) * self.cell_size,
-                );
-                if let Some((d, n)) = ray_hit_aabb_with_normal(
-                    origin, dir, center,
-                    vec3(panel_half_xz, panel_half_y, panel_half_xz),
-                    max_dist,
-                ) {
-                    if best.map_or(true, |(b, _)| d < b) {
-                        best = Some((d, n));
+                for (x, y) in self.neighbourhood(cx, cy) {
+                    let idx = self.idx(x as usize, y as usize);
+                    if self.cells[idx] == 0 {
+                        continue; // wall cells don't have ceiling panels
                     }
+                    let center = vec3(
+                        (x as f32 + 0.5) * self.cell_size,
+                        panel_y,
+                        (y as f32 + 0.5) * self.cell_size,
+                    );
+                    if let Some((d, n)) =
+                        ray_hit_aabb_with_normal(origin, dir, center, panel_half, max_dist)
+                    {
+                        let pb = panel_best.map(|(c, pd, _)| (c, pd));
+                        if grid_walk::is_better(d, (x, y), pb) {
+                            panel_best = Some(((x, y), d, n));
+                        }
+                    }
+                }
+                true
+            });
+            // The old scan visited panels after the floor, replacing it only
+            // when strictly closer; the earliest closest panel wins ties.
+            if let Some((_, d, n)) = panel_best {
+                if best.map_or(true, |(b, _)| d < b) {
+                    best = Some((d, n));
                 }
             }
         }
