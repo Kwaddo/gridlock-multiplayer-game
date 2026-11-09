@@ -139,14 +139,16 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
     }
 }
 
+// server marked them dead with no kill message, so no killer or headshot, the table picks its default
 fn death_skin(p: &OtherPlayer) -> PlayerSkin {
-    if p.is_prone {
-        PlayerSkin::ProneDeath
-    } else if p.is_crouching {
-        PlayerSkin::CrouchDeath
-    } else {
-        PlayerSkin::StandDeath
-    }
+    client::types::anim_chooser::choose_death(
+        client::types::anim_chooser::stance(p.is_prone, p.is_crouching),
+        p.render_position(),
+        p.render_yaw,
+        None,
+        false,
+        p.id,
+    )
 }
 
 /// A state entry's flag bytes, unpacked.

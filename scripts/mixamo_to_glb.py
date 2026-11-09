@@ -1,12 +1,15 @@
 """
-mixamo fbx folder -> one glb per file, run inside blender with no window:
+mixamo fbx -> glb for the game, run from the repo root inside blender with no window:
 
-    blender --background --python scripts/mixamo_to_glb.py -- \
-        --in C:/mixamo_raw --out C:/mixamo_glb --characters Ch15.fbx Skin_Test.fbx
+    blender --background --python scripts/mixamo_to_glb.py
 
-character files keep their mesh, skin and every texture, each texture shrunk by type
-(diffuse 1024, normal 512, the rest 256 by default) so lighting can use them later,
-every other file keeps just the skeleton + its animation (bones only, tiny files)
+reads   client/assets/models/New/Models/*.fbx      every file here is a character (with skin)
+        client/assets/models/New/Animation/*.fbx   every file here is an animation (bones only)
+writes  client/assets/models/characters/<name>.glb  mesh + skin + every texture, shrunk by type
+        client/assets/models/animations/<name>.glb  just the skeleton + its animation, tiny
+
+new skin = drop its fbx in New/Models and run again, nothing to list anywhere
+files whose glb is already newer than the fbx are skipped, --force redoes everything
 before this every animation was exported by hand with the whole character inside (~9 MB each)
 """
 
@@ -16,16 +19,19 @@ import sys
 
 import bpy
 
+ASSETS = os.path.join("client", "assets", "models")
+
 
 def parse_args():
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     p = argparse.ArgumentParser(description="convert mixamo fbx files to glb for gridlock")
-    p.add_argument("--in", dest="src", required=True, help="folder with the .fbx files")
-    p.add_argument("--out", dest="dst", required=True, help="folder to write the .glb files")
-    p.add_argument("--characters", nargs="+", required=True, help="file names of the With Skin character fbx files (main + skins)")
+    p.add_argument("--characters-in", default=os.path.join(ASSETS, "New", "Models"))
+    p.add_argument("--animations-in", default=os.path.join(ASSETS, "New", "Animation"))
+    p.add_argument("--out", default=ASSETS, help="characters/ and animations/ are made in here")
     p.add_argument("--diffuse-size", type=int, default=1024, help="max size of base colour textures")
     p.add_argument("--normal-size", type=int, default=512, help="max size of normal maps")
     p.add_argument("--other-size", type=int, default=256, help="max size of specular, gloss, emissive and anything else")
+    p.add_argument("--force", action="store_true", help="convert everything again, even if up to date")
     return p.parse_args(argv)
 
 
@@ -35,7 +41,10 @@ def empty_scene():
 
 def import_fbx(path):
     # keep mixamo's bone axes as they are, the game matches bones by name
-    bpy.ops.import_scene.fbx(filepath=path, automatic_bone_orientation=False)
+    if hasattr(bpy.ops.import_scene, "fbx"):
+        bpy.ops.import_scene.fbx(filepath=path, automatic_bone_orientation=False)
+    else:
+        bpy.ops.wm.fbx_import(filepath=path)  # newer blender builds
 
 
 def keep_only_armature():
@@ -79,39 +88,67 @@ def compress_textures(sizes):
                 if kinds.get(node.image.name) != "diffuse":
                     kinds[node.image.name] = kind
     for img in bpy.data.images:
+        if img.size[0] == 0:
+            continue  # missing or empty image, nothing to shrink
         kind = kinds.get(img.name, "other")
         shrink(img, sizes[kind])
-        print(f"[mixamo]   texture {img.name}: {kind} -> {img.size[0]}x{img.size[1]}")
 
 
 def export_glb(path):
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_animations=True)
 
 
+def fbx_files(folder):
+    if not os.path.isdir(folder):
+        print(f"[convert] folder not found: {folder}")
+        return []
+    return sorted(f for f in os.listdir(folder) if f.lower().endswith(".fbx"))
+
+
+def up_to_date(src, dst):
+    return os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(src)
+
+
+def convert_folder(src_dir, dst_dir, kind, args, sizes, totals):
+    os.makedirs(dst_dir, exist_ok=True)
+    for name in fbx_files(src_dir):
+        src = os.path.join(src_dir, name)
+        dst = os.path.join(dst_dir, os.path.splitext(name)[0] + ".glb")
+        if not args.force and up_to_date(src, dst):
+            totals["skipped"] += 1
+            totals["bytes"] += os.path.getsize(dst)
+            continue
+        try:
+            empty_scene()
+            import_fbx(src)
+            if kind == "character":
+                compress_textures(sizes)
+            else:
+                keep_only_armature()
+            export_glb(dst)
+        except Exception as e:  # one bad file shouldnt stop the rest
+            print(f"[convert] FAILED {kind} {name}: {e}")
+            totals["failed"].append(name)
+            continue
+        size = os.path.getsize(dst)
+        totals["bytes"] += size
+        totals[kind] += 1
+        print(f"[convert] {kind:9} {name:32} -> {size / 1e6:6.2f} MB")
+
+
 def main():
     args = parse_args()
     sizes = {"diffuse": args.diffuse_size, "normal": args.normal_size, "other": args.other_size}
-    os.makedirs(args.dst, exist_ok=True)
-    files = sorted(f for f in os.listdir(args.src) if f.lower().endswith(".fbx"))
-    missing = [c for c in args.characters if c not in files]
-    if missing:
-        print(f"[mixamo] character file(s) {missing} not found in {args.src}")
+    totals = {"character": 0, "animation": 0, "skipped": 0, "bytes": 0, "failed": []}
+    convert_folder(args.characters_in, os.path.join(args.out, "characters"), "character", args, sizes, totals)
+    convert_folder(args.animations_in, os.path.join(args.out, "animations"), "animation", args, sizes, totals)
+    print(
+        f"[convert] done: {totals['character']} characters, {totals['animation']} animations converted, "
+        f"{totals['skipped']} already up to date, {totals['bytes'] / 1e6:.1f} MB total"
+    )
+    if totals["failed"]:
+        print(f"[convert] failed: {', '.join(totals['failed'])}")
         sys.exit(1)
-
-    for name in files:
-        src = os.path.join(args.src, name)
-        dst = os.path.join(args.dst, os.path.splitext(name)[0] + ".glb")
-        empty_scene()
-        import_fbx(src)
-        if name in args.characters:
-            compress_textures(sizes)
-            kind = "character"
-        else:
-            keep_only_armature()
-            kind = "clip"
-        export_glb(dst)
-        size_mb = os.path.getsize(dst) / 1e6
-        print(f"[mixamo] {kind:9} {name} -> {os.path.basename(dst)} ({size_mb:.2f} MB)")
 
 
 main()

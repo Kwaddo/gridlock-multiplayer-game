@@ -81,9 +81,10 @@ impl PlayingState {
         let mut total_dmg = 0.0f32;
         let mut any_headshot = false;
         let mut pellet_mask: u16 = 0;
-        // (victim id, damage, backstab) per player hit this shot; a shot has
+        // (victim id, damage, backstab, headshot) per player hit this shot; a shot has
         // at most a few pellets, so a linear scan beats two hash maps.
-        let mut player_hits: Vec<(u32, f32, bool)> = Vec::new();
+        // headshot = any pellet hit their head, before this only the hit marker knew
+        let mut player_hits: Vec<(u32, f32, bool, bool)> = Vec::new();
 
         for i in 0..stats.pellet_count as usize {
             // per-pellet nearest-target (reset for each pellet)
@@ -326,7 +327,7 @@ impl PlayingState {
                             let slot = match player_hits.iter().position(|h| h.0 == victim_id) {
                                 Some(i) => i,
                                 None => {
-                                    player_hits.push((victim_id, 0.0, false));
+                                    player_hits.push((victim_id, 0.0, false, false));
                                     player_hits.len() - 1
                                 }
                             };
@@ -341,6 +342,7 @@ impl PlayingState {
                             let fwd = Vec3::new(victim_yaw.cos(), 0.0, victim_yaw.sin());
                             let is_backstab = atk_dir.dot(fwd) < -0.5;
                             player_hits[slot].2 = is_backstab;
+                            player_hits[slot].3 |= zone == HitZone::Head;
                         }
                     }
                     EntityKind::Bot => {
@@ -371,9 +373,9 @@ impl PlayingState {
         }
 
         // Send hit reports in all worlds; server enforces lobby combat rules.
-        for (victim_id, damage, is_backstab) in player_hits {
+        for (victim_id, damage, is_backstab, is_headshot) in player_hits {
             if damage > 0.0 {
-                self.pending_hits.push((victim_id, damage, is_backstab));
+                self.pending_hits.push((victim_id, damage, is_backstab, is_headshot));
             }
         }
 

@@ -16,6 +16,11 @@ use crate::types::player::PlayerSkin;
 // how long a switch between two clips takes to fade, seconds
 const FADE_TIME: f32 = 0.2;
 
+// other players' slow walk isnt sent (no flag bits left), so: walking forward under this speed...
+const SLOW_WALK_BELOW: f32 = 3.0;
+// ...for at least this long means slow walk, long enough that speeding up or coasting to a stop doesnt count
+const SLOW_WALK_AFTER: f32 = 0.4;
+
 pub struct PlayerAnim {
     clip: PlayerSkin,
     time: f32,
@@ -27,6 +32,8 @@ pub struct PlayerAnim {
     // how fast this body really moves on the ground, so walk speed can match it
     last_pos: Option<Vec3>,
     speed: f32,
+    // how long theyve been walking forward slowly, see SLOW_WALK_AFTER
+    slow_for: f32,
 }
 
 impl PlayerAnim {
@@ -40,6 +47,7 @@ impl PlayerAnim {
             fade: 0.0,
             last_pos: None,
             speed: 0.0,
+            slow_for: 0.0,
         }
     }
 
@@ -59,6 +67,11 @@ impl PlayerAnim {
             }
         }
         self.last_pos = Some(pos);
+
+        // a slow forward walk shows the slow walk clip, before this slow walking looked like a normal walk in slow motion
+        let slow = skin == PlayerSkin::RifleWalk && self.speed > 0.3 && self.speed < SLOW_WALK_BELOW;
+        self.slow_for = if slow { self.slow_for + dt } else { 0.0 };
+        let skin = if self.slow_for >= SLOW_WALK_AFTER { PlayerSkin::SlowWalkForward } else { skin };
 
         if skin != self.clip {
             // keep the old clip playing so it can fade out
@@ -161,7 +174,7 @@ fn is_one_shot(skin: PlayerSkin) -> bool {
 // lying on the floor, no look up/down bend here
 fn is_prone(skin: PlayerSkin) -> bool {
     use PlayerSkin::*;
-    matches!(skin, ProneIdle | ProneForward | ProneTurnLeft | ProneTurnRight)
+    matches!(skin, ProneIdle | ProneForward | ProneBack | ProneTurnLeft | ProneTurnRight)
 }
 
 // looping clips where the feet move, switching between two of these keeps the stride
@@ -169,10 +182,10 @@ fn is_moving_loop(skin: PlayerSkin) -> bool {
     use PlayerSkin::*;
     matches!(
         skin,
-        RifleWalk | WalkBack | WalkLeft | WalkRight
+        RifleWalk | WalkBack | WalkLeft | WalkRight | SlowWalkForward
             | SprintForward | SprintLeft | SprintRight
             | CrouchForward | CrouchBack | CrouchLeft | CrouchRight
-            | ProneForward | ProneTurnLeft | ProneTurnRight
+            | ProneForward | ProneBack | ProneTurnLeft | ProneTurnRight
     )
 }
 
@@ -182,9 +195,10 @@ fn playback_rate(skin: PlayerSkin, speed: f32) -> f32 {
     use PlayerSkin::*;
     let made_for = match skin {
         RifleWalk | WalkBack | WalkLeft | WalkRight => 5.0, // walk_speed
+        SlowWalkForward => 1.8, // slow_walk_speed
         SprintForward | SprintLeft | SprintRight => 8.0, // sprint_speed
         CrouchForward | CrouchBack | CrouchLeft | CrouchRight => 2.5, // crouch_speed
-        ProneForward | ProneTurnLeft | ProneTurnRight => 1.5, // prone_speed
+        ProneForward | ProneBack | ProneTurnLeft | ProneTurnRight => 1.5, // prone_speed
         _ => return 1.0,
     };
     (speed / made_for).clamp(0.5, 1.5)

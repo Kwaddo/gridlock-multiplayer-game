@@ -51,6 +51,11 @@ impl PlayingState {
             self.movement_state.is_prone,
             self.movement_state.is_sliding,
         );
+        // slow walk: forward only, s a and d do nothing (ahmed's rule), like prone but no backing up either
+        if self.movement_state.is_slow_walking {
+            let forward = vec3(self.yaw.cos(), 0.0, self.yaw.sin());
+            self.move_dir = if self.move_dir.dot(forward) > 1e-4 { forward } else { Vec3::ZERO };
+        }
         let crouch_just_pressed = config.bind_crouch.is_pressed();
         if crouch_just_pressed
             && self.movement_state.is_sprinting
@@ -83,7 +88,8 @@ impl PlayingState {
                 input::process_crouch(config, self.movement_state.is_crouching);
         }
         self.jump_requested =
-            input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons);
+            input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons)
+                && self.movement_state.jump_cooldown_timer <= 0.0; // just landed, wait a moment
 
         if self.movement_state.is_sliding
             && (self.jump_requested || self.movement_state.slide_timer <= 0.0)

@@ -24,7 +24,7 @@ pub struct NetUpdate {
     pub world_change: Option<(WorldId, Vec3, Option<u8>, Option<u16>)>,
     pub broken_walls: Option<Vec<(u8, u8)>>,
     pub damage_taken: Option<(f32, Option<u32>, bool)>, // (damage amount, attacker_id)
-    pub kill_feed: Option<Vec<(u32, u32, String)>>, // (killer_id, victim_id, weapon)
+    pub kill_feed: Option<Vec<(u32, u32, String, bool)>>, // (killer_id, victim_id, weapon, headshot)
     pub respawn_pos: Option<Vec3>,                // (x, y, z)
     pub respawn_fallback: Option<bool>,           // true if server fell back to teleporter
     pub lobby_console_message: Option<String>,
@@ -271,11 +271,12 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
             ServerMsg::Damage { amount, attacker_id, stun } => {
                 update.damage_taken = Some((amount, Some(attacker_id), stun));
             }
-            ServerMsg::KillFeed { killer_id, victim_id, weapon } => {
+            ServerMsg::KillFeed { killer_id, victim_id, weapon, headshot } => {
+                // headshot carried along for the death chooser, before this the feed had no idea
                 if let Some(ref mut feed) = update.kill_feed {
-                    feed.push((killer_id, victim_id, weapon));
+                    feed.push((killer_id, victim_id, weapon, headshot));
                 } else {
-                    update.kill_feed = Some(vec![(killer_id, victim_id, weapon)]);
+                    update.kill_feed = Some(vec![(killer_id, victim_id, weapon, headshot)]);
                 }
             }
             ServerMsg::Death { killer_id, weapon } => {

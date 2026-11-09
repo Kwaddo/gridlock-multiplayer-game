@@ -27,7 +27,8 @@ pub enum ServerMsg {
     Respawn { position: Vec3, kind: Option<u8> }, // kind: 0=random, 1=teleporter fallback
     Damage { amount: f32, attacker_id: u32, stun: bool },
     Kill { victim_id: u32, weapon: String },
-    KillFeed { killer_id: u32, victim_id: u32, weapon: String },
+    /// `headshot` trails the packet, so older builds still read the rest, before this kills never said if they were headshots
+    KillFeed { killer_id: u32, victim_id: u32, weapon: String, headshot: bool },
     StartDenied { reason: Option<u8> }, // START_DENIED_*; None = running and full
     MatchJoined { id: u32, name: String },
     MatchEnd { winner_id: u32, winner_name: String, countdown: Option<u8> },
@@ -133,10 +134,11 @@ impl ServerMsg {
             ServerMsg::Kill { victim_id, weapon } => {
                 Writer::new(MSG_KILL).u32(*victim_id).str8(weapon).finish()
             }
-            ServerMsg::KillFeed { killer_id, victim_id, weapon } => Writer::new(MSG_KILL_FEED)
+            ServerMsg::KillFeed { killer_id, victim_id, weapon, headshot } => Writer::new(MSG_KILL_FEED)
                 .u32(*killer_id)
                 .u32(*victim_id)
                 .str8(weapon)
+                .bool(*headshot)
                 .finish(),
             ServerMsg::StartDenied { reason } => {
                 let mut w = Writer::new(MSG_START_DENIED);
@@ -289,6 +291,7 @@ impl ServerMsg {
                 killer_id: r.u32()?,
                 victim_id: r.u32()?,
                 weapon: r.str8()?,
+                headshot: r.bool().unwrap_or(false), // older packets have no headshot byte
             },
             MSG_START_DENIED => ServerMsg::StartDenied { reason: r.u8() },
             MSG_MATCH_JOINED => ServerMsg::MatchJoined { id: r.u32()?, name: r.str8()? },
