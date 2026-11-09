@@ -163,26 +163,37 @@
         };
 
         // ---- keeping the keyboard in the game
-        // Browsers keep some keys for themselves: Esc leaves pointer lock
-        // without the page ever seeing it, and Ctrl+W/T/N close or open tabs
-        // (Ctrl is crouch, so Ctrl+W is crouch-walking). No page can cancel
-        // those, except through the Keyboard Lock API (Chrome, Edge, Opera),
-        // which only works in fullscreen. So the click that grabs the mouse
-        // for play also goes fullscreen with the keyboard locked: Esc then
-        // reaches the game (holding Esc still leaves fullscreen) and Ctrl
-        // shortcuts stay movement keys.
+        // Browsers keep shortcuts like Ctrl+W/T/N (close or open tabs) for
+        // themselves, and Ctrl+W is easy to hit while moving. No page can
+        // cancel those, except through the Keyboard Lock API (Chrome, Edge,
+        // Opera), which only works in fullscreen. So the click that grabs the
+        // mouse for play also goes fullscreen with every key but Esc locked:
+        // Ctrl shortcuts stay with the game, and Esc still gets the player out
+        // (frees the mouse and leaves fullscreen; the game pauses, below).
         // Browsers without it (Firefox, Safari) get the fallbacks below: the
-        // tab asks before closing during a game, and losing pointer lock to
-        // Esc pauses the game as the Esc key would.
+        // tab asks before closing during a game.
 
         const keyboardLock = navigator.keyboard && navigator.keyboard.lock ? navigator.keyboard : null;
         // false once the game itself leaves fullscreen (its fullscreen key),
         // so play stays windowed until it asks for fullscreen again
         let autoFullscreen = true;
 
+        // Every key code a keyboard sends, except Escape.
+        const LOCKED_KEYS = [
+            ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((c) => "Key" + c),
+            ..."0123456789".split("").map((d) => "Digit" + d),
+            ..."0123456789".split("").map((d) => "Numpad" + d),
+            ...Array.from({ length: 12 }, (_, i) => "F" + (i + 1)),
+            "Space", "Tab", "Enter", "Backspace", "Delete", "Insert", "Home", "End",
+            "PageUp", "PageDown", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+            "Minus", "Equal", "BracketLeft", "BracketRight", "Backslash", "Semicolon",
+            "Quote", "Backquote", "Comma", "Period", "Slash", "IntlBackslash",
+            "NumpadAdd", "NumpadSubtract", "NumpadMultiply", "NumpadDivide",
+            "NumpadDecimal", "NumpadEnter",
+        ];
         const lockKeys = () => {
             if (!keyboardLock) return;
-            const p = keyboardLock.lock();
+            const p = keyboardLock.lock(LOCKED_KEYS);
             if (p && p.catch) p.catch(() => {});
         };
         const enterPlay = () => {
@@ -235,9 +246,8 @@
             e.returnValue = "";
         });
 
-        // Without the keyboard lock, Esc takes pointer lock away and the game
-        // never hears the key: pass it on, so it pauses as Esc does natively.
-        // (With the lock, Esc reaches the game itself and pointer lock stays.)
+        // Esc (never locked) takes pointer lock away before the game hears the
+        // key: pass it on, so the game pauses as Esc does natively.
         const ESCAPE = 256; // miniquad's key code
         document.addEventListener("pointerlockchange", () => {
             if (document.pointerLockElement === canvas || !wantLock || !wasm_exports) return;
