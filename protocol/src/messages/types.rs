@@ -1,17 +1,19 @@
 //! Structs carried inside `ServerMsg` and `ClientMsg`.
 
-use crate::codec::{dequantize_yaw, quantize_yaw, Reader, Vec3, Writer};
+use crate::codec::{dequantize_pitch, dequantize_yaw, quantize_pitch, quantize_yaw, Reader, Vec3, Writer};
 
-/// One entry of `MSG_STATE`: what changes from tick to tick. 18 bytes on the
-/// wire: `[id:4][x,y,z: fixed-point i16 each][yaw:u16][state_flags:1]
-/// [event_flags:1][health:u16][alive:1][freeze_secs:1]`. Position and yaw
-/// come back quantized (see `codec::quantize_coord`, `codec::quantize_yaw`).
+/// One entry of `MSG_STATE`: what changes from tick to tick. 19 bytes on the
+/// wire: `[id:4][x,y,z: fixed-point i16 each][yaw:u16][pitch:i8 degrees][state_flags:1]
+/// [event_flags:1][health:u16][alive:1][freeze_secs:1]`. Position, yaw and pitch
+/// come back quantized (see `codec::quantize_coord`, `codec::quantize_yaw`, `codec::quantize_pitch`).
 /// What rarely changes travels in `PlayerInfo` instead.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlayerState {
     pub id: u32,
     pub position: Vec3,
     pub yaw: f32,
+    // look up/down in radians, + = up, so other players see where you aim
+    pub pitch: f32,
     pub state_flags: u8,
     pub event_flags: u8,
     pub health: u16,
@@ -21,10 +23,11 @@ pub struct PlayerState {
 }
 
 impl PlayerState {
-    pub const WIRE_BYTES: usize = 18;
+    pub const WIRE_BYTES: usize = 19;
 
     pub(super) fn write(&self, w: &mut Writer) {
         w.u32(self.id).pos16(self.position).u16(quantize_yaw(self.yaw));
+        w.u8(quantize_pitch(self.pitch));
         w.u8(self.state_flags).u8(self.event_flags).u16(self.health);
         w.bool(self.alive).u8(self.freeze_secs);
     }
@@ -34,6 +37,7 @@ impl PlayerState {
             id: r.u32()?,
             position: r.pos16()?,
             yaw: dequantize_yaw(r.u16()?),
+            pitch: dequantize_pitch(r.u8()?),
             state_flags: r.u8()?,
             event_flags: r.u8()?,
             health: r.u16()?,

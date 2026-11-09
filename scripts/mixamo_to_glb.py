@@ -2,9 +2,10 @@
 mixamo fbx folder -> one glb per file, run inside blender with no window:
 
     blender --background --python scripts/mixamo_to_glb.py -- \
-        --in C:/mixamo_raw --out C:/mixamo_glb --characters Ch15.fbx Skin_Test.fbx --texture-size 1024
+        --in C:/mixamo_raw --out C:/mixamo_glb --characters Ch15.fbx Skin_Test.fbx
 
-the character file keeps its mesh, skin and diffuse (base colour) texture only,
+character files keep their mesh, skin and every texture, each texture shrunk by type
+(diffuse 1024, normal 512, the rest 256 by default) so lighting can use them later,
 every other file keeps just the skeleton + its animation (bones only, tiny files)
 before this every animation was exported by hand with the whole character inside (~9 MB each)
 """
@@ -15,9 +16,6 @@ import sys
 
 import bpy
 
-# the only texture the game reads, everything else plugged into the shader gets cut
-KEEP_INPUT = "Base Color"
-
 
 def parse_args():
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
@@ -25,7 +23,9 @@ def parse_args():
     p.add_argument("--in", dest="src", required=True, help="folder with the .fbx files")
     p.add_argument("--out", dest="dst", required=True, help="folder to write the .glb files")
     p.add_argument("--characters", nargs="+", required=True, help="file names of the With Skin character fbx files (main + skins)")
-    p.add_argument("--texture-size", type=int, default=1024, help="max diffuse size in pixels")
+    p.add_argument("--diffuse-size", type=int, default=1024, help="max size of base colour textures")
+    p.add_argument("--normal-size", type=int, default=512, help="max size of normal maps")
+    p.add_argument("--other-size", type=int, default=256, help="max size of specular, gloss, emissive and anything else")
     return p.parse_args(argv)
 
 
@@ -45,29 +45,43 @@ def keep_only_armature():
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
-def strip_textures(max_size):
-    # unplug every texture except base colour, the game is unlit so the rest is dead weight
+def texture_kind(tree, node):
+    # what an image feeds, base colour = diffuse, through a normal map node = normal, anything else = other
+    for link in tree.links:
+        if link.from_node != node:
+            continue
+        if link.to_node.type == "NORMAL_MAP" or link.to_socket.name == "Normal":
+            return "normal"
+        if link.to_socket.name == "Base Color":
+            return "diffuse"
+    return "other"
+
+
+def shrink(img, max_size):
+    w, h = img.size
+    if max(w, h) > max_size:
+        scale = max_size / max(w, h)
+        img.scale(max(1, int(w * scale)), max(1, int(h * scale)))
+        img.pack()
+
+
+def compress_textures(sizes):
+    # keep every map (normal, specular...) but shrink each one by what it is used for
+    # before this the whole set came in at full size, up to 4096 for one specular map
+    kinds = {}
     for mat in bpy.data.materials:
         if not mat.use_nodes:
             continue
-        tree = mat.node_tree
-        for link in list(tree.links):
-            if link.from_node.type == "TEX_IMAGE" and link.to_socket.name != KEEP_INPUT:
-                tree.links.remove(link)
-        for node in list(tree.nodes):
-            if node.type == "TEX_IMAGE" and not any(l.from_node == node for l in tree.links):
-                tree.nodes.remove(node)
-    # images nobody uses anymore, so the exporter doesnt write them
-    for img in list(bpy.data.images):
-        if img.users == 0:
-            bpy.data.images.remove(img)
-    # shrink the diffuse if its bigger than asked
+        for node in mat.node_tree.nodes:
+            if node.type == "TEX_IMAGE" and node.image:
+                kind = texture_kind(mat.node_tree, node)
+                # an image used for colour anywhere stays at the colour size
+                if kinds.get(node.image.name) != "diffuse":
+                    kinds[node.image.name] = kind
     for img in bpy.data.images:
-        w, h = img.size
-        if max(w, h) > max_size:
-            scale = max_size / max(w, h)
-            img.scale(max(1, int(w * scale)), max(1, int(h * scale)))
-            img.pack()
+        kind = kinds.get(img.name, "other")
+        shrink(img, sizes[kind])
+        print(f"[mixamo]   texture {img.name}: {kind} -> {img.size[0]}x{img.size[1]}")
 
 
 def export_glb(path):
@@ -76,6 +90,7 @@ def export_glb(path):
 
 def main():
     args = parse_args()
+    sizes = {"diffuse": args.diffuse_size, "normal": args.normal_size, "other": args.other_size}
     os.makedirs(args.dst, exist_ok=True)
     files = sorted(f for f in os.listdir(args.src) if f.lower().endswith(".fbx"))
     missing = [c for c in args.characters if c not in files]
@@ -89,7 +104,7 @@ def main():
         empty_scene()
         import_fbx(src)
         if name in args.characters:
-            strip_textures(args.texture_size)
+            compress_textures(sizes)
             kind = "character"
         else:
             keep_only_armature()

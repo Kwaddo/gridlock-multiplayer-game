@@ -81,13 +81,13 @@ impl PlayingState {
         for p in &mut self.other_players {
             // move this body's own clock and work out its own pose, before this every body read the shared clip's clock
             let pos = p.render_position();
-            p.anim.tick(p.skin_type, delta, animated_models, pos);
+            p.anim.tick(p.skin_type, delta, animated_models, pos, p.render_pitch);
             // here we refresh the hitbox positions every frame based on the current animation pose of the player so hit detection is accurate if they crouch, prone, slide, etc.
             refresh_player_hitboxes(animated_models, p);
         }
         for bot in &mut self.practice_bots {
             let pos = bot.player.render_position();
-            bot.player.anim.tick(bot.player.skin_type, delta, animated_models, pos);
+            bot.player.anim.tick(bot.player.skin_type, delta, animated_models, pos, bot.player.render_pitch);
             refresh_player_hitboxes(animated_models, &mut bot.player);
         }
         self.practice_bots

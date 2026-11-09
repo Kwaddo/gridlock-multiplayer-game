@@ -36,12 +36,12 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
         match load_obj_mesh_with_materials(&resolved_path).await {
             Ok(mesh) => {
                 let vertex_count = mesh.vertices.len();
-                // ensure vector storage
+                // ensure vector storage, big meshes split so macroquad draws every triangle
                 playing_state
                     .models
                     .entry(key_string.clone())
                     .or_default()
-                    .push(mesh);
+                    .extend(client::types::mesh_split::split_mesh(mesh));
                 playing_state
                     .asset_source_paths
                     .insert(key_string.clone(), path_string.clone());

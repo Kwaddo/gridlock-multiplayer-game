@@ -87,6 +87,7 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
             current.is_prone = flags.prone;
             current.is_sliding = flags.sliding;
             current.apply_snapshot(x, y, z, incoming.yaw);
+            current.pitch = incoming.pitch; // where they look up/down, the body bends toward it
             // name, team, weapon, kills and max health: see apply_player_info
             current.hp = if incoming.alive { incoming.health as f32 } else { 0.0 };
             current.is_alive = incoming.alive;
@@ -185,6 +186,8 @@ fn new_player(e: &PlayerState, flags: &Flags, world: WorldId, info: Option<&Play
     let mut p = OtherPlayer::new(e.id, String::new(), world);
     (p.x, p.y, p.z) = e.position;
     p.yaw = e.yaw;
+    p.pitch = e.pitch;
+    p.render_pitch = e.pitch;
     p.is_sprinting = flags.sprinting;
     p.is_crouching = flags.crouching;
     p.is_prone = flags.prone;

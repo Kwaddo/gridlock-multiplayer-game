@@ -1,4 +1,4 @@
-use crate::codec::{Reader, Vec3, Writer};
+use crate::codec::{dequantize_pitch, quantize_pitch, Reader, Vec3, Writer};
 use crate::*;
 
 /// Client -> server.
@@ -9,7 +9,9 @@ pub enum ClientMsg {
     /// written as whitespace, see [`write_join_version`]: servers from before
     /// the check trim it off and still see the plain name.
     Join { username: String, version: Option<u16> },
-    Position { position: Vec3, yaw: f32, state_flags: Option<u8>, event_flags: Option<u8> },
+    /// `pitch` (look up/down, + = up) trails the event flags and is only written when both flags are,
+    /// before this pitch was never sent so nobody saw where you looked up or down
+    Position { position: Vec3, yaw: f32, state_flags: Option<u8>, event_flags: Option<u8>, pitch: Option<f32> },
     Disconnect,
     WorldChange { target: u8 },
     Discover,
@@ -84,13 +86,16 @@ impl ClientMsg {
                 }
                 w.finish()
             }
-            ClientMsg::Position { position, yaw, state_flags, event_flags } => {
+            ClientMsg::Position { position, yaw, state_flags, event_flags, pitch } => {
                 let mut w = Writer::new(MSG_POSITION);
                 w.vec3(*position).f32(*yaw);
                 if let Some(s) = state_flags {
                     w.u8(*s);
                     if let Some(e) = event_flags {
                         w.u8(*e);
+                        if let Some(p) = pitch {
+                            w.u8(quantize_pitch(*p));
+                        }
                     }
                 }
                 w.finish()
@@ -159,6 +164,7 @@ impl ClientMsg {
                 yaw: r.f32()?,
                 state_flags: r.u8(),
                 event_flags: r.u8(),
+                pitch: r.u8().map(dequantize_pitch),
             },
             MSG_DISCONNECT => ClientMsg::Disconnect,
             MSG_WORLD_CHANGE => ClientMsg::WorldChange { target: r.u8()? },

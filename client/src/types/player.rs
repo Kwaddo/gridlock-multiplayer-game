@@ -185,6 +185,10 @@ pub struct OtherPlayer {
     pub render_y: f32,
     pub render_z: f32,
     pub render_yaw: f32,
+    // look up/down from the server (+ = up) and the smoothed one the body bends to
+    // before this pitch never reached other players, so their bodies always looked level
+    pub pitch: f32,
+    pub render_pitch: f32,
     has_snapshot: bool,
     pub username: String,
     pub skin: Option<Texture2D>,
@@ -260,6 +264,8 @@ impl OtherPlayer {
             render_y: 0.0,
             render_z: 0.0,
             render_yaw: 0.0,
+            pitch: 0.0,
+            render_pitch: 0.0,
             has_snapshot: false,
             username,
             skin: None,
@@ -337,6 +343,8 @@ impl OtherPlayer {
 
         let yaw_alpha = 1.0 - (-Self::YAW_SMOOTH_RATE * delta).exp();
         self.render_yaw = lerp_angle(self.render_yaw, self.yaw, yaw_alpha);
+        // pitch never wraps (its +-89 degrees), a plain ease is enough
+        self.render_pitch += (self.pitch - self.render_pitch) * yaw_alpha;
     }
 }
 

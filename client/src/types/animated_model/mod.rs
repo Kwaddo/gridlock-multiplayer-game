@@ -1,3 +1,4 @@
+mod aim_bend;
 mod clip_select;
 mod constants;
 mod glb;
@@ -103,6 +104,8 @@ pub struct AnimatedModel {
     joint_names: Vec<String>,
     /// Joint index of each `JointRole`, matched by name once at load.
     joint_roles: JointRoleTable,
+    // spine + neck bones that tilt to look up/down, with their share of the tilt (see aim_bend)
+    spine_chain: Vec<(usize, f32)>,
     inverse_bind: Vec<Mat4>,
     // this clip's own pose at its own clock (the hands still use this)
     pose: Pose,

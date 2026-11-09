@@ -52,7 +52,7 @@ impl Server {
             ClientMsg::Disconnect => {
                 handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr)
             }
-            ClientMsg::Position { position, yaw, state_flags, event_flags } => {
+            ClientMsg::Position { position, yaw, state_flags, event_flags, pitch } => {
                 handlers::handle_position(
                     &self.outbox,
                     &mut self.players,
@@ -61,6 +61,7 @@ impl Server {
                     yaw,
                     state_flags,
                     event_flags,
+                    pitch,
                 );
             },
 

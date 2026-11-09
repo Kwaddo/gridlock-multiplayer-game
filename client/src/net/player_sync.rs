@@ -83,6 +83,7 @@ mod tests {
             id,
             position: (x, 0.0, 0.0),
             yaw: 0.0,
+            pitch: 0.0,
             state_flags: 0,
             event_flags,
             health: 90,

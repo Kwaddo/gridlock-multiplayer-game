@@ -13,9 +13,9 @@ use super::AnimatedModel;
 
 #[derive(Default)]
 pub struct Pose { // how eac join is bent/moved compared to its parent
-    local: Vec<LocalTransform>,
+    pub(super) local: Vec<LocalTransform>,
     global: Vec<Mat4>,
-    global_valid: Vec<bool>,
+    pub(super) global_valid: Vec<bool>,
     pub(super) skin_mats: Vec<Mat4>,
     pub(super) joint_positions: Vec<Vec3>,
     // the mesh bent on the cpu for this pose, only made when the gpu cant do it
@@ -180,6 +180,7 @@ mod tests {
             joint_nodes: vec![0, 1],
             joint_names: vec!["hips".into(), "arm".into()],
             joint_roles: [None; super::super::joints::JOINT_ROLE_COUNT],
+            spine_chain: Vec::new(),
             inverse_bind: vec![Mat4::IDENTITY; 2],
             duration: 1.0,
             time: 0.0,

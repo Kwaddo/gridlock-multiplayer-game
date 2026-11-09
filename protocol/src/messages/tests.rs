@@ -16,6 +16,7 @@ fn server_messages_round_trip() {
         id: 7,
         position: (1.0, 2.5, -3.25),
         yaw: -std::f32::consts::FRAC_PI_2,
+        pitch: -(30.0f32).to_radians(), // whole degrees, so it comes back exact
         state_flags: FLAG_ADS | FLAG_IS_BOT,
         event_flags: EVT_LANDED,
         health: 80,
@@ -113,8 +114,16 @@ fn client_messages_round_trip() {
     rt_client(ClientMsg::join("alice"));
     rt_client(ClientMsg::Join { username: "bob".into(), version: Some(0) });
     rt_client(ClientMsg::Join { username: "bob".into(), version: Some(u16::MAX) });
-    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: Some(1), event_flags: Some(2) });
-    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: None, event_flags: None });
+    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: Some(1), event_flags: Some(2), pitch: None });
+    // pitch in whole degrees comes back exact
+    rt_client(ClientMsg::Position {
+        position: (1.0, 2.0, 3.0),
+        yaw: 0.1,
+        state_flags: Some(1),
+        event_flags: Some(2),
+        pitch: Some((45.0f32).to_radians()),
+    });
+    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: None, event_flags: None, pitch: None });
     rt_client(ClientMsg::Hit { victim_id: 2, damage: 30.0, weapon: Some("AK".into()), backstab: Some(false) });
     rt_client(ClientMsg::StartGame { mode: Some(3), duration: Some(0), autofill: Some((4, 0b11111)), blue_bots: None });
     rt_client(ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: Some((1, 0b00100)), blue_bots: Some(5) });

@@ -49,7 +49,8 @@ impl PlayerAnim {
     }
 
     // `pos` = where the body is drawn, used to measure how fast it really moves
-    pub fn tick(&mut self, skin: PlayerSkin, dt: f32, models: &HashMap<String, AnimatedModel>, pos: Vec3) {
+    // `pitch` = where they look up/down (+ = up), the upper body bends toward it
+    pub fn tick(&mut self, skin: PlayerSkin, dt: f32, models: &HashMap<String, AnimatedModel>, pos: Vec3, pitch: f32) {
         // smoothed ground speed, before this the walk always played at full speed even when barely moving
         if let Some(last) = self.last_pos {
             if dt > 0.0 {
@@ -100,6 +101,11 @@ impl PlayerAnim {
             }
         }
 
+        // look up/down, not while dying or lying prone (bending a body on the floor looks broken)
+        if !is_one_shot(skin) && !is_prone(skin) {
+            model.bend_upper_body(pose, pitch);
+        }
+
         model.finish_pose(pose);
         if !model.drawn_on_gpu() {
             model.skin_pose_on_cpu(pose); // if gpu skinning is off, bend the mesh on the cpu for this pose so we can draw it
@@ -144,6 +150,12 @@ fn is_one_shot(skin: PlayerSkin) -> bool {
         skin,
         PlayerSkin::StandDeath | PlayerSkin::CrouchDeath | PlayerSkin::ProneDeath | PlayerSkin::Slide
     )
+}
+
+// lying on the floor, no look up/down bend here
+fn is_prone(skin: PlayerSkin) -> bool {
+    use PlayerSkin::*;
+    matches!(skin, ProneIdle | ProneForward | ProneTurnLeft | ProneTurnRight)
 }
 
 // looping clips where the feet move, switching between two of these keeps the stride
