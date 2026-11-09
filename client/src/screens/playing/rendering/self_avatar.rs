@@ -7,7 +7,13 @@ impl PlayingState {
         use crate::types::animation_state::AnimState;
         let m = &self.movement_state;
         // where you'd have been 0.1 s ago at this speed = your move direction
-        let prev = self.position - m.velocity * 0.1;
+        // no keys held = standing, the blend eases you into idle
+        // before this it went by leftover velocity, so a tap of W walked for ~0.5 s while you slid to a stop
+        let prev = if self.move_dir == macroquad::prelude::Vec3::ZERO {
+            self.position
+        } else {
+            self.position - m.velocity * 0.1
+        };
         let state = AnimState::from_movement(
             prev.x,
             prev.z,
@@ -19,30 +25,68 @@ impl PlayingState {
             m.is_crouching,
             m.is_prone,
             m.is_sliding,
-            false,
+            false
         );
         AnimState::skin_from_state(state, None)
     }
 
-    /// Your own body as others see it, for the mirror. Built fresh every frame
-    /// from your local state (no network lag). Only the mirror pass draws it:
-    /// in first person you never see your own body.
-    pub(crate) fn draw_self_avatar(&self, player_id: u32) {
+    // you in the mirror, the body update_self_avatar keeps in sync
+    // before this it built a brand new throwaway body every frame, so its animation clock reset every frame
+    // only the mirror pass draws it, in first person you never see your own body
+    pub(crate) fn draw_self_avatar(&self) {
         if self.is_dead {
             return; // the death camera draws your corpse instead
         }
-        let mut me =
-            crate::types::player::OtherPlayer::new(player_id, String::new(), self.current_world);
-        me.render_x = self.position.x;
-        me.render_y = self.position.y;
-        me.render_z = self.position.z;
-        me.render_yaw = self.yaw;
-        me.skin_type = self.self_avatar_skin();
-        me.is_sprinting = self.movement_state.is_sprinting;
-        me.is_crouching = self.movement_state.is_crouching;
-        me.is_prone = self.movement_state.is_prone;
-        me.is_ads = self.weapons.active().is_aiming;
-        me.current_weapon = self.weapons.active().stats().name.to_string();
-        self.draw_player_model(&me);
+        self.draw_player_model(&self.self_body);
+    }
+
+    // which death you play, from the stance you died in
+    // before this draw_death_corpse worked it out every frame while drawing
+    fn death_skin(&self) -> crate::types::player::PlayerSkin {
+        use crate::types::player::PlayerSkin;
+        if self.movement_state.is_prone {
+            PlayerSkin::ProneDeath
+        } else if self.movement_state.is_crouching {
+            PlayerSkin::CrouchDeath
+        } else {
+            PlayerSkin::StandDeath
+        }
+    }
+
+    // keep your one third person body in sync with you, alive = copy you, dead = the corpse
+    // before this the mirror self and the corpse were thrown away and rebuilt every frame
+    // so they could never remember an animation clock
+
+    pub(crate) fn update_self_avatar(&mut self, delta: f32) {
+        use crate::screens::playing::state::DeathCameraPhase;
+        let corpse = match self.death_camera_phase {
+            | DeathCameraPhase::ZoomOut { corpse_pos, corpse_yaw, .. }
+            | DeathCameraPhase::Watching { corpse_pos, corpse_yaw, .. } =>
+                Some((corpse_pos, corpse_yaw)),
+            _ => None,
+        };
+
+        let (pos, yaw, skin) = match corpse {
+            Some((pos, yaw)) => (pos, yaw, self.death_skin()),
+            None => (self.position, self.yaw, self.self_avatar_skin()),
+        };
+
+        let aiming = self.weapons.active().is_aiming;
+        let weapon = self.weapons.active().stats().name;
+
+        let body = &mut self.self_body;
+        body.render_x = pos.x;
+        body.render_y = pos.y;
+        body.render_z = pos.z;
+        body.render_yaw = yaw;
+        body.skin_type = skin;
+        body.is_sprinting = self.movement_state.is_sprinting;
+        body.is_crouching = self.movement_state.is_crouching;
+        body.is_prone = self.movement_state.is_prone;
+        body.is_ads = aiming;
+        if body.current_weapon != weapon {
+            body.current_weapon = weapon.to_string(); // only when weapon changes, not every frame
+        }
+        body.anim.tick(skin, delta, &self.animated_models, pos);
     }
 }

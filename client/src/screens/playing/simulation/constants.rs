@@ -67,6 +67,3 @@ pub(super) const SAWNOFF_EQUIP_END_SEC: f32 = 7.30;
 pub(super) const CARBINE_MELEE_HIT_START_SEC: f32 = 6.79;
 #[allow(dead_code)]
 pub(super) const CARBINE_MELEE_HIT_END_SEC: f32 = 7.40;
-
-pub(super) const SLIDE_CLIP_START_SEC: f32 = 0.0;
-pub(super) const SLIDE_CLIP_END_SEC: f32 = 30.0 / 30.0; // frame 0..30 at 30 FPS

@@ -195,7 +195,6 @@ pub struct PlayingState {
     pub prev_hands_key: Option<String>, // tracks active hands rig key across swaps
     pub prev_was_reloading: bool,       // edge detection for reload anim trigger
     pub prev_was_sliding: bool,         // edge detection for slide start/end network events
-    pub prev_any_slide_anim_active: bool, // edge detect for shared world slide clip playback
 
     pub knife_swing_requested: bool, // set by input_processing when punch fires
     pub knife_attack_locked: bool, // true during punch animation
@@ -263,6 +262,9 @@ pub struct PlayingState {
     pub mirrors: Vec<crate::world::mirror::Mirror>,
     /// Off-screen textures the live reflections are rendered into, one per live mirror.
     pub mirror_targets: Vec<RenderTarget>,
+    // you in third person, one body that lasts, the mirror draws it alive, the death cam draws it as your corpse
+    // before this both were throwaway bodies rebuilt every frame
+    pub self_body: crate::types::player::OtherPlayer,
 }
 
 pub struct KillFeedEntry {
@@ -375,7 +377,6 @@ impl PlayingState {
             prev_hands_key: None,
             prev_was_reloading: false,
             prev_was_sliding: false,
-            prev_any_slide_anim_active: false,
             knife_swing_requested: false,
             knife_attack_locked: false,
             knife_attack_lock_timer: 0.0,
@@ -433,6 +434,7 @@ impl PlayingState {
             match_player_ids: HashSet::new(),
             mirrors: crate::world::mirror::mirrors_for_world(WorldId::Lobby),
             mirror_targets: Vec::new(),
+            self_body: crate::types::player::OtherPlayer::new(u32::MAX, String::new(), WorldId::Lobby),
         }
     }
 }

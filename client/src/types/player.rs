@@ -206,15 +206,9 @@ pub struct OtherPlayer {
     pub hitboxes: Vec<Hitbox>,
     pub kills: u32,
     pub sprint_grace: f32,
-    // smoothing / hysteresis for rapid move-direction changes (prevents animation flicker)
+    // which way they last moved, None = standing (footsteps and the idle switch use it)
+    // pending_move_dir/timer, prev_x/z and move_anim_grace used to sit here, nothing ever set them
     pub last_move_dir: MoveDir,
-    pub pending_move_dir: Option<MoveDir>,
-    pub pending_move_timer: f32,
-    // previous snapshot position used for animation delta calculation
-    pub prev_x: f32,
-    pub prev_z: f32,
-    // grace timer that keeps current walk/run animation briefly after player stops
-    pub move_anim_grace: f32,
     // timestamp of the last frame where position actually changed (for idle detection)
     pub last_move_time: f64,
 
@@ -234,6 +228,10 @@ pub struct OtherPlayer {
 
     // death animation: when Some, the player is dying and will be removed when timer hits 0
     pub death_timer: Option<f32>,
+
+    // this body's own animation clock and pose, before this skin_type was all a player had
+    // and the clock lived on the shared clip
+    pub anim: crate::types::player_anim::PlayerAnim,
 }
 
 impl OtherPlayer {
@@ -243,8 +241,6 @@ impl OtherPlayer {
     /// how long we continue treating a player as "sprinting" after the last sprint flag
     /// (helps hide missing/late network packets and stops walk/sprint flicker)
     pub const SPRINT_GRACE: f32 = 0.18; // seconds
-    /// how long we wait before accepting a new movement direction (reduces walk/side animation flicker)
-    pub const MOVE_DIR_GRACE: f32 = 0.12; // seconds
 
     pub fn color_for_id(id: u32) -> Color {
         let r = (id.wrapping_mul(73).wrapping_add(29) % 256) as u8;
@@ -287,11 +283,6 @@ impl OtherPlayer {
             kills: 0,
             sprint_grace: 0.0,
             last_move_dir: MoveDir::None,
-            pending_move_dir: None,
-            pending_move_timer: 0.0,
-            prev_x: 0.0,
-            prev_z: 0.0,
-            move_anim_grace: 0.0,
             last_move_time: 0.0,
             gun_level: 1,
             current_weapon: String::new(),
@@ -299,6 +290,7 @@ impl OtherPlayer {
             is_silent: false,
             footstep_timer: 0.0,
             death_timer: None,
+            anim: crate::types::player_anim::PlayerAnim::new(),
         }
     }
 
@@ -389,19 +381,6 @@ impl CombatEntity for OtherPlayer {
         if self.sprint_grace > 0.0 {
             self.sprint_grace = (self.sprint_grace - delta).max(0.0);
         }
-        if self.move_anim_grace > 0.0 {
-            self.move_anim_grace = (self.move_anim_grace - delta).max(0.0);
-        }
-
-        if self.pending_move_timer > 0.0 {
-            self.pending_move_timer = (self.pending_move_timer - delta).max(0.0);
-            if self.pending_move_timer == 0.0 {
-                if let Some(pd) = self.pending_move_dir.take() {
-                    self.last_move_dir = pd;
-                }
-            }
-        }
-
         // Transition to idle if no position change has been seen for a short
         // grace period. This runs per-frame so it's independent of broadcast
         // frequency, and avoids flicker caused by broadcasts where this
@@ -410,8 +389,6 @@ impl CombatEntity for OtherPlayer {
             let now = macroquad::time::get_time();
             if now - self.last_move_time > 0.12 {
                 self.last_move_dir = MoveDir::None;
-                self.pending_move_dir = None;
-                self.pending_move_timer = 0.0;
                 let anim = AnimState::from_movement(
                     0.0,
                     0.0,
@@ -426,9 +403,8 @@ impl CombatEntity for OtherPlayer {
                     false,
                 );
                 self.skin_type = AnimState::skin_from_state(anim, None);
-                // snap render position so model doesn't slide
-                self.render_x = self.x;
-                self.render_z = self.z;
+                // no snap anymore, the smoothing catches up in ~0.1 s while the blend eases into idle
+                // before this it teleported the drawn body onto the real spot, a small visible jump
             }
         }
     }

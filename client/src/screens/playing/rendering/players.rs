@@ -53,6 +53,8 @@ impl PlayingState {
             if let Some(anim) = anim_model {
                 drawn_body = true;
                 let s = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
+                // this body's own pose, before this every body was drawn in the clip's shared pose (the clones)
+                let pose = p.anim.pose().unwrap_or(anim.own_pose());
                 anim_scale = s;
                 let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
                 _anim_y_offset = y_offset;
@@ -65,7 +67,7 @@ impl PlayingState {
                 // on the GPU too where it can; otherwise the CPU-skinned meshes
                 // are drawn.
                 let tint = Color::new(p.color.r, p.color.g, p.color.b, 1.0);
-                if !anim.draw_gpu(transform, tint) {
+                if !anim.draw_gpu_pose(pose, transform, tint) {
                     let gl = unsafe { get_internal_gl() };
                     gl.quad_gl.push_model_matrix(transform);
                     let tinted = p.color != WHITE;
@@ -75,7 +77,7 @@ impl PlayingState {
                             gl_use_material(material);
                         });
                     }
-                    for base_mesh in anim.meshes() {
+                    for base_mesh in anim.pose_meshes(pose) {
                         draw_mesh(base_mesh);
                     }
                     if tinted {
@@ -86,7 +88,7 @@ impl PlayingState {
 
                 // compute hand pos from joint (set hand_world_pos later when
                 // drawing weapon)
-                if let Some(r_hand) = anim.joint_role_position(JointRole::RightHand) {
+                if let Some(r_hand) = anim.joint_role_position_in(pose, JointRole::RightHand) {
                     let offset = Mat3::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
                         * (r_hand * s)
                         + vec3(0.0, y_offset, 0.0);
@@ -315,43 +317,18 @@ impl PlayingState {
         }
     }
 
-    /// Draw a corpse model at the death position during the death camera sequence.
+    // your corpse during the death camera, it's your one third person body (update_self_avatar
+    // already moved it to the corpse spot and put it on the death clip from the start)
+    // before this it built a throwaway body every frame, so the fall didnt start from the top
+    // and could show up already lying down
     pub(crate) fn draw_death_corpse(&self) {
         use crate::screens::playing::state::DeathCameraPhase;
-
-        let (corpse_pos, corpse_yaw) = match self.death_camera_phase {
-            DeathCameraPhase::ZoomOut { corpse_pos, corpse_yaw, .. }
-            | DeathCameraPhase::Watching { corpse_pos, corpse_yaw, .. } => (corpse_pos, corpse_yaw),
-            _ => return,
-        };
-
-        // Determine death animation based on what stance we were in when we died
-        let skin = if self.movement_state.is_prone {
-            crate::types::player::PlayerSkin::ProneDeath
-        } else if self.movement_state.is_crouching {
-            crate::types::player::PlayerSkin::CrouchDeath
-        } else {
-            crate::types::player::PlayerSkin::StandDeath
-        };
-
-        // Create a temporary OtherPlayer to render the corpse
-        let mut corpse = crate::types::player::OtherPlayer::new(
-            u32::MAX, // dummy ID
-            String::new(),
-            self.current_world,
-        );
-        corpse.x = corpse_pos.x;
-        corpse.y = corpse_pos.y;
-        corpse.z = corpse_pos.z;
-        corpse.render_x = corpse_pos.x;
-        corpse.render_y = corpse_pos.y;
-        corpse.render_z = corpse_pos.z;
-        corpse.yaw = corpse_yaw;
-        corpse.render_yaw = corpse_yaw;
-        corpse.skin_type = skin;
-        corpse.color = WHITE;
-
-        self.draw_player_model(&corpse);
+        if matches!(
+            self.death_camera_phase,
+            DeathCameraPhase::ZoomOut { .. } | DeathCameraPhase::Watching { .. }
+        ) {
+            self.draw_player_model(&self.self_body);
+        }
     }
 
     #[inline(always)]

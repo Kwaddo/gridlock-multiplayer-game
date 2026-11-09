@@ -1,6 +1,6 @@
 use macroquad::prelude::Vec3;
 
-use super::AnimatedModel;
+use super::{AnimatedModel, Pose};
 
 /// Body joints the game looks up by name: hitboxes are built from them and
 /// the world weapon is held at the right hand.
@@ -82,9 +82,15 @@ pub(super) fn resolve_joint_roles(names: &[String]) -> JointRoleTable {
 }
 
 impl AnimatedModel {
-    /// Current position of a role's joint, from the index resolved at load.
+    // the clip's own pose, same as before
     pub fn joint_role_position(&self, role: JointRole) -> Option<Vec3> {
-        self.joint_roles[role as usize].and_then(|i| self.joint_positions.get(i).copied())
+        self.joint_role_position_in(&self.pose, role)
+    }
+
+    // which joint is the head, the clip/skeleton knows, where it is right now, the pose knows
+    // before this it could only read the clip's own pose, so hitboxes matched the shared pose
+    pub fn joint_role_position_in(&self, pose: &Pose, role: JointRole) -> Option<Vec3> {
+        self.joint_roles[role as usize].and_then(|i| pose.joint_positions.get(i).copied())
     }
 }
 

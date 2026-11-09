@@ -7,7 +7,7 @@ use super::constants::SKIN_INTERVAL;
 use super::glb::import_glb;
 use super::nodes::load_nodes;
 use super::parts::build_parts;
-use super::{AnimatedModel, ClipSelectionMode, SharedGeometry};
+use super::{AnimatedModel, ClipSelectionMode, Pose, SharedGeometry};
 
 pub fn load_gltf_animated_model(path: &str, bytes: &[u8]) -> Result<AnimatedModel, String> {
     load_gltf_animated_model_internal(path, bytes, ClipSelectionMode::LongestDuration, None, false)
@@ -128,7 +128,7 @@ fn load_gltf_animated_model_internal(
         parts.len()
     );
 
-    let (node_count, node_parents, node_rest, node_tracks, duration) =
+    let (_node_count, node_parents, node_rest, node_tracks, duration) =
         load_nodes(path, &doc, &buffers, &anim)?;
 
     let joint_nodes: Vec<usize> = skin.joints().map(|j| j.index()).collect();
@@ -174,20 +174,15 @@ fn load_gltf_animated_model_internal(
 
     let mut model = AnimatedModel {
         geometry: SharedGeometry::shared(parts),
-        skinned: None,
         gpu_drawn: Cell::new(false),
-        node_pose: node_rest.clone(),
+        pose: Pose::new(&node_rest, skin.joints().len()),
         node_rest,
         node_parents,
-        node_global: vec![Mat4::IDENTITY; node_count],
-        node_global_valid: vec![false; node_count],
         node_tracks,
         joint_nodes,
         joint_names,
         joint_roles,
-        joint_positions: vec![Vec3::ZERO; skin.joints().len()],
         inverse_bind,
-        skin_mats: vec![Mat4::IDENTITY; skin.joints().len()],
         duration,
         time: 0.0,
         skin_accum: SKIN_INTERVAL, // force first update
