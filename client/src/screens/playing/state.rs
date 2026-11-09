@@ -274,6 +274,8 @@ pub struct PlayingState {
     pub self_body: crate::types::player::OtherPlayer,
     // your death picked from the kill feed (direction + headshot), cleared on respawn
     pub my_death: Option<crate::types::player::PlayerSkin>,
+    // you shot this frame, your mirror self kicks, cleared once used
+    pub shot_fired: bool,
 }
 
 pub struct KillFeedEntry {
@@ -448,6 +450,7 @@ impl PlayingState {
             active_character: Self::DEFAULT_CHARACTER.to_string(),
             self_body: crate::types::player::OtherPlayer::new(u32::MAX, String::new(), WorldId::Lobby),
             my_death: None,
+            shot_fired: false,
         }
     }
 }

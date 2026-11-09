@@ -144,6 +144,7 @@ fn load_gltf_animated_model_internal(
         .collect();
     let joint_roles = super::joints::resolve_joint_roles(&joint_names);
     let spine_chain = super::aim_bend::resolve_spine_chain(&joint_names, &joint_nodes);
+    let upper_mask = super::upper_body::upper_body_mask(&node_names, &node_parents);
     let inverse_bind: Vec<Mat4> = match skin
         .reader(|buffer| Some(&buffers[buffer.index()]))
         .read_inverse_bind_matrices()
@@ -184,6 +185,7 @@ fn load_gltf_animated_model_internal(
         joint_names,
         joint_roles,
         spine_chain,
+        upper_mask,
         inverse_bind,
         duration,
         time: 0.0,

@@ -1,3 +1,4 @@
+use crate::types::player_anim::AnimInput;
 mod audio;
 mod constants;
 mod hands;
@@ -253,11 +254,14 @@ impl PlayingState {
         let animated_models = &self.animated_models;
         for p in &mut self.other_players {
             let pos = p.render_position();
-            p.anim.tick(p.skin_type, delta, animated_models, pos, p.render_pitch);
+            let input = AnimInput { skin: p.skin_type, pos, pitch: p.render_pitch, aiming: p.is_ads, crouching: p.is_crouching, fired: std::mem::take(&mut p.fired) };
+            p.anim.tick(&input, delta, animated_models);
         }
         for bot in &mut self.practice_bots {
             let pos = bot.player.render_position();
-            bot.player.anim.tick(bot.player.skin_type, delta, animated_models, pos, bot.player.render_pitch);
+            let b = &bot.player;
+            let input = AnimInput { skin: b.skin_type, pos, pitch: b.render_pitch, aiming: b.is_ads, crouching: b.is_crouching, fired: b.fired };
+            bot.player.anim.tick(&input, delta, animated_models);
         }
         // your body becomes the corpse here and plays its death from the start
         self.update_self_avatar(delta);

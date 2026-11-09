@@ -9,6 +9,7 @@ mod loader;
 mod nodes;
 mod parts;
 mod playback;
+mod upper_body;
 mod pose;
 
 #[cfg(target_arch = "wasm32")]
@@ -108,6 +109,8 @@ pub struct AnimatedModel {
     joint_roles: JointRoleTable,
     // spine + neck bones that tilt to look up/down, with their share of the tilt (see aim_bend)
     spine_chain: Vec<(usize, f32)>,
+    // per node how much an upper body layer takes over (see upper_body.rs)
+    upper_mask: Vec<f32>,
     inverse_bind: Vec<Mat4>,
     // this clip's own pose at its own clock (the hands still use this)
     pose: Pose,

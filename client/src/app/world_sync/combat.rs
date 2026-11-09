@@ -30,8 +30,12 @@ pub(super) fn apply_damage(
 }
 
 /// Spawns tracers and muzzle flashes for shots fired by bots.
-pub(super) fn spawn_bot_shots(playing_state: &mut PlayingState, bot_shots: Vec<(Vec3, Vec3)>) {
-    for (start, end) in bot_shots {
+pub(super) fn spawn_bot_shots(playing_state: &mut PlayingState, bot_shots: Vec<(u32, Vec3, Vec3)>) {
+    for (shooter, start, end) in bot_shots {
+        // the bot's body kicks too, before this only the tracer and flash showed
+        if let Some(bot) = playing_state.other_players.iter_mut().find(|p| p.id == shooter) {
+            bot.fired = true;
+        }
         playing_state
             .tracers
             .push(client::weapons::effects::BulletTracer {

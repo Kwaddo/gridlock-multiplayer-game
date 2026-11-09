@@ -112,7 +112,10 @@ impl AnimState {
             };
         }
 
-        if state.ads {
+        // aiming while standing still is the full body aim clip
+        // aiming while moving falls through to the move clips, the upper body layer does the aiming
+        // before this aiming always picked aim idle, so you glided around in it
+        if state.ads && matches!(state.move_dir, MoveDir::None) {
             return PlayerSkin::RifleAimIdle;
         }
 
@@ -136,3 +139,21 @@ impl AnimState {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(move_dir: MoveDir, ads: bool, crouched: bool) -> AnimState {
+        AnimState { move_dir, sprinting: false, ads, crouched, prone: false, slide: false, jump_started: false }
+    }
+
+    #[test]
+    fn aiming_still_is_full_body_aiming_moving_keeps_the_legs() {
+        assert_eq!(AnimState::skin_from_state(state(MoveDir::None, true, false), None), PlayerSkin::RifleAimIdle);
+        assert_eq!(AnimState::skin_from_state(state(MoveDir::Forward, true, false), None), PlayerSkin::RifleWalk);
+        assert_eq!(AnimState::skin_from_state(state(MoveDir::Left, true, false), None), PlayerSkin::WalkLeft);
+        assert_eq!(AnimState::skin_from_state(state(MoveDir::None, true, true), None), PlayerSkin::CrouchAim);
+        assert_eq!(AnimState::skin_from_state(state(MoveDir::Backward, true, true), None), PlayerSkin::CrouchBack);
+    }
+}
