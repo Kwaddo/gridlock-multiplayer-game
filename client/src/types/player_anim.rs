@@ -83,6 +83,9 @@ impl PlayerAnim {
         let rate = playback_rate(skin, self.speed);
         self.time = advance(skin, self.time, dt * rate, clip_end(skin, model.duration()));
         let pose = self.pose.get_or_insert_with(|| model.new_pose()); // make a pose if we dont have one yet, then fill it in
+        if !model.pose_fits(pose) {
+            *pose = model.new_pose(); // the character changed to one with a different skeleton
+        }
         model.sample_local(self.time, pose);
 
         // still fading out of the old clip, mix it in
@@ -94,6 +97,9 @@ impl PlayerAnim {
                     let prev_time = advance(prev_skin, prev_time, dt * rate, clip_end(prev_skin, prev_model.duration()));
                     self.prev = Some((prev_skin, prev_time));
                     let prev_pose = self.prev_pose.get_or_insert_with(|| prev_model.new_pose());
+                    if !prev_model.pose_fits(prev_pose) {
+                        *prev_pose = prev_model.new_pose();
+                    }
                     prev_model.sample_local(prev_time, prev_pose);
                     pose.blend_from(prev_pose, w);
                 }

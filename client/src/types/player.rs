@@ -86,15 +86,18 @@ impl PlayerSkin {
             PlayerSkin::CrouchLeft => Some("anim_crouch_left"),
             PlayerSkin::CrouchRight => Some("anim_crouch_right"),
             PlayerSkin::Jump => Some("anim_jump"),
-            PlayerSkin::Slide => Some("anim_slide"),
+            // no slide clip anymore (slide was cut), sprint stands in, before this it was anim_slide
+            PlayerSkin::Slide => Some("anim_sprint_forward"),
             PlayerSkin::ProneIdle => Some("anim_prone_idle"),
             PlayerSkin::ProneForward => Some("anim_prone_forward"),
-            PlayerSkin::ProneTurnRight => Some("anim_prone_turn_right"),
-            PlayerSkin::ProneTurnLeft => Some("anim_prone_turn_left"),
-            PlayerSkin::StandDeath => Some("anim_stand_death"),
+            // prone turn clips were dropped, crawling sideways uses the forward crawl (yaw control turns the body later)
+            PlayerSkin::ProneTurnRight => Some("anim_prone_forward"),
+            PlayerSkin::ProneTurnLeft => Some("anim_prone_forward"),
+            // the old single stand death is gone, the front death stands in until death choosers pick by direction
+            PlayerSkin::StandDeath => Some("anim_death_front"),
             PlayerSkin::CrouchDeath => Some("anim_crouch_death"),
             PlayerSkin::ProneDeath => Some("anim_prone_death"),
-            PlayerSkin::Twerk => Some("anim_twerk"),
+            PlayerSkin::Twerk => Some("anim_emote_twerk"),
         }
     }
 

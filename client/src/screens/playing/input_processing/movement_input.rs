@@ -27,6 +27,13 @@ impl PlayingState {
         );
 
         self.move_dir = input::process_movement_keys(self.yaw, config);
+        // prone: no a/d, only crawl forward or back (there are no sideways prone clips anymore)
+        // w+a still crawls forward at full speed instead of drifting, before this you could strafe while lying down
+        if self.movement_state.is_prone {
+            let forward = vec3(self.yaw.cos(), 0.0, self.yaw.sin());
+            let along = self.move_dir.dot(forward);
+            self.move_dir = if along.abs() > 1e-4 { forward * along.signum() } else { Vec3::ZERO };
+        }
         if self.dev_mode.ruler_set_start_requested {
             self.dev_mode.ruler_start = Some(self.position);
             self.dev_mode.ruler_set_start_requested = false;
