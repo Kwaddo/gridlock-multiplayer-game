@@ -12,7 +12,6 @@ impl PlayingState {
         &mut self,
         camera: &Camera3D,
         maze: Option<&crate::types::maze::Maze>,
-        player_id: u32,
     ) -> Vec<usize> {
         let live = pick_live_mirrors(&self.mirrors, camera.position, camera.matrix());
         if live.is_empty() {
@@ -52,7 +51,7 @@ impl PlayingState {
             // the whole world, seen from the mirrored eye
             self.draw_world(maze, mirror.reflect_point(camera.position));
             // you: only in the mirror, never in the main view
-            self.draw_self_avatar(player_id);
+            self.draw_self_avatar();
             // other mirrors seen inside this reflection become plain tinted panels
             for (other, m) in self.mirrors.iter().enumerate() {
                 if other != index {

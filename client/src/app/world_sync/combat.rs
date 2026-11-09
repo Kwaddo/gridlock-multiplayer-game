@@ -148,12 +148,8 @@ pub(super) fn apply_kill_feed(
                     client::types::player::PlayerSkin::StandDeath
                 };
                 victim.death_timer = Some(2.0);
-                // reset animation playback so it starts from the beginning
-                if let Some(model_key) = victim.skin_type.model_key() {
-                    if let Some(anim) = playing_state.animated_models.get_mut(model_key) {
-                        anim.play_from_start(false);
-                    }
-                }
+                // no rewind needed, switching to the death clip starts this body's own clock at 0
+                // before this it rewound the one shared death clip, restarting everyone else's fall too
             }
         }
     }

@@ -94,11 +94,8 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
             if !incoming.alive {
                 current.skin_type = death_skin(current);
                 current.death_timer = Some(2.0);
-                if let Some(model_key) = current.skin_type.model_key() {
-                    if let Some(anim) = playing_state.animated_models.get_mut(model_key) {
-                        anim.play_from_start(false);
-                    }
-                }
+                // no rewind needed, the death clip starts this body's own clock at 0
+                // before this it rewound the one shared death clip for everyone
             }
         } else {
             // new player
@@ -118,8 +115,6 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
             );
             joined.skin_type = AnimState::skin_from_state(anim_state, None);
             joined.last_move_dir = anim_state.move_dir;
-            joined.pending_move_dir = None;
-            joined.pending_move_timer = 0.0;
             joined.apply_snapshot(joined.x, joined.y, joined.z, joined.yaw);
             if !joined.is_alive {
                 joined.skin_type = death_skin(&joined);

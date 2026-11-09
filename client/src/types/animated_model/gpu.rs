@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 
 use super::constants::MAX_GPU_JOINTS;
-use super::{AnimatedModel, AnimatedPart};
+use super::{AnimatedModel, AnimatedPart, Pose};
 
 // ---------------------------------------------------------------- GPU skinning
 
@@ -189,7 +189,7 @@ impl AnimatedModel {
         &self,
         ctx: &mut dyn miniquad::RenderingBackend,
     ) -> Option<(miniquad::Pipeline, miniquad::TextureId)> {
-        if self.skin_mats.len() > MAX_GPU_JOINTS || force_cpu_skinning() {
+        if self.pose.skin_mats.len() > MAX_GPU_JOINTS || force_cpu_skinning() {
             return None;
         }
         let skinning = GPU_SKINNING
@@ -208,7 +208,20 @@ impl AnimatedModel {
     /// multiplied by `tint`, from buffers uploaded once. Returns false when
     /// this model or GPU cannot (rigid parts, too many joints, no shader);
     /// draw `meshes()` then, which `update` keeps skinned on the CPU.
+    // did the gpu draw this clip last time, if not the cpu has to bend the mesh
+    // before this only the clip itself checked, inside update()
+    pub fn drawn_on_gpu(&self) -> bool {
+        self.gpu_drawn.get()
+    }
+
+    // the clip's own pose, same as before
     pub fn draw_gpu(&self, model: Mat4, tint: Color) -> bool {
+        self.draw_gpu_pose(&self.pose, model, tint)
+    }
+
+    // draw bent like any pose you hand it, before this it could only draw the clip's own pose
+    // so everyone on the same clip got drawn in the exact same pose
+    pub fn draw_gpu_pose(&self, pose: &Pose, model: Mat4, tint: Color) -> bool {
         let mut gl = unsafe { get_internal_gl() };
         let Some(skinning) = self.ensure_gpu(gl.quad_context) else {
             self.gpu_drawn.set(false);
@@ -228,7 +241,7 @@ impl AnimatedModel {
             tint: [tint.r, tint.g, tint.b, tint.a],
             joints: [Mat4::IDENTITY; MAX_GPU_JOINTS],
         };
-        uniforms.joints[..self.skin_mats.len()].copy_from_slice(&self.skin_mats);
+        uniforms.joints[..pose.skin_mats.len()].copy_from_slice(&pose.skin_mats); // this pose's joints go to the gpu
 
         // Draw in macroquad's current pass, after what it has batched so far.
         gl.flush();

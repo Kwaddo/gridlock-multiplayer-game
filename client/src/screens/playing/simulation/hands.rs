@@ -320,16 +320,11 @@ impl PlayingState {
             }
         };
 
-        let in_use = self.player_anims_in_use();
         for (key, model) in self.animated_models.iter_mut() {
-            // Player animations nobody shows right now only keep time (skinning
-            // all of them was most of the frame).
-            if key.starts_with("anim_") && !in_use.contains(key.as_str()) {
-                model.advance(delta);
-                continue;
-            }
+            // player clips are never ticked here anymore, every body has its own clock (PlayerAnim)
+            // before this every player clip had one shared clock ticked here, used by everyone on it
             let should_update = if key.starts_with("anim_") {
-                true
+                false
             } else if key == "fp_hands_sawnoff" {
                 is_sawnoff
             } else if key == "fp_hands_minigun" {
@@ -347,7 +342,6 @@ impl PlayingState {
                 model.update(delta);
             }
         }
-        Self::recycle_player_anims_in_use(in_use);
         // only allocate a new key string when the active hands rig changes
         if self.prev_hands_key.as_deref() != active_hands_key {
             self.prev_hands_key = active_hands_key.map(|k| k.to_string());

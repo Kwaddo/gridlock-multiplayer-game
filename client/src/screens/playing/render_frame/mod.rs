@@ -22,7 +22,13 @@ impl PlayingState {
         let camera = self.build_camera(config);
         // update cached shapes first, so every camera below only reads
         self.bake_bullet_holes();
-        let live_mirrors = self.render_mirror_pass(&camera, maze, player_id);
+        // your body's colour, your player colour alive, white as a corpse, same as before
+        self.self_body.color = if self.is_dead {
+            WHITE
+        } else {
+            crate::types::player::OtherPlayer::color_for_id(player_id)
+        };
+        let live_mirrors = self.render_mirror_pass(&camera, maze);
         // Team Deathmatch in progress: the score bar takes the top of the screen
         let tdm_bar = self.team_score.filter(|_| {
             self.match_mode == Some(crate::net::protocols::MODE_TEAM_DEATHMATCH)
