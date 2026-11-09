@@ -43,6 +43,18 @@ impl PlayingState {
             self.dev_mode.ruler_end = Some(self.position);
             self.dev_mode.ruler_set_end_requested = false;
         }
+        // skin test from the dev menu: wear the next loaded character, every animation follows
+        if self.dev_mode.next_character_requested {
+            self.dev_mode.next_character_requested = false;
+            self.next_character();
+        }
+        if self.dev_mode.default_character_requested {
+            self.dev_mode.default_character_requested = false;
+            self.set_character(Self::DEFAULT_CHARACTER); // straight back to the default soldier
+        }
+        if self.dev_mode.is_unlocked() {
+            self.dev_mode.character_label = self.character_label(); // kept fresh so "still loading" counts down
+        }
 
         // update kill feed timers and drop expired entries in a single pass
         self.kill_feed.retain_mut(|entry| {

@@ -40,7 +40,8 @@ pub(super) fn set_cwd_to_assets_root() {
 /// hands, the knife's hands, and the idle animation every other player is
 /// drawn with until their own animations arrive.
 pub(super) fn spawn_assets(loadout: &Loadout) -> Vec<&'static str> {
-    let mut keys = vec!["fp_hands", "anim_rifle_idle"];
+    // the default character too, the idle animation is just keyframes now and needs a body to play on
+    let mut keys = vec!["fp_hands", "anim_rifle_idle", PlayingState::DEFAULT_CHARACTER];
     for id in loadout.slots {
         keys.extend(id.stats().viewmodel_model);
         keys.push(PlayingState::preferred_hands_key_for_weapon(id));
@@ -62,6 +63,10 @@ pub(super) fn wanted_assets(playing_state: &PlayingState, loadout: &Loadout) -> 
         .map(|p| p.skin_type)
         .chain(playing_state.practice_bots.iter().map(|b| b.player.skin_type));
     keys.extend(skins.filter_map(|skin| skin.model_key()));
+    // skin test: with dev mode unlocked load every character, otherwise only the default one is ever needed
+    if playing_state.dev_mode.is_unlocked() {
+        keys.extend(PlayingState::CHARACTER_ORDER);
+    }
     keys
 }
 

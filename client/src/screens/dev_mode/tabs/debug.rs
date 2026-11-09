@@ -60,6 +60,22 @@ pub(in crate::screens::dev_mode) fn draw_debug_tab(
         }
     }
 
+    // skin test: put every animation on the next loaded character, check it in the mirror
+    y += 20.0;
+    y += draw_section_header("Character (skin test)", x, y);
+    draw_text_ex(&dev.character_label, x, y + 14.0, text_params(14, Color::from_rgba(180, 230, 180, 255)));
+    y += 22.0;
+    let (h, next) = draw_action_button("Next Character", x, y, 170.0, mouse, clicked);
+    y += h;
+    if next {
+        dev.next_character_requested = true;
+    }
+    let (h, back) = draw_action_button("Back to Ch15", x, y, 170.0, mouse, clicked);
+    y += h;
+    if back {
+        dev.default_character_requested = true;
+    }
+
     y += 20.0;
     y += draw_section_header("Distance Ruler", x, y);
     y += draw_toggle("Ruler Active", &mut dev.ruler_active, x, y, mouse, clicked);

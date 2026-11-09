@@ -262,6 +262,13 @@ pub struct PlayingState {
     pub mirrors: Vec<crate::world::mirror::Mirror>,
     /// Off-screen textures the live reflections are rendered into, one per live mirror.
     pub mirror_targets: Vec<RenderTarget>,
+    // the bodies players can wear (the character_ keys), mesh + skeleton, no animation of their own
+    pub characters: HashMap<String, AnimatedModel>,
+    // every animation on its own (the anim_ keys from the animations folder), put on the active character
+    // before this every animation file carried its own copy of the character
+    pub clips: HashMap<String, crate::types::animated_model::Clip>,
+    // which character the clips are on right now, the dev menu can switch it to test skins
+    pub active_character: String,
     // you in third person, one body that lasts, the mirror draws it alive, the death cam draws it as your corpse
     // before this both were throwaway bodies rebuilt every frame
     pub self_body: crate::types::player::OtherPlayer,
@@ -434,6 +441,9 @@ impl PlayingState {
             match_player_ids: HashSet::new(),
             mirrors: crate::world::mirror::mirrors_for_world(WorldId::Lobby),
             mirror_targets: Vec::new(),
+            characters: HashMap::new(),
+            clips: HashMap::new(),
+            active_character: Self::DEFAULT_CHARACTER.to_string(),
             self_body: crate::types::player::OtherPlayer::new(u32::MAX, String::new(), WorldId::Lobby),
         }
     }

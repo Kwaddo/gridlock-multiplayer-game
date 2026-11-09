@@ -87,6 +87,11 @@ impl AnimatedModel {
         &self.pose
     }
 
+    // whether a pose is the right size for this skeleton, switching to a skin with more bones (ty) makes old poses too small
+    pub fn pose_fits(&self, pose: &Pose) -> bool {
+        pose.local.len() == self.node_rest.len() && pose.skin_mats.len() == self.joint_nodes.len()
+    }
+
     // sample a clip at a time and finish the pose, the simple path with no blending
     pub fn sample_pose(&self, time: f32, out: &mut Pose) {
         self.sample_local(time, out);
