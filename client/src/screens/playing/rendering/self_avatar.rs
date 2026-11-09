@@ -100,6 +100,14 @@ impl PlayingState {
         if body.current_weapon != weapon {
             body.current_weapon = weapon.to_string(); // only when weapon changes, not every frame
         }
-        body.anim.tick(skin, delta, &self.animated_models, pos, pitch);
+        let input = crate::types::player_anim::AnimInput {
+            skin,
+            pos,
+            pitch,
+            aiming: corpse.is_none() && aiming, // your gun up in the mirror while you aim and move
+            crouching: self.movement_state.is_crouching,
+            fired: corpse.is_none() && std::mem::take(&mut self.shot_fired),
+        };
+        body.anim.tick(&input, delta, &self.animated_models);
     }
 }

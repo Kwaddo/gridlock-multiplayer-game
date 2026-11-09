@@ -50,6 +50,20 @@ impl Pose {
         self.global_valid.iter_mut().for_each(|v| *v = false); // the mix changed the bends, old answers are stale
     }
 
+    // like blend_from but only where mask > 0, and toward the layer
+    pub(super) fn blend_masked_from(&mut self, layer: &Pose, mask: &[f32], w: f32) {
+        for ((mine, theirs), m) in self.local.iter_mut().zip(&layer.local).zip(mask) {
+            let t = m * w;
+            if t <= 0.0 {
+                continue;
+            }
+            mine.translation = mine.translation.lerp(theirs.translation, t);
+            mine.rotation = mine.rotation.slerp(theirs.rotation, t);
+            mine.scale = mine.scale.lerp(theirs.scale, t);
+        }
+        self.global_valid.iter_mut().for_each(|v| *v = false);
+    }
+
     // read only where is this node, only right after sample_pose, which works them all out
     // drawing only gets to read, so it cant use global() which saves answers as it goes
     pub(super) fn global_of(&self, node: usize) -> Mat4 {
@@ -189,6 +203,7 @@ mod tests {
             joint_names: vec!["hips".into(), "arm".into()],
             joint_roles: [None; super::super::joints::JOINT_ROLE_COUNT],
             spine_chain: Vec::new(),
+            upper_mask: Vec::new(),
             inverse_bind: vec![Mat4::IDENTITY; 2],
             duration: 1.0,
             time: 0.0,

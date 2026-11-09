@@ -42,10 +42,11 @@ pub enum PlayerSkin {
     DeathSide,
     DeathFrontHeadshot,
     DeathBackHeadshot,
+    RifleFire, // upper body only, layered over whatever the legs do
 }
 
 impl PlayerSkin {
-    pub const ALL: [PlayerSkin; 36] = [
+    pub const ALL: [PlayerSkin; 37] = [
         PlayerSkin::Texture,
         PlayerSkin::RifleIdle,
         PlayerSkin::RifleAimIdle,
@@ -82,6 +83,7 @@ impl PlayerSkin {
         PlayerSkin::DeathSide,
         PlayerSkin::DeathFrontHeadshot,
         PlayerSkin::DeathBackHeadshot,
+        PlayerSkin::RifleFire,
     ];
 
     pub const fn is_model_based(self) -> bool {
@@ -111,9 +113,8 @@ impl PlayerSkin {
             PlayerSkin::Slide => Some("anim_sprint_forward"),
             PlayerSkin::ProneIdle => Some("anim_prone_idle"),
             PlayerSkin::ProneForward => Some("anim_prone_forward"),
-            // prone turn clips were dropped, crawling sideways uses the forward crawl (yaw control turns the body later)
-            PlayerSkin::ProneTurnRight => Some("anim_prone_forward"),
-            PlayerSkin::ProneTurnLeft => Some("anim_prone_forward"),
+            // prone turn clips were dropped (a/d is off while prone), old clients still send these
+            PlayerSkin::ProneTurnRight | PlayerSkin::ProneTurnLeft => Some("anim_prone_forward"),
             // the old single stand death is gone, the front death stands in until death choosers pick by direction
             PlayerSkin::StandDeath => Some("anim_death_front"),
             PlayerSkin::CrouchDeath => Some("anim_crouch_death"),
@@ -130,6 +131,7 @@ impl PlayerSkin {
             PlayerSkin::DeathSide => Some("anim_death_right"),
             PlayerSkin::DeathFrontHeadshot => Some("anim_death_front_headshot"),
             PlayerSkin::DeathBackHeadshot => Some("anim_death_back_headshot"),
+            PlayerSkin::RifleFire => Some("anim_rifle_fire"),
         }
     }
 
@@ -171,6 +173,7 @@ impl PlayerSkin {
             PlayerSkin::DeathSide => "Death Side",
             PlayerSkin::DeathFrontHeadshot => "Death Front Headshot",
             PlayerSkin::DeathBackHeadshot => "Death Back Headshot",
+            PlayerSkin::RifleFire => "Rifle Fire",
         }
     }
 
@@ -225,7 +228,8 @@ impl PlayerSkin {
             PlayerSkin::DeathBack => PlayerSkin::DeathSide,
             PlayerSkin::DeathSide => PlayerSkin::DeathFrontHeadshot,
             PlayerSkin::DeathFrontHeadshot => PlayerSkin::DeathBackHeadshot,
-            PlayerSkin::DeathBackHeadshot => PlayerSkin::RifleIdle,
+            PlayerSkin::DeathBackHeadshot => PlayerSkin::RifleFire,
+            PlayerSkin::RifleFire => PlayerSkin::RifleIdle,
         }
     }
 }
@@ -291,6 +295,8 @@ pub struct OtherPlayer {
     // this body's own animation clock and pose, before this skin_type was all a player had
     // and the clock lived on the shared clip
     pub anim: crate::types::player_anim::PlayerAnim,
+    // shot this frame (bot shots now, players with #23), the animation plays the fire kick then clears it
+    pub fired: bool,
 }
 
 impl OtherPlayer {
@@ -352,6 +358,7 @@ impl OtherPlayer {
             footstep_timer: 0.0,
             death_timer: None,
             anim: crate::types::player_anim::PlayerAnim::new(),
+            fired: false,
         }
     }
 

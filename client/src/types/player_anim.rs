@@ -16,6 +16,22 @@ use crate::types::player::PlayerSkin;
 // how long a switch between two clips takes to fade, seconds
 const FADE_TIME: f32 = 0.2;
 
+// how long the upper body layer takes to fade in or out
+const UPPER_FADE: f32 = 0.1;
+
+// only the start of the fire clip plays, the kick, every shot restarts it so auto fire reads as recoil
+const FIRE_KICK: f32 = 0.25;
+
+// what a body tells its animation each frame
+pub struct AnimInput {
+    pub skin: PlayerSkin,
+    pub pos: Vec3,     // where the body is drawn, for its real speed
+    pub pitch: f32,    // look up/down, + = up
+    pub aiming: bool,  // ads, the upper body holds the gun up while moving
+    pub crouching: bool,
+    pub fired: bool,   // shot this frame, the upper body kicks
+}
+
 // other players' slow walk isnt sent (no flag bits left), so: walking forward under this speed...
 const SLOW_WALK_BELOW: f32 = 3.0;
 // ...for at least this long means slow walk, long enough that speeding up or coasting to a stop doesnt count
@@ -34,6 +50,11 @@ pub struct PlayerAnim {
     speed: f32,
     // how long theyve been walking forward slowly, see SLOW_WALK_AFTER
     slow_for: f32,
+    // upper body layer (aim now, fire next), its own clip clock and how strongly it shows
+    upper_clip: Option<PlayerSkin>,
+    upper_time: f32,
+    upper_weight: f32,
+    upper_pose: Option<Pose>,
 }
 
 impl PlayerAnim {
@@ -48,6 +69,10 @@ impl PlayerAnim {
             last_pos: None,
             speed: 0.0,
             slow_for: 0.0,
+            upper_clip: None,
+            upper_time: 0.0,
+            upper_weight: 0.0,
+            upper_pose: None,
         }
     }
 
@@ -56,9 +81,8 @@ impl PlayerAnim {
         self.pose.as_ref()
     }
 
-    // `pos` = where the body is drawn, used to measure how fast it really moves
-    // `pitch` = where they look up/down (+ = up), the upper body bends toward it
-    pub fn tick(&mut self, skin: PlayerSkin, dt: f32, models: &HashMap<String, AnimatedModel>, pos: Vec3, pitch: f32) {
+    pub fn tick(&mut self, input: &AnimInput, dt: f32, models: &HashMap<String, AnimatedModel>) {
+        let (skin, pos, pitch) = (input.skin, input.pos, input.pitch);
         // smoothed ground speed, before this the walk always played at full speed even when barely moving
         if let Some(last) = self.last_pos {
             if dt > 0.0 {
@@ -95,10 +119,12 @@ impl PlayerAnim {
 
         let rate = playback_rate(skin, self.speed);
         self.time = advance(skin, self.time, dt * rate, clip_end(skin, model.duration()));
-        let pose = self.pose.get_or_insert_with(|| model.new_pose()); // make a pose if we dont have one yet, then fill it in
-        if !model.pose_fits(pose) {
-            *pose = model.new_pose(); // the character changed to one with a different skeleton
+        // lent out of self for this tick so the upper layer can use self too, handed back at the end
+        let mut owned = self.pose.take().unwrap_or_else(|| model.new_pose()); // make a pose if we dont have one yet
+        if !model.pose_fits(&owned) {
+            owned = model.new_pose(); // the character changed to one with a different skeleton
         }
+        let pose = &mut owned;
         model.sample_local(self.time, pose);
 
         // still fading out of the old clip, mix it in
@@ -120,6 +146,14 @@ impl PlayerAnim {
             }
         }
 
+        // aiming while moving, legs keep the move clip and the upper body aims, before this you glided in the aim idle
+        let wants = (input.aiming && is_moving_loop(skin))
+            .then_some(if input.crouching { PlayerSkin::CrouchAim } else { PlayerSkin::RifleAimIdle });
+        // no upper layer while dying or prone, a kick on a body on the floor looks broken
+        let layerable = !is_one_shot(skin) && !is_prone(skin);
+        let (wants, fired) = if layerable { (wants, input.fired) } else { (None, false) };
+        self.layer_upper(wants, fired, dt, models, model, pose);
+
         // look up/down, not while dying or lying prone (bending a body on the floor looks broken)
         if !is_one_shot(skin) && !is_prone(skin) {
             model.bend_upper_body(pose, pitch);
@@ -129,6 +163,55 @@ impl PlayerAnim {
         if !model.drawn_on_gpu() {
             model.skin_pose_on_cpu(pose); // if gpu skinning is off, bend the mesh on the cpu for this pose so we can draw it
         }
+        self.pose = Some(owned);
+    }
+}
+
+impl PlayerAnim {
+    // fade the upper layer toward `wants` and mix it onto the upper body of `pose`
+    fn layer_upper(
+        &mut self,
+        wants: Option<PlayerSkin>,
+        fired: bool,
+        dt: f32,
+        models: &HashMap<String, AnimatedModel>,
+        model: &AnimatedModel,
+        pose: &mut Pose,
+    ) {
+        // a shot restarts the kick, it beats aiming until it finishes, then aiming (or nothing) takes back over
+        if fired {
+            self.upper_clip = Some(PlayerSkin::RifleFire);
+            self.upper_time = 0.0;
+        }
+        let kick_end = find(models, PlayerSkin::RifleFire)
+            .map(|m| clip_end(PlayerSkin::RifleFire, m.duration()))
+            .unwrap_or(0.0);
+        let kicking = self.upper_clip == Some(PlayerSkin::RifleFire) && self.upper_time < kick_end;
+        let wants = if kicking { Some(PlayerSkin::RifleFire) } else { wants };
+        if wants.is_some() && wants != self.upper_clip {
+            self.upper_clip = wants;
+            self.upper_time = 0.0;
+        }
+        let target = if wants.is_some() { 1.0 } else { 0.0 };
+        let step = dt / UPPER_FADE;
+        self.upper_weight = if target > self.upper_weight {
+            (self.upper_weight + step).min(1.0)
+        } else {
+            (self.upper_weight - step).max(0.0)
+        };
+        if self.upper_weight <= 0.0 {
+            self.upper_clip = None;
+            return;
+        }
+        let Some(clip) = self.upper_clip else { return };
+        let Some(upper_model) = find(models, clip) else { return };
+        self.upper_time = advance(clip, self.upper_time, dt, clip_end(clip, upper_model.duration()));
+        let layer = self.upper_pose.get_or_insert_with(|| upper_model.new_pose());
+        if !upper_model.pose_fits(layer) {
+            *layer = upper_model.new_pose();
+        }
+        upper_model.sample_local(self.upper_time, layer);
+        model.layer_upper_body(pose, layer, smoothstep(self.upper_weight));
     }
 }
 
@@ -167,7 +250,17 @@ fn smoothstep(x: f32) -> f32 {
 fn is_one_shot(skin: PlayerSkin) -> bool {
     matches!(
         skin,
-        PlayerSkin::StandDeath | PlayerSkin::CrouchDeath | PlayerSkin::ProneDeath | PlayerSkin::Slide
+        PlayerSkin::StandDeath
+            | PlayerSkin::CrouchDeath
+            | PlayerSkin::ProneDeath
+            | PlayerSkin::Slide
+            // the chooser's deaths, before this they looped so bodies kept dying
+            | PlayerSkin::DeathFront
+            | PlayerSkin::DeathBack
+            | PlayerSkin::DeathSide
+            | PlayerSkin::DeathFrontHeadshot
+            | PlayerSkin::DeathBackHeadshot
+            | PlayerSkin::RifleFire
     )
 }
 
@@ -208,6 +301,7 @@ fn playback_rate(skin: PlayerSkin, speed: f32) -> f32 {
 fn clip_end(skin: PlayerSkin, duration: f32) -> f32 {
     match skin {
         PlayerSkin::Slide => duration.min(1.0),
+        PlayerSkin::RifleFire => duration.min(FIRE_KICK),
         _ => duration,
     }
 }
@@ -227,6 +321,21 @@ mod tests {
         assert_eq!(playback_rate(PlayerSkin::RifleWalk, 5.0), 1.0);
         assert_eq!(playback_rate(PlayerSkin::RifleWalk, 0.5), 0.5); // coasting, half speed steps
         assert_eq!(playback_rate(PlayerSkin::RifleIdle, 0.0), 1.0); // idle isnt speed matched
+    }
+
+    #[test]
+    fn every_death_holds_its_last_frame() {
+        use PlayerSkin::*;
+        for death in [StandDeath, CrouchDeath, ProneDeath, DeathFront, DeathBack, DeathSide, DeathFrontHeadshot, DeathBackHeadshot] {
+            assert_eq!(advance(death, 1.9, 0.5, 2.0), 2.0, "{death:?} looped");
+        }
+    }
+
+    #[test]
+    fn fire_plays_just_the_kick_and_holds() {
+        assert_eq!(clip_end(PlayerSkin::RifleFire, 1.2), FIRE_KICK);
+        assert_eq!(clip_end(PlayerSkin::RifleFire, 0.1), 0.1); // a short clip plays whole
+        assert_eq!(advance(PlayerSkin::RifleFire, 0.2, 0.2, FIRE_KICK), FIRE_KICK); // stops at the end, no loop
     }
 
     #[test]

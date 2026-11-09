@@ -158,6 +158,10 @@ impl PlayingState {
                 config.bind_fire.is_down() || weapon.burst_remaining > 0 || punch_fire_this_frame;
             if wants_to_fire {
                 if weapon.fire() {
+                    // your body in the mirror kicks, not for the knife/punch, before this the body never reacted to shots
+                    if weapon.id != crate::weapons::stats::WeaponId::Knife {
+                        self.shot_fired = true;
+                    }
                     // Signal punch swing animation when melee fires
                     if weapon.id == crate::weapons::stats::WeaponId::Knife {
                         self.knife_swing_requested = true;
