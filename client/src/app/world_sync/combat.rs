@@ -28,9 +28,6 @@ pub(super) fn apply_damage(
     playing_state.announcements.push((ann, 2.0));
 }
 
-/// Volume of a bot's shot at distance 0, before falloff.
-const BOT_SHOT_VOLUME: f32 = 0.7;
-
 /// Spawns tracers and muzzle flashes for shots fired by bots.
 /// Their reports play where they were fired, through walls muffled.
 pub(super) fn spawn_bot_shots(
@@ -40,7 +37,8 @@ pub(super) fn spawn_bot_shots(
 ) {
     for &(start, _) in &bot_shots {
         // the shot message carries no weapon, so bots all sound like rifles
-        playing_state.play_spatial_sound("ar_shot", start, Vec3::ZERO, BOT_SHOT_VOLUME, maze);
+        let volume = client::audio::catalog::SHOT_VOLUME;
+        playing_state.play_spatial_sound("ar_shot", start, Vec3::ZERO, volume, maze);
     }
     for (start, end) in bot_shots {
         playing_state

@@ -26,6 +26,10 @@ pub const JUMP: Cue = cue("jump", 0.35, 0.06);
 pub const LAND: Cue = cue("land", 0.5, 0.06);
 
 // ── Weapons (shots use each weapon's `fire_sound_asset_key`) ──
+/// Volume of a gunshot at distance 0, before the master volume. Shots fire
+/// many times a second, so they sit well below the other cues.
+pub const SHOT_VOLUME: f32 = 0.22;
+
 pub const DRY_FIRE: Cue = cue("dry_fire", 0.55, 0.03);
 pub const RELOAD_START: Cue = cue("reload_start", 0.5, 0.03);
 pub const RELOAD_END: Cue = cue("reload_end", 0.55, 0.03);
