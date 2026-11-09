@@ -21,6 +21,8 @@ pub struct Pose { // how eac join is bent/moved compared to its parent
     // the mesh bent on the cpu for this pose, only made when the gpu cant do it
     // before this the bent mesh lived on the clip, so everyone on that clip shared one
     pub(super) cpu_meshes: Option<Vec<Mesh>>,
+    // which character's mesh that copy is of, so a character switch makes a fresh one
+    pub(super) cpu_meshes_for: usize,
 }
 
 impl Pose {
@@ -32,6 +34,7 @@ impl Pose {
             skin_mats: vec![Mat4::IDENTITY; joint_count],
             joint_positions: vec![Vec3::ZERO; joint_count],
             cpu_meshes: None,
+            cpu_meshes_for: 0,
         }
     }
 
@@ -198,6 +201,44 @@ mod tests {
             normalize_scale: 1.0,
             y_offset: 0.0,
         }
+    }
+
+    // the test clip but with a mesh of `verts` vertices all hanging off the arm bone
+    fn with_mesh(verts: usize) -> AnimatedModel {
+        use super::super::{AnimatedPart, SkinVertex};
+        use macroquad::models::Vertex;
+        let mut clip = test_clip();
+        let vertices: Vec<Vertex> = (0..verts).map(|i| Vertex::new(i as f32, 0.0, 0.0, 0.0, 0.0, WHITE)).collect();
+        let skin = (0..verts)
+            .map(|i| SkinVertex {
+                bind_position: vec3(i as f32, 0.0, 0.0),
+                bind_normal: Vec3::Y,
+                joints: [1, 0, 0, 0],
+                weights: [1.0, 0.0, 0.0, 0.0],
+            })
+            .collect();
+        let indices = (0..verts as u16 / 3 * 3).collect();
+        let part = AnimatedPart {
+            mesh: Mesh { vertices, indices, texture: None },
+            skin_vertices: skin,
+            rigid_vertices: Vec::new(),
+            skinned_vertex_count: verts,
+        };
+        clip.geometry = Rc::new(SharedGeometry { parts: vec![part], gpu: RefCell::new(GpuGeometry::Untried) });
+        clip
+    }
+
+    // the amy crash: one pose bent on one character's mesh, then on a bigger one after a character switch
+    // before the fix the pose kept the first mesh copy and indexed past its end
+    #[test]
+    fn switching_character_rebuilds_the_cpu_mesh_copy() {
+        let (small, big) = (with_mesh(1030), with_mesh(1500));
+        let mut pose = small.new_pose();
+        small.sample_pose(0.5, &mut pose);
+        small.skin_pose_on_cpu(&mut pose);
+        big.sample_pose(0.5, &mut pose);
+        big.skin_pose_on_cpu(&mut pose); // panicked here before
+        assert_eq!(big.pose_meshes(&pose).map(|m| m.vertices.len()).sum::<usize>(), 1500);
     }
 
     fn close(a: Vec3, b: Vec3) -> bool {

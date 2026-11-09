@@ -125,6 +125,7 @@ impl PlayingState {
             is_sprinting: self.movement_state.is_sprinting,
             is_crouching: self.movement_state.is_crouching,
             is_airborne: !self.movement_state.is_grounded,
+            is_slow_walking: self.movement_state.is_slow_walking,
         };
         let spread = recoil::current_spread(self.weapons.active(), &ctx);
         self.weapons.active_mut().computed_spread = spread;

@@ -95,6 +95,13 @@ impl AnimatedModel {
     // before this it only worked on the clip's own pose and kept the result on the clip
     pub fn skin_pose_on_cpu(&self, pose: &mut Pose) {
         let geometry = &self.geometry;
+        // the copy has to be of THIS mesh, switching character keeps the pose but the mesh changes
+        // before this a pose kept its first character's copy, switching to amy bent vecna's mesh and crashed
+        let mesh_id = std::rc::Rc::as_ptr(geometry) as usize;
+        if pose.cpu_meshes_for != mesh_id {
+            pose.cpu_meshes = None;
+            pose.cpu_meshes_for = mesh_id;
+        }
         let skinned = pose
             .cpu_meshes
             .get_or_insert_with(|| geometry.parts.iter().map(|p| clone_mesh(&p.mesh)).collect());

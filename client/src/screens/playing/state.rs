@@ -111,7 +111,7 @@ pub struct PlayingState {
     pub pending_lobby_settings: Option<crate::net::protocols::LobbySettings>,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
-    pub pending_hits: Vec<(u32, f32, bool)>, // victim_id, damage, backstab attempt?
+    pub pending_hits: Vec<(u32, f32, bool, bool)>, // victim_id, damage, backstab attempt?, headshot (any pellet hit the head)
 
     pub weapons: WeaponInventory,
 
@@ -272,6 +272,8 @@ pub struct PlayingState {
     // you in third person, one body that lasts, the mirror draws it alive, the death cam draws it as your corpse
     // before this both were throwaway bodies rebuilt every frame
     pub self_body: crate::types::player::OtherPlayer,
+    // your death picked from the kill feed (direction + headshot), cleared on respawn
+    pub my_death: Option<crate::types::player::PlayerSkin>,
 }
 
 pub struct KillFeedEntry {
@@ -445,6 +447,7 @@ impl PlayingState {
             clips: HashMap::new(),
             active_character: Self::DEFAULT_CHARACTER.to_string(),
             self_body: crate::types::player::OtherPlayer::new(u32::MAX, String::new(), WorldId::Lobby),
+            my_death: None,
         }
     }
 }

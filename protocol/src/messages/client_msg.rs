@@ -16,7 +16,9 @@ pub enum ClientMsg {
     WorldChange { target: u8 },
     Discover,
     WallBroken { x: u8, y: u8 },
-    Hit { victim_id: u32, damage: f32, weapon: Option<String>, backstab: Option<bool> },
+    /// `headshot` trails `backstab` and is only written when it is, so the server can tell everyone how they died
+    /// before this the server never knew a kill was a headshot
+    Hit { victim_id: u32, damage: f32, weapon: Option<String>, backstab: Option<bool>, headshot: Option<bool> },
     RespawnRequest,
     StartGame {
         mode: Option<u8>,
@@ -104,13 +106,16 @@ impl ClientMsg {
             ClientMsg::WorldChange { target } => vec![MSG_WORLD_CHANGE, *target],
             ClientMsg::Discover => vec![MSG_DISCOVER],
             ClientMsg::WallBroken { x, y } => vec![MSG_WALL_BROKEN, *x, *y],
-            ClientMsg::Hit { victim_id, damage, weapon, backstab } => {
+            ClientMsg::Hit { victim_id, damage, weapon, backstab, headshot } => {
                 let mut w = Writer::new(MSG_HIT);
                 w.u32(*victim_id).f32(*damage);
                 if let Some(name) = weapon {
                     w.str8(name);
                     if let Some(b) = backstab {
                         w.bool(*b);
+                        if let Some(h) = headshot {
+                            w.bool(*h);
+                        }
                     }
                 }
                 w.finish()
@@ -175,6 +180,7 @@ impl ClientMsg {
                 damage: r.f32()?,
                 weapon: r.str8(),
                 backstab: r.bool(),
+                headshot: r.bool(),
             },
             MSG_RESPAWN_REQUEST => ClientMsg::RespawnRequest,
             MSG_START_GAME => {

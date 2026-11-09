@@ -105,7 +105,7 @@ impl Server {
                 }
             }
             ClientMsg::Discover => handlers::handle_discover(&self.outbox, &self.players, &self.name, src_addr),
-            ClientMsg::Hit { victim_id, damage, weapon, backstab } => handlers::handle_hit(
+            ClientMsg::Hit { victim_id, damage, weapon, backstab, headshot } => handlers::handle_hit(
                 &self.outbox,
                 &mut self.players,
                 src_addr,
@@ -113,6 +113,7 @@ impl Server {
                 damage,
                 weapon,
                 backstab,
+                headshot,
                 &mut self.maze,
                 &mut self.match_running,
                 &mut self.match_start_time,

@@ -11,9 +11,9 @@ use super::nodes::load_nodes;
 use super::{AnimatedModel, ClipSelectionMode, KeyframesQuat, KeyframesVec3, LocalTransform, NodeAnimationTrack};
 
 /*
-    an animation on its own, no mesh, just which bone turns how over time
+    an animation on its own without mesh or textures,
     loaded from the bones only files the converter makes (the .glb files in models/animations)
-    then put on a character with with_clip, which retargets it to that body (like ue's ik retargeter, the simple version)
+    then put on a character with with_clip, which retargets it to that body 
     before this every animation file carried its own copy of the whole character (~9 MB each)
 */
 pub struct Clip {
@@ -55,8 +55,8 @@ impl Clip {
 
 impl AnimatedModel {
     /*
-        this character playing `clip`, ready to use exactly like the old all in one files
-        shares the character's mesh and skeleton (no copy), only the keyframes are new
+        this character playing clip
+        shares the character's mesh and skeleton, only the keyframes are new
         rotations: copied as a change from the source's rest pose onto this body's rest pose
         hips movement: scaled by hip height, so a taller or shorter body still bobs and crouches right
         every other bone keeps this character's own lengths, the clip's lengths (from whoever it was downloaded on) are ignored
@@ -80,7 +80,9 @@ impl AnimatedModel {
         }
         let mut model = AnimatedModel {
             geometry: Rc::clone(&self.geometry),
-            gpu_drawn: Cell::new(false),
+            // the character's mesh is already on the gpu (prepare_gpu at load), so start as gpu drawn
+            // before this every fresh clip did one pointless cpu bend first, right after a character switch
+            gpu_drawn: Cell::new(matches!(*self.geometry.gpu.borrow(), super::gpu::GpuGeometry::Ready(_))),
             pose: self.new_pose(),
             node_rest: self.node_rest.clone(),
             node_parents: self.node_parents.clone(),

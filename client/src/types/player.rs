@@ -31,10 +31,21 @@ pub enum PlayerSkin {
     CrouchDeath,
     ProneDeath,
     Twerk,
+    // new clips (2026-11-09): crawl back, slow walk, the 3 part jump, deaths by direction and headshot
+    ProneBack,
+    SlowWalkForward,
+    JumpStart,
+    FallLoop,
+    Land,
+    DeathFront,
+    DeathBack,
+    DeathSide,
+    DeathFrontHeadshot,
+    DeathBackHeadshot,
 }
 
 impl PlayerSkin {
-    pub const ALL: [PlayerSkin; 26] = [
+    pub const ALL: [PlayerSkin; 36] = [
         PlayerSkin::Texture,
         PlayerSkin::RifleIdle,
         PlayerSkin::RifleAimIdle,
@@ -61,6 +72,16 @@ impl PlayerSkin {
         PlayerSkin::CrouchDeath,
         PlayerSkin::ProneDeath,
         PlayerSkin::Twerk,
+        PlayerSkin::ProneBack,
+        PlayerSkin::SlowWalkForward,
+        PlayerSkin::JumpStart,
+        PlayerSkin::FallLoop,
+        PlayerSkin::Land,
+        PlayerSkin::DeathFront,
+        PlayerSkin::DeathBack,
+        PlayerSkin::DeathSide,
+        PlayerSkin::DeathFrontHeadshot,
+        PlayerSkin::DeathBackHeadshot,
     ];
 
     pub const fn is_model_based(self) -> bool {
@@ -98,6 +119,17 @@ impl PlayerSkin {
             PlayerSkin::CrouchDeath => Some("anim_crouch_death"),
             PlayerSkin::ProneDeath => Some("anim_prone_death"),
             PlayerSkin::Twerk => Some("anim_emote_twerk"),
+            PlayerSkin::ProneBack => Some("anim_prone_back"),
+            PlayerSkin::SlowWalkForward => Some("anim_slow_walk_forward"),
+            PlayerSkin::JumpStart => Some("anim_jump_start"),
+            PlayerSkin::FallLoop => Some("anim_fall_loop"),
+            PlayerSkin::Land => Some("anim_land"),
+            PlayerSkin::DeathFront => Some("anim_death_front"),
+            PlayerSkin::DeathBack => Some("anim_death_back"),
+            // no left death clip, the right one covers both sides (ahmed's call)
+            PlayerSkin::DeathSide => Some("anim_death_right"),
+            PlayerSkin::DeathFrontHeadshot => Some("anim_death_front_headshot"),
+            PlayerSkin::DeathBackHeadshot => Some("anim_death_back_headshot"),
         }
     }
 
@@ -129,6 +161,16 @@ impl PlayerSkin {
             PlayerSkin::CrouchDeath => "Crouch Death",
             PlayerSkin::ProneDeath => "Prone Death",
             PlayerSkin::Twerk => "Twerk",
+            PlayerSkin::ProneBack => "Prone Back",
+            PlayerSkin::SlowWalkForward => "Slow Walk Forward",
+            PlayerSkin::JumpStart => "Jump Start",
+            PlayerSkin::FallLoop => "Fall Loop",
+            PlayerSkin::Land => "Land",
+            PlayerSkin::DeathFront => "Death Front",
+            PlayerSkin::DeathBack => "Death Back",
+            PlayerSkin::DeathSide => "Death Side",
+            PlayerSkin::DeathFrontHeadshot => "Death Front Headshot",
+            PlayerSkin::DeathBackHeadshot => "Death Back Headshot",
         }
     }
 
@@ -173,7 +215,17 @@ impl PlayerSkin {
             // Extras
             PlayerSkin::ProneDeath => PlayerSkin::Slide,
             PlayerSkin::Slide => PlayerSkin::Twerk,
-            PlayerSkin::Twerk => PlayerSkin::RifleIdle,
+            PlayerSkin::Twerk => PlayerSkin::ProneBack,
+            PlayerSkin::ProneBack => PlayerSkin::SlowWalkForward,
+            PlayerSkin::SlowWalkForward => PlayerSkin::JumpStart,
+            PlayerSkin::JumpStart => PlayerSkin::FallLoop,
+            PlayerSkin::FallLoop => PlayerSkin::Land,
+            PlayerSkin::Land => PlayerSkin::DeathFront,
+            PlayerSkin::DeathFront => PlayerSkin::DeathBack,
+            PlayerSkin::DeathBack => PlayerSkin::DeathSide,
+            PlayerSkin::DeathSide => PlayerSkin::DeathFrontHeadshot,
+            PlayerSkin::DeathFrontHeadshot => PlayerSkin::DeathBackHeadshot,
+            PlayerSkin::DeathBackHeadshot => PlayerSkin::RifleIdle,
         }
     }
 }

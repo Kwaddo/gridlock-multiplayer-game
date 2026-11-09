@@ -58,6 +58,8 @@ pub fn handle_hit(
     damage_f: f32,
     weapon_name: Option<String>,
     is_backstab_claim: Option<bool>,
+    // did the killing shot hit the head, older clients dont say so it counts as no
+    headshot: Option<bool>,
     _maze: &mut Option<MazeData>,
     _match_running: &mut bool,
     _match_start_time: &mut Option<Instant>,
@@ -110,6 +112,7 @@ pub fn handle_hit(
         damage,
         &weapon_name,
         is_backstab_claim,
+        headshot.unwrap_or(false),
         match_end_pending,
         match_mode,
         bot_states,
@@ -246,6 +249,8 @@ pub fn apply_damage(
     damage: u32,
     weapon_name: &str,
     is_backstab: bool,
+    // passed on in the kill feed so every client can pick a headshot death, before this nobody knew
+    is_headshot: bool,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_mode: u8,
     bot_states: &mut HashMap<PeerId, crate::bot::ai::BotState>,
@@ -445,6 +450,7 @@ pub fn apply_damage(
             killer_id: players.get(&attacker).map_or(0, |killer| killer.id),
             victim_id,
             weapon: weapon_name.to_string(),
+            headshot: is_headshot,
         }
         .encode();
 

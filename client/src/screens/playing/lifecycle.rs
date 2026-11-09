@@ -175,6 +175,7 @@ impl PlayingState {
         self.movement_state.is_prone = false;
         self.movement_state.is_sliding = false;
         self.death_killer_name = None;
+        self.my_death = None; // next death gets picked fresh
         self.death_weapon_name = None;
         self.death_camera_phase = super::state::DeathCameraPhase::None;
     }

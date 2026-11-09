@@ -27,7 +27,13 @@ impl PlayingState {
             m.is_sliding,
             false
         );
-        AnimState::skin_from_state(state, None)
+        let skin = AnimState::skin_from_state(state, None);
+        // your own slow walk is known for sure, no guessing from speed like for other players
+        if m.is_slow_walking && skin == crate::types::player::PlayerSkin::RifleWalk {
+            crate::types::player::PlayerSkin::SlowWalkForward
+        } else {
+            skin
+        }
     }
 
     // you in the mirror, the body update_self_avatar keeps in sync
@@ -49,14 +55,12 @@ impl PlayingState {
     // which death you play, from the stance you died in
     // before this draw_death_corpse worked it out every frame while drawing
     fn death_skin(&self) -> crate::types::player::PlayerSkin {
-        use crate::types::player::PlayerSkin;
-        if self.movement_state.is_prone {
-            PlayerSkin::ProneDeath
-        } else if self.movement_state.is_crouching {
-            PlayerSkin::CrouchDeath
-        } else {
-            PlayerSkin::StandDeath
-        }
+        use crate::types::anim_chooser::{choose_death, stance};
+        // the kill feed's pick if it came in, otherwise the table's default for your stance
+        self.my_death.unwrap_or_else(|| {
+            let m = &self.movement_state;
+            choose_death(stance(m.is_prone, m.is_crouching), self.position, self.yaw, None, false, 0)
+        })
     }
 
     // keep your one third person body in sync with you, alive = copy you, dead = the corpse

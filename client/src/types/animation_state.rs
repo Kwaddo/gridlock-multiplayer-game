@@ -92,6 +92,8 @@ impl AnimState {
         if state.prone {
             return match state.move_dir {
                 MoveDir::Forward => PlayerSkin::ProneForward,
+                // crawl back, before this backing up while prone showed the idle pose sliding
+                MoveDir::Backward => PlayerSkin::ProneBack,
                 MoveDir::Left => PlayerSkin::ProneTurnLeft,
                 MoveDir::Right => PlayerSkin::ProneTurnRight,
                 _ => PlayerSkin::ProneIdle,

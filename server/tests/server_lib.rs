@@ -56,6 +56,7 @@ fn every_server_packet_decodes() {
         damage: 10.0,
         weapon: Some("AK".into()),
         backstab: Some(false),
+        headshot: Some(true),
     });
     // non-host start request must be denied
     step(&mut server, b, ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: None, blue_bots: None });

@@ -112,6 +112,10 @@ impl PlayingState {
             self.movement_state.slide_cooldown_timer =
                 (self.movement_state.slide_cooldown_timer - delta).max(0.0);
         }
+        if self.movement_state.jump_cooldown_timer > 0.0 {
+            self.movement_state.jump_cooldown_timer =
+                (self.movement_state.jump_cooldown_timer - delta).max(0.0);
+        }
         self.update_crouch_height(config, delta);
         let was_grounded = self.movement_state.is_grounded;
         // Only allow jumping when not frozen after teleport
@@ -180,6 +184,8 @@ impl PlayingState {
 
         if !was_grounded && self.movement_state.is_grounded {
             self.just_landed = true;
+            // short pause before the next jump, holding space jumps again as soon as it runs out
+            self.movement_state.jump_cooldown_timer = self.movement_config.jump_land_cooldown;
         }
         self.prev_was_reloading = self.weapons.active().is_reloading;
 

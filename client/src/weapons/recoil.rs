@@ -16,6 +16,8 @@ pub struct SpreadContext {
     pub is_sprinting: bool,
     pub is_crouching: bool,
     pub is_airborne: bool,
+    // slow walk = dead accurate, see SLOW_WALK_SPREAD_MULT
+    pub is_slow_walking: bool,
     // future: pub is_mantling: bool,
     // future: pub is_sliding: bool,
 }
@@ -154,6 +156,9 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     }
 }
 
+// how much tighter shots are while slow walking (ahmed: dead accurate), 0.2 = a fifth of the normal spread
+pub const SLOW_WALK_SPREAD_MULT: f32 = 0.2;
+
 // calculate spread angle (radians) for the current frame.
 // this is what the crosshair size and bullet deviation are based on.
 pub fn current_spread(weapon: &WeaponState, ctx: &SpreadContext) -> f32 {
@@ -168,7 +173,10 @@ pub fn current_spread(weapon: &WeaponState, ctx: &SpreadContext) -> f32 {
     // situational multipliers
     let mut mult = 1.0;
 
-    if ctx.is_sprinting {
+    if ctx.is_slow_walking {
+        // replaces the moving penalty instead of stacking on it, before this slow walk counted as plain moving
+        mult *= SLOW_WALK_SPREAD_MULT;
+    } else if ctx.is_sprinting {
         mult *= stats.sprint_spread_mult;
     } else if ctx.is_moving {
         mult *= stats.move_spread_mult;
