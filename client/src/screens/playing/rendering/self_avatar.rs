@@ -37,7 +37,13 @@ impl PlayingState {
         if self.is_dead {
             return; // the death camera draws your corpse instead
         }
-        self.draw_player_model(&self.self_body);
+        let muzzle = self.draw_player_model(&self.self_body);
+        // your own shots flash on your reflection's gun, same flash as bots, same 0.08 s as the first person one
+        // before this you fired in the mirror with no flash at all
+        let flash = self.weapons.active().muzzle_flash_timer;
+        if let (Some(at), true) = (muzzle, flash > 0.0) {
+            super::tracers::draw_muzzle_flash(at, (flash / 0.08).min(1.0));
+        }
     }
 
     // which death you play, from the stance you died in
@@ -73,8 +79,11 @@ impl PlayingState {
 
         let aiming = self.weapons.active().is_aiming;
         let weapon = self.weapons.active().stats().name;
+        // look up/down while alive, the corpse lies level
+        let pitch = if corpse.is_some() { 0.0 } else { self.pitch };
 
         let body = &mut self.self_body;
+        body.render_pitch = pitch; // the gun tilts with it too
         body.render_x = pos.x;
         body.render_y = pos.y;
         body.render_z = pos.z;
@@ -87,6 +96,6 @@ impl PlayingState {
         if body.current_weapon != weapon {
             body.current_weapon = weapon.to_string(); // only when weapon changes, not every frame
         }
-        body.anim.tick(skin, delta, &self.animated_models, pos);
+        body.anim.tick(skin, delta, &self.animated_models, pos, pitch);
     }
 }

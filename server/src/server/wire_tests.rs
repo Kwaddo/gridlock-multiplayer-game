@@ -46,7 +46,7 @@ fn an_old_client_is_told_then_sent_back_to_its_menu() {
     assert!(!server.has_peer(old) && server.is_rejected(old) && server.player_count() == 1);
 
     // its positions only bring the notice back now and then
-    let pos = ClientMsg::Position { position: (0.0, 0.0, 0.0), yaw: 0.0, state_flags: None, event_flags: None };
+    let pos = ClientMsg::Position { position: (0.0, 0.0, 0.0), yaw: 0.0, state_flags: None, event_flags: None, pitch: None };
     server.handle_packet(old, &pos.encode());
     assert!(server.drain_outbox().is_empty());
     server.age_rejection(old, Duration::from_secs(4));

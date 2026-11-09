@@ -240,5 +240,33 @@ pub(super) fn build_parts(
     if parts.is_empty() {
         return Err(format!("no renderable primitives found in '{}'", path));
     }
+    // cut big parts into pieces macroquad can draw whole, before this the hands' arms drew about 12%
+    let parts: Vec<AnimatedPart> = parts.into_iter().flat_map(split_part).collect();
     Ok((parts, all_positions))
+}
+
+// one part into pieces under the draw limit, each keeps its own skin data in the same order
+// (skinned vertices first, then rigid ones) because the chunk's vertex ids come back sorted
+fn split_part(part: AnimatedPart) -> Vec<AnimatedPart> {
+    let chunks = crate::types::mesh_split::chunk_triangles(&part.mesh.indices, part.mesh.vertices.len());
+    if chunks.len() == 1 {
+        return vec![part];
+    }
+    let count = part.skinned_vertex_count;
+    chunks
+        .into_iter()
+        .map(|c| {
+            let ids: Vec<usize> = c.old_ids.iter().map(|&o| o as usize).collect();
+            AnimatedPart {
+                mesh: Mesh {
+                    vertices: ids.iter().map(|&o| part.mesh.vertices[o]).collect(),
+                    indices: c.indices,
+                    texture: part.mesh.texture.clone(),
+                },
+                skin_vertices: ids.iter().filter(|&&o| o < count).map(|&o| part.skin_vertices[o]).collect(),
+                rigid_vertices: ids.iter().filter(|&&o| o >= count).map(|&o| part.rigid_vertices[o - count]).collect(),
+                skinned_vertex_count: ids.iter().filter(|&&o| o < count).count(),
+            }
+        })
+        .collect()
 }

@@ -18,6 +18,9 @@ const WORLD_WEAPON_YAW_ADJUST: f32 = std::f32::consts::PI / 2.0; // 45° right
                                                                  // additional forward translation in world space to push guns away from hand
 const WORLD_WEAPON_FORWARD_OFFSET: f32 = 0.1; // units, tweak for desired spacing
 
+// how far past the gun's grip its muzzle sits, roughly a rifle's length, good enough for a flash
+const MUZZLE_REACH: f32 = 0.5;
+
 impl PlayingState {
     #[inline(always)]
     pub(crate) fn draw_other_players(&self) {
@@ -30,7 +33,9 @@ impl PlayingState {
         }
     }
 
-    pub(super) fn draw_player_model(&self, p: &crate::types::player::OtherPlayer) {
+    // draws the body and its gun, returns where the gun's muzzle is (for the muzzle flash), none if no gun
+    pub(super) fn draw_player_model(&self, p: &crate::types::player::OtherPlayer) -> Option<Vec3> {
+        let mut muzzle: Option<Vec3> = None;
         let render_pos = p.render_position();
         let render_yaw = p.render_yaw;
         let desired_key = p.skin_type.model_key();
@@ -247,15 +252,21 @@ impl PlayingState {
                         };
                         pos + forward_dir * dyn_forward
                     };
+                    // tilt the gun up/down with where they look, around the body's sideways axis
+                    // before this the gun stayed level even when the body aimed up or down
+                    let side = vec3(-forward_dir.z, 0.0, forward_dir.x);
+                    let aim_tilt = Mat4::from_axis_angle(side, p.render_pitch);
                     let weapon_transform = if self.dev_mode.is_unlocked() {
                         let (rp, _, rr) = self.dev_mode.weapon_rot_offset;
                         Mat4::from_translation(weapon_pos)
+                            * aim_tilt
                             * Mat4::from_rotation_y(yaw_rot)
                             * Mat4::from_rotation_x(rp)
                             * Mat4::from_rotation_z(rr)
                             * Mat4::from_scale(Vec3::splat(scale_factor))
                     } else {
                         Mat4::from_translation(weapon_pos)
+                            * aim_tilt
                             * Mat4::from_rotation_y(yaw_rot)
                             * Mat4::from_scale(Vec3::splat(scale_factor))
                     };
@@ -270,9 +281,13 @@ impl PlayingState {
                         }
                     }
                     wgl.quad_gl.pop_model_matrix();
+                    // the end of the barrel, a bit out from the gun along where they aim
+                    let aim_dir = forward_dir * p.render_pitch.cos() + Vec3::Y * p.render_pitch.sin();
+                    muzzle = Some(weapon_pos + aim_dir * MUZZLE_REACH);
                 }
             }
         }
+        muzzle
     }
 
     pub(crate) fn draw_target_dummy(&self) {

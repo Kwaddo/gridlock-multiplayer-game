@@ -224,6 +224,8 @@ impl PlayingState {
                     yaw: self.yaw,
                     state_flags: Some(state_flags),
                     event_flags: Some(event_flags),
+                    // where you look up or down, so others see it, before this it was never sent
+                    pitch: Some(self.pitch),
                 }
                 .encode();
                 s.send(&msg);

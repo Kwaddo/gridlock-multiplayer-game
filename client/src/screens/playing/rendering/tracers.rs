@@ -87,13 +87,19 @@ impl PlayingState {
     pub(crate) fn draw_world_muzzle_flashes(&self) {
         for f in &self.world_muzzle_flashes {
             let t = (f.lifetime / crate::weapons::effects::WorldMuzzleFlash::DURATION).clamp(0.0, 1.0);
-            let alpha = (220.0 * t) as u8;
-            let radius = 0.15 * (0.4 + 0.6 * t);
-            // bright orange-yellow flash sphere
-            draw_sphere(f.position, radius, None, Color::from_rgba(255, 200, 80, alpha));
-            // outer glow
-            let glow_alpha = (100.0 * t) as u8;
-            draw_sphere(f.position, radius * 2.0, None, Color::from_rgba(255, 150, 50, glow_alpha));
+            draw_muzzle_flash(f.position, t);
         }
     }
+}
+
+// one third person flash, t = 1 just fired, fading to 0, shared by bots' shots and your mirror self
+// before this the drawing lived inside the bot flash loop only
+pub(crate) fn draw_muzzle_flash(position: Vec3, t: f32) {
+    let alpha = (220.0 * t) as u8;
+    let radius = 0.15 * (0.4 + 0.6 * t);
+    // bright orange-yellow flash sphere
+    draw_sphere(position, radius, None, Color::from_rgba(255, 200, 80, alpha));
+    // outer glow
+    let glow_alpha = (100.0 * t) as u8;
+    draw_sphere(position, radius * 2.0, None, Color::from_rgba(255, 150, 50, glow_alpha));
 }

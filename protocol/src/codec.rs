@@ -37,6 +37,18 @@ pub fn dequantize_yaw(q: u16) -> f32 {
     q as i16 as f32 * (std::f32::consts::PI / 32768.0)
 }
 
+/// Look up/down angle (radians) to whole degrees in one byte, clamped to +-89,
+/// plenty for bending a body, before this pitch wasnt sent at all
+pub fn quantize_pitch(pitch: f32) -> u8 {
+    // float -> int `as` casts saturate and map NaN to 0
+    (pitch.to_degrees().round().clamp(-89.0, 89.0) as i8) as u8
+}
+
+/// Back to radians.
+pub fn dequantize_pitch(q: u8) -> f32 {
+    (q as i8 as f32).to_radians()
+}
+
 /// Append-only packet builder.
 #[derive(Default)]
 pub struct Writer {

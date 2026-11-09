@@ -488,11 +488,12 @@ fn load_gltf_static_mesh_impl(
             v.position.y = (v.position.y - global_min.y) * scale;
             v.position.z = (v.position.z - center_z) * scale;
         }
-        output.push(Mesh {
+        // big primitives into pieces macroquad draws whole, before this guns like the m4 and minigun lost chunks
+        output.extend(client::types::mesh_split::split_mesh(Mesh {
             vertices: pd.vertices,
             indices: pd.indices,
             texture: pd.texture,
-        });
+        }));
     }
 
     Ok(output)

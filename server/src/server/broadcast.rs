@@ -205,6 +205,8 @@ pub(crate) fn player_state(player: &Player, include_events: bool, now: Instant) 
         id: player.id,
         position: player.position,
         yaw: player.yaw,
+        // before this pitch was tracked (bots even set it) but never sent, so nobody saw anyone look up or down
+        pitch: player.pitch,
         state_flags,
         event_flags,
         health: player.health.min(u16::MAX as u32) as u16,
