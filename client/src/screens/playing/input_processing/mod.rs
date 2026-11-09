@@ -201,7 +201,7 @@ impl PlayingState {
 
     fn play_weapon_shot_sound(&self, sound_key: &str, _config: &GameConfig) {
         let pitch = gen_range(0.94f32, 1.06f32);
-        let volume = gen_range(0.7f32, 0.82f32);
+        let volume = crate::audio::catalog::SHOT_VOLUME * gen_range(0.92f32, 1.0f32);
         self.audio.play(sound_key, pitch, volume);
     }
 }
