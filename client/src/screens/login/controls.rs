@@ -78,7 +78,7 @@ impl LoginScreen {
             draw_text_ex(key, x + col_w - kw - 10.0, y + 17.0, text_params(15, WHITE));
         }
 
-        let note = "Esc always pauses too. In a browser, the first click into a game goes fullscreen so keys like Ctrl+W stay in the game.";
+        let note = "Esc always pauses, and in a browser frees the mouse. The first click into a game goes fullscreen so Ctrl+W stays in the game.";
         let note_size = if measure_game_text(note, 12) > pw - pad * 2.0 { 10 } else { 12 };
         draw_text_ex(note, px + pad, py + ph - 52.0, text_params(note_size, TEXT_DIM));
 
