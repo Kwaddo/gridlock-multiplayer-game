@@ -31,7 +31,8 @@ impl PlayingState {
             }
 
             // determine movement state for footstep sounds
-            let is_moving = p.last_move_dir != crate::types::animation_state::MoveDir::None;
+            // other players slow walking are silent too (inferred from their speed)
+            let is_moving = p.last_move_dir != crate::types::animation_state::MoveDir::None && !p.anim.slow_walking();
             let is_sliding = p.is_sliding;
 
             if is_sliding {
@@ -82,7 +83,7 @@ impl PlayingState {
         for p in &mut self.other_players {
             // move this body's own clock and work out its own pose, before this every body read the shared clip's clock
             let pos = p.render_position();
-            let input = AnimInput { skin: p.skin_type, pos, pitch: p.render_pitch, aiming: p.is_ads, crouching: p.is_crouching, fired: std::mem::take(&mut p.fired) };
+            let input = AnimInput { skin: p.skin_type, pos, pitch: p.render_pitch, yaw: p.render_yaw, aiming: p.is_ads, crouching: p.is_crouching, fired: std::mem::take(&mut p.fired) };
             p.anim.tick(&input, delta, animated_models);
             // here we refresh the hitbox positions every frame based on the current animation pose of the player so hit detection is accurate if they crouch, prone, slide, etc.
             refresh_player_hitboxes(animated_models, p);
@@ -90,7 +91,7 @@ impl PlayingState {
         for bot in &mut self.practice_bots {
             let pos = bot.player.render_position();
             let b = &bot.player;
-            let input = AnimInput { skin: b.skin_type, pos, pitch: b.render_pitch, aiming: b.is_ads, crouching: b.is_crouching, fired: b.fired };
+            let input = AnimInput { skin: b.skin_type, pos, pitch: b.render_pitch, yaw: b.render_yaw, aiming: b.is_ads, crouching: b.is_crouching, fired: b.fired };
             bot.player.anim.tick(&input, delta, animated_models);
             refresh_player_hitboxes(animated_models, &mut bot.player);
         }

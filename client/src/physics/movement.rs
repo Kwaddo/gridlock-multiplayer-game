@@ -82,6 +82,9 @@ pub struct MovementConfig {
     pub jump_strength: f32,
     // how long after landing before you can jump again, like fortnite, before this you could jump the same frame you landed
     pub jump_land_cooldown: f32,
+    // slow walk stealth feel: how much the view narrows (0.15 = 15%) and how long it takes to ease in/out
+    pub slow_walk_zoom: f32,
+    pub slow_walk_zoom_time: f32,
     pub stamina_drain: f32,   // per second
     pub stamina_recover: f32, // per second
     pub stamina_depleted_threshold: f32,
@@ -111,6 +114,8 @@ impl MovementConfig {
             gravity: 20.0,
             jump_strength: 6.0,
             jump_land_cooldown: 0.25, // claude's pick, tune by feel
+            slow_walk_zoom: 0.15,
+            slow_walk_zoom_time: 0.25,
             stamina_drain: 35.0,
             stamina_recover: 15.0,
             stamina_depleted_threshold: 10.0,

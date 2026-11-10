@@ -104,6 +104,7 @@ impl PlayingState {
             skin,
             pos,
             pitch,
+            yaw,
             aiming: corpse.is_none() && aiming, // your gun up in the mirror while you aim and move
             crouching: self.movement_state.is_crouching,
             fired: corpse.is_none() && std::mem::take(&mut self.shot_fired),

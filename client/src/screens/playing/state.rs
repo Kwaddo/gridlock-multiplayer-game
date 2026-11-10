@@ -276,6 +276,8 @@ pub struct PlayingState {
     pub my_death: Option<crate::types::player::PlayerSkin>,
     // you shot this frame, your mirror self kicks, cleared once used
     pub shot_fired: bool,
+    // 0..1, eases toward 1 while slow walking, the camera narrows by it
+    pub slow_walk_zoom: f32,
 }
 
 pub struct KillFeedEntry {
@@ -451,6 +453,7 @@ impl PlayingState {
             self_body: crate::types::player::OtherPlayer::new(u32::MAX, String::new(), WorldId::Lobby),
             my_death: None,
             shot_fired: false,
+            slow_walk_zoom: 0.0,
         }
     }
 }

@@ -76,7 +76,8 @@ impl PlayingState {
     pub(super) fn update_local_footsteps(&mut self, delta: f32, config: &GameConfig) {
         // ── Local player footstep sounds ──
         if !self.is_dead && self.movement_state.is_grounded {
-            let is_moving = self.move_dir.length_squared() > 0.01;
+            // slow walk is silent, stalking, before this it made normal footsteps
+            let is_moving = self.move_dir.length_squared() > 0.01 && !self.movement_state.is_slow_walking;
             let is_sliding = self.movement_state.is_sliding;
 
             if is_sliding {

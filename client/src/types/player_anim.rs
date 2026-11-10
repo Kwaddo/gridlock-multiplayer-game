@@ -5,6 +5,8 @@ use macroquad::prelude::*;
 use crate::types::animated_model::{ AnimatedModel, Pose };
 use crate::types::player::PlayerSkin;
 
+use crate::types::blend_space::{ weights, STANDING };
+
 /*
    one players animation clock, before this every clip had one clock shared by everyone, so 2 people walking were clones
    and a second death rewound the first one. L code tbh I don't know how we let that sldie
@@ -27,6 +29,7 @@ pub struct AnimInput {
     pub skin: PlayerSkin,
     pub pos: Vec3,     // where the body is drawn, for its real speed
     pub pitch: f32,    // look up/down, + = up
+    pub yaw: f32,      // look left/right, + = right
     pub aiming: bool,  // ads, the upper body holds the gun up while moving
     pub crouching: bool,
     pub fired: bool,   // shot this frame, the upper body kicks
@@ -37,17 +40,28 @@ const SLOW_WALK_BELOW: f32 = 3.0;
 // ...for at least this long means slow walk, long enough that speeding up or coasting to a stop doesnt count
 const SLOW_WALK_AFTER: f32 = 0.4;
 
+#[derive(Copy, Clone)]
+enum FadeFrom {
+    Clip(PlayerSkin, f32), // clip and how far into it, it keeps playing while it fades
+    Still, // blend space's last pose
+}
+
 pub struct PlayerAnim {
     clip: PlayerSkin,
     time: f32,
     pose: Option<Pose>, // pose for the current clip, updated every tick, used for drawing the player body
-    // the clip we're fading out of and how far into it, it keeps playing while it fades
-    prev: Option<(PlayerSkin, f32)>,
+    // what we're fading out of, the old clip still playing or a still of the blend space
+    prev: Option<FadeFrom>,
     prev_pose: Option<Pose>, // scratch pose for the old clip, kept so it isnt remade every switch
     fade: f32, // seconds since the last switch
     // how fast this body really moves on the ground, so walk speed can match it
     last_pos: Option<Vec3>,
-    speed: f32,
+    vel: Vec2, // smoothed ground velocity, for the blend space to pick clips and how much of each
+
+    stride: f32, 
+    mix_pose: Option<Pose>, // scratch pose for the blend space, kept so it isnt remade every tick
+    still: Option<Pose>, // scratch pose for the blend space's last pose, kept so it isnt remade every tick
+
     // how long theyve been walking forward slowly, see SLOW_WALK_AFTER
     slow_for: f32,
     // upper body layer (aim now, fire next), its own clip clock and how strongly it shows
@@ -67,13 +81,21 @@ impl PlayerAnim {
             prev_pose: None,
             fade: 0.0,
             last_pos: None,
-            speed: 0.0,
+            vel: Vec2::ZERO,
+            stride: 0.0,
+            mix_pose: None,
+            still: None,
             slow_for: 0.0,
             upper_clip: None,
             upper_time: 0.0,
             upper_weight: 0.0,
             upper_pose: None,
         }
+    }
+
+    // looks like theyre slow walking (walking forward slowly for a while), no footsteps then
+    pub fn slow_walking(&self) -> bool {
+        self.slow_for >= SLOW_WALK_AFTER
     }
 
     pub fn pose(&self) -> Option<&Pose> {
@@ -83,67 +105,103 @@ impl PlayerAnim {
 
     pub fn tick(&mut self, input: &AnimInput, dt: f32, models: &HashMap<String, AnimatedModel>) {
         let (skin, pos, pitch) = (input.skin, input.pos, input.pitch);
-        // smoothed ground speed, before this the walk always played at full speed even when barely moving
-        if let Some(last) = self.last_pos {
-            if dt > 0.0 {
-                let now = vec2(pos.x - last.x, pos.z - last.z).length() / dt;
-                self.speed += (now - self.speed) * (1.0 - (-12.0 * dt).exp());
+        // smoothed ground velocity, which way and how fast, before this it was only the speed
+        if let (Some(last), true) = (self.last_pos, dt > 0.0) {
+            let step = vec2(pos.x - last.x, pos.z - last.z);
+            // a respawn or teleport jumps metres in one frame, skip it, before this it read as a huge speed for a moment
+            if step.length() < 2.0 {
+                self.vel += (step / dt - self.vel) * (1.0 - (-12.0 * dt).exp());
             }
         }
         self.last_pos = Some(pos);
+        let speed = self.vel.length();
 
         // a slow forward walk shows the slow walk clip, before this slow walking looked like a normal walk in slow motion
-        let slow = skin == PlayerSkin::RifleWalk && self.speed > 0.3 && self.speed < SLOW_WALK_BELOW;
+        let slow = skin == PlayerSkin::RifleWalk && speed > 0.3 && speed < SLOW_WALK_BELOW;
         self.slow_for = if slow { self.slow_for + dt } else { 0.0 };
         let skin = if self.slow_for >= SLOW_WALK_AFTER { PlayerSkin::SlowWalkForward } else { skin };
 
-        if skin != self.clip {
-            // keep the old clip playing so it can fade out
-            self.prev = Some((self.clip, self.time));
-            self.fade = 0.0;
-            // two movement loops (walk fwd -> strafe) keep the same point in the stride,
-            // anything else starts from the top, before this every switch restarted the step
-            self.time = match (find(models, self.clip), find(models, skin)) {
-                (Some(old), Some(new)) if is_moving_loop(self.clip) && is_moving_loop(skin) => {
-                    let old_end = clip_end(self.clip, old.duration()).max(0.0001);
-                    (self.time / old_end) * clip_end(skin, new.duration())
-                }
-                _ => 0.0,
+        // the blend space counts as one clip, walk fwd -> strafe inside it is the mix moving, not a switch
+        let (was_space, now_space) = (in_space(self.clip), in_space(skin));
+        let switched = if now_space { !was_space } else { skin != self.clip };
+        if switched {
+            // where in the step we were (0..1), so the next moving loop picks up the same step
+            let phase = if was_space {
+                Some(self.stride)
+            } else if is_moving_loop(self.clip) {
+                find(models, self.clip).map(|m| self.time / clip_end(self.clip, m.duration()).max(0.0001))
+            } else {
+                None
             };
-            self.clip = skin;
+            // the blend space isnt one clip so it cant keep playing while it fades, it fades from a still instead
+            self.prev = Some(if was_space { FadeFrom::Still } else { FadeFrom::Clip(self.clip, self.time) });
+            self.fade = 0.0;
+            if now_space {
+                self.stride = phase.unwrap_or(0.0);
+                self.time = 0.0; // the idle's own clock
+            } else {
+                self.time = match (phase, find(models, skin)) {
+                    (Some(p), Some(new)) if is_moving_loop(skin) => p * clip_end(skin, new.duration()),
+                    _ => 0.0,
+                };
+            }
         }
+        self.clip = skin;
 
         let Some(model) = find(models, skin) else {
             return; // no model for this skin, so no pose
         };
 
-        let rate = playback_rate(skin, self.speed);
-        self.time = advance(skin, self.time, dt * rate, clip_end(skin, model.duration()));
+        let rate = playback_rate(skin, speed);
         // lent out of self for this tick so the upper layer can use self too, handed back at the end
         let mut owned = self.pose.take().unwrap_or_else(|| model.new_pose()); // make a pose if we dont have one yet
         if !model.pose_fits(&owned) {
             owned = model.new_pose(); // the character changed to one with a different skeleton
         }
         let pose = &mut owned;
-        model.sample_local(self.time, pose);
+        if now_space {
+            // how they move compared to where they face, x = right, y = forward
+            let (sin, cos) = input.yaw.sin_cos();
+            let local = vec2(self.vel.dot(vec2(-sin, cos)), self.vel.dot(vec2(cos, sin)));
+            self.sample_space(local, dt, models, pose);
+        } else {
+            self.time = advance(skin, self.time, dt * rate, clip_end(skin, model.duration()));
+            model.sample_local(self.time, pose);
+        }
 
-        // still fading out of the old clip, mix it in
-        if let Some((prev_skin, prev_time)) = self.prev {
+        // still fading out of the old clip or the blend space's still, mix it in
+        if let Some(from) = self.prev {
             self.fade += dt;
             let w = smoothstep(self.fade / FADE_TIME);
-            match find(models, prev_skin) {
-                Some(prev_model) if w < 1.0 => {
-                    let prev_time = advance(prev_skin, prev_time, dt * rate, clip_end(prev_skin, prev_model.duration()));
-                    self.prev = Some((prev_skin, prev_time));
-                    let prev_pose = self.prev_pose.get_or_insert_with(|| prev_model.new_pose());
-                    if !prev_model.pose_fits(prev_pose) {
-                        *prev_pose = prev_model.new_pose();
+            match from {
+                _ if w >= 1.0 => self.prev = None, // fade done, just the new clip now
+                FadeFrom::Still => match &self.still {
+                    Some(still) if model.pose_fits(still) => pose.blend_from(still, w),
+                    _ => self.prev = None,
+                },
+                FadeFrom::Clip(prev_skin, prev_time) => match find(models, prev_skin) {
+                    Some(prev_model) => {
+                        let prev_time = advance(prev_skin, prev_time, dt * rate, clip_end(prev_skin, prev_model.duration()));
+                        self.prev = Some(FadeFrom::Clip(prev_skin, prev_time));
+                        let prev_pose = self.prev_pose.get_or_insert_with(|| prev_model.new_pose());
+                        if !prev_model.pose_fits(prev_pose) {
+                            *prev_pose = prev_model.new_pose();
+                        }
+                        prev_model.sample_local(prev_time, prev_pose);
+                        pose.blend_from(prev_pose, w);
                     }
-                    prev_model.sample_local(prev_time, prev_pose);
-                    pose.blend_from(prev_pose, w);
-                }
-                _ => self.prev = None, // fade done (or old clip gone), just the new clip now
+                    None => self.prev = None,
+                },
             }
+        }
+
+        // a still of the blend space before the aim and look bends, leaving it fades from this
+        if now_space {
+            let still = self.still.get_or_insert_with(|| model.new_pose());
+            if !model.pose_fits(still) {
+                *still = model.new_pose();
+            }
+            still.copy_from(pose);
         }
 
         // aiming while moving, legs keep the move clip and the upper body aims, before this you glided in the aim idle
@@ -168,7 +226,7 @@ impl PlayerAnim {
 }
 
 impl PlayerAnim {
-    // fade the upper layer toward `wants` and mix it onto the upper body of `pose`
+    // fade the upper layer toward 'wants' and mix it onto the upper body of 'pose'
     fn layer_upper(
         &mut self,
         wants: Option<PlayerSkin>,
@@ -212,6 +270,35 @@ impl PlayerAnim {
         }
         upper_model.sample_local(self.upper_time, layer);
         model.layer_upper_body(pose, layer, smoothstep(self.upper_weight));
+    }
+
+    // standing moves, mixes the blend space's clips by how they really move
+    // every moving clip shares one stride so the feet land together, idle keeps its own clock
+    fn sample_space(&mut self, local_vel: Vec2, dt: f32, models: &HashMap<String, AnimatedModel>, pose: &mut Pose) {
+        let mix = weights(&STANDING, local_vel);
+        if let Some(len) = stride_length(&mix, |s| find(models, s).map(|m| m.duration())) {
+            self.stride = (self.stride + dt / len).fract();
+        }
+        if let Some(idle) = find(models, STANDING.idle) {
+            self.time = advance(STANDING.idle, self.time, dt, idle.duration());
+        }
+        let mut total = 0.0;
+        for &(skin, w) in &mix {
+            let Some(m) = find(models, skin) else { continue };
+            let t = if skin == STANDING.idle { self.time } else { self.stride * m.duration() };
+            let first = total == 0.0;
+            total += w;
+            if first {
+                m.sample_local(t, pose);
+                continue;
+            }
+            let scratch = self.mix_pose.get_or_insert_with(|| m.new_pose());
+            if !m.pose_fits(scratch) {
+                *scratch = m.new_pose();
+            }
+            m.sample_local(t, scratch);
+            pose.mix_in(scratch, w / total);
+        }
     }
 }
 
@@ -268,6 +355,25 @@ fn is_one_shot(skin: PlayerSkin) -> bool {
 fn is_prone(skin: PlayerSkin) -> bool {
     use PlayerSkin::*;
     matches!(skin, ProneIdle | ProneForward | ProneBack | ProneTurnLeft | ProneTurnRight)
+}
+
+// standing clips the blend space drives, idle too so starting and stopping blend by speed
+// before this tapping w played the walk at full stride
+fn in_space(skin: PlayerSkin) -> bool {
+    use PlayerSkin::*;
+    matches!(skin, RifleIdle | RifleWalk | WalkBack | WalkLeft | WalkRight | SprintForward | SprintLeft | SprintRight)
+}
+
+// one step's length for this mix, the moving clips' lengths by weight, None when its all idle
+fn stride_length(mix: &[(PlayerSkin, f32)], length_of: impl Fn(PlayerSkin) -> Option<f32>) -> Option<f32> {
+    let (mut len, mut moving) = (0.0, 0.0);
+    for &(skin, w) in mix.iter().filter(|(s, _)| *s != STANDING.idle) {
+        if let Some(l) = length_of(skin) {
+            len += l * w;
+            moving += w;
+        }
+    }
+    (moving > 0.0 && len > 0.0).then(|| len / moving)
 }
 
 // looping clips where the feet move, switching between two of these keeps the stride
@@ -336,6 +442,17 @@ mod tests {
         assert_eq!(clip_end(PlayerSkin::RifleFire, 1.2), FIRE_KICK);
         assert_eq!(clip_end(PlayerSkin::RifleFire, 0.1), 0.1); // a short clip plays whole
         assert_eq!(advance(PlayerSkin::RifleFire, 0.2, 0.2, FIRE_KICK), FIRE_KICK); // stops at the end, no loop
+    }
+
+    #[test]
+    fn stride_length_mixes_the_moving_clips() {
+        use PlayerSkin::*;
+        let len = |s| Some(match s { RifleWalk => 1.0, SprintForward => 0.6, _ => 2.0 });
+        assert_eq!(stride_length(&[(RifleIdle, 1.0)], len), None); // standing still, stride waits
+        let mid = stride_length(&[(RifleWalk, 0.5), (SprintForward, 0.5)], len).unwrap();
+        assert!((mid - 0.8).abs() < 1e-5);
+        let slow = stride_length(&[(RifleIdle, 0.5), (RifleWalk, 0.5)], len).unwrap();
+        assert!((slow - 1.0).abs() < 1e-5); // idle doesnt stretch the step
     }
 
     #[test]
