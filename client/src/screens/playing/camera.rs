@@ -86,7 +86,7 @@ impl PlayingState {
         let ads_fov = weapon.stats().ads_zoom_fov;
         let fov = base_fov + (ads_fov - base_fov) * weapon.ads_progress;
         // slow walk focus, fades out as ads takes over so the two zooms dont stack
-        let fov = fov * (1.0 - self.movement_config.slow_walk_zoom * self.slow_walk_zoom * (1.0 - weapon.ads_progress));
+        let fov = fov * self.slow_walk_fov_factor();
 
         Camera3D {
             position: eye_pos,
@@ -100,5 +100,11 @@ impl PlayingState {
             render_target: None,
             viewport: None,
         }
+    }
+
+    /// How much slow walk narrows the view, 1.0 = not at all. Fades out as ADS takes over so the
+    /// two zooms don't stack. The mouse slows by the same factor, before this the formula was copied there.
+    pub(crate) fn slow_walk_fov_factor(&self) -> f32 {
+        1.0 - self.movement_config.slow_walk_zoom * self.slow_walk_zoom * (1.0 - self.weapons.active().ads_progress)
     }
 }

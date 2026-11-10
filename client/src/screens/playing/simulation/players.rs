@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use crate::types::animated_model::AnimatedModel;
+use crate::types::player::OtherPlayer;
 use crate::types::player_anim::AnimInput;
 use crate::core::GameConfig;
 use crate::types::maze::Maze;
@@ -84,20 +88,30 @@ impl PlayingState {
         let animated_models = &self.animated_models;
         for p in &mut self.other_players {
             // move this body's own clock and work out its own pose, before this every body read the shared clip's clock
-            let pos = p.render_position();
-            let input = AnimInput { skin: p.skin_type, pos, pitch: p.render_pitch, yaw: p.render_yaw, aiming: p.is_ads, crouching: p.is_crouching, fired: std::mem::take(&mut p.fired) };
-            p.anim.tick(&input, delta, animated_models);
+            tick_body(p, delta, animated_models);
             // here we refresh the hitbox positions every frame based on the current animation pose of the player so hit detection is accurate if they crouch, prone, slide, etc.
             refresh_player_hitboxes(animated_models, p);
         }
         for bot in &mut self.practice_bots {
-            let pos = bot.player.render_position();
-            let b = &bot.player;
-            let input = AnimInput { skin: b.skin_type, pos, pitch: b.render_pitch, yaw: b.render_yaw, aiming: b.is_ads, crouching: b.is_crouching, fired: b.fired };
-            bot.player.anim.tick(&input, delta, animated_models);
+            tick_body(&mut bot.player, delta, animated_models);
             refresh_player_hitboxes(animated_models, &mut bot.player);
         }
         self.practice_bots
             .retain(|bot: &crate::types::ai::simulated_player::SimulatedPlayer| !bot.is_dead());
     }
+}
+
+// one body's animation tick, players and bots alike, the shot flag is taken so one shot is one kick
+// before this the input was built in 4 places and the bot copies read fired without clearing it
+pub(super) fn tick_body(p: &mut OtherPlayer, dt: f32, models: &HashMap<String, AnimatedModel>) {
+    let input = AnimInput {
+        skin: p.skin_type,
+        pos: p.render_position(),
+        pitch: p.render_pitch,
+        yaw: p.render_yaw,
+        aiming: p.is_ads,
+        crouching: p.is_crouching,
+        fired: std::mem::take(&mut p.fired),
+    };
+    p.anim.tick(&input, dt, models);
 }
