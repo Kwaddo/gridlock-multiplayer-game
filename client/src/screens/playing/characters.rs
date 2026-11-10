@@ -11,7 +11,7 @@ use super::PlayingState;
 */
 impl PlayingState {
     // the soldier everyone uses until skins are a real thing
-    pub const DEFAULT_CHARACTER: &'static str = "character_ch15";
+    pub const DEFAULT_CHARACTER: &'static str = "character_ch15_humanoid";
 
     // a character finished loading, if its the active one put every clip we already have on it
     pub fn add_character(&mut self, key: String, model: AnimatedModel) {
@@ -41,9 +41,13 @@ impl PlayingState {
         true
     }
 
-    // every character in skin test order, default first then the proportion tests (ahmed's priority)
-    pub const CHARACTER_ORDER: [&'static str; 6] =
-        ["character_ch15", "character_pete", "character_vecna", "character_amy", "character_maw", "character_ty"];
+    // every character in skin test order, default first, _humanoid ones (normal proportions, every bone) then _not ones (the memes)
+    pub const CHARACTER_ORDER: [&'static str; 15] = [
+        "character_ch15_humanoid", "character_pete_humanoid", "character_vecna_humanoid", "character_amy_humanoid",
+        "character_alien_humanoid", "character_paladin_humanoid", "character_racer_humanoid", "character_romero_humanoid",
+        "character_steve_humanoid", "character_zlorp_humanoid",
+        "character_big_vegas_not", "character_ortiz_not", "character_mousey_not", "character_maw_not", "character_ty_not",
+    ];
 
     // the loaded characters in that order, anything else loaded after them
     pub fn character_keys(&self) -> Vec<String> {

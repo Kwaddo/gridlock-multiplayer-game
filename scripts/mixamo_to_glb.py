@@ -3,12 +3,13 @@ mixamo fbx -> glb for the game, run from the repo root inside blender with no wi
 
     blender --background --python scripts/mixamo_to_glb.py
 
-reads   client/assets/models/New/Models/*.fbx      every file here is a character (with skin)
-        client/assets/models/New/Animation/*.fbx   every file here is an animation (bones only)
+reads   mixamo_source/Models/*.fbx      every file here is a character (with skin)
+        mixamo_source/Animation/*.fbx   every file here is an animation (bones only)
+        (git ignored, kept out of client/assets so the fbx never get hosted)
 writes  client/assets/models/characters/<name>.glb  mesh + skin + every texture, shrunk by type
         client/assets/models/animations/<name>.glb  just the skeleton + its animation, tiny
 
-new skin = drop its fbx in New/Models and run again, nothing to list anywhere
+new skin = drop its fbx in mixamo_source/Models and run again, nothing to list anywhere
 files whose glb is already newer than the fbx are skipped, --force redoes everything
 before this every animation was exported by hand with the whole character inside (~9 MB each)
 """
@@ -20,13 +21,14 @@ import sys
 import bpy
 
 ASSETS = os.path.join("client", "assets", "models")
+SOURCE = "mixamo_source"
 
 
 def parse_args():
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     p = argparse.ArgumentParser(description="convert mixamo fbx files to glb for gridlock")
-    p.add_argument("--characters-in", default=os.path.join(ASSETS, "New", "Models"))
-    p.add_argument("--animations-in", default=os.path.join(ASSETS, "New", "Animation"))
+    p.add_argument("--characters-in", default=os.path.join(SOURCE, "Models"))
+    p.add_argument("--animations-in", default=os.path.join(SOURCE, "Animation"))
     p.add_argument("--out", default=ASSETS, help="characters/ and animations/ are made in here")
     p.add_argument("--diffuse-size", type=int, default=1024, help="max size of base colour textures")
     p.add_argument("--normal-size", type=int, default=512, help="max size of normal maps")
