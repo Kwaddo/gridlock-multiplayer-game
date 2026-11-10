@@ -11,6 +11,13 @@ pub(super) const FOOTSTEP_VOLUME_SPRINT: f32 = 0.75;
 pub(super) const FOOTSTEP_VOLUME_CROUCH: f32 = 0.22;
 /// Slide sound volume
 pub(super) const SLIDE_SOUND_VOLUME: f32 = 0.6;
+/// Height (world units) at which wall occlusion between listener and
+/// source is tested: above props, below the top of maze walls.
+pub(super) const SOUND_EAR_HEIGHT: f32 = 0.8;
+/// Volume kept by a sound heard through a maze wall.
+pub(super) const SOUND_OCCLUDED_VOLUME: f32 = 0.45;
+/// Strongest stereo pan for world sounds (1 = fully one-sided).
+pub(super) const SOUND_MAX_PAN: f32 = 0.8;
 
 pub(super) const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 pub(super) const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;

@@ -24,7 +24,10 @@ struct Saved {
     gui_scale: Option<u8>,
     minimap_size: Option<u8>,
     minimap_shape: Option<u8>,
-    mute_audio: Option<bool>,
+    /// Stored as `audio_muted`: the older `mute_audio` key held the old
+    /// default (muted) with no way to change it, so it is ignored.
+    audio_muted: Option<bool>,
+    master_volume: Option<f32>,
     crouch_toggle: Option<bool>,
     slow_walk_toggle: Option<bool>,
     prone_toggle: Option<bool>,
@@ -53,7 +56,8 @@ impl Saved {
             gui_scale: field(value, "gui_scale"),
             minimap_size: field(value, "minimap_size"),
             minimap_shape: field(value, "minimap_shape"),
-            mute_audio: field(value, "mute_audio"),
+            audio_muted: field(value, "audio_muted"),
+            master_volume: field(value, "master_volume"),
             crouch_toggle: field(value, "crouch_toggle"),
             slow_walk_toggle: field(value, "slow_walk_toggle"),
             prone_toggle: field(value, "prone_toggle"),
@@ -132,8 +136,11 @@ impl GameConfig {
         if let Some(v) = saved.minimap_shape {
             config.minimap_shape = v;
         }
-        if let Some(v) = saved.mute_audio {
+        if let Some(v) = saved.audio_muted {
             config.mute_audio = v;
+        }
+        if let Some(v) = finite(saved.master_volume) {
+            config.master_volume = v.clamp(0.0, 1.0);
         }
         if let Some(v) = saved.crouch_toggle {
             config.crouch_toggle = v;
@@ -156,7 +163,8 @@ impl GameConfig {
             gui_scale: Some(self.gui_scale),
             minimap_size: Some(self.minimap_size),
             minimap_shape: Some(self.minimap_shape),
-            mute_audio: Some(self.mute_audio),
+            audio_muted: Some(self.mute_audio),
+            master_volume: Some(self.master_volume),
             crouch_toggle: Some(self.crouch_toggle),
             slow_walk_toggle: Some(self.slow_walk_toggle),
             prone_toggle: Some(self.prone_toggle),

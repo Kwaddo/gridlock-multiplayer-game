@@ -86,6 +86,9 @@ impl PlayingState {
         // headshot = any pellet hit their head, before this only the hit marker knew
         let mut player_hits: Vec<(u32, f32, bool, bool)> = Vec::new();
 
+        // one impact sound per shot, not one per shotgun pellet
+        let mut impact_at: Option<Vec3> = None;
+
         for i in 0..stats.pellet_count as usize {
             // per-pellet nearest-target (reset for each pellet)
             let mut closest: Option<(EntityKind, usize, HitZone, f32)> = None;
@@ -238,6 +241,10 @@ impl PlayingState {
                 tracer_thickness: stats.tracer_thickness,
             });
 
+            if surface_hit && impact_at.is_none() {
+                impact_at = Some(tracer_end);
+            }
+
             // spawn bullet hole on surface hit
             if surface_hit {
                 if let (Some(dist), Some(normal)) =
@@ -360,6 +367,11 @@ impl PlayingState {
         }
 
         if total_dmg > 0.0 {
+            self.audio.play_cue(if any_headshot {
+                crate::audio::catalog::HEADSHOT
+            } else {
+                crate::audio::catalog::HIT_MARKER
+            });
             self.hit_marker_timer = 0.35;
             self.hit_marker_headshot = any_headshot;
             self.hit_marker_pellet_mask = pellet_mask;
@@ -382,6 +394,11 @@ impl PlayingState {
         if weapon.id == crate::weapons::stats::WeaponId::Knife && total_dmg <= 0.0 {
             self.knife_attack_lock_timer += KNIFE_MISS_PENALTY_SECS;
             self.knife_miss_slow_timer = KNIFE_MISS_MOVE_SLOW_DURATION;
+        }
+
+        if let Some(at) = impact_at {
+            let impact = crate::audio::catalog::WALL_IMPACT;
+            self.play_spatial_sound(impact.key, at, Vec3::ZERO, impact.volume, None);
         }
     }
 }

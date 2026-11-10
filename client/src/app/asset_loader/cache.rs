@@ -37,7 +37,7 @@ pub(super) fn is_asset_cached(
             || playing_state.characters.contains_key(key) // a character on its own
             || playing_state.clips.contains_key(key) // a bones only animation, even before a character is in to wear it
     } else if is_sound {
-        playing_state.audio.has(key)
+        playing_state.audio.has_file(key)
     } else {
         playing_state.assets.contains_key(key)
     }

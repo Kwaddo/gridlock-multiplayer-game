@@ -1,5 +1,6 @@
 use crate::types::player_anim::AnimInput;
 use crate::core::GameConfig;
+use crate::types::maze::Maze;
 use crate::weapons::combat::CombatEntity;
 
 use macroquad::prelude::*;
@@ -12,9 +13,10 @@ use super::hitboxes::refresh_player_hitboxes;
 use super::PlayingState;
 
 impl PlayingState {
-    /// Other players and practice bots: movement, footstep/slide sounds,
-    /// the shared slide clip, and their pose-driven hitboxes.
-    pub(super) fn update_remote_players(&mut self, delta: f32, config: &GameConfig) {
+    /// Other players and practice bots: movement, proximity footstep/slide
+    /// sounds (placed around the listener, muffled through walls), the shared
+    /// slide clip, and their pose-driven hitboxes.
+    pub(super) fn update_remote_players(&mut self, delta: f32, _config: &GameConfig, maze: Option<&Maze>) {
         // update other players and collect footstep sounds to play
         let mut footstep_sounds: Vec<(Vec3, Vec3, f32)> = Vec::new(); // (pos, vel, volume)
         let mut slide_sounds: Vec<(Vec3, Vec3)> = Vec::new();
@@ -64,10 +66,10 @@ impl PlayingState {
 
         // play collected footstep sounds (outside mutable borrow)
         for (pos, vel, volume) in footstep_sounds {
-            self.play_spatial_sound("footstep", pos, vel, volume, config);
+            self.play_spatial_sound("footstep", pos, vel, volume, maze);
         }
         for (pos, vel) in slide_sounds {
-            self.play_spatial_sound("slide", pos, vel, SLIDE_SOUND_VOLUME, config);
+            self.play_spatial_sound("slide", pos, vel, SLIDE_SOUND_VOLUME, maze);
         }
 
         let local_pos = Some(self.position);

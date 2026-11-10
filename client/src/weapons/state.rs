@@ -451,6 +451,14 @@ impl WeaponInventory {
         self.switch_cooldown = crate::weapons::stats::melee::KNIFE_SWITCH_TO_TIME;
     }
 
+    /// Fill every gun's reserve (Gun Game: guns never run out). At least a
+    /// magazine's worth, for a gun whose stats carry no reserve.
+    pub fn refill_reserves(&mut self) {
+        for w in &mut self.weapons {
+            w.reserve = w.stats_data.max_reserve.max(w.stats_data.magazine_size);
+        }
+    }
+
     /// Add reserve ammo to the active gun (used for kill-resupply in TDM).
     pub fn resupply_active(&mut self, amount: u32) {
         if self.knife_active {
