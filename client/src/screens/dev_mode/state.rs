@@ -79,7 +79,7 @@ impl DevModeState {
             ruler_set_end_requested: false,
             next_character_requested: false,
             default_character_requested: false,
-            character_label: String::from("character_ch15_humanoid"),
+            character_label: String::from(crate::screens::playing::PlayingState::DEFAULT_CHARACTER),
             // default offset: mirror the baseline adjustment used when dev mode is locked
             // (X right/left, Y up/down, Z forward/back) – note that Z sign flips
             // depending on movement/ADS state so the slider value is the magnitude.

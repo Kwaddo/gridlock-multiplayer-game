@@ -24,6 +24,9 @@ const UPPER_FADE: f32 = 0.1;
 // only the start of the fire clip plays, the kick, every shot restarts it so auto fire reads as recoil
 const FIRE_KICK: f32 = 0.25;
 
+// the cpu skinning fallback is slow, each body bends its mesh this often at most, same 30 fps cap the shared clips had
+const CPU_SKIN_INTERVAL: f32 = 1.0 / 30.0;
+
 // what a body tells its animation each frame
 pub struct AnimInput {
     pub skin: PlayerSkin,
@@ -36,7 +39,9 @@ pub struct AnimInput {
 }
 
 // other players' slow walk isnt sent (no flag bits left), so: walking forward under this speed...
-const SLOW_WALK_BELOW: f32 = 3.0;
+// between slow walk (1.8) and the slowest normal walk (2.5, out of stamina), before this 3.0 caught tired walkers too
+// and muted their footsteps
+const SLOW_WALK_BELOW: f32 = 2.2;
 // ...for at least this long means slow walk, long enough that speeding up or coasting to a stop doesnt count
 const SLOW_WALK_AFTER: f32 = 0.4;
 
@@ -69,6 +74,7 @@ pub struct PlayerAnim {
     upper_time: f32,
     upper_weight: f32,
     upper_pose: Option<Pose>,
+    cpu_skin_accum: f32, // seconds since this body's mesh was last bent on the cpu
 }
 
 impl PlayerAnim {
@@ -90,6 +96,7 @@ impl PlayerAnim {
             upper_time: 0.0,
             upper_weight: 0.0,
             upper_pose: None,
+            cpu_skin_accum: 0.0,
         }
     }
 
@@ -134,7 +141,12 @@ impl PlayerAnim {
                 None
             };
             // the blend space isnt one clip so it cant keep playing while it fades, it fades from a still instead
-            self.prev = Some(if was_space { FadeFrom::Still } else { FadeFrom::Clip(self.clip, self.time) });
+            // a respawn cuts straight in, before this the body rose out of its corpse pose at the spawn
+            self.prev = if is_death(self.clip) {
+                None
+            } else {
+                Some(if was_space { FadeFrom::Still } else { FadeFrom::Clip(self.clip, self.time) })
+            };
             self.fade = 0.0;
             if now_space {
                 self.stride = phase.unwrap_or(0.0);
@@ -219,7 +231,13 @@ impl PlayerAnim {
 
         model.finish_pose(pose);
         if !model.drawn_on_gpu() {
-            model.skin_pose_on_cpu(pose); // if gpu skinning is off, bend the mesh on the cpu for this pose so we can draw it
+            // if gpu skinning is off, bend the mesh on the cpu for this pose so we can draw it
+            // capped per body, before this every body did it every frame and the fallback tanked fps
+            self.cpu_skin_accum += dt;
+            if self.cpu_skin_accum >= CPU_SKIN_INTERVAL || model.needs_cpu_skin(pose) {
+                self.cpu_skin_accum = 0.0;
+                model.skin_pose_on_cpu(pose);
+            }
         }
         self.pose = Some(owned);
     }
@@ -349,6 +367,11 @@ fn is_one_shot(skin: PlayerSkin) -> bool {
             | PlayerSkin::DeathBackHeadshot
             | PlayerSkin::RifleFire
     )
+}
+
+// the death clips, every one stays down on its last frame
+fn is_death(skin: PlayerSkin) -> bool {
+    is_one_shot(skin) && !matches!(skin, PlayerSkin::Slide | PlayerSkin::RifleFire)
 }
 
 // lying on the floor, no look up/down bend here

@@ -99,6 +99,11 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
                 // before this it rewound the one shared death clip for everyone
             }
         } else {
+            // dead and not on the list: their corpse already played out and was removed, or they died before we got here
+            // nothing to show till they respawn, before this the corpse came back every 2 s and fell again with the default death
+            if !incoming.alive {
+                continue;
+            }
             // new player
             let mut joined = new_player(incoming, &flags, world, playing_state.player_info.get(&incoming.id));
             let anim_state = AnimState::from_movement(
@@ -117,10 +122,6 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
             joined.skin_type = AnimState::skin_from_state(anim_state, None);
             joined.last_move_dir = anim_state.move_dir;
             joined.apply_snapshot(joined.x, joined.y, joined.z, joined.yaw);
-            if !joined.is_alive {
-                joined.skin_type = death_skin(&joined);
-                joined.death_timer = Some(2.0);
-            }
             playing_state.player_index.insert(joined.id, playing_state.other_players.len());
             playing_state.other_players.push(joined);
         }

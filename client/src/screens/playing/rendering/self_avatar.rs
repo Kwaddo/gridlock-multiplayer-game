@@ -75,6 +75,12 @@ impl PlayingState {
                 Some((corpse_pos, corpse_yaw)),
             _ => None,
         };
+        // alive, this body only shows in a mirror, so skip the whole anim tick in worlds without one (the maze)
+        // before this it ran every frame everywhere
+        if corpse.is_none() && self.mirrors.is_empty() {
+            self.shot_fired = false; // or an old shot kicks the first frame a mirror shows up
+            return;
+        }
 
         let (pos, yaw, skin) = match corpse {
             Some((pos, yaw)) => (pos, yaw, self.death_skin()),

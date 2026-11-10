@@ -18,7 +18,7 @@ impl PlayingState {
         let fov_scale = (ads_fov_rad / 2.0).tan() / (base_fov_rad / 2.0).tan();
         let ads_factor = 1.0 + (fov_scale * ads_mult - 1.0) * weapon.ads_progress;
         // slow walk zoom slows the mouse to match, same idea as ads
-        let slow_zoom = 1.0 - self.movement_config.slow_walk_zoom * self.slow_walk_zoom * (1.0 - weapon.ads_progress);
+        let slow_zoom = self.slow_walk_fov_factor();
         let sens = config.raw_sensitivity() * ads_factor * slow_zoom;
 
         input::process_mouse(

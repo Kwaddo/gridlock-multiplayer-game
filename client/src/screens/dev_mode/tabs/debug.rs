@@ -70,7 +70,7 @@ pub(in crate::screens::dev_mode) fn draw_debug_tab(
     if next {
         dev.next_character_requested = true;
     }
-    let (h, back) = draw_action_button("Back to Ch15", x, y, 170.0, mouse, clicked);
+    let (h, back) = draw_action_button("Back to default", x, y, 170.0, mouse, clicked);
     y += h;
     if back {
         dev.default_character_requested = true;

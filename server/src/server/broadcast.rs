@@ -206,7 +206,9 @@ pub(crate) fn player_state(player: &Player, include_events: bool, now: Instant) 
         position: player.position,
         yaw: player.yaw,
         // before this pitch was tracked (bots even set it) but never sent, so nobody saw anyone look up or down
-        pitch: player.pitch,
+        // bots aim with - = up (bot/manager.rs), the wire and clients use + = up, flip theirs
+        // before this bots bent down when aiming up
+        pitch: if player.is_bot { -player.pitch } else { player.pitch },
         state_flags,
         event_flags,
         health: player.health.min(u16::MAX as u32) as u16,

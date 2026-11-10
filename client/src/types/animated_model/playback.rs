@@ -91,6 +91,11 @@ impl AnimatedModel {
         self.pose = pose;
     }
 
+    // no bent copy of THIS mesh yet (new pose or switched character), so it has to be skinned now, not on the next cap tick
+    pub fn needs_cpu_skin(&self, pose: &Pose) -> bool {
+        pose.cpu_meshes.is_none() || pose.cpu_meshes_for != std::rc::Rc::as_ptr(&self.geometry) as usize
+    }
+
     // bend the mesh on the cpu for this pose, only when the gpu cant do it
     // before this it only worked on the clip's own pose and kept the result on the clip
     pub fn skin_pose_on_cpu(&self, pose: &mut Pose) {
