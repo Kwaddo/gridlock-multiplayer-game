@@ -5,7 +5,6 @@ use crate::core::GameConfig;
 use crate::types::maze::Maze;
 use crate::types::world::WorldId;
 use crate::ui::hud::draw_hud;
-use crate::world::{draw_maze, lobby::draw_lobby};
 
 use macroquad::prelude::*;
 
@@ -21,6 +20,15 @@ impl PlayingState {
     ) {
         self.update_head_bob(get_frame_time());
         let camera = self.build_camera(config);
+        // update cached shapes first, so every camera below only reads
+        self.bake_bullet_holes();
+        // your body's colour, your player colour alive, white as a corpse, same as before
+        self.self_body.color = if self.is_dead {
+            WHITE
+        } else {
+            crate::types::player::OtherPlayer::color_for_id(player_id)
+        };
+        let live_mirrors = self.render_mirror_pass(&camera, maze);
         // Team Deathmatch in progress: the score bar takes the top of the screen
         let tdm_bar = self.team_score.filter(|_| {
             self.match_mode == Some(crate::net::protocols::MODE_TEAM_DEATHMATCH)
@@ -30,43 +38,9 @@ impl PlayingState {
         clear_background(Color::from_rgba(16, 20, 28, 255));
         set_camera(&camera);
 
-        match self.current_world {
-            WorldId::Lobby => {
-                draw_lobby(self.assets.get("floor_texture"));
-            }
-            WorldId::Maze => {
-                if let Some(m) = maze {
-                    draw_maze(
-                        Some(m),
-                        self.position,
-                        crate::core::VIEW_DISTANCE,
-                        self.dev_mode.show_hitboxes,
-                        &self.destroyed_lights,
-                    );
-                }
-            }
-        }
-
-        // in-world teleporter removed
-
-        // S&D: render bomb site marker and dropped/planted bomb in 3D
-        if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
-            && self.current_world == WorldId::Maze
-            && self.snd_round > 0
-        {
-            self.draw_snd_world_markers();
-        }
-
-        if self.current_world == WorldId::Lobby {
-            self.draw_target_dummy();
-        }
-
-        self.draw_other_players();
-        self.draw_death_corpse();
-        self.draw_player_hitboxes();
-        self.draw_tracers(camera.position);
-        self.draw_world_muzzle_flashes();
-        self.draw_bullet_holes();
+        // the 3D world, then the mirrors on top of it
+        self.draw_world(maze, camera.position);
+        self.draw_mirrors(&live_mirrors);
         if self.dev_mode.ruler_active {
             if let (Some(mut start), Some(mut end)) = (self.dev_mode.ruler_start, self.dev_mode.ruler_end) {
                 start.y = 0.02;
@@ -298,7 +272,7 @@ impl PlayingState {
             }
         }
 
-        // Kill confirmation effect — brief white vignette flash when you get a kill
+        // Kill confirmation effect â€” brief white vignette flash when you get a kill
         if self.kill_confirm_timer > 0.0 {
             let t = self.kill_confirm_timer / 0.3; // 0..1 normalized
             let alpha = (t * 60.0) as u8; // subtle, max 60 alpha

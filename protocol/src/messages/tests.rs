@@ -16,6 +16,7 @@ fn server_messages_round_trip() {
         id: 7,
         position: (1.0, 2.5, -3.25),
         yaw: -std::f32::consts::FRAC_PI_2,
+        pitch: -(30.0f32).to_radians(), // whole degrees, so it comes back exact
         state_flags: FLAG_ADS | FLAG_IS_BOT,
         event_flags: EVT_LANDED,
         health: 80,
@@ -45,6 +46,8 @@ fn server_messages_round_trip() {
     rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "G".into(), version: Some(PROTOCOL_VERSION) });
     rt_server(ServerMsg::Respawn { position: (1.0, 2.0, 3.0), kind: Some(1) });
     rt_server(ServerMsg::Damage { amount: 12.5, attacker_id: 4, stun: true });
+    rt_server(ServerMsg::KillFeed { killer_id: 3, victim_id: 9, weapon: "AK".into(), headshot: false });
+    rt_server(ServerMsg::KillFeed { killer_id: 3, victim_id: 9, weapon: "AK".into(), headshot: true });
     rt_server(ServerMsg::StartDenied { reason: None });
     rt_server(ServerMsg::StartDenied { reason: Some(1) });
     rt_server(ServerMsg::MatchEnd { winner_id: 3, winner_name: "x".into(), countdown: Some(5) });
@@ -113,9 +116,18 @@ fn client_messages_round_trip() {
     rt_client(ClientMsg::join("alice"));
     rt_client(ClientMsg::Join { username: "bob".into(), version: Some(0) });
     rt_client(ClientMsg::Join { username: "bob".into(), version: Some(u16::MAX) });
-    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: Some(1), event_flags: Some(2) });
-    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: None, event_flags: None });
-    rt_client(ClientMsg::Hit { victim_id: 2, damage: 30.0, weapon: Some("AK".into()), backstab: Some(false) });
+    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: Some(1), event_flags: Some(2), pitch: None });
+    // pitch in whole degrees comes back exact
+    rt_client(ClientMsg::Position {
+        position: (1.0, 2.0, 3.0),
+        yaw: 0.1,
+        state_flags: Some(1),
+        event_flags: Some(2),
+        pitch: Some((45.0f32).to_radians()),
+    });
+    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: None, event_flags: None, pitch: None });
+    rt_client(ClientMsg::Hit { victim_id: 2, damage: 30.0, weapon: Some("AK".into()), backstab: Some(false), headshot: None });
+    rt_client(ClientMsg::Hit { victim_id: 2, damage: 30.0, weapon: Some("AK".into()), backstab: Some(false), headshot: Some(true) });
     rt_client(ClientMsg::StartGame { mode: Some(3), duration: Some(0), autofill: Some((4, 0b11111)), blue_bots: None });
     rt_client(ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: Some((1, 0b00100)), blue_bots: Some(5) });
     rt_client(ClientMsg::StartGame { mode: None, duration: None, autofill: None, blue_bots: None });
@@ -123,6 +135,17 @@ fn client_messages_round_trip() {
     rt_client(ClientMsg::BotSpawn { behavior: 255, level: 2 });
     rt_client(ClientMsg::Chat { text: "hello there".into() });
     rt_client(ClientMsg::EndMatch);
+}
+
+// a kill feed from before the headshot byte still reads, as not a headshot
+#[test]
+fn old_kill_feed_without_headshot_still_decodes() {
+    let new = ServerMsg::KillFeed { killer_id: 1, victim_id: 2, weapon: "AK".into(), headshot: true }.encode();
+    let old = &new[..new.len() - 1]; // drop the trailing headshot byte
+    assert_eq!(
+        ServerMsg::decode(old),
+        Some(ServerMsg::KillFeed { killer_id: 1, victim_id: 2, weapon: "AK".into(), headshot: false })
+    );
 }
 
 #[test]

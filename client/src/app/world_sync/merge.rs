@@ -87,6 +87,7 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
             current.is_prone = flags.prone;
             current.is_sliding = flags.sliding;
             current.apply_snapshot(x, y, z, incoming.yaw);
+            current.pitch = incoming.pitch; // where they look up/down, the body bends toward it
             // name, team, weapon, kills and max health: see apply_player_info
             current.hp = if incoming.alive { incoming.health as f32 } else { 0.0 };
             current.is_alive = incoming.alive;
@@ -94,13 +95,15 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
             if !incoming.alive {
                 current.skin_type = death_skin(current);
                 current.death_timer = Some(2.0);
-                if let Some(model_key) = current.skin_type.model_key() {
-                    if let Some(anim) = playing_state.animated_models.get_mut(model_key) {
-                        anim.play_from_start(false);
-                    }
-                }
+                // no rewind needed, the death clip starts this body's own clock at 0
+                // before this it rewound the one shared death clip for everyone
             }
         } else {
+            // dead and not on the list: their corpse already played out and was removed, or they died before we got here
+            // nothing to show till they respawn, before this the corpse came back every 2 s and fell again with the default death
+            if !incoming.alive {
+                continue;
+            }
             // new player
             let mut joined = new_player(incoming, &flags, world, playing_state.player_info.get(&incoming.id));
             let anim_state = AnimState::from_movement(
@@ -118,13 +121,7 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
             );
             joined.skin_type = AnimState::skin_from_state(anim_state, None);
             joined.last_move_dir = anim_state.move_dir;
-            joined.pending_move_dir = None;
-            joined.pending_move_timer = 0.0;
             joined.apply_snapshot(joined.x, joined.y, joined.z, joined.yaw);
-            if !joined.is_alive {
-                joined.skin_type = death_skin(&joined);
-                joined.death_timer = Some(2.0);
-            }
             playing_state.player_index.insert(joined.id, playing_state.other_players.len());
             playing_state.other_players.push(joined);
         }
@@ -143,14 +140,16 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
     }
 }
 
+// server marked them dead with no kill message, so no killer or headshot, the table picks its default
 fn death_skin(p: &OtherPlayer) -> PlayerSkin {
-    if p.is_prone {
-        PlayerSkin::ProneDeath
-    } else if p.is_crouching {
-        PlayerSkin::CrouchDeath
-    } else {
-        PlayerSkin::StandDeath
-    }
+    client::types::anim_chooser::choose_death(
+        client::types::anim_chooser::stance(p.is_prone, p.is_crouching),
+        p.render_position(),
+        p.render_yaw,
+        None,
+        false,
+        p.id,
+    )
 }
 
 /// A state entry's flag bytes, unpacked.
@@ -190,6 +189,8 @@ fn new_player(e: &PlayerState, flags: &Flags, world: WorldId, info: Option<&Play
     let mut p = OtherPlayer::new(e.id, String::new(), world);
     (p.x, p.y, p.z) = e.position;
     p.yaw = e.yaw;
+    p.pitch = e.pitch;
+    p.render_pitch = e.pitch;
     p.is_sprinting = flags.sprinting;
     p.is_crouching = flags.crouching;
     p.is_prone = flags.prone;

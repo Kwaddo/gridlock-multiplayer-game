@@ -62,6 +62,8 @@ impl PlayingState {
 
         let bob_offset = if self.movement_state.is_sprinting && self.movement_state.is_grounded {
             self.bob_timer.sin() * 0.05
+        } else if self.movement_state.is_slow_walking {
+            self.bob_timer.sin() * 0.015 // gentle stalking sway
         } else {
             0.0
         };
@@ -83,6 +85,8 @@ impl PlayingState {
         let base_fov = config.raw_fov();
         let ads_fov = weapon.stats().ads_zoom_fov;
         let fov = base_fov + (ads_fov - base_fov) * weapon.ads_progress;
+        // slow walk focus, fades out as ads takes over so the two zooms dont stack
+        let fov = fov * self.slow_walk_fov_factor();
 
         Camera3D {
             position: eye_pos,
@@ -96,5 +100,11 @@ impl PlayingState {
             render_target: None,
             viewport: None,
         }
+    }
+
+    /// How much slow walk narrows the view, 1.0 = not at all. Fades out as ADS takes over so the
+    /// two zooms don't stack. The mouse slows by the same factor, before this the formula was copied there.
+    pub(crate) fn slow_walk_fov_factor(&self) -> f32 {
+        1.0 - self.movement_config.slow_walk_zoom * self.slow_walk_zoom * (1.0 - self.weapons.active().ads_progress)
     }
 }

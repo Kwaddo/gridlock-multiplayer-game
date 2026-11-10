@@ -1,4 +1,4 @@
-use crate::types::animated_model::{AnimatedModel, JointRole};
+use crate::types::animated_model::{AnimatedModel, JointRole, Pose};
 use crate::types::player::OtherPlayer;
 use crate::weapons::combat::{default_player_hitboxes, HitZone, Hitbox};
 
@@ -36,7 +36,7 @@ pub(super) fn refresh_player_hitboxes(
     let scale = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
     let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
     if let Some(hitboxes) =
-        build_standing_hitboxes_from_joints(anim, player.render_yaw, scale, y_offset)
+        build_standing_hitboxes_from_joints(anim, player.anim.pose(), player.render_yaw, scale, y_offset)
     {
         // reuse the vec's allocation rather than building a new one every frame
         player.hitboxes.clear();
@@ -48,12 +48,17 @@ pub(super) fn refresh_player_hitboxes(
 
 fn build_standing_hitboxes_from_joints(
     anim: &AnimatedModel,
+    pose: Option<&Pose>,
     yaw: f32,
     scale: f32,
     y_offset: f32,
 ) -> Option<[Hitbox; 10]> {
     // joint indices are matched by name once at load (see `JointRole::patterns`)
-    let joint = |role: JointRole| anim.joint_role_position(role);
+    // read this body's own pose, before this every body read the shared clip's pose so hitboxes were clones too
+    let joint = |role: JointRole| match pose {
+        Some(pose) => anim.joint_role_position_in(pose, role),
+        None => anim.joint_role_position(role), // no pose yet (first frame), the clip's own like before
+    };
     /*
         Here we are using the same model scaling as the render so visual hitbox indicators line up with the actual hitboxes, and we also apply the same scaling to
         the y_offset which is used to adjust the hitbox positions up or down based on the players height (crouching, standing, etc)

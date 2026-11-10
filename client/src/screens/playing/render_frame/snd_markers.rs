@@ -4,7 +4,7 @@ use super::PlayingState;
 
 impl PlayingState {
     /// S&D: the bomb site marker and the dropped/planted bomb in 3D.
-    pub(super) fn draw_snd_world_markers(&self) {
+    pub(crate) fn draw_snd_world_markers(&self) {
         let cam_pos = self.position;
         let (site_x, site_y, site_z) = self.snd_bomb_site;
         let site_dist =

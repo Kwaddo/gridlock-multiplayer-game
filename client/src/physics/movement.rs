@@ -18,6 +18,8 @@ pub struct MovementState {
     pub is_sliding: bool,
     pub slide_timer: f32,
     pub slide_cooldown_timer: f32,
+    // counts down after landing, no jumping until it hits 0 (stops the land + jump again stutter)
+    pub jump_cooldown_timer: f32,
     pub slide_direction: Vec3,
     pub slide_speed_current: f32,
     pub stamina: f32,
@@ -38,10 +40,11 @@ impl MovementState {
             is_sliding: false,
             slide_timer: 0.0,
             slide_cooldown_timer: 0.0,
+            jump_cooldown_timer: 0.0,
             slide_direction: Vec3::ZERO,
             slide_speed_current: 0.0,
             stamina: 100.0,
-            height: 1.6, // default eye height
+            height: 1.2, // default eye height (matches standing_height)
             is_stamina_depleted: false,
         }
     }
@@ -77,6 +80,11 @@ pub struct MovementConfig {
     pub friction: f32,
     pub gravity: f32,
     pub jump_strength: f32,
+    // how long after landing before you can jump again, like fortnite, before this you could jump the same frame you landed
+    pub jump_land_cooldown: f32,
+    // slow walk stealth feel: how much the view narrows (0.15 = 15%) and how long it takes to ease in/out
+    pub slow_walk_zoom: f32,
+    pub slow_walk_zoom_time: f32,
     pub stamina_drain: f32,   // per second
     pub stamina_recover: f32, // per second
     pub stamina_depleted_threshold: f32,
@@ -90,7 +98,7 @@ impl MovementConfig {
             walk_speed: 5.0,
             sprint_speed: 8.0,
             crouch_speed: 2.5,
-            slow_walk_speed: 3.5,
+            slow_walk_speed: 1.8, // much slower, was 3.5 (ahmed: slow walk = careful + dead accurate)
             prone_speed: 1.5,
             prone_transition_time: 0.8,
             prone_height: 0.3,
@@ -99,12 +107,15 @@ impl MovementConfig {
             slide_stamina_cost: 30.0,
             slide_cooldown: 2.0,
             slide_friction: 12.0,
-            slide_height: 0.4,
+            slide_height: 0.8,
             slide_ads_time_mult: 3.0,
             acceleration: 10.0,
             friction: 8.0,
             gravity: 20.0,
             jump_strength: 6.0,
+            jump_land_cooldown: 0.25, // claude's pick, tune by feel
+            slow_walk_zoom: 0.15,
+            slow_walk_zoom_time: 0.25,
             stamina_drain: 35.0,
             stamina_recover: 15.0,
             stamina_depleted_threshold: 10.0,

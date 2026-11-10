@@ -170,7 +170,7 @@ fn team_score_counts_kills_as_they_happen_and_keeps_them() {
     server.players.get_mut(&b).unwrap().post_teleport_freeze_until = None;
     server.drain_outbox();
 
-    let kill = ClientMsg::Hit { victim_id: 2, damage: 500.0, weapon: Some("AK-47".into()), backstab: None };
+    let kill = ClientMsg::Hit { victim_id: 2, damage: 500.0, weapon: Some("AK-47".into()), backstab: None, headshot: None };
     server.handle_packet(a, &kill.encode());
     server.tick();
     let expected = if alice == crate::player::Team::Red {

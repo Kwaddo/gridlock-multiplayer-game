@@ -1,3 +1,5 @@
+mod aim_bend;
+mod clip;
 mod clip_select;
 mod constants;
 mod glb;
@@ -7,6 +9,9 @@ mod loader;
 mod nodes;
 mod parts;
 mod playback;
+mod upper_body;
+mod pose;
+
 #[cfg(target_arch = "wasm32")]
 pub mod web_decoded;
 
@@ -15,6 +20,8 @@ use macroquad::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
+pub use pose::Pose;
+
 
 use gpu::GpuGeometry;
 use joints::JointRoleTable;
@@ -23,6 +30,7 @@ pub use glb::{import_glb, GlbImages};
 #[cfg(not(target_arch = "wasm32"))]
 pub use glb::predecode_glb_images;
 pub use glb::release_predecoded;
+pub use clip::{load_clip, Clip};
 pub use joints::JointRole;
 pub use loader::{
     load_gltf_animated_model, load_gltf_animated_model_with_clip_index,
@@ -89,26 +97,23 @@ pub struct AnimatedModel {
     /// Bind-pose mesh, skin weights and textures, shared by every clip of the
     /// same character (the player's 25 animation files hold one mesh).
     geometry: Rc<SharedGeometry>,
-    /// This clip's CPU-skinned meshes, made the first time it is skinned on
-    /// the CPU; clips drawn by the GPU, or not drawn at all, never need them.
-    skinned: Option<Vec<Mesh>>,
     /// Whether the last draw skinned on the GPU (see `draw_gpu`); then only
     /// the joint matrices are updated here, every frame.
     gpu_drawn: Cell<bool>,
     node_rest: Vec<LocalTransform>,
-    node_pose: Vec<LocalTransform>,
     node_parents: Vec<Option<usize>>,
-    node_global: Vec<Mat4>,
-    node_global_valid: Vec<bool>,
     node_tracks: Vec<NodeAnimationTrack>,
     joint_nodes: Vec<usize>,
     joint_names: Vec<String>,
     /// Joint index of each `JointRole`, matched by name once at load.
     joint_roles: JointRoleTable,
-    // here we have joint positions, we cache them every frame so we can detect hitboxes precisely everytime the animation moves
-    joint_positions: Vec<Vec3>,
+    // spine + neck bones that tilt to look up/down, with their share of the tilt (see aim_bend)
+    spine_chain: Vec<(usize, f32)>,
+    // per node how much an upper body layer takes over (see upper_body.rs)
+    upper_mask: Vec<f32>,
     inverse_bind: Vec<Mat4>,
-    skin_mats: Vec<Mat4>,
+    // this clip's own pose at its own clock (the hands still use this)
+    pose: Pose,
     duration: f32,
     time: f32,
     skin_accum: f32,

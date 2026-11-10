@@ -17,7 +17,9 @@ impl PlayingState {
         let ads_fov_rad = stats.ads_zoom_fov.to_radians();
         let fov_scale = (ads_fov_rad / 2.0).tan() / (base_fov_rad / 2.0).tan();
         let ads_factor = 1.0 + (fov_scale * ads_mult - 1.0) * weapon.ads_progress;
-        let sens = config.raw_sensitivity() * ads_factor;
+        // slow walk zoom slows the mouse to match, same idea as ads
+        let slow_zoom = self.slow_walk_fov_factor();
+        let sens = config.raw_sensitivity() * ads_factor * slow_zoom;
 
         input::process_mouse(
             &mut self.last_mouse_pos,
@@ -27,6 +29,13 @@ impl PlayingState {
         );
 
         self.move_dir = input::process_movement_keys(self.yaw, config);
+        // prone: no a/d, only crawl forward or back (there are no sideways prone clips anymore)
+        // w+a still crawls forward at full speed instead of drifting, before this you could strafe while lying down
+        if self.movement_state.is_prone {
+            let forward = vec3(self.yaw.cos(), 0.0, self.yaw.sin());
+            let along = self.move_dir.dot(forward);
+            self.move_dir = if along.abs() > 1e-4 { forward * along.signum() } else { Vec3::ZERO };
+        }
         if self.dev_mode.ruler_set_start_requested {
             self.dev_mode.ruler_start = Some(self.position);
             self.dev_mode.ruler_set_start_requested = false;
@@ -44,6 +53,11 @@ impl PlayingState {
             self.movement_state.is_prone,
             self.movement_state.is_sliding,
         );
+        // slow walk: forward only, s a and d do nothing (ahmed's rule), like prone but no backing up either
+        if self.movement_state.is_slow_walking {
+            let forward = vec3(self.yaw.cos(), 0.0, self.yaw.sin());
+            self.move_dir = if self.move_dir.dot(forward) > 1e-4 { forward } else { Vec3::ZERO };
+        }
         let crouch_just_pressed = config.bind_crouch.is_pressed();
         if crouch_just_pressed
             && self.movement_state.is_sprinting
@@ -76,7 +90,8 @@ impl PlayingState {
                 input::process_crouch(config, self.movement_state.is_crouching);
         }
         self.jump_requested =
-            input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons);
+            input::process_jump(config, self.movement_state.is_grounded, &mut self.weapons)
+                && self.movement_state.jump_cooldown_timer <= 0.0; // just landed, wait a moment
 
         if self.movement_state.is_sliding
             && (self.jump_requested || self.movement_state.slide_timer <= 0.0)

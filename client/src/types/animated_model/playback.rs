@@ -1,17 +1,22 @@
 use macroquad::models::Mesh;
 use macroquad::prelude::*;
-use std::rc::Rc;
 
 use super::constants::SKIN_INTERVAL;
-use super::{AnimatedModel, KeyframesQuat, KeyframesVec3};
+use super::{AnimatedModel, KeyframesQuat, KeyframesVec3, Pose};
 
 impl AnimatedModel {
     pub fn mesh(&self) -> &Mesh {
         self.meshes().next().expect("an animated model has at least one part")
     }
 
+    // meshes to draw for the clip's own pose, same as before
     pub fn meshes(&self) -> impl Iterator<Item = &Mesh> {
-        let skinned = self.skinned.as_deref();
+        self.pose_meshes(&self.pose)
+    }
+
+    // meshes to draw for any pose, its cpu bent copy if it has one, otherwise the plain unbent mesh
+    pub fn pose_meshes<'a>(&'a self, pose: &'a Pose) -> impl Iterator<Item = &'a Mesh> {
+        let skinned = pose.cpu_meshes.as_deref();
         let bind = self.geometry.parts.iter().map(|p| &p.mesh);
         skinned.into_iter().flatten().chain(bind.filter(move |_| skinned.is_none()))
     }
@@ -72,36 +77,38 @@ impl AnimatedModel {
 
     /// Pose the skeleton at the current time: joint matrices for skinning and
     /// joint positions for hitboxes. Cheap (one matrix per joint).
+    // the clip's own pose at its own clock, now just "sample me at my time"
     pub(super) fn pose(&mut self) {
-        for (i, pose) in self.node_pose.iter_mut().enumerate() {
-            let mut p = self.node_rest[i];
-            if let Some(track) = &self.node_tracks[i].translation {
-                p.translation = sample_vec3(track, self.time);
-            }
-            if let Some(track) = &self.node_tracks[i].rotation {
-                p.rotation = sample_quat(track, self.time);
-            }
-            if let Some(track) = &self.node_tracks[i].scale {
-                p.scale = sample_vec3(track, self.time);
-            }
-            *pose = p;
-            self.node_global_valid[i] = false;
-        }
-
-        for i in 0..self.joint_nodes.len() {
-            let node_idx = self.joint_nodes[i];
-            let global = self.global_for_node(node_idx);
-            // here we are caching each individual joint position for every joint in the skeleton so we can do hit detection against them for the player
-            self.joint_positions[i] = global.transform_point3(Vec3::ZERO);
-            self.skin_mats[i] = global * self.inverse_bind[i];
-        }
+        let mut pose = std::mem::take(&mut self.pose); // lend it out so we can read self while filling it
+        self.sample_pose(self.time, &mut pose);
+        self.pose = pose; // hand it back
     }
 
-    /// Skin the mesh on the CPU with the current pose.
+    // the clip's own pose, lend it out and bend the mesh for it, same as before
     fn skin_on_cpu(&mut self) {
-        let geometry = Rc::clone(&self.geometry);
-        let skinned = self
-            .skinned
+        let mut pose = std::mem::take(&mut self.pose);
+        self.skin_pose_on_cpu(&mut pose);
+        self.pose = pose;
+    }
+
+    // no bent copy of THIS mesh yet (new pose or switched character), so it has to be skinned now, not on the next cap tick
+    pub fn needs_cpu_skin(&self, pose: &Pose) -> bool {
+        pose.cpu_meshes.is_none() || pose.cpu_meshes_for != std::rc::Rc::as_ptr(&self.geometry) as usize
+    }
+
+    // bend the mesh on the cpu for this pose, only when the gpu cant do it
+    // before this it only worked on the clip's own pose and kept the result on the clip
+    pub fn skin_pose_on_cpu(&self, pose: &mut Pose) {
+        let geometry = &self.geometry;
+        // the copy has to be of THIS mesh, switching character keeps the pose but the mesh changes
+        // before this a pose kept its first character's copy, switching to amy bent vecna's mesh and crashed
+        let mesh_id = std::rc::Rc::as_ptr(geometry) as usize;
+        if pose.cpu_meshes_for != mesh_id {
+            pose.cpu_meshes = None;
+            pose.cpu_meshes_for = mesh_id;
+        }
+        let skinned = pose
+            .cpu_meshes
             .get_or_insert_with(|| geometry.parts.iter().map(|p| clone_mesh(&p.mesh)).collect());
 
         for (part, mesh) in geometry.parts.iter().zip(skinned.iter_mut()) {
@@ -118,10 +125,10 @@ impl AnimatedModel {
                         continue;
                     }
                     let joint_idx = vtx.joints[j] as usize;
-                    if joint_idx >= self.skin_mats.len() {
+                    if joint_idx >= pose.skin_mats.len() {
                         continue;
                     }
-                    let m = self.skin_mats[joint_idx];
+                    let m = pose.skin_mats[joint_idx];
                     p += (m * bind_p).truncate() * w;
                     n += (m * bind_n).truncate() * w;
                     total_w += w;
@@ -147,12 +154,12 @@ impl AnimatedModel {
             let part = &geometry.parts[part_idx];
             for (i, vtx) in part.rigid_vertices.iter().enumerate() {
                 let out_idx = part.skinned_vertex_count + i;
-                let global = self.global_for_node(vtx.node_idx);
+                let global = pose.global_of(vtx.node_idx); // already worked out in sample_pose
                 let out_p = global.transform_point3(vtx.bind_position);
                 let out_n = (global * vtx.bind_normal.extend(0.0))
                     .truncate()
                     .normalize_or_zero();
-                let Some(out) = self.skinned.as_mut().and_then(|m| m[part_idx].vertices.get_mut(out_idx)) else {
+                let Some(out) = pose.cpu_meshes.as_mut().and_then(|m| m[part_idx].vertices.get_mut(out_idx)) else {
                     continue;
                 };
                 out.position = out_p;
@@ -161,24 +168,10 @@ impl AnimatedModel {
         }
     }
 
-    fn global_for_node(&mut self, node_idx: usize) -> Mat4 {
-        if self.node_global_valid[node_idx] {
-            return self.node_global[node_idx];
-        }
-        let local = self.node_pose[node_idx].to_mat4();
-        let global = if let Some(parent) = self.node_parents[node_idx] {
-            self.global_for_node(parent) * local
-        } else {
-            local
-        };
-        self.node_global[node_idx] = global;
-        self.node_global_valid[node_idx] = true;
-        global
-    }
     // lets us find a joint position by matching tokens within the joint name (head, hips, etc) so we can create hitboxes for the player
     pub fn joint_position_with_tokens(&self, tokens: &[&str]) -> Option<Vec3> {
         super::joints::find_joint(&self.joint_names, tokens)
-            .and_then(|i| self.joint_positions.get(i).copied())
+            .and_then(|i| self.pose.joint_positions.get(i).copied())
     }
 
     pub fn duration(&self) -> f32 {
@@ -249,7 +242,7 @@ fn sample_interval(times: &[f32], t: f32) -> (usize, usize, f32) {
     (lo, hi, alpha.clamp(0.0, 1.0))
 }
 
-fn sample_vec3(track: &KeyframesVec3, t: f32) -> Vec3 {
+pub(super) fn sample_vec3(track: &KeyframesVec3, t: f32) -> Vec3 {
     let (i0, i1, a) = sample_interval(&track.times, t);
     if i0 == i1 {
         return track.values[i0];
@@ -257,7 +250,7 @@ fn sample_vec3(track: &KeyframesVec3, t: f32) -> Vec3 {
     track.values[i0].lerp(track.values[i1], a)
 }
 
-fn sample_quat(track: &KeyframesQuat, t: f32) -> Quat {
+pub(super)fn sample_quat(track: &KeyframesQuat, t: f32) -> Quat {
     let (i0, i1, a) = sample_interval(&track.times, t);
     if i0 == i1 {
         return track.values[i0];

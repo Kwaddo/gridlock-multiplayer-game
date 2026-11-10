@@ -9,6 +9,7 @@ fn state(id: u32, position: Vec3, yaw: f32) -> PlayerState {
         id,
         position,
         yaw,
+        pitch: 0.0,
         state_flags: FLAG_SPRINTING | FLAG_SILENT,
         event_flags: EVT_JUMP_START,
         health: 125,
@@ -28,6 +29,21 @@ fn decode_state(m: &ServerMsg) -> Vec<PlayerState> {
 fn yaw_error(a: f32, b: f32) -> f32 {
     let d = (a - b).rem_euclid(std::f32::consts::TAU);
     d.min(std::f32::consts::TAU - d)
+}
+
+#[test]
+fn pitch_comes_back_within_half_a_degree_and_clamps() {
+    // whole degrees on the wire, so anything in range comes back within half a degree
+    let mut p = -89.0f32;
+    while p <= 89.0 {
+        let back = dequantize_pitch(quantize_pitch(p.to_radians())).to_degrees();
+        assert!((back - p).abs() <= 0.5 + 1e-3, "{p} -> {back}");
+        p += 0.37;
+    }
+    // past straight up or down clamps to 89, nan is level
+    assert_eq!(dequantize_pitch(quantize_pitch(3.0)).to_degrees().round(), 89.0);
+    assert_eq!(dequantize_pitch(quantize_pitch(-3.0)).to_degrees().round(), -89.0);
+    assert_eq!(quantize_pitch(f32::NAN), 0);
 }
 
 #[test]
@@ -95,7 +111,7 @@ fn yaw_comes_back_within_a_hundredth_of_a_degree() {
 }
 
 #[test]
-fn state_entries_are_18_bytes() {
+fn state_entries_are_19_bytes() {
     let one = ServerMsg::State { world: 1, players: vec![state(1, (1.0, 0.0, 1.0), 0.3)] };
     let sixteen = ServerMsg::State {
         world: 1,
@@ -104,7 +120,7 @@ fn state_entries_are_18_bytes() {
     let header = 1 + 1 + 2;
     assert_eq!(one.encode().len(), header + PlayerState::WIRE_BYTES);
     assert_eq!(sixteen.encode().len(), header + 16 * PlayerState::WIRE_BYTES);
-    assert_eq!(PlayerState::WIRE_BYTES, 18);
+    assert_eq!(PlayerState::WIRE_BYTES, 19); // 18 before pitch was added
     // health saturates in u16 on the server side; flags and freeze pass through
     let got = decode_state(&sixteen);
     assert_eq!(got.len(), 16);

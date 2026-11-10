@@ -160,8 +160,8 @@ impl GameConfig {
             gui_scale: 0, // Auto
 
             // Player
-            standing_height: 1.0,
-            crouch_height: 0.5,
+            standing_height: 1.2,
+            crouch_height: 0.8,
 
             // Minimap
             minimap_size: 1,  // Medium

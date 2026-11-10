@@ -24,7 +24,7 @@ pub struct NetUpdate {
     pub world_change: Option<(WorldId, Vec3, Option<u8>, Option<u16>)>,
     pub broken_walls: Option<Vec<(u8, u8)>>,
     pub damage_taken: Option<(f32, Option<u32>, bool)>, // (damage amount, attacker_id)
-    pub kill_feed: Option<Vec<(u32, u32, String)>>, // (killer_id, victim_id, weapon)
+    pub kill_feed: Option<Vec<(u32, u32, String, bool)>>, // (killer_id, victim_id, weapon, headshot)
     pub respawn_pos: Option<Vec3>,                // (x, y, z)
     pub respawn_fallback: Option<bool>,           // true if server fell back to teleporter
     pub lobby_console_message: Option<String>,
@@ -40,7 +40,7 @@ pub struct NetUpdate {
     pub self_max_hp: Option<f32>,
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
-    pub bot_shots: Option<Vec<(Vec3, Vec3)>>, // (start, end)
+    pub bot_shots: Option<Vec<(u32, Vec3, Vec3)>>, // (shooter, start, end), before this the shooter was dropped
     pub lobby_leader_id: Option<u32>,         // host player ID (0 = none)
     pub lobby_settings: Option<LobbySettings>, // the host's lobby console choices
     pub match_status: Option<u8>,             // MATCH_STATUS_*
@@ -99,6 +99,7 @@ pub fn send_position(link: &mut dyn Link, position: Vec3, yaw: f32) {
         yaw,
         state_flags: None,
         event_flags: None,
+        pitch: None,
     }
     .encode();
     link.send(&pos_msg);
@@ -270,11 +271,12 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
             ServerMsg::Damage { amount, attacker_id, stun } => {
                 update.damage_taken = Some((amount, Some(attacker_id), stun));
             }
-            ServerMsg::KillFeed { killer_id, victim_id, weapon } => {
+            ServerMsg::KillFeed { killer_id, victim_id, weapon, headshot } => {
+                // headshot carried along for the death chooser, before this the feed had no idea
                 if let Some(ref mut feed) = update.kill_feed {
-                    feed.push((killer_id, victim_id, weapon));
+                    feed.push((killer_id, victim_id, weapon, headshot));
                 } else {
-                    update.kill_feed = Some(vec![(killer_id, victim_id, weapon)]);
+                    update.kill_feed = Some(vec![(killer_id, victim_id, weapon, headshot)]);
                 }
             }
             ServerMsg::Death { killer_id, weapon } => {
@@ -328,7 +330,7 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
             ServerMsg::BotShots(fired) => {
                 let shots = update.bot_shots.get_or_insert_with(Vec::new);
                 shots.extend(fired.iter().map(|s| {
-                    (vec3(s.start.0, s.start.1, s.start.2), vec3(s.end.0, s.end.1, s.end.2))
+                    (s.shooter_id, vec3(s.start.0, s.start.1, s.start.2), vec3(s.end.0, s.end.1, s.end.2))
                 }));
             }
             _ => {}

@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use client::types::anim_chooser::{choose_death, stance};
 
 use client::screens::PlayingState;
 use client::types::world::WorldId;
@@ -32,15 +33,19 @@ pub(super) fn apply_damage(
 /// Their reports play where they were fired, through walls muffled.
 pub(super) fn spawn_bot_shots(
     playing_state: &mut PlayingState,
-    bot_shots: Vec<(Vec3, Vec3)>,
+    bot_shots: Vec<(u32, Vec3, Vec3)>,
     maze: Option<&client::types::maze::Maze>,
 ) {
-    for &(start, _) in &bot_shots {
+    for &(_, start, _) in &bot_shots {
         // the shot message carries no weapon, so bots all sound like rifles
         let volume = client::audio::catalog::SHOT_VOLUME;
         playing_state.play_spatial_sound("ar_shot", start, Vec3::ZERO, volume, maze);
     }
-    for (start, end) in bot_shots {
+    for (shooter, start, end) in bot_shots {
+        // the bot's body kicks too, before this only the tracer and flash showed
+        if let Some(bot) = playing_state.other_players.iter_mut().find(|p| p.id == shooter) {
+            bot.fired = true;
+        }
         playing_state
             .tracers
             .push(client::weapons::effects::BulletTracer {
@@ -65,11 +70,12 @@ pub(super) fn spawn_bot_shots(
 /// Adds kill-feed entries and starts death animations for the victims.
 pub(super) fn apply_kill_feed(
     playing_state: &mut PlayingState,
-    kills: Vec<(u32, u32, String)>,
+    kills: Vec<(u32, u32, String, bool)>,
     player_id: u32,
     username: &str,
 ) {
-    for (killer_id, victim_id, weapon) in kills {
+    // headshot = the killing shot hit the head (from the shooter, via the server), before this the feed never said
+    for (killer_id, victim_id, weapon, headshot) in kills {
         // resolve names now so they persist even after player models are removed
         let killer_name = if killer_id == player_id {
             username.to_string()
@@ -143,27 +149,43 @@ pub(super) fn apply_kill_feed(
             }
         }
 
+        // where the killer stood, for which way the victim falls (you, or their body if we can see it)
+        let killer_pos = if killer_id == player_id {
+            Some(playing_state.position)
+        } else {
+            playing_state.other_players.iter().find(|p| p.id == killer_id).map(|p| p.render_position())
+        };
+        let ms = &playing_state.movement_state;
+        if victim_id == player_id {
+            // your own death, the corpse plays this, before this it only went by stance
+            playing_state.my_death = Some(choose_death(
+                stance(ms.is_prone, ms.is_crouching),
+                playing_state.position,
+                playing_state.yaw,
+                killer_pos,
+                headshot,
+                player_id,
+            ));
+        }
+
         // mark victim as dying so they play a death animation before removal.
         // the server will eventually stop sending state updates for the dead
         // player, but the kill-feed packet arrives earlier and gives us an
         // opportunity to trigger the animation right away.
         if victim_id != player_id {
             if let Some(victim) = playing_state.other_players.iter_mut().find(|p| p.id == victim_id) {
-                // pick death animation based on current stance
-                victim.skin_type = if victim.is_prone {
-                    client::types::player::PlayerSkin::ProneDeath
-                } else if victim.is_crouching {
-                    client::types::player::PlayerSkin::CrouchDeath
-                } else {
-                    client::types::player::PlayerSkin::StandDeath
-                };
+                // which way they fall, from stance + where the killer was + headshot, before this stance only
+                victim.skin_type = choose_death(
+                    stance(victim.is_prone, victim.is_crouching),
+                    victim.render_position(),
+                    victim.render_yaw,
+                    killer_pos,
+                    headshot,
+                    victim_id,
+                );
                 victim.death_timer = Some(2.0);
-                // reset animation playback so it starts from the beginning
-                if let Some(model_key) = victim.skin_type.model_key() {
-                    if let Some(anim) = playing_state.animated_models.get_mut(model_key) {
-                        anim.play_from_start(false);
-                    }
-                }
+                // no rewind needed, switching to the death clip starts this body's own clock at 0
+                // before this it rewound the one shared death clip, restarting everyone else's fall too
             }
         }
     }

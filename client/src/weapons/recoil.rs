@@ -16,6 +16,8 @@ pub struct SpreadContext {
     pub is_sprinting: bool,
     pub is_crouching: bool,
     pub is_airborne: bool,
+    // slow walk = dead accurate, see SLOW_WALK_SPREAD_MULT
+    pub is_slow_walking: bool,
     // future: pub is_mantling: bool,
     // future: pub is_sliding: bool,
 }
@@ -154,6 +156,9 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     }
 }
 
+// how much tighter shots are while slow walking (ahmed: dead accurate), 0.2 = a fifth of the normal spread
+pub const SLOW_WALK_SPREAD_MULT: f32 = 0.2;
+
 // calculate spread angle (radians) for the current frame.
 // this is what the crosshair size and bullet deviation are based on.
 pub fn current_spread(weapon: &WeaponState, ctx: &SpreadContext) -> f32 {
@@ -168,7 +173,11 @@ pub fn current_spread(weapon: &WeaponState, ctx: &SpreadContext) -> f32 {
     // situational multipliers
     let mut mult = 1.0;
 
-    if ctx.is_sprinting {
+    // only while actually moving, before this holding slow walk still was 5x tighter than plain standing
+    if ctx.is_slow_walking && ctx.is_moving {
+        // replaces the moving penalty instead of stacking on it, before this slow walk counted as plain moving
+        mult *= SLOW_WALK_SPREAD_MULT;
+    } else if ctx.is_sprinting {
         mult *= stats.sprint_spread_mult;
     } else if ctx.is_moving {
         mult *= stats.move_spread_mult;
@@ -189,4 +198,26 @@ pub fn current_spread(weapon: &WeaponState, ctx: &SpreadContext) -> f32 {
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::weapons::stats::WeaponId;
+
+    fn ctx(is_moving: bool, is_slow_walking: bool) -> SpreadContext {
+        SpreadContext { is_moving, is_sprinting: false, is_crouching: false, is_airborne: false, is_slow_walking }
+    }
+
+    #[test]
+    fn slow_walk_standing_still_is_plain_standing() {
+        let w = WeaponState::new(WeaponId::M1911);
+        assert_eq!(current_spread(&w, &ctx(false, true)), current_spread(&w, &ctx(false, false)));
+    }
+
+    #[test]
+    fn slow_walk_moving_beats_walking() {
+        let w = WeaponState::new(WeaponId::M1911);
+        assert!(current_spread(&w, &ctx(true, true)) < current_spread(&w, &ctx(true, false)));
+    }
 }

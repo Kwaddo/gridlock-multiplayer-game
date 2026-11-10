@@ -31,10 +31,22 @@ pub enum PlayerSkin {
     CrouchDeath,
     ProneDeath,
     Twerk,
+    // new clips (2026-11-09): crawl back, slow walk, the 3 part jump, deaths by direction and headshot
+    ProneBack,
+    SlowWalkForward,
+    JumpStart,
+    FallLoop,
+    Land,
+    DeathFront,
+    DeathBack,
+    DeathSide,
+    DeathFrontHeadshot,
+    DeathBackHeadshot,
+    RifleFire, // upper body only, layered over whatever the legs do
 }
 
 impl PlayerSkin {
-    pub const ALL: [PlayerSkin; 26] = [
+    pub const ALL: [PlayerSkin; 37] = [
         PlayerSkin::Texture,
         PlayerSkin::RifleIdle,
         PlayerSkin::RifleAimIdle,
@@ -61,6 +73,17 @@ impl PlayerSkin {
         PlayerSkin::CrouchDeath,
         PlayerSkin::ProneDeath,
         PlayerSkin::Twerk,
+        PlayerSkin::ProneBack,
+        PlayerSkin::SlowWalkForward,
+        PlayerSkin::JumpStart,
+        PlayerSkin::FallLoop,
+        PlayerSkin::Land,
+        PlayerSkin::DeathFront,
+        PlayerSkin::DeathBack,
+        PlayerSkin::DeathSide,
+        PlayerSkin::DeathFrontHeadshot,
+        PlayerSkin::DeathBackHeadshot,
+        PlayerSkin::RifleFire,
     ];
 
     pub const fn is_model_based(self) -> bool {
@@ -86,15 +109,29 @@ impl PlayerSkin {
             PlayerSkin::CrouchLeft => Some("anim_crouch_left"),
             PlayerSkin::CrouchRight => Some("anim_crouch_right"),
             PlayerSkin::Jump => Some("anim_jump"),
-            PlayerSkin::Slide => Some("anim_slide"),
+            // no slide clip anymore (slide was cut), sprint stands in, before this it was anim_slide
+            PlayerSkin::Slide => Some("anim_sprint_forward"),
             PlayerSkin::ProneIdle => Some("anim_prone_idle"),
             PlayerSkin::ProneForward => Some("anim_prone_forward"),
-            PlayerSkin::ProneTurnRight => Some("anim_prone_turn_right"),
-            PlayerSkin::ProneTurnLeft => Some("anim_prone_turn_left"),
-            PlayerSkin::StandDeath => Some("anim_stand_death"),
+            // prone turn clips were dropped (a/d is off while prone), old clients still send these
+            PlayerSkin::ProneTurnRight | PlayerSkin::ProneTurnLeft => Some("anim_prone_forward"),
+            // the old single stand death is gone, the front death stands in until death choosers pick by direction
+            PlayerSkin::StandDeath => Some("anim_death_front"),
             PlayerSkin::CrouchDeath => Some("anim_crouch_death"),
             PlayerSkin::ProneDeath => Some("anim_prone_death"),
-            PlayerSkin::Twerk => Some("anim_twerk"),
+            PlayerSkin::Twerk => Some("anim_emote_twerk"),
+            PlayerSkin::ProneBack => Some("anim_prone_back"),
+            PlayerSkin::SlowWalkForward => Some("anim_slow_walk_forward"),
+            PlayerSkin::JumpStart => Some("anim_jump_start"),
+            PlayerSkin::FallLoop => Some("anim_fall_loop"),
+            PlayerSkin::Land => Some("anim_land"),
+            PlayerSkin::DeathFront => Some("anim_death_front"),
+            PlayerSkin::DeathBack => Some("anim_death_back"),
+            // no left death clip, the right one covers both sides (ahmed's call)
+            PlayerSkin::DeathSide => Some("anim_death_right"),
+            PlayerSkin::DeathFrontHeadshot => Some("anim_death_front_headshot"),
+            PlayerSkin::DeathBackHeadshot => Some("anim_death_back_headshot"),
+            PlayerSkin::RifleFire => Some("anim_rifle_fire"),
         }
     }
 
@@ -126,6 +163,17 @@ impl PlayerSkin {
             PlayerSkin::CrouchDeath => "Crouch Death",
             PlayerSkin::ProneDeath => "Prone Death",
             PlayerSkin::Twerk => "Twerk",
+            PlayerSkin::ProneBack => "Prone Back",
+            PlayerSkin::SlowWalkForward => "Slow Walk Forward",
+            PlayerSkin::JumpStart => "Jump Start",
+            PlayerSkin::FallLoop => "Fall Loop",
+            PlayerSkin::Land => "Land",
+            PlayerSkin::DeathFront => "Death Front",
+            PlayerSkin::DeathBack => "Death Back",
+            PlayerSkin::DeathSide => "Death Side",
+            PlayerSkin::DeathFrontHeadshot => "Death Front Headshot",
+            PlayerSkin::DeathBackHeadshot => "Death Back Headshot",
+            PlayerSkin::RifleFire => "Rifle Fire",
         }
     }
 
@@ -170,7 +218,18 @@ impl PlayerSkin {
             // Extras
             PlayerSkin::ProneDeath => PlayerSkin::Slide,
             PlayerSkin::Slide => PlayerSkin::Twerk,
-            PlayerSkin::Twerk => PlayerSkin::RifleIdle,
+            PlayerSkin::Twerk => PlayerSkin::ProneBack,
+            PlayerSkin::ProneBack => PlayerSkin::SlowWalkForward,
+            PlayerSkin::SlowWalkForward => PlayerSkin::JumpStart,
+            PlayerSkin::JumpStart => PlayerSkin::FallLoop,
+            PlayerSkin::FallLoop => PlayerSkin::Land,
+            PlayerSkin::Land => PlayerSkin::DeathFront,
+            PlayerSkin::DeathFront => PlayerSkin::DeathBack,
+            PlayerSkin::DeathBack => PlayerSkin::DeathSide,
+            PlayerSkin::DeathSide => PlayerSkin::DeathFrontHeadshot,
+            PlayerSkin::DeathFrontHeadshot => PlayerSkin::DeathBackHeadshot,
+            PlayerSkin::DeathBackHeadshot => PlayerSkin::RifleFire,
+            PlayerSkin::RifleFire => PlayerSkin::RifleIdle,
         }
     }
 }
@@ -185,6 +244,10 @@ pub struct OtherPlayer {
     pub render_y: f32,
     pub render_z: f32,
     pub render_yaw: f32,
+    // look up/down from the server (+ = up) and the smoothed one the body bends to
+    // before this pitch never reached other players, so their bodies always looked level
+    pub pitch: f32,
+    pub render_pitch: f32,
     has_snapshot: bool,
     pub username: String,
     pub skin: Option<Texture2D>,
@@ -206,15 +269,9 @@ pub struct OtherPlayer {
     pub hitboxes: Vec<Hitbox>,
     pub kills: u32,
     pub sprint_grace: f32,
-    // smoothing / hysteresis for rapid move-direction changes (prevents animation flicker)
+    // which way they last moved, None = standing (footsteps and the idle switch use it)
+    // pending_move_dir/timer, prev_x/z and move_anim_grace used to sit here, nothing ever set them
     pub last_move_dir: MoveDir,
-    pub pending_move_dir: Option<MoveDir>,
-    pub pending_move_timer: f32,
-    // previous snapshot position used for animation delta calculation
-    pub prev_x: f32,
-    pub prev_z: f32,
-    // grace timer that keeps current walk/run animation briefly after player stops
-    pub move_anim_grace: f32,
     // timestamp of the last frame where position actually changed (for idle detection)
     pub last_move_time: f64,
 
@@ -234,6 +291,12 @@ pub struct OtherPlayer {
 
     // death animation: when Some, the player is dying and will be removed when timer hits 0
     pub death_timer: Option<f32>,
+
+    // this body's own animation clock and pose, before this skin_type was all a player had
+    // and the clock lived on the shared clip
+    pub anim: crate::types::player_anim::PlayerAnim,
+    // shot this frame (bot shots now, players with #23), the animation plays the fire kick then clears it
+    pub fired: bool,
 }
 
 impl OtherPlayer {
@@ -243,8 +306,6 @@ impl OtherPlayer {
     /// how long we continue treating a player as "sprinting" after the last sprint flag
     /// (helps hide missing/late network packets and stops walk/sprint flicker)
     pub const SPRINT_GRACE: f32 = 0.18; // seconds
-    /// how long we wait before accepting a new movement direction (reduces walk/side animation flicker)
-    pub const MOVE_DIR_GRACE: f32 = 0.12; // seconds
 
     pub fn color_for_id(id: u32) -> Color {
         let r = (id.wrapping_mul(73).wrapping_add(29) % 256) as u8;
@@ -264,6 +325,8 @@ impl OtherPlayer {
             render_y: 0.0,
             render_z: 0.0,
             render_yaw: 0.0,
+            pitch: 0.0,
+            render_pitch: 0.0,
             has_snapshot: false,
             username,
             skin: None,
@@ -287,11 +350,6 @@ impl OtherPlayer {
             kills: 0,
             sprint_grace: 0.0,
             last_move_dir: MoveDir::None,
-            pending_move_dir: None,
-            pending_move_timer: 0.0,
-            prev_x: 0.0,
-            prev_z: 0.0,
-            move_anim_grace: 0.0,
             last_move_time: 0.0,
             gun_level: 1,
             current_weapon: String::new(),
@@ -299,6 +357,8 @@ impl OtherPlayer {
             is_silent: false,
             footstep_timer: 0.0,
             death_timer: None,
+            anim: crate::types::player_anim::PlayerAnim::new(),
+            fired: false,
         }
     }
 
@@ -345,6 +405,8 @@ impl OtherPlayer {
 
         let yaw_alpha = 1.0 - (-Self::YAW_SMOOTH_RATE * delta).exp();
         self.render_yaw = lerp_angle(self.render_yaw, self.yaw, yaw_alpha);
+        // pitch never wraps (its +-89 degrees), a plain ease is enough
+        self.render_pitch += (self.pitch - self.render_pitch) * yaw_alpha;
     }
 }
 
@@ -389,19 +451,6 @@ impl CombatEntity for OtherPlayer {
         if self.sprint_grace > 0.0 {
             self.sprint_grace = (self.sprint_grace - delta).max(0.0);
         }
-        if self.move_anim_grace > 0.0 {
-            self.move_anim_grace = (self.move_anim_grace - delta).max(0.0);
-        }
-
-        if self.pending_move_timer > 0.0 {
-            self.pending_move_timer = (self.pending_move_timer - delta).max(0.0);
-            if self.pending_move_timer == 0.0 {
-                if let Some(pd) = self.pending_move_dir.take() {
-                    self.last_move_dir = pd;
-                }
-            }
-        }
-
         // Transition to idle if no position change has been seen for a short
         // grace period. This runs per-frame so it's independent of broadcast
         // frequency, and avoids flicker caused by broadcasts where this
@@ -410,8 +459,6 @@ impl CombatEntity for OtherPlayer {
             let now = macroquad::time::get_time();
             if now - self.last_move_time > 0.12 {
                 self.last_move_dir = MoveDir::None;
-                self.pending_move_dir = None;
-                self.pending_move_timer = 0.0;
                 let anim = AnimState::from_movement(
                     0.0,
                     0.0,
@@ -426,9 +473,8 @@ impl CombatEntity for OtherPlayer {
                     false,
                 );
                 self.skin_type = AnimState::skin_from_state(anim, None);
-                // snap render position so model doesn't slide
-                self.render_x = self.x;
-                self.render_z = self.z;
+                // no snap anymore, the smoothing catches up in ~0.1 s while the blend eases into idle
+                // before this it teleported the drawn body onto the real spot, a small visible jump
             }
         }
     }

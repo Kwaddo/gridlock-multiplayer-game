@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod lobby;
+pub mod mirror;
 pub mod render;
 pub mod shooting_range;
 pub mod ui;

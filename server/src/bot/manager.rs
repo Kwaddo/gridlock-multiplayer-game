@@ -375,6 +375,7 @@ impl BotManager {
                     damage,
                     &weapon,
                     false,
+                    false, // bots dont roll hit zones, so never a headshot
                     match_end_pending,
                     match_mode,
                     &mut self.bot_states,

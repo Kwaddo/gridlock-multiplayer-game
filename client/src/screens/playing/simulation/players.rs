@@ -1,14 +1,17 @@
+use std::collections::HashMap;
+
+use crate::types::animated_model::AnimatedModel;
+use crate::types::player::OtherPlayer;
+use crate::types::player_anim::AnimInput;
 use crate::core::GameConfig;
 use crate::types::maze::Maze;
-use crate::types::player::PlayerSkin;
 use crate::weapons::combat::CombatEntity;
 
 use macroquad::prelude::*;
 
 use super::constants::{
     FOOTSTEP_INTERVAL_CROUCH, FOOTSTEP_INTERVAL_SPRINT, FOOTSTEP_INTERVAL_WALK,
-    FOOTSTEP_VOLUME_CROUCH, FOOTSTEP_VOLUME_SPRINT, FOOTSTEP_VOLUME_WALK, SLIDE_CLIP_END_SEC,
-    SLIDE_CLIP_START_SEC, SLIDE_SOUND_VOLUME,
+    FOOTSTEP_VOLUME_CROUCH, FOOTSTEP_VOLUME_SPRINT, FOOTSTEP_VOLUME_WALK, SLIDE_SOUND_VOLUME,
 };
 use super::hitboxes::refresh_player_hitboxes;
 use super::PlayingState;
@@ -22,7 +25,11 @@ impl PlayingState {
         let mut footstep_sounds: Vec<(Vec3, Vec3, f32)> = Vec::new(); // (pos, vel, volume)
         let mut slide_sounds: Vec<(Vec3, Vec3)> = Vec::new();
         for p in &mut self.other_players {
+            // how far the drawn body moved this frame, for the sounds' velocity
+            // before this it read prev_x/prev_z which were never set (always 0), so the velocity was garbage
+            let before = p.render_position();
             p.update(delta);
+            let vel = (p.render_position() - before) * vec3(1.0, 0.0, 1.0) / delta.max(0.001);
 
             // skip dead players
             if p.hp <= 0.0 {
@@ -30,14 +37,14 @@ impl PlayingState {
             }
 
             // determine movement state for footstep sounds
-            let is_moving = p.last_move_dir != crate::types::animation_state::MoveDir::None;
+            // other players slow walking are silent too (inferred from their speed)
+            let is_moving = p.last_move_dir != crate::types::animation_state::MoveDir::None && !p.anim.slow_walking();
             let is_sliding = p.is_sliding;
 
             if is_sliding {
                 // slide sound plays once at start (timer acts as "played" flag)
                 if p.footstep_timer <= 0.0 {
                     let pos = p.render_position();
-                    let vel = vec3(p.render_x - p.prev_x, 0.0, p.render_z - p.prev_z) / delta.max(0.001);
                     slide_sounds.push((pos, vel));
                     p.footstep_timer = 1.0; // prevent re-triggering during same slide
                 }
@@ -52,7 +59,6 @@ impl PlayingState {
                         (FOOTSTEP_INTERVAL_WALK, FOOTSTEP_VOLUME_WALK)
                     };
                     let pos = p.render_position();
-                    let vel = vec3(p.render_x - p.prev_x, 0.0, p.render_z - p.prev_z) / delta.max(0.001);
                     footstep_sounds.push((pos, vel, volume));
                     p.footstep_timer = interval;
                 }
@@ -75,28 +81,37 @@ impl PlayingState {
             bot.simulate_yaw(delta, local_pos);
             bot.update(delta);
         }
-        let any_slide_skin_active =
-            self.other_players.iter().any(|p| p.skin_type == PlayerSkin::Slide) ||
-            self.practice_bots.iter().any(|b| b.player.skin_type == PlayerSkin::Slide);
-        if let Some(slide_anim) = self.animated_models.get_mut("anim_slide") {
-            if any_slide_skin_active && !self.prev_any_slide_anim_active {
-                slide_anim.play_segment(SLIDE_CLIP_START_SEC, SLIDE_CLIP_END_SEC, false);
-            } else if !any_slide_skin_active {
-                // Reset to frame 0 when no one is sliding, so the next slide starts cleanly.
-                slide_anim.stop_at_start();
-            }
-        }
-        self.prev_any_slide_anim_active = any_slide_skin_active;
+        // slides need no special handling anymore, each body starts its own slide at 0 (see PlayerAnim)
+        // before this the one shared slide clip restarted only when nobody was sliding,
+        // so a second slider joined the first one halfway through
 
         let animated_models = &self.animated_models;
         for p in &mut self.other_players {
+            // move this body's own clock and work out its own pose, before this every body read the shared clip's clock
+            tick_body(p, delta, animated_models);
             // here we refresh the hitbox positions every frame based on the current animation pose of the player so hit detection is accurate if they crouch, prone, slide, etc.
             refresh_player_hitboxes(animated_models, p);
         }
         for bot in &mut self.practice_bots {
+            tick_body(&mut bot.player, delta, animated_models);
             refresh_player_hitboxes(animated_models, &mut bot.player);
         }
         self.practice_bots
             .retain(|bot: &crate::types::ai::simulated_player::SimulatedPlayer| !bot.is_dead());
     }
+}
+
+// one body's animation tick, players and bots alike, the shot flag is taken so one shot is one kick
+// before this the input was built in 4 places and the bot copies read fired without clearing it
+pub(super) fn tick_body(p: &mut OtherPlayer, dt: f32, models: &HashMap<String, AnimatedModel>) {
+    let input = AnimInput {
+        skin: p.skin_type,
+        pos: p.render_position(),
+        pitch: p.render_pitch,
+        yaw: p.render_yaw,
+        aiming: p.is_ads,
+        crouching: p.is_crouching,
+        fired: std::mem::take(&mut p.fired),
+    };
+    p.anim.tick(&input, dt, models);
 }

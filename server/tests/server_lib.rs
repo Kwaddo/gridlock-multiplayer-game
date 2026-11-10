@@ -49,12 +49,14 @@ fn every_server_packet_decodes() {
         yaw: 0.0,
         state_flags: Some(0),
         event_flags: Some(0),
+        pitch: Some(0.2),
     });
     step(&mut server, a, ClientMsg::Hit {
         victim_id: 2,
         damage: 10.0,
         weapon: Some("AK".into()),
         backstab: Some(false),
+        headshot: Some(true),
     });
     // non-host start request must be denied
     step(&mut server, b, ClientMsg::StartGame { mode: Some(2), duration: Some(0), autofill: None, blue_bots: None });

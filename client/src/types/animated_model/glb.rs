@@ -192,7 +192,8 @@ fn upload(image: image::RgbaImage) -> Option<Texture2D> {
         return None;
     }
     let texture = Texture2D::from_rgba8(width as u16, height as u16, &image);
-    texture.set_filter(FilterMode::Nearest);
+    // smooth sampling for model textures, before this it was Nearest so close up models looked pixelated
+    texture.set_filter(FilterMode::Linear);
     Some(texture)
 }
 

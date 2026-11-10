@@ -97,13 +97,15 @@ impl PlayingState {
                 s.send(&msg);
             }
 
-            while let Some((victim_id, damage, is_backstab)) = self.pending_hits.pop() {
+            while let Some((victim_id, damage, is_backstab, is_headshot)) = self.pending_hits.pop() {
                 // include active weapon name so server can include it in kill feed
                 let msg = ClientMsg::Hit {
                     victim_id,
                     damage,
                     weapon: Some(self.weapons.active().stats().name.to_string()),
                     backstab: Some(is_backstab),
+                    // so the kill feed can say headshot and everyone picks the headshot death, before this it was never sent
+                    headshot: Some(is_headshot),
                 }
                 .encode();
                 s.send(&msg);
@@ -224,6 +226,8 @@ impl PlayingState {
                     yaw: self.yaw,
                     state_flags: Some(state_flags),
                     event_flags: Some(event_flags),
+                    // where you look up or down, so others see it, before this it was never sent
+                    pitch: Some(self.pitch),
                 }
                 .encode();
                 s.send(&msg);

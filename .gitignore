@@ -30,3 +30,10 @@ registry/node_modules/
 
 # Per-player settings saved by the game
 client/settings.json
+
+
+# Local planning notes (never commit)
+planning/
+
+# Mixamo fbx sources for scripts/mixamo_to_glb.py (big, never hosted or committed)
+mixamo_source/

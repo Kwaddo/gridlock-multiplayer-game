@@ -15,6 +15,7 @@ pub fn handle_position(
     yaw: f32,
     state_flags: Option<u8>,
     event_flags: Option<u8>,
+    pitch: Option<f32>,
 ) {
 
     if let Some(player) = players.get_mut(&src_addr) {
@@ -31,6 +32,9 @@ pub fn handle_position(
 
         player.position = (x, y, z);
         player.yaw = yaw;
+        if let Some(pitch) = pitch {
+            player.pitch = pitch; // older clients dont send it, theirs stays level
+        }
         player.last_activity = Instant::now();
     }
 

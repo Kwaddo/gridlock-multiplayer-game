@@ -113,7 +113,7 @@ pub struct PlayingState {
     pub pending_lobby_settings: Option<crate::net::protocols::LobbySettings>,
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
-    pub pending_hits: Vec<(u32, f32, bool)>, // victim_id, damage, backstab attempt?
+    pub pending_hits: Vec<(u32, f32, bool, bool)>, // victim_id, damage, backstab attempt?, headshot (any pellet hit the head)
 
     pub weapons: WeaponInventory,
 
@@ -197,7 +197,6 @@ pub struct PlayingState {
     pub prev_hands_key: Option<String>, // tracks active hands rig key across swaps
     pub prev_was_reloading: bool,       // edge detection for reload anim trigger
     pub prev_was_sliding: bool,         // edge detection for slide start/end network events
-    pub prev_any_slide_anim_active: bool, // edge detect for shared world slide clip playback
 
     pub knife_swing_requested: bool, // set by input_processing when punch fires
     pub knife_attack_locked: bool, // true during punch animation
@@ -261,6 +260,26 @@ pub struct PlayingState {
     pub team_score: Option<crate::net::TeamScore>,
     /// Players in the running match (the rest are in the lobby).
     pub match_player_ids: HashSet<u32>,
+    /// Every mirror in the current world. Draw, collision and bullets loop over this.
+    pub mirrors: Vec<crate::world::mirror::Mirror>,
+    /// Off-screen textures the live reflections are rendered into, one per live mirror.
+    pub mirror_targets: Vec<RenderTarget>,
+    // the bodies players can wear (the character_ keys), mesh + skeleton, no animation of their own
+    pub characters: HashMap<String, AnimatedModel>,
+    // every animation on its own (the anim_ keys from the animations folder), put on the active character
+    // before this every animation file carried its own copy of the character
+    pub clips: HashMap<String, crate::types::animated_model::Clip>,
+    // which character the clips are on right now, the dev menu can switch it to test skins
+    pub active_character: String,
+    // you in third person, one body that lasts, the mirror draws it alive, the death cam draws it as your corpse
+    // before this both were throwaway bodies rebuilt every frame
+    pub self_body: crate::types::player::OtherPlayer,
+    // your death picked from the kill feed (direction + headshot), cleared on respawn
+    pub my_death: Option<crate::types::player::PlayerSkin>,
+    // you shot this frame, your mirror self kicks, cleared once used
+    pub shot_fired: bool,
+    // 0..1, eases toward 1 while slow walking, the camera narrows by it
+    pub slow_walk_zoom: f32,
 }
 
 pub struct KillFeedEntry {
@@ -374,7 +393,6 @@ impl PlayingState {
             prev_hands_key: None,
             prev_was_reloading: false,
             prev_was_sliding: false,
-            prev_any_slide_anim_active: false,
             knife_swing_requested: false,
             knife_attack_locked: false,
             knife_attack_lock_timer: 0.0,
@@ -430,6 +448,15 @@ impl PlayingState {
             match_status: crate::net::protocols::MATCH_STATUS_NONE,
             team_score: None,
             match_player_ids: HashSet::new(),
+            mirrors: crate::world::mirror::mirrors_for_world(WorldId::Lobby),
+            mirror_targets: Vec::new(),
+            characters: HashMap::new(),
+            clips: HashMap::new(),
+            active_character: Self::DEFAULT_CHARACTER.to_string(),
+            self_body: crate::types::player::OtherPlayer::new(u32::MAX, String::new(), WorldId::Lobby),
+            my_death: None,
+            shot_fired: false,
+            slow_walk_zoom: 0.0,
         }
     }
 }

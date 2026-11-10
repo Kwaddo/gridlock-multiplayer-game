@@ -3,9 +3,11 @@ use crate::world::lobby::{LANDMARK_CUBES, PARKOUR_CUBES};
 use crate::world::shooting_range::SHOOTING_RANGE_COLLIDERS;
 use macroquad::prelude::*;
 
+use crate::world::mirror::Mirror;
+
 pub const PLAYER_RADIUS: f32 = 0.25;
 
-/// Iterator over all collidable cubes (landmarks + parkour)
+/// Iterator over all collidable cubes (landmarks + parkour + range)
 pub fn all_cubes() -> impl Iterator<Item = &'static (Vec3, Vec3)> {
     LANDMARK_CUBES
         .iter()
@@ -13,7 +15,64 @@ pub fn all_cubes() -> impl Iterator<Item = &'static (Vec3, Vec3)> {
         .chain(SHOOTING_RANGE_COLLIDERS.iter())
 }
 
-/// Resolve vertical collision: land on cube tops, bump head on cube bottoms, land on ground.
+/// Mirrors are solid in every world: push the player out of each mirror's box.
+pub fn resolve_mirrors(
+    position: &mut Vec3,
+    velocity: &mut Vec3,
+    player_height: f32,
+    mirrors: &[Mirror],
+) {
+    for mirror in mirrors {
+        let (center, size) = mirror.collider();
+        let min = center - size * 0.5;
+        let max = center + size * 0.5;
+
+        // only if the player's body overlaps the mirror vertically
+        if position.y + player_height <= min.y || position.y >= max.y {
+            continue;
+        }
+
+        // closest point on the box (top-down) to the player
+        let closest_x = position.x.clamp(min.x, max.x);
+        let closest_z = position.z.clamp(min.z, max.z);
+        let dx = position.x - closest_x;
+        let dz = position.z - closest_z;
+        let dist_sq = dx * dx + dz * dz;
+        if dist_sq >= PLAYER_RADIUS * PLAYER_RADIUS {
+            continue;
+        }
+
+        // push out along the shortest way
+        let (nx, nz, overlap) = if dist_sq > 0.0001 {
+            let dist = dist_sq.sqrt();
+            (dx / dist, dz / dist, PLAYER_RADIUS - dist)
+        } else {
+            // centre inside the box: leave through the nearest side
+            let sides = [
+                (-1.0, 0.0, position.x - min.x),
+                (1.0, 0.0, max.x - position.x),
+                (0.0, -1.0, position.z - min.z),
+                (0.0, 1.0, max.z - position.z),
+            ];
+            let (nx, nz, d) = sides
+                .into_iter()
+                .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap();
+            (nx, nz, d + PLAYER_RADIUS)
+        };
+        position.x += nx * overlap;
+        position.z += nz * overlap;
+
+        // stop moving into the glass
+        let into = velocity.x * nx + velocity.z * nz;
+        if into < 0.0 {
+            velocity.x -= into * nx;
+            velocity.z -= into * nz;
+        }
+    }
+}
+
+/// resolve vertical collision: land on cube tops, bump head on cube bottoms, land on ground.
 pub fn resolve_vertical(
     position: &mut Vec3,
     velocity: &mut Vec3,

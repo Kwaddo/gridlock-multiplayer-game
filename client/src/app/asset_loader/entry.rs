@@ -36,12 +36,12 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
         match load_obj_mesh_with_materials(&resolved_path).await {
             Ok(mesh) => {
                 let vertex_count = mesh.vertices.len();
-                // ensure vector storage
+                // ensure vector storage, big meshes split so macroquad draws every triangle
                 playing_state
                     .models
                     .entry(key_string.clone())
                     .or_default()
-                    .push(mesh);
+                    .extend(client::types::mesh_split::split_mesh(mesh));
                 playing_state
                     .asset_source_paths
                     .insert(key_string.clone(), path_string.clone());
@@ -71,6 +71,30 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                 return;
             }
         };
+        // a character (mesh + skeleton) or a bones only animation, see screens/playing/characters.rs
+        // before this every anim_ file was a whole character with one animation in it
+        if key.starts_with("character_") {
+            match load_gltf_animated_model(&resolved_path, &bytes) {
+                Ok(model) => {
+                    playing_state.asset_source_paths.insert(key_string.clone(), path_string.clone());
+                    println!("Loaded character: {} from {}", key_string, path_string);
+                    playing_state.add_character(key_string, model);
+                }
+                Err(e) => warn!("Failed to load character {} from {}: {}", key_string, path_string, e),
+            }
+            return;
+        }
+        if key.starts_with("anim_") && path.contains("/animations/") {
+            match client::types::animated_model::load_clip(&resolved_path, &bytes) {
+                Ok(clip) => {
+                    playing_state.asset_source_paths.insert(key_string.clone(), path_string.clone());
+                    println!("Loaded animation: {} ({:.2}s) from {}", key_string, clip.duration(), path_string);
+                    playing_state.add_clip(key_string, clip);
+                }
+                Err(e) => warn!("Failed to load animation {} from {}: {}", key_string, path_string, e),
+            }
+            return;
+        }
         let animated_result = if keep_unskinned_primitives {
             load_gltf_animated_model_with_unskinned(&resolved_path, &bytes, true)
         } else {

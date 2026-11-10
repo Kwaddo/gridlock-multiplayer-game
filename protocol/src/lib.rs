@@ -9,7 +9,8 @@ pub use messages::*;
 /// and a host only play together when theirs match (see `ClientMsg::Join`,
 /// `ServerMsg::Welcome`). Builds from before the check have no version on
 /// the wire and count as 1.
-pub const PROTOCOL_VERSION: u16 = 2;
+// 3: pitch added to MSG_STATE (one byte) and MSG_POSITION, so a 2 cant read a 3's state packets
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// What the server tells a client of another version once it has let it in
 /// far enough to be heard: a chat notice is all an old build can show.

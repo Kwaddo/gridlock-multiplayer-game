@@ -40,6 +40,10 @@ pub struct DevModeState {
     pub ruler_end: Option<Vec3>,
     pub ruler_set_start_requested: bool,
     pub ruler_set_end_requested: bool,
+    // skin test: the button asks for the next character, the game switches and writes back which one it is now
+    pub next_character_requested: bool,
+    pub default_character_requested: bool,
+    pub character_label: String,
     // world-weapon adjustment knobs (local space)
     pub weapon_pos_offset: (f32, f32, f32),
     pub weapon_rot_offset: (f32, f32, f32),
@@ -73,6 +77,9 @@ impl DevModeState {
             ruler_end: None,
             ruler_set_start_requested: false,
             ruler_set_end_requested: false,
+            next_character_requested: false,
+            default_character_requested: false,
+            character_label: String::from(crate::screens::playing::PlayingState::DEFAULT_CHARACTER),
             // default offset: mirror the baseline adjustment used when dev mode is locked
             // (X right/left, Y up/down, Z forward/back) – note that Z sign flips
             // depending on movement/ADS state so the slider value is the magnitude.

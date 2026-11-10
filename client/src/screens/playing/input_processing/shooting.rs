@@ -81,9 +81,10 @@ impl PlayingState {
         let mut total_dmg = 0.0f32;
         let mut any_headshot = false;
         let mut pellet_mask: u16 = 0;
-        // (victim id, damage, backstab) per player hit this shot; a shot has
+        // (victim id, damage, backstab, headshot) per player hit this shot; a shot has
         // at most a few pellets, so a linear scan beats two hash maps.
-        let mut player_hits: Vec<(u32, f32, bool)> = Vec::new();
+        // headshot = any pellet hit their head, before this only the hit marker knew
+        let mut player_hits: Vec<(u32, f32, bool, bool)> = Vec::new();
 
         // one impact sound per shot, not one per shotgun pellet
         let mut impact_at: Option<Vec3> = None;
@@ -116,22 +117,28 @@ impl PlayingState {
             let mut surface_hit = false;
             let mut surface_normal: Option<Vec3> = None;
             let mut hit_wall_cell: Option<(u8, u8)> = None;
-            let closest_blocking_dist = if self.current_world == WorldId::Maze {
+            // mirrors (any world) are checked first: the world is then only
+            // tested up to the nearest mirror, so nothing behind a mirror
+            // gets hit (no wall damage, no hole, no light broken).
+            let mirror_dist =
+                crate::world::mirror::nearest_mirror_hit(&self.mirrors, eye, fwd, range);
+            let world_range = mirror_dist.unwrap_or(range);
+            let world_dist = if self.current_world == WorldId::Maze {
                 // gather all candidate hits
                 let wall_hit = maze
                     .as_ref()
-                    .and_then(|m| m.ray_test_walls_with_normal(eye, fwd, range));
+                    .and_then(|m| m.ray_test_walls_with_normal(eye, fwd, world_range));
                 let prop_hit = maze
                     .as_ref()
-                    .and_then(|m| m.ray_test_props_with_normal(eye, fwd, range));
+                    .and_then(|m| m.ray_test_props_with_normal(eye, fwd, world_range));
                 let fc_hit = maze.as_ref().and_then(|m| {
-                    m.ray_test_floor_ceiling_with_normal(eye, fwd, range)
+                    m.ray_test_floor_ceiling_with_normal(eye, fwd, world_range)
                 });
                 let light_hit = maze.as_ref().and_then(|m| {
                     m.ray_test_ceiling_lights_with_normal(
                         eye,
                         fwd,
-                        range,
+                        world_range,
                         &self.destroyed_lights,
                     )
                 });
@@ -186,7 +193,7 @@ impl PlayingState {
             } else if self.current_world == WorldId::Lobby {
                 // lobby: test against lobby cubes, console, ground
                 if let Some((dist, n)) =
-                    crate::world::lobby::ray_test_lobby_with_normal(eye, fwd, range)
+                    crate::world::lobby::ray_test_lobby_with_normal(eye, fwd, world_range)
                 {
                     surface_hit = true;
                     surface_normal = Some(n);
@@ -196,6 +203,16 @@ impl PlayingState {
                 }
             } else {
                 None
+            };
+            // nothing in the world was closer, but a mirror was: the bullet
+            // stops at the glass. No normal = no bullet hole.
+            let closest_blocking_dist = match (world_dist, mirror_dist) {
+                (Some(d), _) => Some(d),
+                (None, Some(md)) => {
+                    surface_hit = true;
+                    Some(md)
+                }
+                (None, None) => None,
             };
 
             let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
@@ -317,7 +334,7 @@ impl PlayingState {
                             let slot = match player_hits.iter().position(|h| h.0 == victim_id) {
                                 Some(i) => i,
                                 None => {
-                                    player_hits.push((victim_id, 0.0, false));
+                                    player_hits.push((victim_id, 0.0, false, false));
                                     player_hits.len() - 1
                                 }
                             };
@@ -332,6 +349,7 @@ impl PlayingState {
                             let fwd = Vec3::new(victim_yaw.cos(), 0.0, victim_yaw.sin());
                             let is_backstab = atk_dir.dot(fwd) < -0.5;
                             player_hits[slot].2 = is_backstab;
+                            player_hits[slot].3 |= zone == HitZone::Head;
                         }
                     }
                     EntityKind::Bot => {
@@ -367,9 +385,9 @@ impl PlayingState {
         }
 
         // Send hit reports in all worlds; server enforces lobby combat rules.
-        for (victim_id, damage, is_backstab) in player_hits {
+        for (victim_id, damage, is_backstab, is_headshot) in player_hits {
             if damage > 0.0 {
-                self.pending_hits.push((victim_id, damage, is_backstab));
+                self.pending_hits.push((victim_id, damage, is_backstab, is_headshot));
             }
         }
 

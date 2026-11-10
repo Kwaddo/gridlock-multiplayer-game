@@ -109,7 +109,10 @@ impl BakedBulletHole {
 }
 
 impl PlayingState {
-    pub(crate) fn draw_bullet_holes(&mut self) {
+    /// Bring the baked shapes up to date with the current holes. Call once per
+    /// frame before drawing, so `draw_bullet_holes` can be called by every
+    /// camera (main view and mirrors) without changing anything.
+    pub(crate) fn bake_bullet_holes(&mut self) {
         // Holes are only ever added at the back or removed, so the baked list
         // follows them in order: drop baked entries whose hole is gone, and
         // bake the new holes at the end.
@@ -126,7 +129,10 @@ impl PlayingState {
             cursor += 1;
         }
         baked.truncate(cursor);
+    }
 
+    pub(crate) fn draw_bullet_holes(&self) {
+        let baked = &self.bullet_hole_geometry;
         let uv = vec2(0.0, 0.0);
         let mut verts = [Vertex::new2(Vec3::ZERO, uv, BLANK); HOLE_VERTS];
         for (hole, geo) in self.bullet_holes.iter().zip(baked.iter()) {

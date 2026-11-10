@@ -9,7 +9,6 @@ mod timers;
 use crate::core::GameConfig;
 use crate::physics::collision;
 use crate::types::maze::Maze;
-use crate::types::player::PlayerSkin;
 use crate::types::world::WorldId;
 use crate::weapons::combat::CombatEntity;
 
@@ -19,47 +18,10 @@ use super::PlayingState;
 
 pub use event_sounds::EventSoundState;
 
-thread_local! {
-    /// The set `player_anims_in_use` fills, kept between frames so it is
-    /// cleared and refilled instead of allocated every frame.
-    static PLAYER_ANIMS_IN_USE: std::cell::RefCell<std::collections::HashSet<&'static str>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
-}
+// player_anims_in_use is gone, it picked which shared clip clocks to tick each frame
+// now every body ticks its own clock (PlayerAnim), so nothing has to pick
 
 impl PlayingState {
-    /// Player animations something is drawing now: other players, practice
-    /// bots, and our own corpse during the death camera. Only these need
-    /// skinning; their joints also drive those players' hitboxes.
-    fn player_anims_in_use(&self) -> std::collections::HashSet<&'static str> {
-        let mut keys = PLAYER_ANIMS_IN_USE.take();
-        keys.clear();
-        let skins = self
-            .other_players
-            .iter()
-            .map(|p| p.skin_type)
-            .chain(self.practice_bots.iter().map(|b| b.player.skin_type));
-        keys.extend(
-            skins
-                .filter_map(|skin| skin.model_key())
-                .map(|key| if self.animated_models.contains_key(key) { key } else { "anim_rifle_idle" }),
-        );
-        // Players drawn with a missing model fall back to the idle clip.
-        keys.insert("anim_rifle_idle");
-        if !matches!(self.death_camera_phase, super::state::DeathCameraPhase::None) {
-            keys.extend(
-                [PlayerSkin::StandDeath, PlayerSkin::CrouchDeath, PlayerSkin::ProneDeath]
-                    .into_iter()
-                    .filter_map(|skin| skin.model_key()),
-            );
-        }
-        keys
-    }
-
-    /// Hand the set from `player_anims_in_use` back for the next frame.
-    fn recycle_player_anims_in_use(keys: std::collections::HashSet<&'static str>) {
-        PLAYER_ANIMS_IN_USE.set(keys);
-    }
-
     #[inline(always)]
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
         self.audio.set_levels(config.master_volume, config.mute_audio);
@@ -84,6 +46,18 @@ impl PlayingState {
         if self.dev_mode.ruler_set_end_requested {
             self.dev_mode.ruler_end = Some(self.position);
             self.dev_mode.ruler_set_end_requested = false;
+        }
+        // skin test from the dev menu: wear the next loaded character, every animation follows
+        if self.dev_mode.next_character_requested {
+            self.dev_mode.next_character_requested = false;
+            self.next_character();
+        }
+        if self.dev_mode.default_character_requested {
+            self.dev_mode.default_character_requested = false;
+            self.set_character(Self::DEFAULT_CHARACTER); // straight back to the default soldier
+        }
+        if self.dev_mode.is_unlocked() {
+            self.dev_mode.character_label = self.character_label(); // kept fresh so "still loading" counts down
         }
 
         // update kill feed timers and drop expired entries in a single pass
@@ -148,6 +122,10 @@ impl PlayingState {
             self.movement_state.slide_cooldown_timer =
                 (self.movement_state.slide_cooldown_timer - delta).max(0.0);
         }
+        if self.movement_state.jump_cooldown_timer > 0.0 {
+            self.movement_state.jump_cooldown_timer =
+                (self.movement_state.jump_cooldown_timer - delta).max(0.0);
+        }
         self.update_crouch_height(config, delta);
         let was_grounded = self.movement_state.is_grounded;
         // Only allow jumping when not frozen after teleport
@@ -206,13 +184,25 @@ impl PlayingState {
                 }
             }
         }
+        // mirrors are solid in every world
+        collision::resolve_mirrors(
+            &mut self.position,
+            &mut self.movement_state.velocity,
+            self.movement_state.height,
+            &self.mirrors,
+        );
 
         if !was_grounded && self.movement_state.is_grounded {
             self.just_landed = true;
+            // short pause before the next jump, holding space jumps again as soon as it runs out
+            self.movement_state.jump_cooldown_timer = self.movement_config.jump_land_cooldown;
         }
         self.prev_was_reloading = self.weapons.active().is_reloading;
 
         self.update_local_footsteps(delta, config);
+
+        // your one third person body follows you, after movement so the mirror isnt a frame behind
+        self.update_self_avatar(delta);
     }
 
     /// The dead player's frame: respawn and death-camera timers, plus the
@@ -265,18 +255,19 @@ impl PlayingState {
         for p in &mut self.other_players {
             p.update(delta);
         }
-        let in_use = self.player_anims_in_use();
-        for (key, model) in self.animated_models.iter_mut() {
-            if in_use.contains(key.as_str()) {
-                model.update(delta);
-            } else if key.starts_with("anim_") {
-                model.advance(delta);
-            }
-        }
-        Self::recycle_player_anims_in_use(in_use);
         for bot in &mut self.practice_bots {
             bot.simulate_yaw(delta, Some(self.position));
             bot.update(delta);
         }
+        // same as the normal frame, keep every body's own clock going while we spectate
+        let animated_models = &self.animated_models;
+        for p in &mut self.other_players {
+            players::tick_body(p, delta, animated_models);
+        }
+        for bot in &mut self.practice_bots {
+            players::tick_body(&mut bot.player, delta, animated_models);
+        }
+        // your body becomes the corpse here and plays its death from the start
+        self.update_self_avatar(delta);
     }
 }

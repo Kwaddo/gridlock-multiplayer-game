@@ -1,4 +1,4 @@
-use crate::codec::{Reader, Vec3, Writer};
+use crate::codec::{dequantize_pitch, quantize_pitch, Reader, Vec3, Writer};
 use crate::*;
 
 /// Client -> server.
@@ -9,12 +9,16 @@ pub enum ClientMsg {
     /// written as whitespace, see [`write_join_version`]: servers from before
     /// the check trim it off and still see the plain name.
     Join { username: String, version: Option<u16> },
-    Position { position: Vec3, yaw: f32, state_flags: Option<u8>, event_flags: Option<u8> },
+    /// `pitch` (look up/down, + = up) trails the event flags and is only written when both flags are,
+    /// before this pitch was never sent so nobody saw where you looked up or down
+    Position { position: Vec3, yaw: f32, state_flags: Option<u8>, event_flags: Option<u8>, pitch: Option<f32> },
     Disconnect,
     WorldChange { target: u8 },
     Discover,
     WallBroken { x: u8, y: u8 },
-    Hit { victim_id: u32, damage: f32, weapon: Option<String>, backstab: Option<bool> },
+    /// `headshot` trails `backstab` and is only written when it is, so the server can tell everyone how they died
+    /// before this the server never knew a kill was a headshot
+    Hit { victim_id: u32, damage: f32, weapon: Option<String>, backstab: Option<bool>, headshot: Option<bool> },
     RespawnRequest,
     StartGame {
         mode: Option<u8>,
@@ -84,13 +88,16 @@ impl ClientMsg {
                 }
                 w.finish()
             }
-            ClientMsg::Position { position, yaw, state_flags, event_flags } => {
+            ClientMsg::Position { position, yaw, state_flags, event_flags, pitch } => {
                 let mut w = Writer::new(MSG_POSITION);
                 w.vec3(*position).f32(*yaw);
                 if let Some(s) = state_flags {
                     w.u8(*s);
                     if let Some(e) = event_flags {
                         w.u8(*e);
+                        if let Some(p) = pitch {
+                            w.u8(quantize_pitch(*p));
+                        }
                     }
                 }
                 w.finish()
@@ -99,13 +106,16 @@ impl ClientMsg {
             ClientMsg::WorldChange { target } => vec![MSG_WORLD_CHANGE, *target],
             ClientMsg::Discover => vec![MSG_DISCOVER],
             ClientMsg::WallBroken { x, y } => vec![MSG_WALL_BROKEN, *x, *y],
-            ClientMsg::Hit { victim_id, damage, weapon, backstab } => {
+            ClientMsg::Hit { victim_id, damage, weapon, backstab, headshot } => {
                 let mut w = Writer::new(MSG_HIT);
                 w.u32(*victim_id).f32(*damage);
                 if let Some(name) = weapon {
                     w.str8(name);
                     if let Some(b) = backstab {
                         w.bool(*b);
+                        if let Some(h) = headshot {
+                            w.bool(*h);
+                        }
                     }
                 }
                 w.finish()
@@ -159,6 +169,7 @@ impl ClientMsg {
                 yaw: r.f32()?,
                 state_flags: r.u8(),
                 event_flags: r.u8(),
+                pitch: r.u8().map(dequantize_pitch),
             },
             MSG_DISCONNECT => ClientMsg::Disconnect,
             MSG_WORLD_CHANGE => ClientMsg::WorldChange { target: r.u8()? },
@@ -169,6 +180,7 @@ impl ClientMsg {
                 damage: r.f32()?,
                 weapon: r.str8(),
                 backstab: r.bool(),
+                headshot: r.bool(),
             },
             MSG_RESPAWN_REQUEST => ClientMsg::RespawnRequest,
             MSG_START_GAME => {
