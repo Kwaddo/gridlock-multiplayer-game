@@ -129,10 +129,17 @@ impl PlayingState {
     }
 
     pub(super) fn update_head_bob(&mut self, delta: f32) {
+        let moving = self.move_dir.length_squared() > 0.01;
         if self.movement_state.is_sprinting && self.movement_state.is_grounded {
             self.bob_timer += delta * 12.0;
+        } else if self.movement_state.is_slow_walking && self.movement_state.is_grounded && moving {
+            self.bob_timer += delta * 4.0; // slow careful sway while stalking, before this slow walk had no motion
         } else {
             self.bob_timer = 0.0;
         }
+        // stealth focus, eases in while slow walking and back out
+        let target = if self.movement_state.is_slow_walking { 1.0 } else { 0.0 };
+        let step = delta / self.movement_config.slow_walk_zoom_time.max(0.01);
+        self.slow_walk_zoom += (target - self.slow_walk_zoom).clamp(-step, step);
     }
 }

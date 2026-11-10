@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod anim_chooser;
 pub mod animated_model;
+pub mod blend_space;
 pub mod maze;
 pub mod mesh_split;
 pub mod orientation;

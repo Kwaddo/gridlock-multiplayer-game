@@ -38,7 +38,7 @@ impl Pose {
         }
     }
 
-    // mix another pose's bent joints into this one, w=0 all `from`, w=1 all this one
+    // mix another pose's bent joints into this one, w=0 all 'from', w=1 all this one
     // like ue's blend node, it mixes the local bends then finish_pose works out the rest
     // before this a clip change was an instant cut, nothing could mix two poses
     pub fn blend_from(&mut self, from: &Pose, w: f32) {
@@ -48,6 +48,26 @@ impl Pose {
             mine.scale = theirs.scale.lerp(mine.scale, w);
         }
         self.global_valid.iter_mut().for_each(|v| *v = false); // the mix changed the bends, old answers are stale
+    }
+
+    // move this pose toward the other pose by t (0 = stay, 1 = become other), for mixing many clips by weight
+    // mixing a, b, c = start at a, mix_in(b, wb/(wa+wb)), then mix_in(c, wc/(wa+wb+wc))
+    pub fn mix_in(&mut self, other: &Pose, t: f32) {
+        if t <= 0.0 {
+            return;
+        }
+        for (mine, theirs) in self.local.iter_mut().zip(&other.local) {
+            mine.translation = mine.translation.lerp(theirs.translation, t);
+            mine.rotation = mine.rotation.slerp(theirs.rotation, t);
+            mine.scale = mine.scale.lerp(theirs.scale, t);
+        }
+        self.global_valid.iter_mut().for_each(|v| *v = false);
+    }
+
+    // copy bends of another pose to fade from later
+    pub fn copy_from(&mut self, other: &Pose) {
+        self.local.clone_from(&other.local);
+        self.global_valid.iter_mut().for_each(|v| *v = false);
     }
 
     // like blend_from but only where mask > 0, and toward the layer
@@ -218,7 +238,7 @@ mod tests {
         }
     }
 
-    // the test clip but with a mesh of `verts` vertices all hanging off the arm bone
+    // the test clip but with a mesh of 'verts' vertices all hanging off the arm bone
     fn with_mesh(verts: usize) -> AnimatedModel {
         use super::super::{AnimatedPart, SkinVertex};
         use macroquad::models::Vertex;
@@ -241,6 +261,23 @@ mod tests {
         };
         clip.geometry = Rc::new(SharedGeometry { parts: vec![part], gpu: RefCell::new(GpuGeometry::Untried) });
         clip
+    }
+
+    // mixing three poses in a row with the running weights lands on their weighted average
+    #[test]
+    fn mix_in_gives_the_weighted_average() {
+        let at = |x: f32| {
+            let mut p = Pose::new(&[rest(Vec3::ZERO)], 0);
+            p.local[0].translation = vec3(x, 0.0, 0.0);
+            p
+        };
+        let (a, b, c) = (at(0.0), at(10.0), at(100.0));
+        let (wa, wb, wc) = (0.5, 0.3, 0.2);
+        let mut mix = a;
+        mix.mix_in(&b, wb / (wa + wb));
+        mix.mix_in(&c, wc / (wa + wb + wc));
+        // 0*0.5 + 10*0.3 + 100*0.2 = 23
+        assert!((mix.local[0].translation.x - 23.0).abs() < 1e-4, "{:?}", mix.local[0].translation);
     }
 
     // the amy crash: one pose bent on one character's mesh, then on a bigger one after a character switch

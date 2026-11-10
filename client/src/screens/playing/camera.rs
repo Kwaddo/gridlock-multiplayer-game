@@ -62,6 +62,8 @@ impl PlayingState {
 
         let bob_offset = if self.movement_state.is_sprinting && self.movement_state.is_grounded {
             self.bob_timer.sin() * 0.05
+        } else if self.movement_state.is_slow_walking {
+            self.bob_timer.sin() * 0.015 // gentle stalking sway
         } else {
             0.0
         };
@@ -83,6 +85,8 @@ impl PlayingState {
         let base_fov = config.raw_fov();
         let ads_fov = weapon.stats().ads_zoom_fov;
         let fov = base_fov + (ads_fov - base_fov) * weapon.ads_progress;
+        // slow walk focus, fades out as ads takes over so the two zooms dont stack
+        let fov = fov * (1.0 - self.movement_config.slow_walk_zoom * self.slow_walk_zoom * (1.0 - weapon.ads_progress));
 
         Camera3D {
             position: eye_pos,
