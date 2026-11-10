@@ -23,7 +23,16 @@ pub struct SettingsScreen {
     pub show_unsaved_prompt: bool,
     pub active_tab: SettingsTab,
     pub crosshair_state: crosshair_settings::CrosshairSettingsPreview,
+    /// Whether the Crosshair tab is offered. Off on the main menu: crosshairs
+    /// belong to the weapons and presets of a player in a game.
+    pub crosshair_tab: bool,
 }
+
+const ALL_TABS: [(SettingsTab, &str); 3] = [
+    (SettingsTab::General, "General"),
+    (SettingsTab::Keybinds, "Keybinds"),
+    (SettingsTab::Crosshair, "Crosshair"),
+];
 
 /// Compute centered, width-capped panel dimensions.
 fn panel_layout(s: f32, content_top: f32) -> (f32, f32, f32) {
@@ -42,10 +51,28 @@ impl SettingsScreen {
             show_unsaved_prompt: false,
             active_tab: SettingsTab::General,
             crosshair_state: crosshair_settings::CrosshairSettingsPreview::new(),
+            crosshair_tab: true,
         }
     }
 
+    /// The tabs on offer, in display order.
+    fn tabs(&self) -> &'static [(SettingsTab, &'static str)] {
+        if self.crosshair_tab {
+            &ALL_TABS
+        } else {
+            &ALL_TABS[..2]
+        }
+    }
+
+    /// Open the screen on `tab`; `in_game` offers the Crosshair tab.
+    pub fn open(&mut self, config: &GameConfig, tab: SettingsTab, in_game: bool) {
+        self.enter(config);
+        self.crosshair_tab = in_game;
+        self.active_tab = if !in_game && tab == SettingsTab::Crosshair { SettingsTab::General } else { tab };
+    }
+
     pub fn enter(&mut self, config: &GameConfig) {
+        self.crosshair_tab = true;
         self.saved_config = Some(config.clone());
         self.show_unsaved_prompt = false;
         self.crosshair_state.reset_visit();

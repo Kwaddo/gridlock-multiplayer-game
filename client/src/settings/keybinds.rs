@@ -14,7 +14,7 @@ const BIND_ACTIONS: &[(&str, &str)] = &[
     ("Reload", "reload"),
     ("Fire", "fire"),
     ("Aim", "aim"),
-    ("Settings", "settings"),
+    ("Pause", "settings"),
     ("Weapon 1", "weapon1"),
     ("Weapon 2", "weapon2"),
     ("Weapon 3", "weapon3"),
