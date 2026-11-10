@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn real_character_arms_and_head_are_upper_legs_are_not() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/models/characters/Ch15.glb");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/models/characters/Ch15_humanoid.glb");
         let Ok(bytes) = std::fs::read(&path) else {
             eprintln!("no converted assets, skipping");
             return;

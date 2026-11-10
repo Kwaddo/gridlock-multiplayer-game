@@ -221,7 +221,7 @@ mod tests {
     }
 
     // these must work, the rest are proportion tests that are allowed to fail (Ahmed's priority)
-    const MUST_WORK: [&str; 3] = ["Ch15", "Skin_Pete", "Skin_Vecna"];
+    const MUST_WORK: [&str; 3] = ["Ch15_humanoid", "Pete_humanoid", "Vecna_humanoid"];
 
     // the real converted files, skipped when theyre not there (client/assets is git ignored)
     // every animation on every character: loads, retargets, and the pose comes out sane
