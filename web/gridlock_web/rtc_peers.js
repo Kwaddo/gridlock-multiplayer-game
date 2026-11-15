@@ -6,7 +6,8 @@
 (function (gridlockWeb) {
     const {
         EV_PEER_JOINED, EV_PEER_LEFT, EV_PACKET, EV_CLOSED, FORCE_RELAY, NO_DIRECT, SPARE_GATHER_MS,
-        DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, CHANNEL, RELIABLE_CHANNEL,
+        DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, UNRELIABLE_MAX_BUFFERED,
+        CHANNEL, RELIABLE_CHANNEL,
         gathered, isStunOnly, RtcSpares,
     } = gridlockWeb;
 
@@ -199,6 +200,16 @@
                     ? reliable
                     : peer.channel;
             if (channel.readyState !== "open") return;
+            // Drop a stale small snapshot rather than queue it behind others.
+            // Never the reliable channel, and never a big packet that only came
+            // here because the reliable one is backed up: those must arrive.
+            if (
+                channel === peer.channel &&
+                bytes.length <= RELIABLE_MIN_BYTES &&
+                channel.bufferedAmount > UNRELIABLE_MAX_BUFFERED
+            ) {
+                return;
+            }
             try {
                 channel.send(bytes);
             } catch {

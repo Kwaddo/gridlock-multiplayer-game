@@ -23,6 +23,9 @@
     <!-- the G from the title screen -->
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <!-- the game itself, downloading while the scripts below load (load() then
+         finds it here); devices without a mouse download none of it (see below) -->
+    <link rel="preload" href="gridlock.wasm" as="fetch" crossorigin media="(any-pointer: fine)">
     <style>
         html, body, canvas {
             margin: 0;
@@ -104,6 +107,17 @@
         // only a touchscreen (phones, most tablets) get a note instead of the
         // game, and download none of it.
         if (matchMedia("(any-pointer: fine)").matches) {
+            // Models hosted elsewhere: connect there now, before the game asks.
+            try {
+                const models = new URL(window.GRIDLOCK_MODELS_URL || "", location.href).origin;
+                if (window.GRIDLOCK_MODELS_URL && models !== location.origin) {
+                    const link = document.createElement("link");
+                    link.rel = "preconnect";
+                    link.href = models;
+                    link.crossOrigin = "anonymous";
+                    document.head.appendChild(link);
+                }
+            } catch {}
             load("gridlock.wasm");
         } else {
             document.getElementById("glcanvas").remove();

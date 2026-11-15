@@ -20,7 +20,7 @@
 
 (function (gridlockWeb) {
     const {
-        PLUGIN_VERSION, sockets, readString, readBytes, writeU32, writeBytes, roomHttpUrl, iceServersFor, prewarm,
+        PLUGIN_VERSION, sockets, readString, readBytes, writeU32, writeBytes, heapFloats, roomHttpUrl, iceServersFor, prewarm,
         RtcSocket, preconnect, takePreconnected, registerModels, registerDecode,
     } = gridlockWeb;
 
@@ -33,7 +33,9 @@
     function audio() {
         if (!audioContext) {
             audioContext = new AudioContext();
-            const resume = () => audioContext.resume();
+            // Kept for good (a context can be suspended again), but only asks
+            // while it is not running: every key and click comes through here.
+            const resume = () => audioContext.state !== "running" && audioContext.resume();
             for (const ev of ["pointerdown", "keydown", "touchstart"]) {
                 window.addEventListener(ev, resume, { capture: true });
             }
@@ -50,20 +52,41 @@
     // they post keep going in the background. Those frames only keep the game
     // and its connections going, without drawing (see platform::page_hidden),
     // so 20 a second is plenty.
+    // The worker only runs while the tab is hidden (from the first game on):
+    // a visible tab has its animation frames.
     const HIDDEN_FRAME_MS = 50;
     let hiddenTicker = null;
+    let hiddenTickerUrl = null;
+    let watchingVisibility = false;
 
     function keepRunningWhenHidden() {
-        if (hiddenTicker || typeof Worker === "undefined") return;
+        if (typeof Worker === "undefined") return;
+        if (!watchingVisibility) {
+            watchingVisibility = true;
+            document.addEventListener("visibilitychange", updateHiddenTicker);
+        }
+        updateHiddenTicker();
+    }
+
+    function updateHiddenTicker() {
+        if (!document.hidden) {
+            if (hiddenTicker) hiddenTicker.terminate();
+            hiddenTicker = null;
+            return;
+        }
+        if (hiddenTicker) return;
         const source = `setInterval(() => postMessage(0), ${HIDDEN_FRAME_MS});`;
         try {
-            hiddenTicker = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
+            hiddenTickerUrl ??= URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+            hiddenTicker = new Worker(hiddenTickerUrl);
         } catch {
             return; // no workers (e.g. a strict content policy): the game pauses when hidden
         }
         hiddenTicker.onmessage = () => {
-            const inGame = [...sockets.values()].some((s) => !s.closed);
-            if (document.hidden && inGame && wasm_exports) wasm_exports.frame();
+            if (!document.hidden || !wasm_exports) return;
+            let inGame = false;
+            for (const s of sockets.values()) if (!s.closed) inGame = true;
+            if (inGame) wasm_exports.frame();
         };
     }
 
@@ -71,6 +94,19 @@
 
     function register(importObject) {
         const env = importObject.env;
+
+        // ---- WebGL context attributes. The loader asks for getContext("webgl")
+        // with none, so the browser multisamples (antialias), keeps an alpha
+        // channel and may pick the low-power GPU. The native build renders
+        // without MSAA; match it. `?aa` in the URL keeps antialiasing on.
+
+        const canvas = document.querySelector("#glcanvas");
+        if (canvas) {
+            const getContext = canvas.getContext.bind(canvas);
+            const antialias = new URLSearchParams(location.search).has("aa");
+            canvas.getContext = (type, attrs) =>
+                getContext(type, { antialias, alpha: false, powerPreference: "high-performance", ...attrs });
+        }
 
         // ---- models: file loading and download progress (gridlock_web/models.js)
 
@@ -88,9 +124,26 @@
         // miniquad's loader uploads only the first matrix of a uniform array
         // (it ignores `count`), which the GPU skinning shader's joint array
         // needs whole (client/src/types/animated_model.rs).
+        // WebGL2 reads the matrices straight out of the wasm memory (no new
+        // view per call); WebGL1 has no offset argument and gets a view.
+        let uniformGl = null;
+        let uniformWebgl2 = false;
         env.glUniformMatrix4fv = function (location, count, transpose, value) {
-            const data = new Float32Array(wasm_memory.buffer, value, 16 * count);
-            gl.uniformMatrix4fv(GL.uniforms[location], !!transpose, data);
+            if (uniformGl !== gl) {
+                uniformGl = gl;
+                uniformWebgl2 = typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext;
+            }
+            const floats = heapFloats();
+            const at = value >>> 2;
+            if (uniformWebgl2) gl.uniformMatrix4fv(GL.uniforms[location], !!transpose, floats, at, 16 * count);
+            else gl.uniformMatrix4fv(GL.uniforms[location], !!transpose, floats.subarray(at, at + 16 * count));
+        };
+        // miniquad's loader copies a loaded file into wasm memory one byte at a
+        // time, which for a model of several MB takes a frame or more.
+        env.fs_take_buffer = function (id, ptr, max) {
+            const file = FS.loaded_files[id];
+            if (file) new Uint8Array(wasm_memory.buffer, ptr, max).set(file.length > max ? file.subarray(0, max) : file);
+            delete FS.loaded_files[id];
         };
         env.gridlock_force_cpu_skinning = () => (new URLSearchParams(location.search).has("cpuskin") ? 1 : 0);
         env.gridlock_unix_ms = () => Date.now();
@@ -313,7 +366,9 @@
 
         env.gridlock_rtc_send = function (handle, peer, ptr, len) {
             const socket = sockets.get(handle);
-            if (socket) socket.send(peer, readBytes(ptr, len));
+            // A view, not a copy: a data channel's send copies what it sends
+            // at once (RtcSocket.send keeps nothing).
+            if (socket) socket.send(peer, new Uint8Array(wasm_memory.buffer, ptr, len));
         };
 
         // Returns the next event kind (0 = none) and writes its peer and payload
@@ -348,7 +403,10 @@
             if (/\/servers\/?$/.test(url)) iceServersFor(url);
             const req = { done: false, status: 0, body: new Uint8Array(0) };
             requests.set(id, req);
-            const headers = { "Content-Type": "application/json" };
+            // Content-Type only with a body: a GET without one is then a
+            // "simple" request, which a registry on another origin answers
+            // without a CORS preflight first.
+            const headers = bodyLen > 0 ? { "Content-Type": "application/json" } : {};
             if (authLen > 0) headers.Authorization = readString(authPtr, authLen);
             const method = readString(methodPtr, methodLen);
             fetch(url, {

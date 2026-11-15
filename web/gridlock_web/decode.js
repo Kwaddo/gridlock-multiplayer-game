@@ -16,15 +16,30 @@
     const KIND_GLB = 1;
     const KIND_IMAGE = 2;
 
-    // Runs in the worker. Message in: { id, kind, bytes }. Message out:
-    // { id, images: [{ index, key, width, height, rgba }] }, where `key`
-    // names the image's content: GLBs often embed the same textures, which
-    // are decoded once (`rgba` is absent for one already decoded).
+    // Runs in the worker. Message in: { id, kind, bytes }. Messages out:
+    // { pixels: { key, width, height, rgba } } for each image as soon as it
+    // is decoded, then { id, images: [{ index, key }] } for the file, where
+    // `key` names the image's content: GLBs often embed the same textures,
+    // which are decoded once. A file's reply goes out only once each of its
+    // images' pixels did (or could not be decoded), also when another file
+    // was decoding that image already.
     function workerMain() {
-        const decoded = new Set(); // keys already decoded
+        const decoded = new Map(); // key -> Promise, settled once its pixels went out (or not)
         const canDecode = typeof createImageBitmap === "function" && typeof OffscreenCanvas === "function";
+        // Hashing natively is far faster; only a secure context has it (not
+        // a plain-http LAN page), which gets the loop below. The key never
+        // leaves this page.
+        const subtle = self.isSecureContext ? self.crypto?.subtle : undefined;
 
-        function contentKey(bytes) {
+        async function contentKey(bytes) {
+            if (subtle) {
+                try {
+                    const digest = new Uint8Array(await subtle.digest("SHA-1", bytes));
+                    let hex = "";
+                    for (const b of digest) hex += (b < 16 ? "0" : "") + b.toString(16);
+                    return `${hex}:${bytes.length}`;
+                } catch {}
+            }
             let fnv = 0x811c9dc5;
             let djb = 5381;
             for (let i = 0; i < bytes.length; i++) {
@@ -50,8 +65,24 @@
                 at += 8 + length;
             }
             if (!json || !bin) return [];
+            // Only the images a material takes its colour from: the game
+            // samples no others (client/src/app/obj_loader.rs,
+            // animated_model/parts.rs), and a model often embeds big normal
+            // and roughness maps too. Any other the game asks for, it decodes.
+            const used = new Set();
+            for (const material of json.materials || []) {
+                const infos = [
+                    material?.pbrMetallicRoughness?.baseColorTexture,
+                    material?.extensions?.KHR_materials_pbrSpecularGlossiness?.diffuseTexture,
+                ];
+                for (const info of infos) {
+                    const source = json.textures?.[info?.index]?.source;
+                    if (source !== undefined) used.add(source);
+                }
+            }
             const out = [];
             (json.images || []).forEach((image, index) => {
+                if (!used.has(index)) return;
                 const bv = json.bufferViews?.[image.bufferView];
                 if (!bv || bv.buffer !== 0 || json.buffers?.[0]?.uri !== undefined) return;
                 const start = bv.byteOffset || 0;
@@ -79,27 +110,25 @@
             return { width, height, rgba };
         }
 
+        async function decodeOut(key, source) {
+            const image = await decode(source.bytes, source.mime).catch(() => null);
+            if (image) self.postMessage({ pixels: { key, ...image } }, [image.rgba.buffer]);
+        }
+
         self.onmessage = async ({ data: { id, kind, bytes } }) => {
             const images = [];
-            const transfer = [];
             try {
                 // 1: a .glb; otherwise the file is the image (index 0xffffffff).
                 const sources = kind === 1 ? glbImages(bytes) : [{ index: 0xffffffff, mime: "", bytes }];
                 for (const source of sources) {
-                    const key = contentKey(source.bytes);
-                    const entry = { index: source.index, key };
-                    if (canDecode && !decoded.has(key)) {
-                        decoded.add(key);
-                        const image = await decode(source.bytes, source.mime).catch(() => null);
-                        if (image) {
-                            Object.assign(entry, image);
-                            transfer.push(image.rgba.buffer);
-                        }
-                    }
-                    images.push(entry);
+                    const key = await contentKey(source.bytes);
+                    images.push({ index: source.index, key });
+                    if (!canDecode) continue;
+                    if (!decoded.has(key)) decoded.set(key, decodeOut(key, source).catch(() => {}));
+                    await decoded.get(key);
                 }
             } catch {} // not a valid file: the game reports it
-            self.postMessage({ id, images }, transfer);
+            self.postMessage({ id, images });
         };
     }
 
@@ -113,6 +142,10 @@
                 const source = `(${workerMain.toString()})();`;
                 worker = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
                 worker.onmessage = ({ data }) => {
+                    if (data.pixels) {
+                        pixels.set(data.pixels.key, data.pixels);
+                        return;
+                    }
                     waiting.get(data.id)?.(data.images);
                     waiting.delete(data.id);
                 };
@@ -140,10 +173,8 @@
         const id = nextId++;
         return new Promise((resolve) => {
             waiting.set(id, (images) => {
-                for (const image of images) {
-                    keyOf.set(`${path}#${image.index}`, image.key);
-                    if (image.rgba) pixels.set(image.key, image);
-                }
+                // (their pixels came on their own, before this)
+                for (const image of images) keyOf.set(`${path}#${image.index}`, image.key);
                 resolve();
             });
             // A copy (moved, not copied again): the original goes to the game.
