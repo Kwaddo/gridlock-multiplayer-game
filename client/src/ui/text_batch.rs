@@ -62,12 +62,12 @@ pub fn flush() {
     });
 }
 
-/// `draw_text_ex(s, x, y, text_params(font_size, color))`, queued when batching.
-pub fn text(s: &str, x: f32, y: f32, font_size: u16, color: Color) {
+/// `draw_text_ex(s, x, y, text_params(font_size, color))`, queued when
+/// batching. Returns the text's width.
+pub fn text(s: &str, x: f32, y: f32, font_size: u16, color: Color) -> f32 {
     let batching = BATCH.with_borrow(|b| b.depth > 0);
     if !batching {
-        draw_text_ex(s, x, y, text_params(font_size, color));
-        return;
+        return draw_text_ex(s, x, y, text_params(font_size, color)).width;
     }
     let width = measure_game_text(s, font_size);
     let fs = font_size as f32;
@@ -79,6 +79,7 @@ pub fn text(s: &str, x: f32, y: f32, font_size: u16, color: Color) {
         let end = b.arena.len();
         b.items.push(Queued { text: start..end, x, y, font_size, color, bounds });
     });
+    width
 }
 
 /// Call before drawing a shape that covers (x, y, w, h): flushes the queued

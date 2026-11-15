@@ -1,4 +1,5 @@
-use crate::ui::fonts::{measure_game_text, text_params};
+use crate::ui::fonts::measure_game_text;
+use crate::ui::text_batch;
 
 use macroquad::prelude::*;
 
@@ -12,20 +13,20 @@ impl LoginScreen {
     /// Labelled text input bound to `field`; clicking it focuses it.
     pub(super) fn text_field(&mut self, field: LoginField, label: &str, placeholder: &str, x: f32, y: f32, w: f32) {
         let active = self.active_field == field;
-        draw_text_ex(label, x, y, text_params(13, if active { ACCENT } else { TEXT_LABEL }));
+        text_batch::text(label, x, y, 13, if active { ACCENT } else { TEXT_LABEL });
 
         let fy = y + 10.0;
-        draw_rectangle(x, fy, w, FIELD_H, INPUT_BG);
-        draw_rectangle_lines(x, fy, w, FIELD_H, if active { 2.0 } else { 1.0 }, if active { ACCENT } else { INPUT_BORDER });
+        text_batch::rect(x, fy, w, FIELD_H, INPUT_BG);
+        text_batch::rect_lines(x, fy, w, FIELD_H, if active { 2.0 } else { 1.0 }, if active { ACCENT } else { INPUT_BORDER });
 
         let text = self.field_text(field);
         if text.is_empty() && !active {
-            draw_text_ex(placeholder, x + 10.0, fy + 23.0, text_params(17, Color::new(0.30, 0.32, 0.42, 0.5)));
+            text_batch::text(placeholder, x + 10.0, fy + 23.0, 17, Color::new(0.30, 0.32, 0.42, 0.5));
         } else {
-            // draw_text_ex returns the same width measure_game_text would
-            let tw = draw_text_ex(text, x + 10.0, fy + 23.0, text_params(17, WHITE)).width;
+            // text_batch::text returns the same width measure_game_text would
+            let tw = text_batch::text(text, x + 10.0, fy + 23.0, 17, WHITE);
             if active && (self.anim_time * 2.5) as i32 % 2 == 0 {
-                draw_rectangle(x + 10.0 + tw + 2.0, fy + 6.0, 2.0, FIELD_H - 12.0, ACCENT);
+                text_batch::rect(x + 10.0 + tw + 2.0, fy + 6.0, 2.0, FIELD_H - 12.0, ACCENT);
             }
         }
 
@@ -54,20 +55,20 @@ impl LoginScreen {
 /// Filled accent button; returns true on the frame it is clicked.
 pub(super) fn button(label: &str, size: u16, x: f32, y: f32, w: f32, h: f32) -> bool {
     let hover = in_rect(mouse_position(), x, y, w, h);
-    draw_rectangle(x, y, w, h, if hover { ACCENT_HOVER } else { ACCENT });
+    text_batch::rect(x, y, w, h, if hover { ACCENT_HOVER } else { ACCENT });
     let tw = measure_game_text(label, size);
-    draw_text_ex(label, x + (w - tw) / 2.0, y + h / 2.0 + size as f32 * 0.35, text_params(size, BUTTON_TEXT));
+    text_batch::text(label, x + (w - tw) / 2.0, y + h / 2.0 + size as f32 * 0.35, size, BUTTON_TEXT);
     hover && is_mouse_button_pressed(MouseButton::Left)
 }
 
 /// Outlined secondary button; returns true on the frame it is clicked.
 pub(super) fn outline_button(label: &str, size: u16, x: f32, y: f32, w: f32, h: f32) -> bool {
     let hover = in_rect(mouse_position(), x, y, w, h);
-    draw_rectangle(x, y, w, h, PANEL_BG);
-    draw_rectangle_lines(x, y, w, h, if hover { 2.0 } else { 1.0 }, if hover { ACCENT } else { INPUT_BORDER });
+    text_batch::rect(x, y, w, h, PANEL_BG);
+    text_batch::rect_lines(x, y, w, h, if hover { 2.0 } else { 1.0 }, if hover { ACCENT } else { INPUT_BORDER });
     let tw = measure_game_text(label, size);
     let color = if hover { WHITE } else { TEXT_LABEL };
-    draw_text_ex(label, x + (w - tw) / 2.0, y + h / 2.0 + size as f32 * 0.35, text_params(size, color));
+    text_batch::text(label, x + (w - tw) / 2.0, y + h / 2.0 + size as f32 * 0.35, size, color);
     hover && is_mouse_button_pressed(MouseButton::Left)
 }
 
@@ -79,11 +80,11 @@ pub(super) fn checkbox(value: &mut bool, enabled: bool, label: &str, x: f32, y: 
     if hover && is_mouse_button_pressed(MouseButton::Left) {
         *value = !*value;
     }
-    draw_rectangle(x, y, size, size, INPUT_BG);
-    draw_rectangle_lines(x, y, size, size, 1.0, if hover { ACCENT } else { INPUT_BORDER });
+    text_batch::rect(x, y, size, size, INPUT_BG);
+    text_batch::rect_lines(x, y, size, size, 1.0, if hover { ACCENT } else { INPUT_BORDER });
     if *value && enabled {
-        draw_rectangle(x + 4.0, y + 4.0, size - 8.0, size - 8.0, ACCENT);
+        text_batch::rect(x + 4.0, y + 4.0, size - 8.0, size - 8.0, ACCENT);
     }
     let color = if enabled { TEXT_LABEL } else { TEXT_DIM };
-    draw_text_ex(label, x + size + 10.0, y + 14.0, text_params(14, color));
+    text_batch::text(label, x + size + 10.0, y + 14.0, 14, color);
 }

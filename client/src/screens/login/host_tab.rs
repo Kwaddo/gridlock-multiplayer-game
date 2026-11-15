@@ -1,6 +1,7 @@
 use crate::core::game_state::LoginField;
 use crate::net::registry::registry_url;
-use crate::ui::fonts::{measure_game_text, text_params};
+use crate::ui::fonts::measure_game_text;
+use crate::ui::text_batch;
 
 use macroquad::prelude::*;
 
@@ -39,7 +40,7 @@ impl LoginScreen {
         } else {
             HINT_UNLISTED
         };
-        draw_text_ex(hint, fx, cb_y + 40.0, text_params(12, TEXT_DIM));
+        text_batch::text(hint, fx, cb_y + 40.0, 12, TEXT_DIM);
 
         let bw = 240.0;
         let by = cb_y + 64.0;
@@ -49,6 +50,6 @@ impl LoginScreen {
 
         let note = "Your game ends when you leave it.";
         let nw = measure_game_text(note, 12);
-        draw_text_ex(note, px + (pw - nw) / 2.0, by + 62.0, text_params(12, TEXT_DIM));
+        text_batch::text(note, px + (pw - nw) / 2.0, by + 62.0, 12, TEXT_DIM);
     }
 }

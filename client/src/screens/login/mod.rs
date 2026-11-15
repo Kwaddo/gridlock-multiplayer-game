@@ -1,7 +1,8 @@
 use crate::core::game_state::*;
 use crate::net::browser::ServerBrowser;
 use crate::net::client::{ConnectProgress, Connector};
-use crate::ui::fonts::{measure_game_text, text_params};
+use crate::ui::fonts::measure_game_text;
+use crate::ui::text_batch;
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
 use std::cell::RefCell;
@@ -129,7 +130,11 @@ impl LoginScreen {
     pub fn draw(&mut self) {
         self.draw_background();
         self.draw_title();
+        // panel text is queued and drawn after the shapes it does not overlap
+        text_batch::batched(|| self.draw_panel());
+    }
 
+    fn draw_panel(&mut self) {
         let sw = screen_width();
         let sh = screen_height();
 
@@ -138,8 +143,8 @@ impl LoginScreen {
         let panel_x = (sw - panel_w) / 2.0;
         let panel_y = sh * 0.24;
         let pad = 36.0;
-        draw_rectangle(panel_x, panel_y, panel_w, panel_h, PANEL_BG);
-        draw_rectangle_lines(panel_x, panel_y, panel_w, panel_h, 1.0, PANEL_BORDER);
+        text_batch::rect(panel_x, panel_y, panel_w, panel_h, PANEL_BG);
+        text_batch::rect_lines(panel_x, panel_y, panel_w, panel_h, 1.0, PANEL_BORDER);
 
         // Everyone needs a name, whichever way they get into a game.
         self.text_field(LoginField::Username, "USERNAME", "Player", panel_x + pad, panel_y + 26.0, panel_w - pad * 2.0);
@@ -159,7 +164,7 @@ impl LoginScreen {
         if !self.error_msg.is_empty() {
             let ew = measure_game_text(&self.error_msg, 15);
             let ey = panel_y + panel_h - 14.0;
-            draw_text_ex(&self.error_msg, panel_x + (panel_w - ew) / 2.0, ey, text_params(15, ERROR));
+            text_batch::text(&self.error_msg, panel_x + (panel_w - ew) / 2.0, ey, 15, ERROR);
         }
 
         // Settings and the controls reference, reachable before joining
@@ -176,15 +181,16 @@ impl LoginScreen {
             }
         }
 
-        draw_text_ex(
+        text_batch::text(
             "F11 fullscreen   |   TAB switch fields   |   ENTER confirm",
             panel_x,
             by + bh + 22.0,
-            text_params(13, TEXT_DIM),
+            13,
+            TEXT_DIM,
         );
 
         if let Some(connector) = &self.connector {
-            draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.55));
+            text_batch::rect(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.55));
             draw_connecting(&connector.progress(), sw, sh);
         }
     }
@@ -199,15 +205,15 @@ impl LoginScreen {
             }
             let active = self.active_tab == tab;
             if active {
-                draw_rectangle(tx, y, tab_w, h, TAB_ACTIVE_BG);
-                draw_rectangle(tx, y + h - 2.0, tab_w, 2.0, ACCENT);
+                text_batch::rect(tx, y, tab_w, h, TAB_ACTIVE_BG);
+                text_batch::rect(tx, y + h - 2.0, tab_w, 2.0, ACCENT);
             }
             let lw = measure_game_text(label, 18);
             let color = if active { WHITE } else { TAB_INACTIVE_TEXT };
-            draw_text_ex(label, tx + (tab_w - lw) / 2.0, y + 26.0, text_params(18, color));
+            text_batch::text(label, tx + (tab_w - lw) / 2.0, y + 26.0, 18, color);
         }
-        draw_rectangle(x, y, w, 1.0, Color::new(0.20, 0.24, 0.40, 0.5));
-        draw_rectangle(x, y + h, w, 1.0, Color::new(0.20, 0.24, 0.40, 0.5));
+        text_batch::rect(x, y, w, 1.0, Color::new(0.20, 0.24, 0.40, 0.5));
+        text_batch::rect(x, y + h, w, 1.0, Color::new(0.20, 0.24, 0.40, 0.5));
     }
 
     fn select_tab(&mut self, tab: MainMenuTab) {
@@ -237,12 +243,12 @@ fn draw_connecting(p: &ConnectProgress, sw: f32, sh: f32) {
     let px = (sw - pw) / 2.0;
     let py = sh * 0.38;
     let pad = 30.0;
-    draw_rectangle(px, py, pw, ph, PANEL_BG);
-    draw_rectangle_lines(px, py, pw, ph, 1.0, PANEL_BORDER);
+    text_batch::rect(px, py, pw, ph, PANEL_BG);
+    text_batch::rect_lines(px, py, pw, ph, 1.0, PANEL_BORDER);
 
     let centered = |text: &str, y: f32, size: u16, color: Color| {
         let w = measure_game_text(text, size);
-        draw_text_ex(text, (sw - w) / 2.0, y, text_params(size, color));
+        text_batch::text(text, (sw - w) / 2.0, y, size, color);
     };
 
     // dots cycle so the panel visibly lives even when the bar barely moves
@@ -255,13 +261,13 @@ fn draw_connecting(p: &ConnectProgress, sw: f32, sh: f32) {
     let bw = pw - pad * 2.0;
     let bh = 22.0;
     let by = py + 76.0;
-    draw_rectangle(bx, by, bw, bh, INPUT_BG);
-    draw_rectangle_lines(bx, by, bw, bh, 1.0, PANEL_BORDER);
+    text_batch::rect(bx, by, bw, bh, INPUT_BG);
+    text_batch::rect_lines(bx, by, bw, bh, 1.0, PANEL_BORDER);
     let frac = p.fraction.clamp(0.0, 1.0);
-    draw_rectangle(bx + 2.0, by + 2.0, (bw - 4.0) * frac, bh - 4.0, ACCENT);
+    text_batch::rect(bx + 2.0, by + 2.0, (bw - 4.0) * frac, bh - 4.0, ACCENT);
     let pct = format!("{}%", (frac * 100.0).round() as u32);
     let pct_w = measure_game_text(&pct, 14);
-    draw_text_ex(&pct, bx + (bw - pct_w) / 2.0, by + 16.0, text_params(14, WHITE));
+    text_batch::text(&pct, bx + (bw - pct_w) / 2.0, by + 16.0, 14, WHITE);
 
     // long room URLs keep their distinctive end
     let char_count = p.address.chars().count();
@@ -271,10 +277,10 @@ fn draw_connecting(p: &ConnectProgress, sw: f32, sh: f32) {
     } else {
         p.address.into()
     };
-    draw_text_ex(&address, bx, by + bh + 20.0, text_params(13, TEXT_DIM));
+    text_batch::text(&address, bx, by + bh + 20.0, 13, TEXT_DIM);
     let elapsed = format!("{:.1}s", p.elapsed.as_secs_f32());
     let ew = measure_game_text(&elapsed, 15);
-    draw_text_ex(&elapsed, bx + bw - ew, by + bh + 20.0, text_params(15, TEXT_LABEL));
+    text_batch::text(&elapsed, bx + bw - ew, by + bh + 20.0, 15, TEXT_LABEL);
 
     let gives_up = p.gives_up_in.as_secs_f32().ceil() as u32;
     let footer = if p.join_attempts > 1 {
