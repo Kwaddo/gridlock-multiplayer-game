@@ -25,6 +25,24 @@ cargo build --release --target "$TARGET" -p client
 echo "==> Assembling $DIST..."
 mkdir -p "$DIST"
 cp "$SCRIPT_DIR/target/$TARGET/release/client.wasm" "$DIST/gridlock.wasm"
+# Binaryen's optimizer trims rustc's output a little further (smaller download,
+# quicker compile on load). Optional: without it, or if it fails, the build
+# goes on with the wasm as cargo made it.
+if command -v wasm-opt >/dev/null 2>&1; then
+    echo "==> Optimizing gridlock.wasm with wasm-opt..."
+    # Only the features rustc uses by default, which every current browser has.
+    if wasm-opt -O3 --enable-sign-ext --enable-mutable-globals --enable-nontrapping-float-to-int \
+        --enable-bulk-memory --enable-multivalue --enable-reference-types \
+        -o "$DIST/gridlock.opt.wasm" "$DIST/gridlock.wasm"; then
+        echo "==> wasm-opt: $(wc -c <"$DIST/gridlock.wasm" | tr -d ' ') -> $(wc -c <"$DIST/gridlock.opt.wasm" | tr -d ' ') bytes"
+        mv "$DIST/gridlock.opt.wasm" "$DIST/gridlock.wasm"
+    else
+        rm -f "$DIST/gridlock.opt.wasm"
+        echo "==> Note: wasm-opt failed; keeping gridlock.wasm as cargo built it"
+    fi
+else
+    echo "==> Note: wasm-opt not found (install Binaryen to shrink gridlock.wasm); skipping it"
+fi
 cp "$SCRIPT_DIR/web/index.html" "$SCRIPT_DIR/web/mq_js_bundle.js" "$SCRIPT_DIR/web/gridlock_web.js" \
     "$SCRIPT_DIR/web/favicon.png" "$SCRIPT_DIR/web/apple-touch-icon.png" "$SCRIPT_DIR/web/og-image.jpg" "$DIST/"
 # The plugin's modules, loaded by index.html before gridlock_web.js.
