@@ -1,5 +1,12 @@
 use crate::ui::fonts::{measure_game_text, text_params};
 use macroquad::prelude::*;
+use std::cell::RefCell;
+use std::fmt::Write;
+
+thread_local! {
+    // reused for every slider value label so drawing them does not allocate
+    static VALUE_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+}
 
 pub(super) fn draw_section_header(label: &str, x: f32, y: f32, s: f32) -> f32 {
     let fs = (18.0 * s) as u16;
@@ -69,8 +76,11 @@ pub(super) fn draw_slider_display(
 
     let step = if max > 100.0 { 1.0 } else if max > 5.0 { 0.1 } else { 0.05 };
     let precision = if step >= 1.0 { 0 } else if step >= 0.1 { 1 } else { 2 };
-    let txt = format!("{:.*}", precision, value);
-    draw_text_ex(&txt, slider_x + slider_w + 6.0 * s, y + 12.0 * s, text_params(val_fs, GRAY));
+    VALUE_TEXT.with_borrow_mut(|txt| {
+        txt.clear();
+        let _ = write!(txt, "{:.*}", precision, value);
+        draw_text_ex(txt, slider_x + slider_w + 6.0 * s, y + 12.0 * s, text_params(val_fs, GRAY));
+    });
 }
 
 /// Input half of a checkbox row (drawn by `draw_toggle_display`). Returns the
