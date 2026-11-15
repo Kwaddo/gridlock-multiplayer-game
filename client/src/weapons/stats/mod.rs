@@ -23,6 +23,8 @@ pub mod snipers;
 pub mod other;
 pub mod melee;
 
+use std::sync::OnceLock;
+
 // --- weapon category (broad class) ---
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -245,10 +247,18 @@ impl WeaponId {
     ];
 
     /// All weapon IDs belonging to a given category (excludes hidden weapons).
-    pub fn all_in(cat: WeaponCategory) -> Vec<WeaponId> {
-        Self::ALL.iter().copied()
-            .filter(|w| w.category() == cat && !Self::HIDDEN.contains(w))
-            .collect()
+    /// Built once from ALL and HIDDEN; the loadout screen asks for these
+    /// lists several times per frame.
+    pub fn all_in(cat: WeaponCategory) -> &'static [WeaponId] {
+        static BY_CATEGORY: OnceLock<[Vec<WeaponId>; 7]> = OnceLock::new();
+        let lists = BY_CATEGORY.get_or_init(|| {
+            std::array::from_fn(|i| {
+                Self::ALL.iter().copied()
+                    .filter(|w| w.category() as usize == i && !Self::HIDDEN.contains(w))
+                    .collect()
+            })
+        });
+        &lists[cat as usize]
     }
 }
 

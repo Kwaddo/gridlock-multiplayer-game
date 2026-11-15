@@ -24,6 +24,8 @@ const CATEGORY_HEADER: Color = Color::new(0.85, 0.65, 0.30, 1.0);
 const STAT_BAR_BG: Color = Color::new(0.06, 0.07, 0.13, 1.0);
 
 const SLOT_LABELS: [&str; LOADOUT_SLOTS] = ["PRIMARY", "SECONDARY"];
+// SLOT_LABELS in brackets, the tag drawn on a weapon row that fills that slot
+const SLOT_TAGS: [&str; LOADOUT_SLOTS] = ["[PRIMARY]", "[SECONDARY]"];
 
 /// Which weapon categories are valid for each slot.
 fn allowed_categories(slot: usize) -> &'static [WeaponCategory] {
@@ -42,11 +44,11 @@ struct StatBar {
 
 const STAT_SEGMENTS: u32 = 10;
 
-fn compute_stat_bars(weapon_id: WeaponId) -> Vec<StatBar> {
+fn compute_stat_bars(weapon_id: WeaponId) -> [StatBar; 6] {
     let s = weapon_id.stats();
     let eff_damage = s.damage * s.pellet_count as f32;
 
-    vec![
+    [
         StatBar { label: "DAMAGE",    value: ((eff_damage - 15.0) / (120.0 - 15.0)).clamp(0.0, 1.0) },
         StatBar { label: "FIRE RATE", value: ((s.fire_rate - 1.0) / (15.0 - 1.0)).clamp(0.0, 1.0) },
         StatBar { label: "ACCURACY",  value: (1.0 - (s.hip_spread - 0.01) / (0.08 - 0.01)).clamp(0.0, 1.0) },
@@ -134,7 +136,7 @@ impl LobbyInventoryScreen {
                     continue;
                 }
                 let weapons = WeaponId::all_in(*cat);
-                for weapon_id in weapons {
+                for &weapon_id in weapons {
                     if y + row_h > list_y && y < list_y + list_h {
                         let row_x = pad;
                         let row_w = left_w - pad * 2.0;
@@ -241,7 +243,6 @@ impl LobbyInventoryScreen {
         let header_h = 28.0;
 
         let mut y = list_y - self.scroll_offset;
-        let loadout_set: Vec<WeaponId> = loadout.slots.to_vec();
         let active_allowed: Option<&[WeaponCategory]> =
             self.selected_slot.map(|s| allowed_categories(s));
 
@@ -264,13 +265,13 @@ impl LobbyInventoryScreen {
             }
             y += header_h;
 
-            for weapon_id in weapons {
+            for &weapon_id in weapons {
                 if y + row_h > list_y && y < list_y + list_h {
                     let row_x = pad;
                     let row_w = left_w - pad * 2.0;
                     let can_click = cat_allowed && self.selected_slot.is_some();
                     let hover = in_rect(mouse, row_x, y, row_w, row_h) && can_click;
-                    let in_loadout = loadout_set.contains(&weapon_id);
+                    let in_loadout = loadout.slots.contains(&weapon_id);
                     let is_hovered_weapon = self.hovered_weapon == Some(weapon_id);
 
                     let bg = if is_hovered_weapon && can_click {
@@ -295,9 +296,9 @@ impl LobbyInventoryScreen {
                     draw_text_ex(name, row_x + 12.0, y + 21.0, text_params(14, text_color));
 
                     if let Some(slot_idx) = loadout.slots.iter().position(|&w| w == weapon_id) {
-                        let tag = format!("[{}]", SLOT_LABELS[slot_idx]);
-                        let tag_w = measure_game_text(&tag, 12);
-                        draw_text_ex(&tag, row_x + row_w - tag_w - 8.0, y + 20.0, text_params(12, TEXT_DIM));
+                        let tag = SLOT_TAGS[slot_idx];
+                        let tag_w = measure_game_text(tag, 12);
+                        draw_text_ex(tag, row_x + row_w - tag_w - 8.0, y + 20.0, text_params(12, TEXT_DIM));
                     }
                 }
                 y += row_h;
