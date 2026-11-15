@@ -16,7 +16,54 @@
     const KIND_GLB = 1;
     const KIND_IMAGE = 2;
 
-    // Runs in the worker. Message in: { id, kind, bytes }. Messages out:
+    // The images to decode in a .glb, as [{ index, mime, bytes }]; only those
+    // stored in its binary chunk (the game supports no others). Each `bytes`
+    // is a copy of just that image, to move to the worker: the file itself
+    // goes to the game, and copying all of it (most of it meshes and maps the
+    // worker never reads) cost more than reading its JSON here.
+    function glbImages(bytes) {
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        if (bytes.length < 20 || view.getUint32(0, true) !== 0x46546c67) return [];
+        let json = null;
+        let bin = null;
+        for (let at = 12; at + 8 <= bytes.length; ) {
+            const length = view.getUint32(at, true);
+            const type = view.getUint32(at + 4, true);
+            const data = bytes.subarray(at + 8, at + 8 + length);
+            if (type === 0x4e4f534a) json = JSON.parse(new TextDecoder().decode(data));
+            else if (type === 0x004e4942) bin = data;
+            at += 8 + length;
+        }
+        if (!json || !bin) return [];
+        // Only the images a material takes its colour from: the game
+        // samples no others (client/src/app/obj_loader.rs,
+        // animated_model/parts.rs), and a model often embeds big normal
+        // and roughness maps too. Any other the game asks for, it decodes.
+        const used = new Set();
+        for (const material of json.materials || []) {
+            const infos = [
+                material?.pbrMetallicRoughness?.baseColorTexture,
+                material?.extensions?.KHR_materials_pbrSpecularGlossiness?.diffuseTexture,
+            ];
+            for (const info of infos) {
+                const source = json.textures?.[info?.index]?.source;
+                if (source !== undefined) used.add(source);
+            }
+        }
+        const out = [];
+        (json.images || []).forEach((image, index) => {
+            if (!used.has(index)) return;
+            const bv = json.bufferViews?.[image.bufferView];
+            if (!bv || bv.buffer !== 0 || json.buffers?.[0]?.uri !== undefined) return;
+            const start = bv.byteOffset || 0;
+            if (start + bv.byteLength > bin.length) return;
+            out.push({ index, mime: image.mimeType || "", bytes: bin.slice(start, start + bv.byteLength) });
+        });
+        return out;
+    }
+
+    // Runs in the worker. Message in: { id, sources: [{ index, mime, bytes }] }
+    // (see glbImages). Messages out:
     // { pixels: { key, width, height, rgba } } for each image as soon as it
     // is decoded, then { id, images: [{ index, key }] } for the file, where
     // `key` names the image's content: GLBs often embed the same textures,
@@ -49,49 +96,6 @@
             return `${fnv >>> 0}:${djb >>> 0}:${bytes.length}`;
         }
 
-        // The embedded images of a .glb, as [{ index, mime, bytes }]; only
-        // those stored in its binary chunk (the game supports no others).
-        function glbImages(bytes) {
-            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-            if (bytes.length < 20 || view.getUint32(0, true) !== 0x46546c67) return [];
-            let json = null;
-            let bin = null;
-            for (let at = 12; at + 8 <= bytes.length; ) {
-                const length = view.getUint32(at, true);
-                const type = view.getUint32(at + 4, true);
-                const data = bytes.subarray(at + 8, at + 8 + length);
-                if (type === 0x4e4f534a) json = JSON.parse(new TextDecoder().decode(data));
-                else if (type === 0x004e4942) bin = data;
-                at += 8 + length;
-            }
-            if (!json || !bin) return [];
-            // Only the images a material takes its colour from: the game
-            // samples no others (client/src/app/obj_loader.rs,
-            // animated_model/parts.rs), and a model often embeds big normal
-            // and roughness maps too. Any other the game asks for, it decodes.
-            const used = new Set();
-            for (const material of json.materials || []) {
-                const infos = [
-                    material?.pbrMetallicRoughness?.baseColorTexture,
-                    material?.extensions?.KHR_materials_pbrSpecularGlossiness?.diffuseTexture,
-                ];
-                for (const info of infos) {
-                    const source = json.textures?.[info?.index]?.source;
-                    if (source !== undefined) used.add(source);
-                }
-            }
-            const out = [];
-            (json.images || []).forEach((image, index) => {
-                if (!used.has(index)) return;
-                const bv = json.bufferViews?.[image.bufferView];
-                if (!bv || bv.buffer !== 0 || json.buffers?.[0]?.uri !== undefined) return;
-                const start = bv.byteOffset || 0;
-                if (start + bv.byteLength > bin.length) return;
-                out.push({ index, mime: image.mimeType || "", bytes: bin.subarray(start, start + bv.byteLength) });
-            });
-            return out;
-        }
-
         // RGBA pixels, or null. Images with any transparency are left to the
         // game: a canvas stores premultiplied alpha, which would round them.
         async function decode(bytes, mime) {
@@ -115,11 +119,9 @@
             if (image) self.postMessage({ pixels: { key, ...image } }, [image.rgba.buffer]);
         }
 
-        self.onmessage = async ({ data: { id, kind, bytes } }) => {
+        self.onmessage = async ({ data: { id, sources } }) => {
             const images = [];
             try {
-                // 1: a .glb; otherwise the file is the image (index 0xffffffff).
-                const sources = kind === 1 ? glbImages(bytes) : [{ index: 0xffffffff, mime: "", bytes }];
                 for (const source of sources) {
                     const key = await contentKey(source.bytes);
                     images.push({ index: source.index, key });
@@ -170,6 +172,14 @@
     function decodeAhead(path, kind, bytes) {
         const w = decoder();
         if (!w) return Promise.resolve();
+        let sources = [];
+        try {
+            // A .glb's images; otherwise the file is the image (index
+            // 0xffffffff). Copies (moved, not copied again): the original
+            // goes to the game.
+            sources = kind === KIND_GLB ? glbImages(bytes) : [{ index: 0xffffffff, mime: "", bytes: bytes.slice() }];
+        } catch {} // not a valid file: the game reports it
+        if (!sources.length) return Promise.resolve();
         const id = nextId++;
         return new Promise((resolve) => {
             waiting.set(id, (images) => {
@@ -177,9 +187,7 @@
                 for (const image of images) keyOf.set(`${path}#${image.index}`, image.key);
                 resolve();
             });
-            // A copy (moved, not copied again): the original goes to the game.
-            const copy = bytes.slice();
-            w.postMessage({ id, kind, bytes: copy }, [copy.buffer]);
+            w.postMessage({ id, sources }, sources.map((source) => source.bytes.buffer));
         });
     }
 
