@@ -4,6 +4,7 @@ use crate::core::GameConfig;
 use crate::types::maze::{CellKind, CellKindCache, Maze};
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
+use crate::ui::prims::{fill_disc, ring};
 use crate::weapons::combat::CombatEntity;
 use crate::world::lobby::{LANDMARK_CUBES, LOBBY_CONSOLE_POS, LOBBY_CONSOLE_SIZE, PARKOUR_CUBES};
 
@@ -61,7 +62,7 @@ pub fn draw_minimap(
 
     // Background
     if circular {
-        draw_circle(center_x, center_y, half + 1.0, BG_COLOR);
+        fill_disc(center_x, center_y, half + 1.0, 20, BG_COLOR);
     } else {
         draw_rectangle(
             center_x - half,
@@ -104,8 +105,8 @@ pub fn draw_minimap(
 
     // Border
     if circular {
-        draw_circle_lines(center_x, center_y, half + 2.0, 3.0, BORDER_GLOW);
-        draw_circle_lines(center_x, center_y, half, 2.0, BORDER_COLOR);
+        ring(center_x, center_y, half + 2.0, 3.0, 30, BORDER_GLOW);
+        ring(center_x, center_y, half, 2.0, 30, BORDER_COLOR);
     } else {
         let tl_x = center_x - half;
         let tl_y = center_y - half;
@@ -143,35 +144,39 @@ fn draw_maze_layer(
     let frac_x = player_cx - pcx as f32;
     let frac_z = player_cz - pcy as f32;
 
-    CELL_KINDS.with(|kinds| kinds.borrow_mut().sync(maze));
     let view_r = (half / cell_px).ceil() as i32 + 1;
 
-    for dy in -view_r..=view_r {
-        for dx in -view_r..=view_r {
-            let cx = pcx + dx;
-            let cy = pcy + dy;
+    // borrowed once for the whole window rather than once per cell
+    CELL_KINDS.with(|kinds| {
+        kinds.borrow_mut().sync(maze);
+        let kinds = kinds.borrow();
+        for dy in -view_r..=view_r {
+            for dx in -view_r..=view_r {
+                let cx = pcx + dx;
+                let cy = pcy + dy;
 
-            // Screen position of cell center (north-up: no rotation)
-            let sx = center_x + (dx as f32 - frac_x + 0.5) * cell_px;
-            let sy = center_y + (dy as f32 - frac_z + 0.5) * cell_px;
+                // Screen position of cell center (north-up: no rotation)
+                let sx = center_x + (dx as f32 - frac_x + 0.5) * cell_px;
+                let sy = center_y + (dy as f32 - frac_z + 0.5) * cell_px;
 
-            let alpha = fade_alpha(sx, sy, center_x, center_y, half, circular);
-            if alpha <= 0.0 {
-                continue;
+                let alpha = fade_alpha(sx, sy, center_x, center_y, half, circular);
+                if alpha <= 0.0 {
+                    continue;
+                }
+
+                let base = match kinds.kind_at(cx, cy) {
+                    CellKind::RoomFloor => ROOM_FLOOR_COLOR,
+                    CellKind::Floor => FLOOR_COLOR,
+                    CellKind::BreakableWall => BREAKABLE_COLOR,
+                    CellKind::Wall => WALL_COLOR,
+                };
+
+                let color = Color::new(base.r, base.g, base.b, base.a * alpha);
+                let h = cell_px / 2.0;
+                draw_rectangle(sx - h, sy - h, cell_px, cell_px, color);
             }
-
-            let base = match CELL_KINDS.with(|kinds| kinds.borrow().kind_at(cx, cy)) {
-                CellKind::RoomFloor => ROOM_FLOOR_COLOR,
-                CellKind::Floor => FLOOR_COLOR,
-                CellKind::BreakableWall => BREAKABLE_COLOR,
-                CellKind::Wall => WALL_COLOR,
-            };
-
-            let color = Color::new(base.r, base.g, base.b, base.a * alpha);
-            let h = cell_px / 2.0;
-            draw_rectangle(sx - h, sy - h, cell_px, cell_px, color);
         }
-    }
+    });
 }
 
 // ─── Lobby layer ──────────────────────────────────────────────────────────────
@@ -344,14 +349,9 @@ fn draw_other_players(
 
         let dot_size = (ppwu * 0.9).clamp(3.0, 6.0);
         let c = p.color;
-        draw_circle(sx, sy, dot_size, Color::new(c.r, c.g, c.b, c.a * alpha));
-        draw_circle_lines(
-            sx,
-            sy,
-            dot_size,
-            1.0,
-            Color::new(0.0, 0.0, 0.0, 0.5 * alpha),
-        );
+        // a 3-6 px dot: 12 sides is visually a circle
+        fill_disc(sx, sy, dot_size, 12, Color::new(c.r, c.g, c.b, c.a * alpha));
+        ring(sx, sy, dot_size, 1.0, 12, Color::new(0.0, 0.0, 0.0, 0.5 * alpha));
     }
 }
 

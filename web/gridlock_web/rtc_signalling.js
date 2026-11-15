@@ -7,7 +7,7 @@
 (function (gridlockWeb) {
     const {
         FORCE_RELAY, POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, LONG_POLL_HEADER,
-        LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, SEND_BATCH_MS, sleep, roomHttpUrl, gathered,
+        LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, SEEN_KEEP, SEND_BATCH_MS, sleep, roomHttpUrl, gathered,
         iceServersFor, spareFor,
     } = gridlockWeb;
 
@@ -159,8 +159,14 @@
                         }
                         // Ask to be held until something new arrives; a registry
                         // without long polling ignores this.
-                        const have = [...seen].filter(([, seq]) => seq >= lastSeq - HAVE_WINDOW).slice(-HAVE_MAX);
-                        q += `&wait&after=${lastSeq}&have=${have.map(([id]) => encodeURIComponent(id)).join(",")}`;
+                        // Messages too old to come again are forgotten on the
+                        // way, so `seen` stays small for a host up for hours.
+                        const have = [];
+                        seen.forEach((seq, id) => {
+                            if (seq < lastSeq - SEEN_KEEP) seen.delete(id);
+                            else if (seq >= lastSeq - HAVE_WINDOW) have.push(id);
+                        });
+                        q += `&wait&after=${lastSeq}&have=${have.slice(-HAVE_MAX).map((id) => encodeURIComponent(id)).join(",")}`;
                         const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
                         longPoll = resp.headers.has(LONG_POLL_HEADER);
                         failures = 0;
@@ -168,6 +174,9 @@
                         // players already connected are not affected.
                         if (resp.status === 410 && this.isHost && (await this.reclaim())) {
                             this.publishSpares(); // they name the host by its new id
+                            // A restarted local registry numbers messages from 1
+                            // again; an old `after` would hide every new one.
+                            lastSeq = 0;
                             continue;
                         }
                         // 410: the host left; 403/404: this room is gone for us.

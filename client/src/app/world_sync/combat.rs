@@ -26,6 +26,12 @@ pub(super) fn apply_damage(
     } else {
         "Hit!".to_string()
     };
+    // a burst of hits from one attacker refreshes one line instead of
+    // stacking a copy per hit (a minigun stacked dozens)
+    if let Some(existing) = playing_state.announcements.iter_mut().find(|(text, _)| *text == ann) {
+        existing.1 = existing.1.max(2.0);
+        return;
+    }
     playing_state.announcements.push((ann, 2.0));
 }
 
@@ -36,6 +42,16 @@ pub(super) fn spawn_bot_shots(
     bot_shots: Vec<(u32, Vec3, Vec3)>,
     maze: Option<&client::types::maze::Maze>,
 ) {
+    // The server sends every bot shot to every human, wherever they are: a
+    // shot from a bot in another world (the maze, seen from the lobby) would
+    // play its sound and draw its tracer at that world's coordinates here.
+    // (The server now sends a bot's shots only to its world; this also covers
+    // older hosts.) A shooter we do not know yet still shows, as before.
+    let world = playing_state.current_world;
+    let mut bot_shots = bot_shots;
+    bot_shots.retain(|&(shooter, ..)| {
+        playing_state.other_players.iter().find(|p| p.id == shooter).is_none_or(|p| p.world == world)
+    });
     for &(_, start, _) in &bot_shots {
         // the shot message carries no weapon, so bots all sound like rifles
         let volume = client::audio::catalog::SHOT_VOLUME;

@@ -123,6 +123,12 @@ thread_local! {
     ).expect("mirror glass shader failed to compile");
 }
 
+/// Compiles the glass shader now (during loading) instead of in the first
+/// frame a mirror goes live.
+pub fn warm_up() {
+    GLASS_MATERIAL.with(|_| {});
+}
+
 impl Mirror {
     /// distance from mirror plane, positive if in front of mirror, negative if behind
     pub fn signed_distance(&self, p: Vec3) -> f32 {

@@ -6,6 +6,7 @@ pub mod broadcast;
 pub mod game;
 pub mod handlers;
 pub mod snd;
+mod snd_gate;
 pub mod utils;
 mod match_flow;
 mod packet;
@@ -19,7 +20,7 @@ mod wire_tests;
 
 use crate::bot::manager::BotManager;
 use crate::maze::MazeData;
-use crate::net::{Outbox, PeerId};
+use crate::net::{Outbox, Packet, PeerId};
 use crate::player::Player;
 use crate::protocols::*;
 
@@ -142,8 +143,14 @@ impl Server {
     }
 
     /// Packets queued since the last call, as `(destination, bytes)`.
-    pub fn drain_outbox(&mut self) -> Vec<(PeerId, Vec<u8>)> {
+    pub fn drain_outbox(&mut self) -> Vec<(PeerId, Packet)> {
         self.outbox.drain()
+    }
+
+    /// [`drain_outbox`](Self::drain_outbox) onto the end of `out`, for a host
+    /// that keeps one buffer across ticks: no allocation once both have grown.
+    pub fn drain_outbox_into(&mut self, out: &mut Vec<(PeerId, Packet)>) {
+        self.outbox.drain_into(out);
     }
 
     /// Whether `peer` currently owns a player (joined and not timed out).

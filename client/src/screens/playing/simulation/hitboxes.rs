@@ -63,8 +63,10 @@ fn build_standing_hitboxes_from_joints(
         Here we are using the same model scaling as the render so visual hitbox indicators line up with the actual hitboxes, and we also apply the same scaling to
         the y_offset which is used to adjust the hitbox positions up or down based on the players height (crouching, standing, etc)
     */
+    // the same rotation for every joint, built once
+    let rotation = Mat3::from_rotation_y(-yaw + PLAYER_MODEL_YAW_OFFSET);
     let to_offset = |p: Vec3| -> Vec3 {
-        let rotated = Mat3::from_rotation_y(-yaw + PLAYER_MODEL_YAW_OFFSET) * (p * scale);
+        let rotated = rotation * (p * scale);
         rotated + vec3(0.0, y_offset, 0.0)
     };
 

@@ -1,6 +1,9 @@
 use macroquad::prelude::*;
+use std::cell::RefCell;
+use std::fmt::Write;
 
 use crate::ui::draw_arc;
+use crate::ui::prims::{draw_circle, draw_circle_lines};
 use crate::ui::fonts::{measure_game_text, text_params};
 use crate::weapons::crosshair::CrosshairType;
 use crate::weapons::effects::DamageNumber;
@@ -8,6 +11,11 @@ use crate::weapons::stats::CrosshairStyle;
 use crate::weapons::WeaponInventory;
 
 use super::scope::draw_scope_vignette;
+
+thread_local! {
+    // reused for every damage number so drawing them does not allocate
+    static DAMAGE_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+}
 
 pub(super) fn draw_crosshair_and_combat_feedback(
     cx: f32,
@@ -58,7 +66,11 @@ pub(super) fn draw_crosshair_and_combat_feedback(
                 let thick = (xhair.line_thickness * sh) / 100.0;
                 let gap_angle: f32 = 20.0_f32.to_radians();
                 let quarter = std::f32::consts::FRAC_PI_2;
-                let segs = 32u32;
+                // about one segment per 4 px of outer arc length (never more
+                // than the old fixed 32): the chords stay well under a pixel
+                // off the true curve at crosshair radii
+                let arc_len = (radius + thick) * (quarter - 2.0 * gap_angle);
+                let segs = (arc_len / 4.0).ceil().clamp(6.0, 32.0) as u32;
 
                 if xhair.outline_enabled {
                     let ot = thick + (xhair.outline_thickness * sh) / 100.0 * 2.0;
@@ -481,13 +493,16 @@ pub(super) fn draw_crosshair_and_combat_feedback(
         } else {
             (Color::from_rgba(255, 255, 255, alpha), 22)
         };
-        let text = format!("{}", dmg.amount as u32);
-        let tw = measure_game_text(&text, size);
-        draw_text_ex(
-            &text,
-            dmg.screen_x - tw / 2.0,
-            dmg.screen_y,
-            text_params(size, color),
-        );
+        DAMAGE_TEXT.with_borrow_mut(|text| {
+            text.clear();
+            let _ = write!(text, "{}", dmg.amount as u32);
+            let tw = measure_game_text(text, size);
+            draw_text_ex(
+                text,
+                dmg.screen_x - tw / 2.0,
+                dmg.screen_y,
+                text_params(size, color),
+            );
+        });
     }
 }

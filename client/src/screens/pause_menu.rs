@@ -2,7 +2,8 @@ use crate::core::GameConfig;
 use crate::core::GameState;
 use crate::screens::dev_mode::DevModeState;
 use crate::settings::SettingsScreen;
-use crate::ui::fonts::{measure_game_text, text_params};
+use crate::ui::fonts::measure_game_text;
+use crate::ui::text_batch;
 use crate::ui::is_button_clicked;
 use macroquad::prelude::*;
 
@@ -67,17 +68,20 @@ impl PauseMenu {
         if !(in_match && is_host) {
             self.confirm_end = None;
         }
-        let action = if let Some(opened) = self.confirm_end {
-            self.draw_confirm_end(config, get_time() - opened >= CONFIRM_ARM_SECS)
-        } else {
-            match draw_main(config, dev_mode, in_match, is_host)? {
-                Button::EndMatch => {
-                    self.confirm_end = Some(get_time());
-                    None
+        // button text is queued and drawn after the panel and button shapes
+        let action = text_batch::batched(|| {
+            if let Some(opened) = self.confirm_end {
+                self.draw_confirm_end(config, get_time() - opened >= CONFIRM_ARM_SECS)
+            } else {
+                match draw_main(config, dev_mode, in_match, is_host)? {
+                    Button::EndMatch => {
+                        self.confirm_end = Some(get_time());
+                        None
+                    }
+                    picked => button_action(picked, config, settings_screen, dev_mode),
                 }
-                picked => button_action(picked, config, settings_screen, dev_mode),
             }
-        };
+        });
         if action.is_some() {
             self.confirm_end = None;
         }
@@ -98,11 +102,12 @@ impl PauseMenu {
 
         let note = "Everyone returns to the lobby.";
         let note_w = measure_game_text(note, 16);
-        draw_text_ex(
+        text_batch::text(
             note,
             (screen_width() - note_w) / 2.0,
             panel_y + 72.0,
-            text_params(16, Color::from_rgba(200, 200, 200, 255)),
+            16,
+            Color::from_rgba(200, 200, 200, 255),
         );
 
         let btn_x = (screen_width() - BTN_W) / 2.0;
@@ -167,6 +172,8 @@ fn draw_main(
         if DevModeState::update_code_prompt(dev_mode) {
             return Some(Button::DevModeUnlocked);
         }
+        // the prompt draws unbatched over the panel
+        text_batch::flush();
         DevModeState::draw_code_prompt(dev_mode);
         return None; // Block all button interaction
     }
@@ -242,27 +249,28 @@ fn draw_panel(panel_x: f32, panel_y: f32, panel_h: f32) {
 
 /// Dimmed game behind, and the menu panel with its title.
 fn draw_panel_titled(panel_x: f32, panel_y: f32, panel_h: f32, title: &str) {
-    draw_rectangle(
+    text_batch::rect(
         0.0,
         0.0,
         screen_width(),
         screen_height(),
         Color::from_rgba(0, 0, 0, 150),
     );
-    draw_rectangle(
+    text_batch::rect(
         panel_x,
         panel_y,
         PANEL_W,
         panel_h,
         Color::from_rgba(30, 30, 30, 240),
     );
-    draw_rectangle_lines(panel_x, panel_y, PANEL_W, panel_h, 2.0, WHITE);
+    text_batch::rect_lines(panel_x, panel_y, PANEL_W, panel_h, 2.0, WHITE);
 
     let title_w = measure_game_text(title, 30);
-    draw_text_ex(
+    text_batch::text(
         title,
         (screen_width() - title_w) / 2.0,
         panel_y + 40.0,
-        text_params(30, WHITE),
+        30,
+        WHITE,
     );
 }

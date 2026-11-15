@@ -56,9 +56,6 @@ impl PlayingState {
             self.dev_mode.default_character_requested = false;
             self.set_character(Self::DEFAULT_CHARACTER); // straight back to the default soldier
         }
-        if self.dev_mode.is_unlocked() {
-            self.dev_mode.character_label = self.character_label(); // kept fresh so "still loading" counts down
-        }
 
         // update kill feed timers and drop expired entries in a single pass
         self.kill_feed.retain_mut(|entry| {

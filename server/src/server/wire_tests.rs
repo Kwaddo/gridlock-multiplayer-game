@@ -4,7 +4,7 @@ use super::*;
 use crate::net::BOT_PEER_BASE;
 use crate::player::Team;
 
-fn to(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<ServerMsg> {
+fn to(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<ServerMsg> {
     out.iter().filter(|(p, _)| *p == peer).filter_map(|(_, b)| ServerMsg::decode(b)).collect()
 }
 
@@ -161,6 +161,16 @@ fn bot_shots_of_one_tick_share_a_packet() {
     }
     crate::bot::manager::send_bot_shots(&outbox, &players, &[]);
     assert!(outbox.drain().is_empty());
+
+    // a shot at a victim who is gone draws no tracer to the origin
+    crate::bot::manager::send_bot_shots(&outbox, &players, &[(bots[0], 777)]);
+    assert!(outbox.drain().is_empty());
+
+    // humans in another world do not hear or see the bots' shots
+    players.get_mut(&other_human).unwrap().world = crate::player::WorldId::Maze;
+    crate::bot::manager::send_bot_shots(&outbox, &players, &fired);
+    let out = outbox.drain();
+    assert!(!out.is_empty() && out.iter().all(|(p, _)| *p == human));
 }
 
 fn round_to_grid(v: f32) -> f32 {

@@ -23,18 +23,35 @@ fn force_cpu_skinning() -> bool {
 
 pub(super) enum GpuGeometry {
     Untried,
-    /// One vertex and index buffer per part, uploaded once.
-    Ready(Vec<GpuPart>),
+    /// The parts merged into as few vertex/index buffers as fit u16 indices,
+    /// uploaded once.
+    Ready(Vec<GpuBatch>),
     /// Rigid parts, too many joints, or no shader: skinned on the CPU instead.
     Unavailable,
 }
 
-pub(super) struct GpuPart {
+/// One vertex and index buffer holding several parts back to back, drawn as
+/// one index range per run of parts with the same texture and colour (the
+/// load-time chunks of one primitive merge back into one draw).
+pub(super) struct GpuBatch {
     vertices: miniquad::BufferId,
     indices: miniquad::BufferId,
+    draws: Vec<GpuDraw>,
+}
+
+struct GpuDraw {
+    first_index: i32,
     index_count: i32,
+    /// Kept so the texture outlives the buffers that sample it.
     texture: Option<Texture2D>,
     color: [f32; 4],
+}
+
+impl GpuDraw {
+    fn same_material(&self, texture: &Option<Texture2D>, color: [f32; 4]) -> bool {
+        let id = |t: &Option<Texture2D>| t.as_ref().map(|t| t.raw_miniquad_id());
+        id(&self.texture) == id(texture) && self.color == color
+    }
 }
 
 /// Pipeline and a 1x1 white texture for untextured parts; `None` if the GPU
@@ -140,9 +157,11 @@ fn gpu_skinning_setup(ctx: &mut dyn miniquad::RenderingBackend) -> Option<GpuSki
     Some(GpuSkinning { pipeline, white })
 }
 
-fn gpu_parts(ctx: &mut dyn miniquad::RenderingBackend, parts: &[AnimatedPart]) -> Option<Vec<GpuPart>> {
+/// Vertices one u16-indexed batch can hold.
+const BATCH_MAX_VERTICES: usize = u16::MAX as usize + 1;
+
+fn gpu_parts(ctx: &mut dyn miniquad::RenderingBackend, parts: &[AnimatedPart]) -> Option<Vec<GpuBatch>> {
     use miniquad::*;
-    let mut out = Vec::with_capacity(parts.len());
     for part in parts {
         if !part.rigid_vertices.is_empty() || part.skin_vertices.len() != part.mesh.vertices.len() {
             return None;
@@ -150,27 +169,49 @@ fn gpu_parts(ctx: &mut dyn miniquad::RenderingBackend, parts: &[AnimatedPart]) -
         if part.skin_vertices.iter().any(|v| v.joints.iter().any(|&j| j as usize >= MAX_GPU_JOINTS)) {
             return None;
         }
-        let vertices: Vec<GpuSkinVertex> = part
-            .mesh
-            .vertices
-            .iter()
-            .zip(&part.skin_vertices)
-            .map(|(v, s)| GpuSkinVertex {
-                position: s.bind_position.to_array(),
-                uv: v.uv.to_array(),
-                joints: s.joints.map(|j| j as f32),
-                weights: s.weights,
-            })
-            .collect();
-        let color = part.mesh.vertices.first().map_or([255; 4], |v| v.color).map(|c| c as f32 / 255.0);
-        out.push(GpuPart {
-            vertices: ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Immutable, BufferSource::slice(&vertices)),
-            indices: ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Immutable, BufferSource::slice(&part.mesh.indices)),
-            index_count: part.mesh.indices.len() as i32,
-            texture: part.mesh.texture.clone(),
-            color,
-        });
+        if part.mesh.vertices.len() > BATCH_MAX_VERTICES {
+            return None;
+        }
     }
+
+    let mut out = Vec::new();
+    let mut vertices: Vec<GpuSkinVertex> = Vec::new();
+    let mut indices: Vec<u16> = Vec::new();
+    let mut draws: Vec<GpuDraw> = Vec::new();
+    let mut flush = |vertices: &mut Vec<GpuSkinVertex>, indices: &mut Vec<u16>, draws: &mut Vec<GpuDraw>, ctx: &mut dyn RenderingBackend| {
+        if draws.is_empty() {
+            return;
+        }
+        out.push(GpuBatch {
+            vertices: ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Immutable, BufferSource::slice(vertices)),
+            indices: ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Immutable, BufferSource::slice(indices)),
+            draws: std::mem::take(draws),
+        });
+        vertices.clear();
+        indices.clear();
+    };
+
+    for part in parts {
+        if vertices.len() + part.mesh.vertices.len() > BATCH_MAX_VERTICES {
+            flush(&mut vertices, &mut indices, &mut draws, ctx);
+        }
+        let base = vertices.len() as u16;
+        let first_index = indices.len() as i32;
+        vertices.extend(part.mesh.vertices.iter().zip(&part.skin_vertices).map(|(v, s)| GpuSkinVertex {
+            position: s.bind_position.to_array(),
+            uv: v.uv.to_array(),
+            joints: s.joints.map(|j| j as f32),
+            weights: s.weights,
+        }));
+        indices.extend(part.mesh.indices.iter().map(|&i| base + i));
+        let index_count = part.mesh.indices.len() as i32;
+        let color = part.mesh.vertices.first().map_or([255; 4], |v| v.color).map(|c| c as f32 / 255.0);
+        match draws.last_mut() {
+            Some(last) if last.same_material(&part.mesh.texture, color) => last.index_count += index_count,
+            _ => draws.push(GpuDraw { first_index, index_count, texture: part.mesh.texture.clone(), color }),
+        }
+    }
+    flush(&mut vertices, &mut indices, &mut draws, ctx);
     Some(out)
 }
 
@@ -219,16 +260,26 @@ impl AnimatedModel {
         self.draw_gpu_pose(&self.pose, model, tint)
     }
 
+    /// The clip's own pose with every material's alpha forced to 1, like
+    /// the first-person hands' `draw_mesh_opaque` (texture alpha still applies).
+    pub fn draw_gpu_opaque(&self, model: Mat4) -> bool {
+        self.draw_gpu_impl(&self.pose, model, WHITE, true)
+    }
+
     // draw bent like any pose you hand it, before this it could only draw the clip's own pose
     // so everyone on the same clip got drawn in the exact same pose
     pub fn draw_gpu_pose(&self, pose: &Pose, model: Mat4, tint: Color) -> bool {
+        self.draw_gpu_impl(pose, model, tint, false)
+    }
+
+    fn draw_gpu_impl(&self, pose: &Pose, model: Mat4, tint: Color, opaque: bool) -> bool {
         let mut gl = unsafe { get_internal_gl() };
         let Some(skinning) = self.ensure_gpu(gl.quad_context) else {
             self.gpu_drawn.set(false);
             return false;
         };
         let gpu = self.geometry.gpu.borrow();
-        let GpuGeometry::Ready(parts) = &*gpu else {
+        let GpuGeometry::Ready(batches) = &*gpu else {
             self.gpu_drawn.set(false);
             return false;
         };
@@ -249,16 +300,25 @@ impl AnimatedModel {
         let ctx = gl.quad_context;
         ctx.begin_pass(pass, miniquad::PassAction::Nothing);
         ctx.apply_pipeline(&skinning.0);
-        for part in parts {
-            uniforms.color = part.color;
-            let texture = part.texture.as_ref().map_or(skinning.1, |t| t.raw_miniquad_id());
-            ctx.apply_bindings(&miniquad::Bindings {
-                vertex_buffers: vec![part.vertices],
-                index_buffer: part.indices,
-                images: vec![texture],
-            });
-            ctx.apply_uniforms(miniquad::UniformsSource::table(&uniforms));
-            ctx.draw(0, part.index_count, 1);
+        // The 5 KB uniform block goes up once, and again only when a draw's
+        // colour differs; bindings change only with the batch or texture.
+        let mut uploaded_color: Option<[f32; 4]> = None;
+        for batch in batches {
+            let mut bound: Option<miniquad::TextureId> = None;
+            for draw in &batch.draws {
+                let texture = draw.texture.as_ref().map_or(skinning.1, |t| t.raw_miniquad_id());
+                if bound != Some(texture) {
+                    ctx.apply_bindings_from_slice(&[batch.vertices], batch.indices, &[texture]);
+                    bound = Some(texture);
+                }
+                let color = if opaque { [draw.color[0], draw.color[1], draw.color[2], 1.0] } else { draw.color };
+                if uploaded_color != Some(color) {
+                    uniforms.color = color;
+                    ctx.apply_uniforms(miniquad::UniformsSource::table(&uniforms));
+                    uploaded_color = Some(color);
+                }
+                ctx.draw(draw.first_index, draw.index_count, 1);
+            }
         }
         ctx.end_render_pass();
         true

@@ -94,6 +94,14 @@
     const RELIABLE_MIN_BYTES = 1100;
     // ...unless that channel is backed up this far, when they take their chances.
     const RELIABLE_MAX_BUFFERED = 256 * 1024;
+    // The game channel backed up this far (a stalled link, about a second of
+    // snapshots): what is queued is stale already, so new packets are dropped,
+    // like UDP would, instead of arriving late in a burst.
+    const UNRELIABLE_MAX_BUFFERED = 32 * 1024;
+    // A message this much older than the newest one seen (in its seq, ms on
+    // the live registry) can not be handed out again: registries keep
+    // messages for 60 s. The page forgets having seen it.
+    const SEEN_KEEP = 70000;
     const CHANNEL = "gridlock";
     const RELIABLE_CHANNEL = "gridlock-r";
 
@@ -102,7 +110,7 @@
         POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, LONG_POLL_HEADER, LONG_POLL_GAP_MS,
         POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, GATHER_MS, SPARE_COUNT, SPARE_ROTATE_MS, SPARE_GRACE_MS, SPARE_TICK_MS,
         SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, PRECONNECT_RETRY_MS, SEND_BATCH_MS,
-        DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, ICE_CACHE_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, CHANNEL,
-        RELIABLE_CHANNEL,
+        DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, ICE_CACHE_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, UNRELIABLE_MAX_BUFFERED,
+        SEEN_KEEP, CHANNEL, RELIABLE_CHANNEL,
     });
 })((window.gridlockWeb = window.gridlockWeb || {}));

@@ -5,6 +5,7 @@ use platform::Instant;
 use crate::player::{Player, Team, WorldId};
 use crate::protocols::*;
 use crate::server::broadcast;
+use crate::server::snd_gate::{RoundStateGate, RoundStateKey};
 
 /// S&D round phase
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +63,9 @@ pub struct SndState {
     /// Saved spawn positions so we can re-use them across rounds
     pub red_spawn: (f32, f32, f32),
     pub blue_spawn: (f32, f32, f32),
+
+    /// Holds back round-state broadcasts that would show nothing new.
+    round_state_gate: RoundStateGate,
 }
 
 // S&D timing constants
@@ -101,6 +105,7 @@ impl SndState {
             round_alive: HashMap::new(),
             red_spawn,
             blue_spawn,
+            round_state_gate: RoundStateGate::default(),
         }
     }
 
@@ -306,8 +311,12 @@ impl SndState {
             }
         }
 
-        // Broadcast round state
-        self.broadcast_round_state(socket, players);
+        // Broadcast round state, when a client would see a change (or as a
+        // heartbeat), not on every tick
+        let key = self.round_state_key(players.len());
+        if self.round_state_gate.should_send(key, dt) {
+            self.broadcast_round_state(socket, players);
+        }
 
         None
     }
@@ -436,6 +445,25 @@ impl SndState {
         if self.defuser == Some(player_addr) {
             self.defuser = None;
             self.defuse_progress = 0.0;
+        }
+    }
+
+    fn round_state_key(&self, players: usize) -> RoundStateKey {
+        RoundStateKey {
+            round: self.current_round,
+            wins: (self.red_round_wins, self.blue_round_wins),
+            phase: self.phase as u8,
+            attacking_team: self.attacking_team.as_u8(),
+            bomb_carrier: self.bomb_carrier.unwrap_or(0),
+            bomb_pos: self.bomb_dropped_pos.unwrap_or((0.0, 0.0, 0.0)),
+            bomb_planted: self.bomb_planted,
+            plant_step: RoundStateKey::progress_step(self.plant_progress),
+            defuse_step: RoundStateKey::progress_step(self.defuse_progress),
+            planting: self.plant_progress > 0.0,
+            defusing: self.defuse_progress > 0.0,
+            timer_secs: RoundStateKey::timer_secs(self.phase_timer),
+            urgent: RoundStateKey::urgent(self.phase_timer),
+            players,
         }
     }
 

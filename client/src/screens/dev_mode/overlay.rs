@@ -4,7 +4,8 @@ use crate::ui::fonts::{measure_game_text, text_params};
 use crate::weapons::state::WeaponInventory;
 use macroquad::prelude::*;
 
-use super::state::{DevModeState, TAB_NAMES};
+use super::state::{DevModeState, DEBUG_TAB, TAB_NAMES};
+use super::text_queue::{flush_text, queue_text, take_content_bottom};
 use super::tabs::{
     draw_crosshair_tab, draw_debug_tab, draw_movement_tab, draw_viewmodel_tab, draw_weapon_tab,
 };
@@ -44,18 +45,14 @@ pub fn draw_dev_overlay<F>(
         Color::from_rgba(80, 150, 220, 255),
     );
 
-    draw_text_ex(
+    queue_text(
         "DEV MODE",
         panel_x + 10.0,
         panel_y + 24.0,
-        text_params(20, Color::from_rgba(80, 150, 220, 255)),
+        20,
+        Color::from_rgba(80, 150, 220, 255),
     );
-    draw_text_ex(
-        "F3 to close",
-        panel_x + panel_w - 100.0,
-        panel_y + 24.0,
-        text_params(12, GRAY),
-    );
+    queue_text("F3 to close", panel_x + panel_w - 100.0, panel_y + 24.0, 12, GRAY);
 
     let tab_y = panel_y + 36.0;
     let tab_w = (panel_w - 20.0) / TAB_NAMES.len() as f32;
@@ -75,12 +72,7 @@ pub fn draw_dev_overlay<F>(
         };
         draw_rectangle(tx, tab_y, tab_w - 2.0, 26.0, color);
         let tw = measure_game_text(name, 14);
-        draw_text_ex(
-            name,
-            tx + (tab_w - 2.0 - tw) / 2.0,
-            tab_y + 18.0,
-            text_params(14, WHITE),
-        );
+        queue_text(name, tx + (tab_w - 2.0 - tw) / 2.0, tab_y + 18.0, 14, WHITE);
 
         if clicked
             && mouse.0 >= tx
@@ -92,6 +84,8 @@ pub fn draw_dev_overlay<F>(
             dev.scroll_offset = 0.0;
         }
     }
+    // Header text goes before the content so scrolled rows still cover it.
+    flush_text();
 
     let (_, scroll_y) = mouse_wheel();
     if mouse.0 >= panel_x
@@ -112,6 +106,10 @@ pub fn draw_dev_overlay<F>(
     let content_y = tab_y + 36.0 + dev.scroll_offset;
     let content_w = panel_w - 32.0;
 
+    // every tab's height is measured from what it draws, so scrolling stops
+    // at its own bottom (before, only the Viewmodel tab set it, and the other
+    // tabs scrolled without limit or by the Viewmodel tab's height)
+    let _ = take_content_bottom();
     match dev.active_tab {
         0 => draw_weapon_tab(inventory, dev, content_x, content_y, content_w, mouse, clicked, held),
         1 => draw_crosshair_tab(inventory, content_x, content_y, content_w, mouse, clicked, held),
@@ -128,12 +126,16 @@ pub fn draw_dev_overlay<F>(
             let bottom_y = draw_viewmodel_tab(inventory, dev, content_x, content_y, content_w, mouse, clicked, held);
             dev.content_height = bottom_y - content_y;
         }
-        4 => draw_debug_tab(dev, inventory, content_x, content_y, mouse, clicked),
+        DEBUG_TAB => draw_debug_tab(dev, inventory, content_x, content_y, mouse, clicked),
         5 => {
             draw_bot_tab(content_x, content_y, content_w, mouse, clicked, held);
         }
         _ => {}
     }
+    if dev.active_tab != 3 {
+        dev.content_height = take_content_bottom().map_or(0.0, |bottom| bottom - content_y + 8.0);
+    }
+    flush_text();
 
     // ── Viewport Drag Mode (Viewmodel tab only) ───────────────────────────
     if dev.active_tab == 3 && dev.viewport_drag_active {

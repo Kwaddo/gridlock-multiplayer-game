@@ -22,7 +22,7 @@ pub mod udp_host;
 #[doc(hidden)]
 pub use platform;
 
-pub use net::{PeerId, BOT_PEER_BASE};
+pub use net::{Packet, PeerId, BOT_PEER_BASE};
 pub use server::Server;
 pub use server::game::MATCH_MAX_PLAYERS as MAX_PLAYERS;
 

@@ -3,6 +3,7 @@
 
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
+import { pipeline } from "node:stream";
 
 import { TYPES } from "./config.mjs";
 import { MODELS_DIR, SITE } from "./options.mjs";
@@ -46,14 +47,29 @@ function sendFile(req, res, file, cache) {
     return false;
   }
   if (!stat.isFile()) return false;
+  // Validators, so a reload revalidates (no-cache) instead of downloading
+  // the wasm and every model again: 304 while the file is unchanged.
+  const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+  const lastModified = stat.mtime.toUTCString();
+  const validators = { ETag: etag, "Last-Modified": lastModified, "Cache-Control": cache };
+  const ifNoneMatch = req.headers["if-none-match"];
+  const ifModifiedSince = Date.parse(req.headers["if-modified-since"] || "");
+  const unchanged = ifNoneMatch
+    ? ifNoneMatch.split(",").some((tag) => tag.trim() === etag || tag.trim() === "*")
+    : !Number.isNaN(ifModifiedSince) && ifModifiedSince >= Math.floor(stat.mtimeMs / 1000) * 1000;
+  if (unchanged) {
+    res.writeHead(304, validators);
+    res.end();
+    return true;
+  }
   const headers = {
     "Content-Type": TYPES[extname(file).toLowerCase()] || "application/octet-stream",
     "Content-Length": stat.size,
-    "Cache-Control": cache,
+    ...validators,
   };
   res.writeHead(200, headers);
   if (req.method === "HEAD") res.end();
-  else createReadStream(file).pipe(res);
+  else pipeline(createReadStream(file), res, () => {}); // (an aborted download is no error)
   return true;
 }
 

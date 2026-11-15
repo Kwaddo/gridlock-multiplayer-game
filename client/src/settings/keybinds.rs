@@ -1,9 +1,10 @@
 use crate::core::{GameConfig, InputBinding};
 use crate::ui::fonts::{measure_game_text, text_params};
 use macroquad::prelude::*;
+use std::fmt::Write;
 
 // all rebindable actions in display order
-const BIND_ACTIONS: &[(&str, &str)] = &[
+const BIND_ACTIONS: [(&str, &str); 22] = [
     ("Forward", "forward"),
     ("Backward", "backward"),
     ("Left", "left"),
@@ -84,6 +85,37 @@ fn set_binding(config: &mut GameConfig, action: &str, binding: InputBinding) {
     }
 }
 
+/// Every binding in BIND_ACTIONS order, without allocating.
+fn binding_array(config: &GameConfig) -> [InputBinding; BIND_ACTIONS.len()] {
+    std::array::from_fn(|i| get_binding(config, BIND_ACTIONS[i].1))
+}
+
+/// Which bindings are shared with at least one other action.
+fn duplicate_flags(bindings: &[InputBinding; BIND_ACTIONS.len()]) -> [bool; BIND_ACTIONS.len()] {
+    let mut dup = [false; BIND_ACTIONS.len()];
+    for i in 0..bindings.len() {
+        for j in (i + 1)..bindings.len() {
+            if bindings[i] == bindings[j] {
+                dup[i] = true;
+                dup[j] = true;
+            }
+        }
+    }
+    dup
+}
+
+/// Same text as InputBinding::display_name, written into a reused buffer
+/// (keys, the common case, need no allocation).
+fn write_binding_name(buf: &mut String, binding: InputBinding) {
+    buf.clear();
+    match binding {
+        InputBinding::Key(k) => {
+            let _ = write!(buf, "{:?}", k);
+        }
+        InputBinding::Mouse(_) => buf.push_str(&binding.display_name()),
+    }
+}
+
 const MODE_TOGGLE_ROWS: f32 = 3.0;
 
 /// Calculate row dimensions that fit within the panel, preventing overflow
@@ -121,19 +153,19 @@ pub fn update_keybinds(
     let bw = panel_w - 40.0 * s;
 
     // if currently rebinding, listen for key or mouse input
-    if let Some(action) = rebinding.clone() {
+    if let Some(action) = rebinding.as_deref() {
         if is_mouse_button_pressed(MouseButton::Left) {
-            set_binding(config, &action, InputBinding::Mouse(MouseButton::Left));
+            set_binding(config, action, InputBinding::Mouse(MouseButton::Left));
             *rebinding = None;
             return;
         }
         if is_mouse_button_pressed(MouseButton::Right) {
-            set_binding(config, &action, InputBinding::Mouse(MouseButton::Right));
+            set_binding(config, action, InputBinding::Mouse(MouseButton::Right));
             *rebinding = None;
             return;
         }
         if is_mouse_button_pressed(MouseButton::Middle) {
-            set_binding(config, &action, InputBinding::Mouse(MouseButton::Middle));
+            set_binding(config, action, InputBinding::Mouse(MouseButton::Middle));
             *rebinding = None;
             return;
         }
@@ -141,7 +173,7 @@ pub fn update_keybinds(
             if key == KeyCode::Escape {
                 *rebinding = None;
             } else {
-                set_binding(config, &action, InputBinding::Key(key));
+                set_binding(config, action, InputBinding::Key(key));
                 *rebinding = None;
             }
             return;
@@ -197,6 +229,34 @@ pub fn draw_keybinds(
     panel_h: f32,
     s: f32,
 ) {
+    let (row_h, row_gap) = calc_row_dims(panel_h, s);
+    let bx = right_x + 20.0 * s;
+    let bw = panel_w - 40.0 * s;
+    let row_fs = (18.0 * s).min(row_h * 0.6) as u16;
+
+    let bindings = binding_array(config);
+    let duplicates = duplicate_flags(&bindings);
+    let rebinding_idx = rebinding
+        .as_deref()
+        .and_then(|r| BIND_ACTIONS.iter().position(|&(_, id)| id == r));
+    let row_y = |i: usize| panel_top + 50.0 * s + (i as f32) * (row_h + row_gap);
+
+    // Crouch/Slow-Walk/Prone mode toggle buttons
+    let toggle_y =
+        panel_top + 50.0 * s + (BIND_ACTIONS.len() as f32) * (row_h + row_gap) + 10.0 * s;
+
+    let mouse = mouse_position();
+    let mode_btn_w = 80.0 * s;
+    let mode_btn_x = bx + bw - mode_btn_w - 5.0 * s;
+    let mode_btn_h = row_h - 6.0 * s;
+    let mode_rows = [
+        ("Crouch Mode", config.crouch_toggle, toggle_y),
+        ("Slow Walk Mode", config.slow_walk_toggle, toggle_y + row_h + row_gap),
+        ("Prone Mode", config.prone_toggle, toggle_y + (row_h + row_gap) * 2.0),
+    ];
+
+    // Shapes first, then all text: rows never overlap, so drawing the text
+    // last looks the same and keeps the font atlas bound for one batch.
     draw_rectangle(
         right_x,
         panel_top,
@@ -205,6 +265,38 @@ pub fn draw_keybinds(
         Color::from_rgba(30, 30, 30, 240),
     );
     draw_rectangle_lines(right_x, panel_top, panel_w, panel_h, 2.0, WHITE);
+
+    for i in 0..BIND_ACTIONS.len() {
+        let by = row_y(i);
+        let bg_color = if rebinding_idx == Some(i) {
+            Color::from_rgba(80, 80, 20, 255)
+        } else {
+            Color::from_rgba(45, 45, 45, 255)
+        };
+
+        draw_rectangle(bx, by, bw, row_h, bg_color);
+        draw_rectangle_lines(bx, by, bw, row_h, 1.0, GRAY);
+    }
+
+    for &(_, is_toggle, y) in &mode_rows {
+        let hover = mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= y && mouse.1 <= y + row_h;
+        let bg = if hover {
+            Color::from_rgba(65, 65, 85, 255)
+        } else {
+            Color::from_rgba(55, 55, 75, 255)
+        };
+        draw_rectangle(bx, y, bw, row_h, bg);
+        draw_rectangle_lines(bx, y, bw, row_h, 1.0, GRAY);
+
+        let mode_btn_y = y + 3.0 * s;
+        let mode_btn_color = if is_toggle {
+            Color::from_rgba(30, 100, 30, 255)
+        } else {
+            Color::from_rgba(100, 60, 20, 255)
+        };
+        draw_rectangle(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, mode_btn_color);
+        draw_rectangle_lines(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, 1.0, WHITE);
+    }
 
     let title_fs = (22.0 * s) as u16;
     let kb_title = "Key Bindings";
@@ -216,28 +308,9 @@ pub fn draw_keybinds(
         text_params(title_fs, YELLOW),
     );
 
-    let (row_h, row_gap) = calc_row_dims(panel_h, s);
-    let bx = right_x + 20.0 * s;
-    let bw = panel_w - 40.0 * s;
-    let row_fs = (18.0 * s).min(row_h * 0.6) as u16;
-
-    let all_bindings = config.all_bindings();
-
-    for (i, &(label, action_id)) in BIND_ACTIONS.iter().enumerate() {
-        let by = panel_top + 50.0 * s + (i as f32) * (row_h + row_gap);
-        let binding = get_binding(config, action_id);
-
-        let duplicate = all_bindings.iter().filter(|(_, b)| *b == binding).count() > 1;
-
-        let is_rebinding = rebinding.as_deref() == Some(action_id);
-        let bg_color = if is_rebinding {
-            Color::from_rgba(80, 80, 20, 255)
-        } else {
-            Color::from_rgba(45, 45, 45, 255)
-        };
-
-        draw_rectangle(bx, by, bw, row_h, bg_color);
-        draw_rectangle_lines(bx, by, bw, row_h, 1.0, GRAY);
+    let mut key_text = String::new();
+    for (i, &(label, _)) in BIND_ACTIONS.iter().enumerate() {
+        let by = row_y(i);
         draw_text_ex(
             label,
             bx + 10.0 * s,
@@ -245,67 +318,31 @@ pub fn draw_keybinds(
             text_params(row_fs, WHITE),
         );
 
-        let key_text = if is_rebinding {
-            "Press key/mouse...".to_string()
+        if rebinding_idx == Some(i) {
+            key_text.clear();
+            key_text.push_str("Press key/mouse...");
         } else {
-            binding.display_name()
-        };
+            write_binding_name(&mut key_text, bindings[i]);
+        }
         let key_tw = measure_game_text(&key_text, row_fs);
         draw_text_ex(
             &key_text,
             bx + bw - key_tw - 10.0 * s,
             by + row_h * 0.67,
-            text_params(row_fs, if duplicate { RED } else { YELLOW }),
+            text_params(row_fs, if duplicates[i] { RED } else { YELLOW }),
         );
     }
 
-    // Crouch/Slow-Walk/Prone mode toggle buttons
-    let toggle_y =
-        panel_top + 50.0 * s + (BIND_ACTIONS.len() as f32) * (row_h + row_gap) + 10.0 * s;
-
-    let mouse = mouse_position();
-    let mode_btn_w = 80.0 * s;
-    let mode_btn_x = bx + bw - mode_btn_w - 5.0 * s;
-    let mode_btn_h = row_h - 6.0 * s;
-
-    let draw_mode_row = |label: &str, is_toggle: bool, y: f32| {
-        let hover = mouse.0 >= bx && mouse.0 <= bx + bw && mouse.1 >= y && mouse.1 <= y + row_h;
-        let bg = if hover {
-            Color::from_rgba(65, 65, 85, 255)
-        } else {
-            Color::from_rgba(55, 55, 75, 255)
-        };
-        draw_rectangle(bx, y, bw, row_h, bg);
-        draw_rectangle_lines(bx, y, bw, row_h, 1.0, GRAY);
+    for &(label, is_toggle, y) in &mode_rows {
         draw_text_ex(label, bx + 10.0 * s, y + row_h * 0.67, text_params(row_fs, WHITE));
 
         let mode_text = if is_toggle { "Toggle" } else { "Hold" };
         let mode_tw = measure_game_text(mode_text, row_fs);
-        let mode_btn_y = y + 3.0 * s;
-        let mode_btn_color = if is_toggle {
-            Color::from_rgba(30, 100, 30, 255)
-        } else {
-            Color::from_rgba(100, 60, 20, 255)
-        };
-        draw_rectangle(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, mode_btn_color);
-        draw_rectangle_lines(mode_btn_x, mode_btn_y, mode_btn_w, mode_btn_h, 1.0, WHITE);
         draw_text_ex(
             mode_text,
             mode_btn_x + (mode_btn_w - mode_tw) / 2.0,
             y + row_h * 0.63,
             text_params(row_fs, WHITE),
         );
-    };
-
-    draw_mode_row("Crouch Mode", config.crouch_toggle, toggle_y);
-    draw_mode_row(
-        "Slow Walk Mode",
-        config.slow_walk_toggle,
-        toggle_y + row_h + row_gap,
-    );
-    draw_mode_row(
-        "Prone Mode",
-        config.prone_toggle,
-        toggle_y + (row_h + row_gap) * 2.0,
-    );
+    }
 }

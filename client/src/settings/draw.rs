@@ -8,16 +8,6 @@ use super::{crosshair_settings, keybinds, panel_layout, sliders, SettingsScreen,
 
 impl SettingsScreen {
     fn draw_header(&self, s: f32) {
-        let title_fs = (28.0 * s) as u16;
-        let title = "SETTINGS";
-        let title_w = measure_game_text(title, title_fs);
-        draw_text_ex(
-            title,
-            (screen_width() - title_w) / 2.0,
-            45.0 * s,
-            text_params(title_fs, WHITE),
-        );
-
         let tab_y = 80.0 * s;
         let tab_w = 120.0 * s;
         let tab_h = 36.0 * s;
@@ -28,7 +18,9 @@ impl SettingsScreen {
             tab_w * tabs.len() as f32 + tab_gap * (tabs.len() as f32 - 1.0);
         let tabs_start_x = (screen_width() - total_tabs_w) / 2.0;
 
-        for (i, (tab, name)) in tabs.iter().enumerate() {
+        // tab shapes first, then the title and tab labels in one text batch
+        // (nothing here overlaps, so the order does not change the picture)
+        for (i, (tab, _)) in tabs.iter().enumerate() {
             let tab_x = tabs_start_x + (tab_w + tab_gap) * (i as f32);
             let tab_color = if *tab == self.active_tab {
                 Color::from_rgba(80, 150, 220, 255)
@@ -37,6 +29,20 @@ impl SettingsScreen {
             };
             draw_rectangle(tab_x, tab_y, tab_w, tab_h, tab_color);
             draw_rectangle_lines(tab_x, tab_y, tab_w, tab_h, 2.0, WHITE);
+        }
+
+        let title_fs = (28.0 * s) as u16;
+        let title = "SETTINGS";
+        let title_w = measure_game_text(title, title_fs);
+        draw_text_ex(
+            title,
+            (screen_width() - title_w) / 2.0,
+            45.0 * s,
+            text_params(title_fs, WHITE),
+        );
+
+        for (i, (_, name)) in tabs.iter().enumerate() {
+            let tab_x = tabs_start_x + (tab_w + tab_gap) * (i as f32);
             let text_w = measure_game_text(name, tab_fs);
             draw_text_ex(
                 name,
@@ -54,6 +60,30 @@ impl SettingsScreen {
         presets: &CrosshairPresetManager,
         assets: &std::collections::HashMap<String, Texture2D>,
     ) {
+        self.draw_with_overlay(180, config, weapons, presets, assets);
+    }
+
+    /// Draw over the running game. The in-game screen used to get two
+    /// alpha-180 black overlays; one alpha-233 overlay gives the same
+    /// darkness (1 - (1 - 180/255)^2 ~= 233/255) for one full-screen blend.
+    pub fn draw_in_game(
+        &self,
+        config: &GameConfig,
+        weapons: &WeaponInventory,
+        presets: &CrosshairPresetManager,
+        assets: &std::collections::HashMap<String, Texture2D>,
+    ) {
+        self.draw_with_overlay(233, config, weapons, presets, assets);
+    }
+
+    fn draw_with_overlay(
+        &self,
+        overlay_alpha: u8,
+        config: &GameConfig,
+        weapons: &WeaponInventory,
+        presets: &CrosshairPresetManager,
+        assets: &std::collections::HashMap<String, Texture2D>,
+    ) {
         let s = config.gui_scale_factor();
 
         // Full-screen dark overlay matching pause menu style
@@ -62,10 +92,14 @@ impl SettingsScreen {
             0.0,
             screen_width(),
             screen_height(),
-            Color::from_rgba(0, 0, 0, 180),
+            Color::from_rgba(0, 0, 0, overlay_alpha),
         );
 
-        self.draw_header(s);
+        // The Crosshair tab masks this area and draws the header again on
+        // top, so only draw it here for the other tabs.
+        if self.active_tab != SettingsTab::Crosshair {
+            self.draw_header(s);
+        }
 
         let tab_h = 36.0 * s;
         let content_top = 80.0 * s + tab_h + 15.0 * s;
@@ -180,13 +214,6 @@ impl SettingsScreen {
             Color::from_rgba(50, 50, 50, 255),
         );
         draw_rectangle_lines(back_x, back_y, back_w, back_h, 1.0, WHITE);
-        let back_tw = measure_game_text("Back", btn_fs);
-        draw_text_ex(
-            "Back",
-            back_x + (back_w - back_tw) / 2.0,
-            back_y + back_h * 0.65,
-            text_params(btn_fs, WHITE),
-        );
 
         // Reset button
         let reset_x = back_x - back_w - 15.0 * s;
@@ -198,13 +225,6 @@ impl SettingsScreen {
             Color::from_rgba(80, 60, 20, 255),
         );
         draw_rectangle_lines(reset_x, back_y, back_w, back_h, 1.0, WHITE);
-        let reset_tw = measure_game_text("Reset", btn_fs);
-        draw_text_ex(
-            "Reset",
-            reset_x + (back_w - reset_tw) / 2.0,
-            back_y + back_h * 0.65,
-            text_params(btn_fs, WHITE),
-        );
 
         // Save button
         let save_x = back_x + back_w + 15.0 * s;
@@ -229,6 +249,22 @@ impl SettingsScreen {
             } else {
                 WHITE
             },
+        );
+
+        // labels after all three button shapes, so they share one text batch
+        let back_tw = measure_game_text("Back", btn_fs);
+        draw_text_ex(
+            "Back",
+            back_x + (back_w - back_tw) / 2.0,
+            back_y + back_h * 0.65,
+            text_params(btn_fs, WHITE),
+        );
+        let reset_tw = measure_game_text("Reset", btn_fs);
+        draw_text_ex(
+            "Reset",
+            reset_x + (back_w - reset_tw) / 2.0,
+            back_y + back_h * 0.65,
+            text_params(btn_fs, WHITE),
         );
         let save_label = if has_dupes { "Fix dupes" } else { "Save" };
         let save_tw = measure_game_text(save_label, btn_fs);

@@ -165,19 +165,16 @@ pub fn choose_team_weapon_for_player(
         Team::Spectator => return "Knife".to_string(),
     };
 
-    // collect weapons already used by teammates
-    let mut used = std::collections::HashSet::new();
-    for p in players.values() {
-        if p.team == player.team {
-            if !p.current_weapon.is_empty() {
-                used.insert(p.current_weapon.clone());
-            }
-        }
-    }
+    // weapons already used by teammates
+    let used = |w: &str| {
+        players.values().any(|p| {
+            p.team == player.team && !p.current_weapon.is_empty() && p.current_weapon == w
+        })
+    };
 
     // pick the first unused weapon from pool
     for &w in pool.iter() {
-        if !used.contains(w) {
+        if !used(w) {
             return w.to_string();
         }
     }
@@ -395,11 +392,15 @@ pub fn lobby_team_counts(players: &HashMap<PeerId, Player>) -> (usize, usize) {
 pub fn balance_lobby_teams(players: &mut HashMap<PeerId, Player>) -> bool {
     use crate::player::Team;
     // Fast path (every tick): nobody to place and the teams are balanced, so
-    // the full pass below would change nothing.
-    let (red, blue) = lobby_team_counts(players);
-    let unplaced = players
-        .values()
-        .any(|p| p.world == WorldId::Lobby && !p.is_bot && p.team == Team::Spectator);
+    // the full pass below would change nothing. One pass counts all three.
+    let (mut red, mut blue, mut unplaced) = (0usize, 0usize, false);
+    for p in players.values().filter(|p| p.world == WorldId::Lobby && !p.is_bot) {
+        match p.team {
+            Team::Red => red += 1,
+            Team::Blue => blue += 1,
+            Team::Spectator => unplaced = true,
+        }
+    }
     if !unplaced && red.abs_diff(blue) <= 1 {
         return false;
     }
@@ -409,7 +410,6 @@ pub fn balance_lobby_teams(players: &mut HashMap<PeerId, Player>) -> bool {
         .map(|(addr, p)| (p.id, *addr))
         .collect();
     lobby.sort();
-    let (mut red, mut blue) = (red, blue);
     let mut changed = false;
 
     for (_, addr) in &lobby {

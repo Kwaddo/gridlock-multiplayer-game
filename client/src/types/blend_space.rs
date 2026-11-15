@@ -11,6 +11,7 @@ use crate::types::player::PlayerSkin;
 pub struct Ring {
     pub speed: f32,
     pub clips: &'static [(f32, PlayerSkin)], // (direction in degrees, 0 forward, 90 right, -90 left, 180 back)
+    // kept sorted by direction (a test checks), so ring_mix doesnt copy and sort them every call
 }
 
 pub struct BlendSpace {
@@ -25,29 +26,88 @@ pub static STANDING: BlendSpace = BlendSpace {
         Ring {
             speed: 5.0,
             clips: &[
+                (-90.0, PlayerSkin::WalkLeft),
                 (0.0, PlayerSkin::RifleWalk),
                 (90.0, PlayerSkin::WalkRight),
                 (180.0, PlayerSkin::WalkBack),
-                (-90.0, PlayerSkin::WalkLeft),
             ],
         },
         Ring {
             speed: 8.0,
             clips: &[
+                (-90.0, PlayerSkin::SprintLeft),
                 (0.0, PlayerSkin::SprintForward),
                 (90.0, PlayerSkin::SprintRight),
                 (180.0, PlayerSkin::WalkBack),
-                (-90.0, PlayerSkin::SprintLeft),
             ],
         },
     ],
 };
 
+// the most clips one mix can hold: two rings, two neighbours on each
+pub const MAX_MIX: usize = 4;
+
+// a clip under this share of the mix cant be seen but still costs a whole sample, see Mix::drop_faint
+const FAINT: f32 = 0.02;
+
+// clips and how much of each, at most MAX_MIX, kept on the stack instead of a Vec every tick
+#[derive(Clone, Copy, Debug)]
+pub struct Mix {
+    items: [(PlayerSkin, f32); MAX_MIX],
+    len: usize,
+}
+
+impl Mix {
+    fn new(fill: PlayerSkin) -> Self {
+        Self { items: [(fill, 0.0); MAX_MIX], len: 0 }
+    }
+
+    // a clip twice (walk back is on both rings) adds up into one entry
+    fn add(&mut self, skin: PlayerSkin, w: f32) {
+        if w <= 0.0 {
+            return;
+        }
+        match self.items[..self.len].iter_mut().find(|(s, _)| *s == skin) {
+            Some(entry) => entry.1 += w,
+            None => {
+                self.items[self.len] = (skin, w);
+                self.len += 1;
+            }
+        }
+    }
+
+    // fade out clips under FAINT (FAINT..2*FAINT ramps up, so a clip doesnt pop in or out) and share their weight out
+    // before this a steady walker on the ring edge sampled 3-4 clips where 2 showed
+    fn drop_faint(&mut self) {
+        let (mut kept, mut total) = (0, 0.0);
+        for i in 0..self.len {
+            let (skin, w) = self.items[i];
+            let w = w * ((w - FAINT) / FAINT).clamp(0.0, 1.0);
+            if w > 0.0 {
+                self.items[kept] = (skin, w);
+                kept += 1;
+                total += w;
+            }
+        }
+        self.len = kept;
+        self.items[..kept].iter_mut().for_each(|e| e.1 /= total);
+    }
+}
+
+impl std::ops::Deref for Mix {
+    type Target = [(PlayerSkin, f32)];
+    fn deref(&self) -> &Self::Target {
+        &self.items[..self.len]
+    }
+}
+
 // movement relative to facing (x = right, y = forward) -> clips and how much of each, always adds up to 1
-pub fn weights(space: &BlendSpace, local_vel: Vec2) -> Vec<(PlayerSkin, f32)> {
+pub fn weights(space: &BlendSpace, local_vel: Vec2) -> Mix {
+    let mut out = Mix::new(space.idle);
     let speed = local_vel.length();
     if speed < 1e-3 || space.rings.is_empty() {
-        return vec![(space.idle, 1.0)];
+        out.add(space.idle, 1.0);
+        return out;
     }
     let angle = local_vel.x.atan2(local_vel.y).to_degrees();
 
@@ -62,31 +122,22 @@ pub fn weights(space: &BlendSpace, local_vel: Vec2) -> Vec<(PlayerSkin, f32)> {
         }
     };
 
-    let mut out: Vec<(PlayerSkin, f32)> = Vec::new();
-    let mut add = |skin: PlayerSkin, w: f32| {
-        if w <= 0.0 {
-            return;
-        }
-        match out.iter_mut().find(|(s, _)| *s == skin) {
-            Some(entry) => entry.1 += w,
-            None => out.push((skin, w)),
-        }
-    };
     match inner {
-        None => add(space.idle, 1.0 - t),
-        Some(ring) => ring_mix(ring, angle).into_iter().for_each(|(s, w)| add(s, w * (1.0 - t))),
+        None => out.add(space.idle, 1.0 - t),
+        Some(ring) => ring_mix(ring, angle).into_iter().for_each(|(s, w)| out.add(s, w * (1.0 - t))),
     }
-    ring_mix(outer, angle).into_iter().for_each(|(s, w)| add(s, w * t));
+    ring_mix(outer, angle).into_iter().for_each(|(s, w)| out.add(s, w * t));
+    out.drop_faint();
     out
 }
 
 // on one ring, the two clips either side of angle, split by how close it is to each
-fn ring_mix(ring: &Ring, angle: f32) -> Vec<(PlayerSkin, f32)> {
-    let mut clips: Vec<(f32, PlayerSkin)> = ring.clips.to_vec();
-    clips.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+// the clips are already sorted by direction, a lone clip comes back with an empty partner
+fn ring_mix(ring: &Ring, angle: f32) -> [(PlayerSkin, f32); 2] {
+    let clips = ring.clips;
     let n = clips.len();
     if n == 1 {
-        return vec![(clips[0].1, 1.0)];
+        return [(clips[0].1, 1.0), (clips[0].1, 0.0)];
     }
     for i in 0..n {
         let (a, a_skin) = clips[i];
@@ -100,10 +151,10 @@ fn ring_mix(ring: &Ring, angle: f32) -> Vec<(PlayerSkin, f32)> {
         }
         if x >= a && x <= b {
             let t = (x - a) / (b - a);
-            return vec![(a_skin, 1.0 - t), (b_skin, t)];
+            return [(a_skin, 1.0 - t), (b_skin, t)];
         }
     }
-    vec![(clips[0].1, 1.0)]
+    [(clips[0].1, 1.0), (clips[0].1, 0.0)]
 }
 
 #[cfg(test)]
@@ -112,7 +163,7 @@ mod tests {
     use PlayerSkin::*;
 
     fn w(space: &BlendSpace, x: f32, y: f32) -> Vec<(PlayerSkin, f32)> {
-        weights(space, vec2(x, y))
+        weights(space, vec2(x, y)).to_vec()
     }
 
     fn of(mix: &[(PlayerSkin, f32)], skin: PlayerSkin) -> f32 {
@@ -167,7 +218,31 @@ mod tests {
                 let sum: f32 = mix.iter().map(|(_, w)| w).sum();
                 assert!((sum - 1.0).abs() < 1e-4, "{deg} {speed}: {mix:?}");
                 assert!(mix.iter().all(|(_, w)| *w >= 0.0));
+                // dropped clips are gone, not left in at 0
+                assert!(mix.len() <= MAX_MIX && mix.iter().all(|(_, w)| *w > 0.0), "{deg} {speed}: {mix:?}");
             }
+        }
+    }
+
+    // a steady walker on the ring edge, 5.2 m/s and 3 degrees off forward
+    // before drop_faint this sampled 4 clips, two of them under 7%
+    #[test]
+    fn faint_clips_are_dropped_and_the_rest_still_add_up() {
+        let r = (-3f32).to_radians();
+        let mix = w(&STANDING, r.sin() * 5.2, r.cos() * 5.2);
+        assert_eq!(mix.len(), 3, "{mix:?}");
+        assert_eq!(of(&mix, SprintLeft), 0.0, "{mix:?}");
+        let sum: f32 = mix.iter().map(|(_, w)| w).sum();
+        assert!((sum - 1.0).abs() < 1e-4, "{mix:?}");
+        // barely moving is all idle, the moving clips are too faint to show
+        assert_eq!(w(&STANDING, 0.0, 0.05), vec![(RifleIdle, 1.0)]);
+    }
+
+    // ring_mix relies on this instead of sorting every call
+    #[test]
+    fn ring_clips_are_sorted_by_direction() {
+        for ring in STANDING.rings {
+            assert!(ring.clips.windows(2).all(|p| p[0].0 < p[1].0));
         }
     }
 }

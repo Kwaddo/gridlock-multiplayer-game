@@ -134,6 +134,9 @@ impl PlayingState {
                 config,
             );
 
+            // where recent hits came from, around the crosshair
+            self.draw_damage_indicators();
+
             let dt = get_frame_time();
             if self.movement_state.is_stamina_depleted {
                 self.stamina_depleted_vignette_alpha =

@@ -1,6 +1,8 @@
 use macroquad::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 static GAME_FONT: OnceLock<Font> = OnceLock::new();
@@ -69,8 +71,62 @@ pub fn text_params(font_size: u16, color: Color) -> TextParams<'static> {
     }
 }
 
+// Widths of recently measured strings, one bucket per font size. macroquad's
+// measure_text takes three mutex locks and three hash lookups per character,
+// and the HUD re-measures the same strings every frame. The result depends on
+// the text, the size, the DPI scale and which font is loaded, so the whole
+// memo is dropped when the DPI scale or font changes, and a bucket is cleared
+// once it grows past MEASURE_MEMO_BUCKET_CAP (timers, chat drafts).
+const MEASURE_MEMO_BUCKET_CAP: usize = 512;
+
+struct MeasureMemo {
+    dpi_scale: f32,
+    has_font: bool,
+    buckets: Vec<(u16, HashMap<String, f32>)>,
+}
+
+thread_local! {
+    static MEASURE_MEMO: RefCell<MeasureMemo> = RefCell::new(MeasureMemo {
+        dpi_scale: 0.0,
+        has_font: false,
+        buckets: Vec::new(),
+    });
+}
+
 // measure text width using the game font.
 pub fn measure_game_text(text: &str, font_size: u16) -> f32 {
+    let font = game_font();
+    let dpi_scale = screen_dpi_scale();
+    MEASURE_MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.dpi_scale != dpi_scale || memo.has_font != font.is_some() {
+            memo.dpi_scale = dpi_scale;
+            memo.has_font = font.is_some();
+            memo.buckets.clear();
+        }
+        let idx = match memo.buckets.iter().position(|(size, _)| *size == font_size) {
+            Some(i) => i,
+            None => {
+                memo.buckets.push((font_size, HashMap::new()));
+                memo.buckets.len() - 1
+            }
+        };
+        let bucket = &mut memo.buckets[idx].1;
+        if let Some(&w) = bucket.get(text) {
+            return w;
+        }
+        let w = measure_game_text_uncached(text, font_size);
+        if bucket.len() >= MEASURE_MEMO_BUCKET_CAP {
+            bucket.clear();
+        }
+        bucket.insert(text.to_owned(), w);
+        w
+    })
+}
+
+/// measure_game_text without the memo, for strings measured once (word-wrap
+/// candidates) that would only push the strings drawn every frame out of it.
+pub fn measure_game_text_uncached(text: &str, font_size: u16) -> f32 {
     let atlas_size = font_size * FONT_OVERSAMPLE;
     let scale = 1.0 / FONT_OVERSAMPLE as f32;
     measure_text(text, game_font(), atlas_size, scale).width

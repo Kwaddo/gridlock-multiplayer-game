@@ -81,6 +81,10 @@ impl Link for Backlogged {
     }
 
     fn recv(&mut self) -> Vec<Box<[u8]>> {
+        // replayed already (every call after the first): no copy needed
+        if self.pending.is_empty() {
+            return self.inner.recv();
+        }
         let mut out = std::mem::take(&mut self.pending);
         out.extend(self.inner.recv());
         out

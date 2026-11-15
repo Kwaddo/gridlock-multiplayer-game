@@ -91,6 +91,7 @@ impl PlayingState {
             // flushing the batch several times per mesh.
             if let Some(meshes) = self.models.get(model_key) {
                 self.draw_3d_viewmodel(
+                    Some((model_key, meshes.as_slice())),
                     meshes.iter(),
                     1.0,
                     0.0,
@@ -103,6 +104,7 @@ impl PlayingState {
                 return;
             } else if let Some(animated_model) = self.animated_models.get(model_key) {
                 self.draw_3d_viewmodel(
+                    None,
                     animated_model.meshes(),
                     animated_model.normalize_scale,
                     animated_model.y_offset,
@@ -136,8 +138,11 @@ impl PlayingState {
     }
 
     /// Draw the weapon's `meshes`, then the hands and muzzle flash once.
+    /// `static_model` (model key and its meshes) lets a static weapon draw
+    /// from GPU-resident buffers instead of re-batching `meshes` every frame.
     fn draw_3d_viewmodel<'m>(
         &self,
+        static_model: Option<(&str, &[Mesh])>,
         meshes: impl IntoIterator<Item = &'m Mesh>,
         mesh_normalize_scale: f32,
         mesh_y_offset: f32,
@@ -258,18 +263,22 @@ impl PlayingState {
         let gl = unsafe { get_internal_gl() }; // unsafe is required to access internal GL for custom shader uniforms
         gl.quad_gl.depth_test(true);
 
-        // avoid allocating a transformed mesh every frame by using the GL model matrix
-        gl.quad_gl.push_model_matrix(transform);
-        for mesh in meshes {
-            draw_mesh(mesh);
+        let on_gpu = static_model
+            .is_some_and(|(key, ms)| crate::types::static_gpu::draw_static_meshes(key, ms, transform));
+        if !on_gpu {
+            // avoid allocating a transformed mesh every frame by using the GL model matrix
+            gl.quad_gl.push_model_matrix(transform);
+            for mesh in meshes {
+                draw_mesh(mesh);
+            }
+            gl.quad_gl.pop_model_matrix();
         }
-        gl.quad_gl.pop_model_matrix();
 
         /*
             DRAWING ANIMATED HANDS HERE
         */
 
-        let mut draw_hands = |hands_mesh: &Mesh, normalize_scale: f32, y_offset: f32| {
+        let hands_transform_for = |normalize_scale: f32, y_offset: f32| {
             // Keep hands scale independent from weapon scale so tiny weapon tuning
             // does not make hands disappear.
             let hands_scale = HANDS_BASE_SCALE * stats.viewmodel_hands_scale.max(0.01);
@@ -295,23 +304,28 @@ impl PlayingState {
             let clamped_normalize = normalize_scale.clamp(0.2, 5.0);
             let hands_normalize_mat = Mat4::from_translation(vec3(0.0, y_offset, 0.0))
                 * Mat4::from_scale(Vec3::splat(clamped_normalize));
-            let hands_transform =
-                hands_trans * hands_rot_mat * hands_scale_mat * hands_normalize_mat;
-
-            // Viewmodel hands should be fully opaque regardless of source material
-            // alpha; only a mesh that is not needs its own copy.
-            gl.quad_gl.push_model_matrix(hands_transform);
-            draw_mesh_opaque(hands_mesh);
-            gl.quad_gl.pop_model_matrix();
+            hands_trans * hands_rot_mat * hands_scale_mat * hands_normalize_mat
         };
 
+        // Viewmodel hands should be fully opaque regardless of source material
+        // alpha; only a mesh that is not needs its own copy. One transform for
+        // all of a model's meshes, worked out once.
         if should_draw_hands {
             if let Some(hands_model) = hands_anim {
-                for mesh in hands_model.meshes() {
-                    draw_hands(mesh, hands_model.normalize_scale, hands_model.y_offset);
+                let hands_transform = hands_transform_for(hands_model.normalize_scale, hands_model.y_offset);
+                // skinned on the GPU from buffers uploaded once; after a GPU draw,
+                // update() stops re-skinning the hands on the CPU
+                if !hands_model.draw_gpu_opaque(hands_transform) {
+                    gl.quad_gl.push_model_matrix(hands_transform);
+                    for mesh in hands_model.meshes() {
+                        draw_mesh_opaque(mesh);
+                    }
+                    gl.quad_gl.pop_model_matrix();
                 }
             } else if let Some(hands_mesh) = hands_static {
-                draw_hands(hands_mesh, 1.0, 0.0);
+                gl.quad_gl.push_model_matrix(hands_transform_for(1.0, 0.0));
+                draw_mesh_opaque(hands_mesh);
+                gl.quad_gl.pop_model_matrix();
             }
         }
 
@@ -332,13 +346,14 @@ impl PlayingState {
                 let alpha = (220.0 * t) as u8;
                 let radius = 18.0 * vm_scale * 28.0 * (0.4 + 0.6 * t);
 
-                draw_circle(
+                // allocation-free circles (macroquad's draw_circle allocates per call)
+                crate::ui::prims::draw_circle(
                     fx,
                     fy,
                     radius * 1.4,
                     Color::from_rgba(255, 190, 80, alpha / 2),
                 );
-                draw_circle(fx, fy, radius, Color::from_rgba(255, 240, 180, alpha));
+                crate::ui::prims::draw_circle(fx, fy, radius, Color::from_rgba(255, 240, 180, alpha));
             }
     }
     }

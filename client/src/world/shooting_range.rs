@@ -33,58 +33,44 @@ pub const SHOOTING_RANGE_COLLIDERS: [(Vec3, Vec3); 5] = [
     ),
 ];
 
-pub fn draw_shooting_range(floor_texture: Option<&Texture2D>) {
+// The range is drawn in three groups so the lobby can batch each with its
+// own: macroquad opens a new draw call whenever the texture or the mode
+// (triangles/lines) changes, so interleaving them cost one call per piece.
+
+const RANGE_BUTTON_CENTER: Vec3 = vec3(
+    RANGE_START_BUTTON_POS.x,
+    RANGE_START_BUTTON_POS.y + RANGE_START_BUTTON_SIZE.y * 0.5,
+    RANGE_START_BUTTON_POS.z,
+);
+
+/// The textured floor extension.
+pub(super) fn draw_shooting_range_floor(floor_texture: Option<&Texture2D>) {
     draw_cube(RANGE_EXT_CENTER, RANGE_EXT_SIZE, floor_texture, DARKGRAY);
+}
 
-    draw_cube(
-        RANGE_LINE_CENTER,
-        RANGE_LINE_SIZE,
-        None,
-        Color::from_rgba(90, 95, 105, 255),
-    );
-    draw_cube(
-        RANGE_SIDE_LEFT_CENTER,
-        RANGE_SIDE_SIZE,
-        None,
-        Color::from_rgba(70, 75, 85, 255),
-    );
-    draw_cube(
-        RANGE_SIDE_RIGHT_CENTER,
-        RANGE_SIDE_SIZE,
-        None,
-        Color::from_rgba(70, 75, 85, 255),
-    );
-    draw_cube(
-        RANGE_BACK_CENTER,
-        RANGE_BACK_SIZE,
-        None,
-        Color::from_rgba(80, 85, 95, 255),
-    );
-
-    draw_cube_wires(RANGE_LINE_CENTER, RANGE_LINE_SIZE, BLACK);
-    draw_cube_wires(RANGE_SIDE_LEFT_CENTER, RANGE_SIDE_SIZE, BLACK);
-    draw_cube_wires(RANGE_SIDE_RIGHT_CENTER, RANGE_SIDE_SIZE, BLACK);
-    draw_cube_wires(RANGE_BACK_CENTER, RANGE_BACK_SIZE, BLACK);
-
+/// The untextured, opaque solids.
+pub(super) fn draw_shooting_range_fills() {
+    draw_cube(RANGE_LINE_CENTER, RANGE_LINE_SIZE, None, Color::from_rgba(90, 95, 105, 255));
+    draw_cube(RANGE_SIDE_LEFT_CENTER, RANGE_SIDE_SIZE, None, Color::from_rgba(70, 75, 85, 255));
+    draw_cube(RANGE_SIDE_RIGHT_CENTER, RANGE_SIDE_SIZE, None, Color::from_rgba(70, 75, 85, 255));
+    draw_cube(RANGE_BACK_CENTER, RANGE_BACK_SIZE, None, Color::from_rgba(80, 85, 95, 255));
     // Start button pedestal near the line.
-    let button_center = vec3(
-        RANGE_START_BUTTON_POS.x,
-        RANGE_START_BUTTON_POS.y + RANGE_START_BUTTON_SIZE.y * 0.5,
-        RANGE_START_BUTTON_POS.z,
-    );
+    draw_cube(RANGE_BUTTON_CENTER, RANGE_START_BUTTON_SIZE, None, Color::from_rgba(40, 45, 55, 255));
     draw_cube(
-        button_center,
-        RANGE_START_BUTTON_SIZE,
-        None,
-        Color::from_rgba(40, 45, 55, 255),
-    );
-    draw_cube_wires(button_center, RANGE_START_BUTTON_SIZE, BLACK);
-    draw_cube(
-        button_center + vec3(0.0, 0.35, 0.0),
+        RANGE_BUTTON_CENTER + vec3(0.0, 0.35, 0.0),
         vec3(0.36, 0.10, 0.36),
         None,
         Color::from_rgba(255, 107, 53, 255),
     );
+}
+
+/// The black edge lines.
+pub(super) fn draw_shooting_range_wires() {
+    draw_cube_wires(RANGE_LINE_CENTER, RANGE_LINE_SIZE, BLACK);
+    draw_cube_wires(RANGE_SIDE_LEFT_CENTER, RANGE_SIDE_SIZE, BLACK);
+    draw_cube_wires(RANGE_SIDE_RIGHT_CENTER, RANGE_SIDE_SIZE, BLACK);
+    draw_cube_wires(RANGE_BACK_CENTER, RANGE_BACK_SIZE, BLACK);
+    draw_cube_wires(RANGE_BUTTON_CENTER, RANGE_START_BUTTON_SIZE, BLACK);
 }
 
 pub fn ray_test_shooting_range_with_normal(

@@ -5,7 +5,7 @@ use macroquad::prelude::*;
 use crate::types::animated_model::{ AnimatedModel, Pose };
 use crate::types::player::PlayerSkin;
 
-use crate::types::blend_space::{ weights, STANDING };
+use crate::types::blend_space::{ weights, MAX_MIX, STANDING };
 
 /*
    one players animation clock, before this every clip had one clock shared by everyone, so 2 people walking were clones
@@ -254,6 +254,12 @@ impl PlayerAnim {
         model: &AnimatedModel,
         pose: &mut Pose,
     ) {
+        // nothing wanted and already faded out, nothing to do, before this it looked up the fire clip every tick anyway
+        // (a faded out layer never holds a clip, see the end of this, so no kick can be left playing)
+        if wants.is_none() && !fired && self.upper_weight <= 0.0 {
+            self.upper_clip = None;
+            return;
+        }
         // a shot restarts the kick, it beats aiming until it finishes, then aiming (or nothing) takes back over
         if fired {
             self.upper_clip = Some(PlayerSkin::RifleFire);
@@ -294,15 +300,24 @@ impl PlayerAnim {
     // every moving clip shares one stride so the feet land together, idle keeps its own clock
     fn sample_space(&mut self, local_vel: Vec2, dt: f32, models: &HashMap<String, AnimatedModel>, pose: &mut Pose) {
         let mix = weights(&STANDING, local_vel);
-        if let Some(len) = stride_length(&mix, |s| find(models, s).map(|m| m.duration())) {
+        // each clip's model looked up once, before this the stride, the idle clock and the sampling each looked it up again
+        let mut found: [Option<&AnimatedModel>; MAX_MIX] = [None; MAX_MIX];
+        for (slot, &(skin, _)) in found.iter_mut().zip(mix.iter()) {
+            *slot = find(models, skin);
+        }
+        let model_of = |skin: PlayerSkin| match mix.iter().position(|(s, _)| *s == skin) {
+            Some(i) => found[i],
+            None => find(models, skin),
+        };
+        if let Some(len) = stride_length(&mix, |s| model_of(s).map(|m| m.duration())) {
             self.stride = (self.stride + dt / len).fract();
         }
-        if let Some(idle) = find(models, STANDING.idle) {
+        if let Some(idle) = model_of(STANDING.idle) {
             self.time = advance(STANDING.idle, self.time, dt, idle.duration());
         }
         let mut total = 0.0;
-        for &(skin, w) in &mix {
-            let Some(m) = find(models, skin) else { continue };
+        for (&(skin, w), m) in mix.iter().zip(found) {
+            let Some(m) = m else { continue };
             let t = if skin == STANDING.idle { self.time } else { self.stride * m.duration() };
             let first = total == 0.0;
             total += w;

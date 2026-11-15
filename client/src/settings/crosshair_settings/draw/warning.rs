@@ -1,7 +1,7 @@
 use crate::ui::fonts::{measure_game_text, text_params};
 use macroquad::prelude::*;
 
-pub(in crate::settings::crosshair_settings) fn draw_shotgun_type_warning(
+pub(super) fn draw_shotgun_type_warning(
     x: f32,
     y: f32,
     _btn_w: f32,
@@ -47,6 +47,29 @@ pub(in crate::settings::crosshair_settings) fn draw_shotgun_type_warning(
         text_params(ok_fs, WHITE),
     );
 
+    clicked
+        && mouse.0 >= ok_x
+        && mouse.0 <= ok_x + ok_w
+        && mouse.1 >= ok_y
+        && mouse.1 <= ok_y + ok_h
+}
+
+/// Whether this frame's click lands on the OK button of the warning that
+/// `draw_shotgun_type_warning` paints at the same (`x`, `y`).
+pub(in crate::settings::crosshair_settings) fn shotgun_warning_ok_clicked(
+    x: f32,
+    y: f32,
+    mouse: (f32, f32),
+    clicked: bool,
+    s: f32,
+) -> bool {
+    let box_w = 340.0 * s;
+    let box_h = 80.0 * s;
+    let box_y = y - box_h - 10.0 * s;
+    let ok_w = 50.0 * s;
+    let ok_h = 25.0 * s;
+    let ok_x = x + box_w - ok_w - 10.0 * s;
+    let ok_y = box_y + box_h - ok_h - 8.0 * s;
     clicked
         && mouse.0 >= ok_x
         && mouse.0 <= ok_x + ok_w

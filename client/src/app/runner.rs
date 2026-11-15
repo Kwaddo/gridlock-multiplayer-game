@@ -249,15 +249,9 @@ pub async fn run() {
                     last_server_contact = Some(Instant::now());
                 }
                 playing_state.simulate(&config, maze.as_ref());
-                playing_state.render(&mut config, &username, player_id, maze.as_ref());
-
-                draw_rectangle(
-                    0.0,
-                    0.0,
-                    screen_width(),
-                    screen_height(),
-                    Color::from_rgba(0, 0, 0, 150)
-                );
+                // the loadout screen covers the window with a 95%-opaque panel, so the
+                // 3D scene under it is not rendered; clear to the panel colour instead
+                clear_background(Color::new(0.05, 0.06, 0.12, 1.0));
                 lobby_inventory.draw(&loadout);
                 if lobby_inventory.update(&mut loadout) {
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);

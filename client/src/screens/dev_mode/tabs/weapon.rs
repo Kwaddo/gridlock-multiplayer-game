@@ -1,8 +1,8 @@
-use crate::ui::fonts::text_params;
 use crate::weapons::state::WeaponInventory;
 use macroquad::prelude::*;
 
 use super::super::state::DevModeState;
+use super::super::text_queue::queue_fmt;
 use super::super::widgets::{
     draw_action_button, draw_section_header, draw_slider, draw_slider_u32,
 };
@@ -19,11 +19,12 @@ pub(in crate::screens::dev_mode) fn draw_weapon_tab(
 ) {
     let weapon = inv.active_mut();
     let name = weapon.stats_data.name;
-    draw_text_ex(
-        &format!("Active: {}", name),
+    queue_fmt(
+        format_args!("Active: {}", name),
         x,
         y + 14.0,
-        text_params(16, Color::from_rgba(255, 200, 80, 255)),
+        16,
+        Color::from_rgba(255, 200, 80, 255),
     );
     y += 24.0;
 

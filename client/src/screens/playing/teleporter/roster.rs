@@ -204,10 +204,14 @@ impl PlayingState {
         let gap = 10.0;
         let box_w = (w - gap * 2.0) / 3.0;
         let box_h = 46.0;
-        for (i, (label, value)) in details.iter().enumerate() {
+        // boxes first, then their text in one batch
+        for i in 0..details.len() {
             let bx = x + i as f32 * (box_w + gap);
             draw_rectangle(bx, y, box_w, box_h, CONTROL_BG);
             draw_rectangle_lines(bx, y, box_w, box_h, 1.0, PANEL_BORDER);
+        }
+        for (i, (label, value)) in details.iter().enumerate() {
+            let bx = x + i as f32 * (box_w + gap);
             draw_text_ex(label, bx + 10.0, y + 17.0, text_params(11, TEXT_DIM));
             draw_text_ex(value, bx + 10.0, y + 36.0, text_params(14, WHITE));
         }
@@ -239,10 +243,14 @@ impl PlayingState {
         // how the mode plays
         y += ROSTER_H + 24.0;
         if let Some(s) = settings {
+            // bullets first, then the heading and tips in one text batch
+            for i in 0..mode_tips(s.mode).len() {
+                let ty = y + 20.0 + i as f32 * 18.0;
+                draw_rectangle(x + 2.0, ty - 6.0, 4.0, 4.0, ACCENT);
+            }
             draw_text_ex("HOW IT PLAYS", x, y, text_params(12, TEXT_DIM));
             for (i, tip) in mode_tips(s.mode).iter().enumerate() {
                 let ty = y + 20.0 + i as f32 * 18.0;
-                draw_rectangle(x + 2.0, ty - 6.0, 4.0, 4.0, ACCENT);
                 draw_text_ex(tip, x + 14.0, ty, text_params(12, TEXT_LABEL));
             }
         }

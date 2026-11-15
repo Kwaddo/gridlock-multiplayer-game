@@ -17,12 +17,35 @@
         return new Uint8Array(wasm_memory.buffer, ptr, len).slice();
     }
 
+    // Views of the whole wasm memory, shared by the calls below so they do
+    // not each make one. Growing the memory replaces its buffer (the old one
+    // is detached), so they are made anew when that has happened.
+    let heapBuffer = null;
+    let heapU8 = null;
+    let heapU32 = null;
+    let heapF32 = null;
+    function heap() {
+        if (heapBuffer !== wasm_memory.buffer) {
+            heapBuffer = wasm_memory.buffer;
+            heapU8 = new Uint8Array(heapBuffer);
+            heapU32 = new Uint32Array(heapBuffer);
+            heapF32 = new Float32Array(heapBuffer);
+        }
+    }
+    function heapFloats() {
+        heap();
+        return heapF32;
+    }
+
+    // (`ptr` is a Rust *mut u32, so 4-aligned.)
     function writeU32(ptr, value) {
-        new Uint32Array(wasm_memory.buffer, ptr, 1)[0] = value >>> 0;
+        heap();
+        heapU32[ptr >>> 2] = value >>> 0;
     }
 
     function writeBytes(ptr, bytes) {
-        new Uint8Array(wasm_memory.buffer, ptr, bytes.length).set(bytes);
+        heap();
+        heapU8.set(bytes, ptr);
     }
 
     // Timers in hidden tabs are throttled (to once a minute after a while),
@@ -54,11 +77,20 @@
 
     // The game passes wss://<registry>/room/<code>; signalling now runs over
     // https://<registry>/room/<code>/..., and ICE servers live at https://<registry>/ice.
+    // The game asks for the same few rooms on every frame of the host list
+    // (preconnect, prewarm), so the answers are kept (a bounded few).
+    const roomHttpUrls = new Map(); // room url -> http url
+    const ROOM_HTTP_URLS_MAX = 64;
     function roomHttpUrl(roomUrl) {
+        const known = roomHttpUrls.get(roomUrl);
+        if (known !== undefined) return known;
         const url = new URL(roomUrl);
         url.protocol = url.protocol === "wss:" ? "https:" : "http:";
         url.search = "";
-        return url.toString().replace(/\/$/, "");
+        const http = url.toString().replace(/\/$/, "");
+        if (roomHttpUrls.size >= ROOM_HTTP_URLS_MAX) roomHttpUrls.clear();
+        roomHttpUrls.set(roomUrl, http);
+        return http;
     }
 
     // Resolves once a connection has gathered its ICE candidates, or after
@@ -96,7 +128,7 @@
     }
 
     Object.assign(gridlockWeb, {
-        sockets, readString, readBytes, writeU32, writeBytes, sleep, roomHttpUrl, gathered, isReflexive, randomHex,
-        isStunOnly,
+        sockets, readString, readBytes, writeU32, writeBytes, heapFloats, sleep, roomHttpUrl, gathered, isReflexive,
+        randomHex, isStunOnly,
     });
 })((window.gridlockWeb = window.gridlockWeb || {}));

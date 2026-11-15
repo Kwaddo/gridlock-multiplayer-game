@@ -189,13 +189,13 @@ impl SettingsScreen {
         // Save button
         let save_w = 120.0 * s;
         let save_x = back_x + back_w + 15.0 * s;
-        let has_dupes = Self::has_duplicates(config);
+        // duplicate check last: it only matters for a click on the button
         if clicked
-            && !has_dupes
             && mouse.0 >= save_x
             && mouse.0 <= save_x + save_w
             && mouse.1 >= back_y
             && mouse.1 <= back_y + back_h
+            && !Self::has_duplicates(config)
         {
             if self.active_tab == SettingsTab::Crosshair {
                 self.crosshair_state.show_save_prompt = true;

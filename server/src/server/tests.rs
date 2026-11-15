@@ -2,7 +2,7 @@ use super::*;
 use crate::player::Team;
 use crate::player::WorldId;
 
-fn to(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<ServerMsg> {
+fn to(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<ServerMsg> {
     out.iter().filter(|(p, _)| *p == peer).filter_map(|(_, b)| ServerMsg::decode(b)).collect()
 }
 
@@ -64,7 +64,7 @@ fn match_ends_once_every_human_has_left_it() {
     assert!(!server.match_running && server.maze.is_none());
 }
 
-fn statuses(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<u8> {
+fn statuses(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<u8> {
     to(out, peer)
         .into_iter()
         .filter_map(|m| match m {
@@ -278,7 +278,7 @@ fn an_endless_match_sends_its_timer_heartbeat_once_a_second() {
     server.handle_packet(b, &ClientMsg::join("bob").encode());
     start_match(&mut server, a);
     server.match_duration = None;
-    let timers = |out: &[(PeerId, Vec<u8>)]| {
+    let timers = |out: &[(PeerId, crate::net::Packet)]| {
         to(out, b).iter().filter(|m| matches!(m, ServerMsg::MatchTimer { secs: u16::MAX })).count()
     };
 

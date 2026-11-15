@@ -29,11 +29,17 @@ use crate::types::maze::Maze;
 use super::props::draw_prop_hitboxes;
 use cache::MazeMeshes;
 use constants::{MIN_RENDER_CELLS, PLACEHOLDER_COLOR, RENDER_SLACK_CELLS};
-use cull::{DistanceCull, Frustum};
+use cull::DistanceCull;
+pub(crate) use cull::Frustum;
 pub(in crate::world::render) use mesh::MeshBuilder;
 
 thread_local! {
     static MESHES: RefCell<Option<MazeMeshes>> = const { RefCell::new(None) };
+}
+
+/// Compiles the maze pipeline ahead of the first maze frame.
+pub fn warm_up() {
+    gpu::warm_up();
 }
 
 /// Put macroquad's batcher in a known state (triangles, depth test, no

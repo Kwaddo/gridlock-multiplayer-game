@@ -1,6 +1,6 @@
-use gridlock_server::{PeerId, Server};
+use gridlock_server::{Packet, PeerId, Server};
 
-fn sent_types(out: &[(PeerId, Vec<u8>)], to: PeerId) -> Vec<u8> {
+fn sent_types(out: &[(PeerId, Packet)], to: PeerId) -> Vec<u8> {
     out.iter().filter(|(p, _)| *p == to).map(|(_, b)| b[0]).collect()
 }
 
@@ -81,7 +81,7 @@ fn every_server_packet_decodes() {
     }
 }
 
-fn decoded(out: &[(PeerId, Vec<u8>)], to: PeerId) -> Vec<protocol::ServerMsg> {
+fn decoded(out: &[(PeerId, Packet)], to: PeerId) -> Vec<protocol::ServerMsg> {
     out.iter()
         .filter(|(p, _)| *p == to)
         .filter_map(|(_, b)| protocol::ServerMsg::decode(b))
@@ -136,7 +136,7 @@ fn chat_reaches_everyone_cleaned_and_rate_limited() {
     assert!(!out.iter().any(|(_, b)| b[0] == protocol::MSG_CHAT));
 }
 
-fn infos_to(out: &[(PeerId, Vec<u8>)], to: PeerId) -> Vec<protocol::PlayerInfo> {
+fn infos_to(out: &[(PeerId, Packet)], to: PeerId) -> Vec<protocol::PlayerInfo> {
     decoded(out, to)
         .into_iter()
         .filter_map(|m| match m {

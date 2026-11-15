@@ -25,7 +25,13 @@ pub struct MazeData {
     /// The encoded `ServerMsg::Maze`, built on the first send and shared by
     /// every recipient until a wall breaks.
     encoded: std::cell::OnceCell<Vec<u8>>,
+    /// [`MazeData::team_spawn_positions`] as last worked out, with the bits of
+    /// the cell size it was for; cleared when a wall breaks.
+    team_spawns: std::cell::Cell<Option<(u32, TeamSpawns)>>,
 }
+
+/// Red's and Blue's spawn, in world coords.
+type TeamSpawns = ((f32, f32, f32), (f32, f32, f32));
 
 impl MazeData {
     pub fn new(width: u8, height: u8) -> Self {
@@ -58,7 +64,39 @@ impl MazeData {
             prop_cells,
             nav_cells,
             encoded: std::cell::OnceCell::new(),
+            team_spawns: std::cell::Cell::new(None),
         }
+    }
+
+    /// Whether a prop stands on (x, y) or any cell next to it.
+    fn prop_within_one(&self, x: usize, y: usize) -> bool {
+        let w = self.width as usize;
+        let h = self.height as usize;
+        (y.saturating_sub(1)..=(y + 1).min(h.saturating_sub(1))).any(|py| {
+            (x.saturating_sub(1)..=(x + 1).min(w.saturating_sub(1)))
+                .any(|px| self.prop_cells.get(py * w + px).copied().unwrap_or(false))
+        })
+    }
+
+    /// A spawn spot: the 3x3 area around (cx, cy) is open and has no prop in
+    /// it (avoid spawning on/next to props).
+    fn has_clearance(&self, cx: usize, cy: usize) -> bool {
+        let width_usize = self.width as usize;
+        let height_usize = self.height as usize;
+        if cx == 0 || cy == 0 || cx + 1 >= width_usize || cy + 1 >= height_usize {
+            return false;
+        }
+        // cell walkability check
+        for dy in (cy - 1)..=(cy + 1) {
+            for dx in (cx - 1)..=(cx + 1) {
+                let idx = dy * width_usize + dx;
+                if self.cells.get(idx).copied().unwrap_or(0) == 0 {
+                    return false;
+                }
+            }
+        }
+        // ensure no prop sits inside the 3x3 area
+        !self.prop_within_one(cx, cy)
     }
 
     /// Per cell (row-major, like `cells`): whether a prop stands there.
@@ -111,46 +149,24 @@ impl MazeData {
     /// farthest apart. Only rooms have such areas, so the teams start in the
     /// two rooms farthest from each other. Falls back to opposite maze
     /// corners if there are fewer than two.
-    pub fn team_spawn_positions(&self, cell_size: f32) -> ((f32, f32, f32), (f32, f32, f32)) {
+    pub fn team_spawn_positions(&self, cell_size: f32) -> TeamSpawns {
+        // the same maze always gives the same pair: work it out once
+        let key = cell_size.to_bits();
+        if let Some((k, spawns)) = self.team_spawns.get() {
+            if k == key {
+                return spawns;
+            }
+        }
+        let spawns = self.compute_team_spawn_positions(cell_size);
+        self.team_spawns.set(Some((key, spawns)));
+        spawns
+    }
+
+    fn compute_team_spawn_positions(&self, cell_size: f32) -> TeamSpawns {
         // Helper: check 3x3 clearance around a cell and ensure no props occupy that area
         let width_usize = self.width as usize;
         let height_usize = self.height as usize;
-        let has_clearance = |cx: usize, cy: usize| -> bool {
-            if cx == 0 || cy == 0 || cx + 1 >= width_usize || cy + 1 >= height_usize {
-                return false;
-            }
-            // cell walkability check
-            for dy in (cy - 1)..=(cy + 1) {
-                for dx in (cx - 1)..=(cx + 1) {
-                    let idx = dy * width_usize + dx;
-                    if self.cells.get(idx).copied().unwrap_or(0) == 0 {
-                        return false;
-                    }
-                }
-            }
-            // ensure no prop sits inside the 3x3 area (avoid spawning on/next to props)
-            for prop in &self.props {
-                let px = prop.x as usize;
-                let py = prop.y as usize;
-                if (px >= cx.saturating_sub(1) && px <= cx + 1)
-                    && (py >= cy.saturating_sub(1) && py <= cy + 1)
-                {
-                    return false;
-                }
-                // also check a small world-space distance to avoid edge collisions
-                let cand_x = (cx as f32 + 0.5) * cell_size;
-                let cand_z = (cy as f32 + 0.5) * cell_size;
-                let prop_x = (prop.x as f32 + 0.5) * cell_size;
-                let prop_z = (prop.y as f32 + 0.5) * cell_size;
-                let dx = prop_x - cand_x;
-                let dz = prop_z - cand_z;
-                let min_dist = cell_size * 0.9; // slightly less than a cell
-                if dx * dx + dz * dz <= min_dist * min_dist {
-                    return false;
-                }
-            }
-            true
-        };
+        let has_clearance = |cx: usize, cy: usize| self.has_clearance(cx, cy);
 
         // The pair of `cells` farthest apart, with its squared distance in cells.
         let farthest_pair = |cells: &[(usize, usize)]| {
@@ -179,8 +195,7 @@ impl MazeData {
         let mut best = farthest_pair(&cells_where(&|x, y| has_clearance(x, y)));
         if best.map_or(true, |(_, _, d2)| d2 < min_apart * min_apart) {
             let prop_free = |x: usize, y: usize| {
-                self.cells[y * width_usize + x] == 1
-                    && !self.props.iter().any(|p| (p.x as usize).abs_diff(x) <= 1 && (p.y as usize).abs_diff(y) <= 1)
+                self.cells[y * width_usize + x] == 1 && !self.prop_within_one(x, y)
             };
             let wider = farthest_pair(&cells_where(&prop_free));
             if wider.map_or(false, |(_, _, d2)| best.map_or(true, |(_, _, b2)| d2 > b2)) {
@@ -234,42 +249,7 @@ impl MazeData {
         let height_usize = self.height as usize;
 
         // Helper: check 3x3 clearance around a cell and ensure no props occupy that area
-        let has_clearance = |cx: usize, cy: usize| -> bool {
-            if cx == 0 || cy == 0 || cx + 1 >= width_usize || cy + 1 >= height_usize {
-                return false;
-            }
-            // cell walkability check
-            for dy in (cy - 1)..=(cy + 1) {
-                for dx in (cx - 1)..=(cx + 1) {
-                    let idx = dy * width_usize + dx;
-                    if self.cells.get(idx).copied().unwrap_or(0) == 0 {
-                        return false;
-                    }
-                }
-            }
-            // ensure no prop sits inside the 3x3 area (avoid spawning on/next to props)
-            for prop in &self.props {
-                let px = prop.x as usize;
-                let py = prop.y as usize;
-                if (px >= cx.saturating_sub(1) && px <= cx + 1)
-                    && (py >= cy.saturating_sub(1) && py <= cy + 1)
-                {
-                    return false;
-                }
-                // also check a small world-space distance to avoid edge collisions
-                let cand_x = (cx as f32 + 0.5) * cell_size;
-                let cand_z = (cy as f32 + 0.5) * cell_size;
-                let prop_x = (prop.x as f32 + 0.5) * cell_size;
-                let prop_z = (prop.y as f32 + 0.5) * cell_size;
-                let dx = prop_x - cand_x;
-                let dz = prop_z - cand_z;
-                let min_dist = cell_size * 0.9; // slightly less than a cell
-                if dx * dx + dz * dz <= min_dist * min_dist {
-                    return false;
-                }
-            }
-            true
-        };
+        let has_clearance = |cx: usize, cy: usize| self.has_clearance(cx, cy);
 
         // Try multiple random attempts first
         for _ in 0..200 {
@@ -353,6 +333,8 @@ impl MazeData {
         if self.cells[idx] == 0 {
             self.cells[idx] = 1;
             self.encoded = std::cell::OnceCell::new();
+            // an opened wall can make a new clear spawn area
+            self.team_spawns.set(None);
             if !self.prop_cells[idx] {
                 self.nav_cells[idx] = 1;
             }

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::net::{Outbox, PeerId};
+use crate::net::{Outbox, Packet, PeerId};
 use platform::Instant;
 
 use crate::player::{Player, WorldId};
@@ -7,9 +7,10 @@ use crate::protocols::*;
 
 /// Send one packet to every human player.
 pub fn to_humans(socket: &Outbox, players: &HashMap<PeerId, Player>, msg: &[u8]) {
+    let msg = Packet::from(msg);
     for (addr, p) in players.iter() {
         if !p.is_bot {
-            let _ = socket.send_to(msg, *addr);
+            socket.send_shared(&msg, *addr);
         }
     }
 }
@@ -49,13 +50,13 @@ pub fn broadcast_player_list(socket: &Outbox, players: &HashMap<PeerId, Player>)
     broadcast_lobby_leader(socket, players);
 
     // Build the message once; the content is identical for every receiver.
-    let msg = player_list_msg(players);
+    let msg = Packet::from(player_list_msg(players));
 
     for (addr, p) in players.iter() {
         if p.is_bot {
             continue;
         }
-        let _ = socket.send_to(&msg, *addr);
+        socket.send_shared(&msg, *addr);
     }
 }
 
@@ -65,12 +66,12 @@ pub fn broadcast_lobby_leader(socket: &Outbox, players: &HashMap<PeerId, Player>
         .and_then(|addr| players.get(&addr))
         .map(|p| p.id)
         .unwrap_or(0);
-    let msg = ServerMsg::LobbyLeader { id: leader_id }.encode();
+    let msg = Packet::from(ServerMsg::LobbyLeader { id: leader_id }.encode());
     for (addr, p) in players.iter() {
         if p.is_bot {
             continue;
         }
-        let _ = socket.send_to(&msg, *addr);
+        socket.send_shared(&msg, *addr);
     }
 }
 
@@ -80,12 +81,12 @@ pub fn broadcast_match_timer(
     players: &HashMap<PeerId, Player>,
     secs: u16,
 ) {
-    let msg = ServerMsg::MatchTimer { secs }.encode();
+    let msg = Packet::from(ServerMsg::MatchTimer { secs }.encode());
     for (addr, p) in players.iter() {
         if p.is_bot {
             continue;
         }
-        let _ = socket.send_to(&msg, *addr);
+        socket.send_shared(&msg, *addr);
     }
 }
 
@@ -96,14 +97,16 @@ pub fn move_all_players_to_lobby(
     reset_scores: bool,
 ) {
     // Build the world-change-to-lobby message once; coords are the same for everyone.
-    let wc = ServerMsg::WorldChange {
-        world: WorldId::Lobby.as_u8(),
-        spawn: (0.0, 0.0, 0.0),
-        mode: None,
-        freeze_secs: None,
-        match_timer: None,
-    }
-    .encode();
+    let wc = Packet::from(
+        ServerMsg::WorldChange {
+            world: WorldId::Lobby.as_u8(),
+            spawn: (0.0, 0.0, 0.0),
+            mode: None,
+            freeze_secs: None,
+            match_timer: None,
+        }
+        .encode(),
+    );
 
     for (addr, p) in players.iter_mut() {
         if p.is_bot {
@@ -118,7 +121,7 @@ pub fn move_all_players_to_lobby(
             p.gun_level = 1;
             p.death_time = None;
         }
-        let _ = socket.send_to(&wc, *addr);
+        socket.send_shared(&wc, *addr);
     }
 
     crate::server::game::auto_assign_lobby_teams(players);
@@ -145,7 +148,7 @@ fn send_state(socket: &Outbox, players: &HashMap<PeerId, Player>, include_events
     let now = Instant::now();
     // The message only depends on the receiver's world: encode it once per
     // world (at most a couple) and send the same bytes to everyone in it.
-    let mut by_world: Vec<(WorldId, Vec<u8>)> = Vec::with_capacity(2);
+    let mut by_world: Vec<(WorldId, Packet)> = Vec::with_capacity(2);
 
     for (recv_addr, receiver) in players.iter() {
         if receiver.is_bot {
@@ -154,11 +157,11 @@ fn send_state(socket: &Outbox, players: &HashMap<PeerId, Player>, include_events
         let at = match by_world.iter().position(|(w, _)| *w == receiver.world) {
             Some(at) => at,
             None => {
-                by_world.push((receiver.world, state_msg(players, receiver.world, include_events, now)));
+                by_world.push((receiver.world, state_msg(players, receiver.world, include_events, now).into()));
                 by_world.len() - 1
             }
         };
-        let _ = socket.send_to(&by_world[at].1, *recv_addr);
+        socket.send_shared(&by_world[at].1, *recv_addr);
     }
 }
 
@@ -170,11 +173,14 @@ pub(crate) fn state_msg(
     include_events: bool,
     now: Instant,
 ) -> Vec<u8> {
-    let entries = players
-        .values()
-        .filter(|p| p.world == world)
-        .map(|p| player_state(p, include_events, now))
-        .collect();
+    // sized for everyone up front: a filtered collect starts empty and regrows
+    let mut entries = Vec::with_capacity(players.len());
+    entries.extend(
+        players
+            .values()
+            .filter(|p| p.world == world)
+            .map(|p| player_state(p, include_events, now)),
+    );
     ServerMsg::State { world: world.as_u8(), players: entries }.encode()
 }
 
@@ -225,7 +231,7 @@ mod tests {
     use std::time::Duration;
 
     /// The previous `send_state`: one message built and encoded per receiver.
-    fn per_receiver(players: &HashMap<PeerId, Player>, include_events: bool) -> Vec<(PeerId, Vec<u8>)> {
+    fn per_receiver(players: &HashMap<PeerId, Player>, include_events: bool) -> Vec<(PeerId, Packet)> {
         let now = Instant::now();
         let mut out = Vec::new();
         for (recv_addr, receiver) in players.iter() {
@@ -238,7 +244,7 @@ mod tests {
                 .map(|p| player_state(p, include_events, now))
                 .collect();
             let world = receiver.world.as_u8();
-            out.push((*recv_addr, ServerMsg::State { world, players: entries }.encode()));
+            out.push((*recv_addr, ServerMsg::State { world, players: entries }.encode().into()));
         }
         out
     }

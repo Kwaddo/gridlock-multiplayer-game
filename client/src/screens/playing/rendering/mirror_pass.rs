@@ -4,6 +4,9 @@ use crate::world::mirror::{ pick_live_mirrors, MirrorCamera };
 
 use super::super::PlayingState;
 
+/// The mirror's reflection renders at 1/MIRROR_DOWNSCALE of the window size.
+const MIRROR_DOWNSCALE: u32 = 2;
+
 impl PlayingState {
     /// Renders the reflection of each live mirror into its own texture.
     /// Returns the indexes (into `self.mirrors`) of the mirrors that got one;
@@ -18,11 +21,16 @@ impl PlayingState {
             return live;
         }
 
-        // screen-sized textures with a depth buffer. sample_count must be 0:
+        // half-screen-sized textures with a depth buffer: the glass samples them
+        // by gl_FragCoord / ScreenSize, so any size works and the bilinear
+        // upscale is not noticeable on a reflection. sample_count must be 0:
         // the default (1) gives a blank mirror in the browser.
         // On resize, drop the old textures now and create new ones next frame,
         // so the engine never frees a texture twice in one frame.
-        let (w, h) = (screen_width() as u32, screen_height() as u32);
+        let (w, h) = (
+            (screen_width() as u32 / MIRROR_DOWNSCALE).max(1),
+            (screen_height() as u32 / MIRROR_DOWNSCALE).max(1),
+        );
         let wrong_size = self.mirror_targets
             .iter()
             .any(|rt| (rt.texture.width() as u32) != w || (rt.texture.height() as u32) != h);

@@ -5,8 +5,9 @@
 // - State lives in a private bucket reached through the S3 API (STATE_BUCKET).
 //   The host list is one object, state.json. The bucket has no conditional
 //   writes, so two writes at once can overwrite each other: every change to
-//   it is checked after a moment and applied again on top of the other one if
-//   it went missing (commit). A host whose listing still went missing gets
+//   it (but a heartbeat, which the next one heals) is checked after a moment
+//   and applied again on top of the other one if it went missing (commit,
+//   after the reply). A host whose listing still went missing gets
 //   404 on its next heartbeat and registers again.
 // - WebRTC signalling never touches state.json, since it is on the path of
 //   every join: each room's claim and each message are objects of their own
@@ -84,8 +85,16 @@ const LONG_POLL_MS = 6000; // the function itself times out at 10 s
 const LONG_POLL_ACTIVE_MS = 10000;
 // (Each look itself takes an S3 round trip, ~150 ms from the edge, on top.)
 const LONG_POLL_CHECK_MS = 25;
-const LONG_POLL_IDLE_CHECK_MS = 50;
+// An idle host is looked at about 2.5 times a second instead of ~5: the
+// first message of a join may wait up to this long (a write in the same
+// isolate still wakes the poll at once), and each look saved is an S3 LIST.
+const LONG_POLL_IDLE_CHECK_MS = 250;
 const LONG_POLL_CLAIM_CHECK_MS = 2000;
+// A look that fails waits twice as long before the next, up to this; after
+// LONG_POLL_MAX_FAILURES in a row the poll gives up with a 503, as when its
+// first look fails, so a failing store is not asked 20-40 times a second.
+const LONG_POLL_FAIL_MAX_MS = 1000;
+const LONG_POLL_MAX_FAILURES = 3;
 const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
 // How far apart two isolates' clocks may be, for a poll's `after`.
 const CLOCK_SKEW_MS = 2000;
@@ -110,6 +119,12 @@ const MAX_SIGNALS = 64;
 const ROOM_CODE = /^[A-Za-z0-9_-]{4,32}$/;
 const PEER_ID = /^[0-9a-f-]{36}$/;
 const TURN_CREDENTIAL_TTL = 86400;
+// Minted TURN credentials are handed out again this long (the page itself
+// keeps them 30 min more), far within their TURN_CREDENTIAL_TTL.
+const ICE_REUSE_MS = 30 * 60 * 1000;
+// GET /servers answers from this isolate's last read of state.json for this
+// long (requests at once share one read); its own writes drop it at once.
+const HOST_LIST_REUSE_MS = 2000;
 const STUN_ONLY = { iceServers: [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }] };
 
 export default {
@@ -121,7 +136,15 @@ export default {
         if (!ROOM_CODE.test(arg)) return cors(json({ error: "bad room code" }, 400));
         return cors(await room(request, env, ctx, arg, action));
       }
-      if (root === "ice" && request.method === "GET") return cors(json(await iceServers(env)));
+      if (root === "ice" && request.method === "GET") {
+        const servers = await iceServers(env);
+        const resp = json(servers);
+        // The page may reuse these a while; not a failed mint (STUN only
+        // although TURN is configured), so the next ask tries again.
+        const failedMint = servers === STUN_ONLY && !env.TURN_URLS && env.TURN_KEY_ID && env.TURN_KEY_API_TOKEN;
+        resp.headers.set("Cache-Control", failedMint ? "no-store" : "private, max-age=600");
+        return cors(resp);
+      }
       if (root === "models" && request.method === "GET" && env.MODELS_ORIGIN) return cors(await model(request, env));
       if (root === "servers") return cors(await servers(request, env, ctx, arg, action));
       return cors(json({ error: "not found" }, 404));
@@ -143,19 +166,51 @@ async function loadState(store) {
   return { listings };
 }
 
+// The host list as GET /servers last read it in this isolate: { at, state: Promise }.
+let hostList = null;
+
+function listedState(store) {
+  if (hostList && Date.now() - hostList.at < HOST_LIST_REUSE_MS) return hostList.state;
+  const entry = { at: Date.now(), state: loadState(store) };
+  hostList = entry;
+  entry.state.catch(() => {
+    if (hostList === entry) hostList = null;
+  });
+  return entry.state;
+}
+
 // Apply a change to state.json and make sure it stuck: a write made at the
 // same moment can overwrite ours, so read back after a moment and apply the
 // change again on top of what is there if it is missing. `apply` must be
-// safe to repeat; `applied` tells whether a state has the change.
-async function commit(store, apply, applied) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const state = await loadState(store);
-    if (attempt > 0 && applied(state)) return;
-    apply(state);
-    await store.put(STATE_KEY, state);
-    await new Promise((r) => setTimeout(r, 100 + Math.random() * 200));
-    if (applied(await loadState(store))) return;
-  }
+// safe to repeat; `applied` tells whether a state has the change (then
+// nothing is written). Options: `state`, the state the caller just read, for
+// the first attempt; `ctx`, to make that check after the response is sent
+// (in ctx.waitUntil); `check: false` to write once and not check at all, for
+// a change that heals itself (a heartbeat: the next one comes long before
+// the listing would expire).
+async function commit(store, apply, applied, { state, ctx, check = true } = {}) {
+  state ??= await loadState(store);
+  if (applied(state)) return;
+  apply(state);
+  await putState(store, state);
+  if (!check) return;
+  const settle = async () => {
+    for (let attempt = 1; attempt < 4; attempt++) {
+      await delay(100 + Math.random() * 200);
+      const now = await loadState(store);
+      if (applied(now)) return;
+      apply(now);
+      await putState(store, now);
+    }
+  };
+  if (ctx) ctx.waitUntil(settle().catch((e) => console.error("gridlock-registry: commit:", e && e.stack ? e.stack : e)));
+  else await settle();
+}
+
+async function putState(store, state) {
+  hostList = null;
+  await store.put(STATE_KEY, state);
+  hostList = null;
 }
 
 // ---------------------------------------------------------------- host list
@@ -165,7 +220,7 @@ async function servers(request, env, ctx, id, extra) {
   const store = new Store(env);
 
   if (!id && request.method === "GET") {
-    const { listings } = await loadState(store);
+    const { listings } = await listedState(store);
     const ip = request.headers.get("CF-Connecting-IP");
     return json(
       Object.entries(listings).map(([id, listing]) => ({
@@ -175,14 +230,14 @@ async function servers(request, env, ctx, id, extra) {
       })),
     );
   }
-  if (!id && request.method === "POST") return createListing(request, store);
+  if (!id && request.method === "POST") return createListing(request, store, ctx);
   if (!id || !PEER_ID.test(id)) return json({ error: "not found" }, 404);
   if (request.method === "PUT") return heartbeat(request, store, id);
-  if (request.method === "DELETE") return removeListing(request, store, id);
+  if (request.method === "DELETE") return removeListing(request, store, ctx, id);
   return json({ error: "method not allowed" }, 405);
 }
 
-async function createListing(request, store) {
+async function createListing(request, store, ctx) {
   const ip = request.headers.get("CF-Connecting-IP");
   const body = await readJson(request);
   const name = cleanName(body?.name);
@@ -201,7 +256,8 @@ async function createListing(request, store) {
   // heartbeat) replaces what it had, so the game is never listed twice.
   // Only the machine that listed a room may replace that listing: anyone else
   // could otherwise take over (or rename) another host's game.
-  const { listings } = await loadState(store);
+  const state = await loadState(store);
+  const { listings } = state;
   for (const [other, l] of Object.entries(listings)) {
     if (room ? l.entry.room !== room : l.entry.addr !== entry.addr) continue;
     if (l.ip !== ip) return json({ error: "room already listed" }, 409);
@@ -223,13 +279,15 @@ async function createListing(request, store) {
       s.listings[id] = listing;
     },
     (s) => Boolean(s.listings[id]),
+    { state, ctx },
   );
   // Echo the address back so a host can tell whether it is reachable as listed.
   return json({ id, token, ttl: TTL_SECONDS, ...(entry.addr ? { addr: entry.addr } : {}) }, 201);
 }
 
 async function heartbeat(request, store, id) {
-  const { listings } = await loadState(store);
+  const state = await loadState(store);
+  const { listings } = state;
   if (!(await authorized(request, listings, id))) return json({ error: "unknown listing" }, 404);
   const players = int((await readJson(request))?.players, 0, 255);
   const expires = Date.now() + TTL_SECONDS * 1000;
@@ -241,13 +299,17 @@ async function heartbeat(request, store, id) {
       l.expires = expires;
     },
     (s) => s.listings[id]?.expires >= expires,
+    // A heartbeat lost to a write at the same moment heals with the next
+    // one (HEARTBEAT_SECS 20 against TTL_SECONDS 60), so it is not checked.
+    { state, check: false },
   );
   return new Response(null, { status: 204 });
 }
 
-async function removeListing(request, store, id) {
-  if (!(await authorized(request, (await loadState(store)).listings, id))) return json({ error: "unknown listing" }, 404);
-  await commit(store, (s) => delete s.listings[id], (s) => !s.listings[id]);
+async function removeListing(request, store, ctx, id) {
+  const state = await loadState(store);
+  if (!(await authorized(request, state.listings, id))) return json({ error: "unknown listing" }, 404);
+  await commit(store, (s) => delete s.listings[id], (s) => !s.listings[id], { state, ctx });
   return new Response(null, { status: 204 });
 }
 
@@ -270,8 +332,25 @@ async function iceServers(env) {
     };
     return { iceServers: [...STUN_ONLY.iceServers, turn] };
   }
-  // Cloudflare's TURN service, with short-lived credentials minted per request.
+  // Cloudflare's TURN service, with short-lived credentials (a day), minted
+  // once per ICE_REUSE_MS in this isolate; requests at once share one mint.
   if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return STUN_ONLY;
+  const now = Date.now();
+  if (minted?.keyId === env.TURN_KEY_ID && now - minted.at < ICE_REUSE_MS) return minted.servers;
+  const entry = { keyId: env.TURN_KEY_ID, at: now, servers: mintIceServers(env) };
+  minted = entry;
+  // A failed mint is not kept: the next request tries again.
+  const forget = () => {
+    if (minted === entry) minted = null;
+  };
+  entry.servers.then((s) => s === STUN_ONLY && forget(), forget);
+  return entry.servers;
+}
+
+// Minted ICE servers in this isolate: { keyId, at, servers: Promise }.
+let minted = null;
+
+async function mintIceServers(env) {
   const resp = await fetch(
     `https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`,
     {
@@ -377,10 +456,17 @@ async function room(request, env, ctx, code, action) {
     // (A player only polls while it connects.)
     const active = !asHost || now - after < LONG_POLL_ACTIVE_MS;
     const check = active ? LONG_POLL_CHECK_MS : LONG_POLL_IDLE_CHECK_MS;
+    let failures = 0; // looks failed in a row
     while (wait && !messages.length && Date.now() - now < LONG_POLL_MS) {
-      await nextMessage(box, check);
+      await nextMessage(box, failures ? Math.min(check * 2 ** failures, LONG_POLL_FAIL_MAX_MS) : check);
       // A look that failed (the store has the odd hiccup) is tried again.
-      messages = await look().catch(() => []);
+      try {
+        messages = await look();
+        failures = 0;
+      } catch (e) {
+        if (++failures >= LONG_POLL_MAX_FAILURES) throw e;
+        messages = [];
+      }
       if (!messages.length && Date.now() - lastClaimCheck >= LONG_POLL_CLAIM_CHECK_MS) {
         lastClaimCheck = Date.now();
         if (!open(await loadClaim())) return json({ error: "room closed" }, 410);
@@ -450,6 +536,7 @@ async function room(request, env, ctx, code, action) {
             for (const [lid, l] of Object.entries(s.listings)) if (l.entry.room === code) delete s.listings[lid];
           },
           (s) => !Object.values(s.listings).some((l) => l.entry.room === code),
+          { ctx },
         );
       }
       return new Response(null, { status: 204 });
@@ -608,7 +695,12 @@ function nextMessage(key, ms) {
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
-      localWaiters.get(key)?.delete(done);
+      const waiters = localWaiters.get(key);
+      if (waiters) {
+        waiters.delete(done);
+        // (no empty set left behind for every mailbox ever polled)
+        if (!waiters.size) localWaiters.delete(key);
+      }
       resolve();
     };
     const timer = setTimeout(done, ms);
@@ -634,9 +726,19 @@ async function hostVia(env, code, id, host) {
   return hmacHex(env.SIGNAL_SECRET, `${code}:${id}>${host}`);
 }
 
+// SIGNAL_SECRET's HMAC key, imported once per isolate: { secret, key: Promise }.
+let signalKey = null;
+
 async function hmacHex(secret, message) {
-  const key = await crypto.subtle.importKey("raw", utf8(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return hex(await crypto.subtle.sign("HMAC", key, utf8(message)));
+  let entry = signalKey;
+  if (entry?.secret !== secret) {
+    entry = { secret, key: crypto.subtle.importKey("raw", utf8(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]) };
+    signalKey = entry;
+    entry.key.catch(() => {
+      if (signalKey === entry) signalKey = null;
+    });
+  }
+  return hex(await crypto.subtle.sign("HMAC", await entry.key, utf8(message)));
 }
 
 async function validPeer(env, code, id, token, asHost) {
@@ -718,7 +820,7 @@ class Store {
 
     const amzDate = new Date().toISOString().replace(/[-:]|\.\d{3}/g, "");
     const date = amzDate.slice(0, 8);
-    const payloadHash = await sha256Hex(body);
+    const payloadHash = body === "" ? EMPTY_SHA256 : await sha256Hex(body);
     const headers = { host: url.host, "x-amz-content-sha256": payloadHash, "x-amz-date": amzDate };
     const signedHeaders = Object.keys(headers).sort().join(";");
     const canonicalHeaders = Object.keys(headers).sort().map((h) => `${h}:${headers[h]}\n`).join("");
@@ -726,9 +828,8 @@ class Store {
     const scope = `${date}/auto/s3/aws4_request`;
     const toSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${await sha256Hex(canonicalRequest)}`;
 
-    let key = utf8(`AWS4${this.env.S3_SECRET_ACCESS_KEY}`);
-    for (const part of [date, "auto", "s3", "aws4_request"]) key = await hmac(key, part);
-    const signature = hex(await hmac(key, toSign));
+    const key = await signingKey(this.env.S3_SECRET_ACCESS_KEY, date);
+    const signature = hex(await crypto.subtle.sign("HMAC", key, utf8(toSign)));
 
     return fetch(url, {
       method,
@@ -741,6 +842,29 @@ class Store {
       },
     });
   }
+}
+
+// SHA-256 of an empty body (every GET, LIST and DELETE).
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+// The SigV4 signing key, derived from the secret and the UTC date, so the
+// same all day: derived once a day per isolate. { secret, date, key: Promise }
+let signing = null;
+
+function signingKey(secret, date) {
+  if (signing?.secret === secret && signing.date === date) return signing.key;
+  const entry = { secret, date, key: deriveSigningKey(secret, date) };
+  signing = entry;
+  entry.key.catch(() => {
+    if (signing === entry) signing = null;
+  });
+  return entry.key;
+}
+
+async function deriveSigningKey(secret, date) {
+  let key = utf8(`AWS4${secret}`);
+  for (const part of [date, "auto", "s3", "aws4_request"]) key = await hmac(key, part);
+  return crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 
 function xmlText(text) {
@@ -756,12 +880,18 @@ async function sha256Hex(text) {
   return hex(await crypto.subtle.digest("SHA-256", utf8(text)));
 }
 
+const HEX = Array.from({ length: 256 }, (_, b) => b.toString(16).padStart(2, "0"));
+
 function hex(buffer) {
-  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  let out = "";
+  for (const b of new Uint8Array(buffer)) out += HEX[b];
+  return out;
 }
 
+const encoder = new TextEncoder();
+
 function utf8(text) {
-  return new TextEncoder().encode(text);
+  return encoder.encode(text);
 }
 
 function rfc3986(value) {
@@ -820,6 +950,9 @@ function cors(response) {
   headers.set("Access-Control-Allow-Origin", "*");
   headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  // Browsers may skip the preflight this long (Chromium caps it at 2 h):
+  // without it they ask again after 5 s, so before every heartbeat.
+  headers.set("Access-Control-Max-Age", "86400");
   // The page reads this one to know its polls are held (see room).
   headers.set("Access-Control-Expose-Headers", LONG_POLL_HEADER);
   return new Response(response.body, { status: response.status, headers });

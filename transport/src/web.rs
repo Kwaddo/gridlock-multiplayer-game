@@ -1,6 +1,13 @@
 //! Browser networking through the `gridlock_web` miniquad JS plugin
 //! (`web/gridlock_web.js`): WebRTC data channels and fetch, both polled.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::thread::LocalKey;
+use std::time::Duration;
+
+use platform::Instant;
+
 use crate::{Link, LinkStatus};
 
 mod ffi {
@@ -91,11 +98,40 @@ impl Drop for RtcSocket {
     }
 }
 
+/// How long a URL handed to [`prewarm`] or [`preconnect`] is not handed over
+/// again. Callers repeat every frame; the JS side keeps what they started for
+/// 10-15 s, so passing on each repeat only re-parses the URL to find it.
+// short enough that a socket JS dropped is re-warmed well before a join
+const REPEAT_AFTER: Duration = Duration::from_millis(250);
+
+thread_local! {
+    static PREWARMED: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
+    static PRECONNECTED: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
+}
+
+/// Whether `url` was last handed over at least [`REPEAT_AFTER`] ago (or never);
+/// if so, it counts as handed over now.
+fn due(sent: &'static LocalKey<RefCell<HashMap<String, Instant>>>, url: &str) -> bool {
+    sent.with(|sent| {
+        let mut sent = sent.borrow_mut();
+        let now = Instant::now();
+        let fresh = |at: &Instant| now.saturating_duration_since(*at) < REPEAT_AFTER;
+        if sent.get(url).is_some_and(fresh) {
+            return false;
+        }
+        sent.retain(|_, at| fresh(at));
+        sent.insert(url.to_string(), now);
+        true
+    })
+}
+
 /// Get ready to join the room at `room_url` (the player points at it): its
 /// host's spare offer and the ICE servers are fetched ahead. Cheap to call
 /// every frame; repeats are ignored for a while.
 pub fn prewarm(room_url: &str) {
-    unsafe { ffi::gridlock_rtc_prewarm(room_url.as_ptr(), room_url.len() as u32) }
+    if due(&PREWARMED, room_url) {
+        unsafe { ffi::gridlock_rtc_prewarm(room_url.as_ptr(), room_url.len() as u32) }
+    }
 }
 
 /// Connect to the room at `room_url` now, ahead of a join: the next
@@ -104,7 +140,9 @@ pub fn prewarm(room_url: &str) {
 /// at); one not asked for in a few seconds is closed. The host learns the
 /// player's address from the connection, as it would from a join.
 pub fn preconnect(room_url: &str) {
-    unsafe { ffi::gridlock_rtc_preconnect(room_url.as_ptr(), room_url.len() as u32) }
+    if due(&PRECONNECTED, room_url) {
+        unsafe { ffi::gridlock_rtc_preconnect(room_url.as_ptr(), room_url.len() as u32) }
+    }
 }
 
 /// A player's link to the host of a signalling room.

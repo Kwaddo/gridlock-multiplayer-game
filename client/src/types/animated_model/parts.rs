@@ -248,7 +248,11 @@ pub(super) fn build_parts(
 // one part into pieces under the draw limit, each keeps its own skin data in the same order
 // (skinned vertices first, then rigid ones) because the chunk's vertex ids come back sorted
 fn split_part(part: AnimatedPart) -> Vec<AnimatedPart> {
-    let chunks = crate::types::mesh_split::chunk_triangles(&part.mesh.indices, part.mesh.vertices.len());
+    use crate::types::mesh_split::{chunk_triangles, needs_split};
+    if !needs_split(&part.mesh.indices, part.mesh.vertices.len()) {
+        return vec![part]; // fits, no copy of its indices just to find that out
+    }
+    let chunks = chunk_triangles(&part.mesh.indices, part.mesh.vertices.len());
     if chunks.len() == 1 {
         return vec![part];
     }

@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+
+# The browser's clock (std::time::Instant panics on wasm32), for web.rs.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+platform = { path = "../platform" }

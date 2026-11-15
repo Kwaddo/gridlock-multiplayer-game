@@ -8,6 +8,7 @@ mod players;
 pub use players::{draw_player_list, draw_team_scoreboard};
 mod scope;
 mod status;
+pub(crate) use status::CachedText;
 mod team_score;
 pub use team_score::draw_team_score_bar;
 pub use loading::draw_background_loading;
@@ -21,6 +22,10 @@ use crate::types::world::WorldId;
 use crate::ui::OtherPlayer;
 use crate::weapons::effects::DamageNumber;
 use crate::weapons::WeaponInventory;
+
+thread_local! {
+    static HIT_BY_TEXT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
 
 pub fn draw_hud(
     username: &str,
@@ -68,12 +73,20 @@ pub fn draw_hud(
             Color::from_rgba(255, 40, 40, alpha),
         );
         if let Some(att) = last_damage_attacker {
-            draw_text_ex(
-                &format!("Hit by {}", att),
-                12.0,
-                36.0,
-                crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
-            );
+            HIT_BY_TEXT.with_borrow_mut(|text| {
+                // rebuilt only when the attacker changes
+                if text.strip_prefix("Hit by ") != Some(att) {
+                    text.clear();
+                    text.push_str("Hit by ");
+                    text.push_str(att);
+                }
+                draw_text_ex(
+                    text,
+                    12.0,
+                    36.0,
+                    crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
+                );
+            });
         } else {
             draw_text_ex(
                 "Hit!",

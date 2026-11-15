@@ -64,9 +64,9 @@ impl Server {
         if game::balance_lobby_teams(&mut self.players) {
             broadcast::broadcast_player_list(&self.outbox, &self.players);
         }
-        if self.last_regen_tick.elapsed() >= Duration::from_secs(1) {
+        if now_tick.saturating_duration_since(self.last_regen_tick) >= Duration::from_secs(1) {
             game::process_lobby_regen(&mut self.players);
-            self.last_regen_tick = Instant::now();
+            self.last_regen_tick = now_tick;
         }
         // what rarely changes goes out ahead of the state that may first show it
         self.sync_player_info();
@@ -91,7 +91,15 @@ impl Server {
             .last_bookkeeping
             .map_or(true, |t| t.elapsed() >= BOOKKEEPING_INTERVAL);
         if bookkeeping_due {
-            self.last_bookkeeping = Some(Instant::now());
+            let now = Instant::now();
+            self.last_bookkeeping = Some(now);
+            // An expired freeze reads the same as none; clearing it spares
+            // every later freeze check a clock read.
+            for p in self.players.values_mut() {
+                if p.post_teleport_freeze_until.is_some_and(|t| t <= now) {
+                    p.post_teleport_freeze_until = None;
+                }
+            }
             self.forget_rejected();
             let timed_out = game::cleanup_inactive_players(&mut self.players);
             if !timed_out.is_empty() {
@@ -136,10 +144,11 @@ impl Server {
         // Periodically rebroadcast warmup countdown so clients that missed
         // the original packet can catch up (helps offscreen/paused clients).
         if let Some(end) = self.match_warmup_end {
-            let secs = if Instant::now() >= end {
+            let now = Instant::now();
+            let secs = if now >= end {
                 0u8
             } else {
-                end.saturating_duration_since(Instant::now())
+                end.saturating_duration_since(now)
                     .as_secs()
                     .min(255) as u8
             };
@@ -211,10 +220,11 @@ impl Server {
         // display the remaining end-of-match timer even if they missed the
         // original MSG_MATCH_END packet.
         if let Some((when, winner_id, winner_name)) = self.match_end_pending.as_ref() {
-            let secs = if Instant::now() >= *when {
+            let now = Instant::now();
+            let secs = if now >= *when {
                 0u8
             } else {
-                when.saturating_duration_since(Instant::now())
+                when.saturating_duration_since(now)
                     .as_secs()
                     .min(255) as u8
             };

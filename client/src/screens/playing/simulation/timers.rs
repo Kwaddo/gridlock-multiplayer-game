@@ -10,6 +10,8 @@ impl PlayingState {
             self.hit_marker_timer = (self.hit_marker_timer - delta).max(0.0);
         }
 
+        self.tick_damage_indicators(delta);
+
         // Damage flash timer (short red vignette + optional attacker name)
         if self.damage_flash_timer > 0.0 {
             self.damage_flash_timer = (self.damage_flash_timer - delta).max(0.0);
