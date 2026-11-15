@@ -90,6 +90,11 @@ const LONG_POLL_CHECK_MS = 25;
 // isolate still wakes the poll at once), and each look saved is an S3 LIST.
 const LONG_POLL_IDLE_CHECK_MS = 250;
 const LONG_POLL_CLAIM_CHECK_MS = 2000;
+// A look that fails waits twice as long before the next, up to this; after
+// LONG_POLL_MAX_FAILURES in a row the poll gives up with a 503, as when its
+// first look fails, so a failing store is not asked 20-40 times a second.
+const LONG_POLL_FAIL_MAX_MS = 1000;
+const LONG_POLL_MAX_FAILURES = 3;
 const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
 // How far apart two isolates' clocks may be, for a poll's `after`.
 const CLOCK_SKEW_MS = 2000;
@@ -451,10 +456,17 @@ async function room(request, env, ctx, code, action) {
     // (A player only polls while it connects.)
     const active = !asHost || now - after < LONG_POLL_ACTIVE_MS;
     const check = active ? LONG_POLL_CHECK_MS : LONG_POLL_IDLE_CHECK_MS;
+    let failures = 0; // looks failed in a row
     while (wait && !messages.length && Date.now() - now < LONG_POLL_MS) {
-      await nextMessage(box, check);
+      await nextMessage(box, failures ? Math.min(check * 2 ** failures, LONG_POLL_FAIL_MAX_MS) : check);
       // A look that failed (the store has the odd hiccup) is tried again.
-      messages = await look().catch(() => []);
+      try {
+        messages = await look();
+        failures = 0;
+      } catch (e) {
+        if (++failures >= LONG_POLL_MAX_FAILURES) throw e;
+        messages = [];
+      }
       if (!messages.length && Date.now() - lastClaimCheck >= LONG_POLL_CLAIM_CHECK_MS) {
         lastClaimCheck = Date.now();
         if (!open(await loadClaim())) return json({ error: "room closed" }, 410);
