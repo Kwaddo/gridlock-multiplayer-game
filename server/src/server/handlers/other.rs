@@ -75,35 +75,8 @@ pub fn handle_hit(
     let weapon_name = weapon_name.unwrap_or_default();
     let is_backstab_claim = is_backstab_claim.unwrap_or(false);
 
-    let victim_addr_opt = players
-        .iter()
-        .find(|(_, p)| p.id == victim_id)
-        .map(|(addr, _)| *addr);
-
-    let Some(victim_addr) = victim_addr_opt else { return; };
-
-    // avoid holding multiple simultaneous mutable borrows of `players` by doing
-    // short-lived immutable checks, then separate mutable borrows for victim and
-    // killer. We'll record if the victim needs to be reset after killer handling.
-    // First, perform immutable checks on the victim
-    {
-        let victim_ref = match players.get(&victim_addr) {
-            Some(v) => v,
-            None => return,
-        };
-        // If the victim is in their per-player post-teleport freeze, ignore hits
-        if victim_ref
-            .post_teleport_freeze_until
-            .map_or(false, |t| t > Instant::now())
-            && victim_ref.world == WorldId::Maze
-        {
-            return;
-        }
-        if !victim_ref.is_alive {
-            return;
-        }
-    }
-
+    // apply_damage finds the victim and ignores hits on the dead and the
+    // frozen itself, so there is nothing to check here first
     apply_damage(
         socket,
         players,
@@ -348,29 +321,20 @@ pub fn apply_damage(
 
     if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
 
-        let _chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
-            if vref.team != Team::Spectator {
-                game::choose_team_weapon_for_player(players, vref)
-            } else {
-                "Knife".to_string()
-            }
-        } else {
-            "Knife".to_string()
-        };
-
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.is_alive = false;
             vmut.deaths += 1;
             vmut.death_time = Some(Instant::now());
         }
 
-        let death_msg = ServerMsg::Death {
-            killer_id: players.get(&attacker).map_or(0, |att| att.id),
-            weapon: weapon_name.to_string(),
-        }
-        .encode();
         if let Some(victim) = players.get(&victim_addr) {
             if !victim.is_bot {
+                // encoded only for a human: bots get no packets
+                let death_msg = ServerMsg::Death {
+                    killer_id: players.get(&attacker).map_or(0, |att| att.id),
+                    weapon: weapon_name.to_string(),
+                }
+                .encode();
                 let _ = socket.send_to(&death_msg, victim_addr);
             }
         }
@@ -407,9 +371,9 @@ pub fn apply_damage(
                 }
             }
 
-            let kill_msg =
-                ServerMsg::Kill { victim_id, weapon: weapon_name.to_string() }.encode();
             if !killer.is_bot {
+                let kill_msg =
+                    ServerMsg::Kill { victim_id, weapon: weapon_name.to_string() }.encode();
                 let _ = socket.send_to(&kill_msg, attacker);
             }
         }
@@ -471,15 +435,14 @@ pub fn apply_damage(
 
         // stun when punched
         let is_punch = weapon_name.eq_ignore_ascii_case("punch") || weapon_name.eq_ignore_ascii_case("knife"); 
-        let dmg_msg = ServerMsg::Damage {
-            amount: damage as f32,
-            attacker_id: players.get(&attacker).map_or(0, |att| att.id),
-            stun: is_punch,
-        }
-        .encode();
-
         if let Some(victim) = players.get(&victim_addr) {
             if !victim.is_bot {
+                let dmg_msg = ServerMsg::Damage {
+                    amount: damage as f32,
+                    attacker_id: players.get(&attacker).map_or(0, |att| att.id),
+                    stun: is_punch,
+                }
+                .encode();
                 let _ = socket.send_to(&dmg_msg, victim_addr);
             }
         }

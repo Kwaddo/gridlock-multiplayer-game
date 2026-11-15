@@ -6,6 +6,7 @@ pub mod broadcast;
 pub mod game;
 pub mod handlers;
 pub mod snd;
+mod snd_gate;
 pub mod utils;
 mod match_flow;
 mod packet;

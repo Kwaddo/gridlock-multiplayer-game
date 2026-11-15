@@ -199,11 +199,13 @@ impl BotManager {
         maze: Option<&crate::maze::MazeData>,
         team_score: &mut crate::server::game::TeamScore,
     ) {
-        let elapsed = self.last_tick.elapsed();
+        // one clock read for the whole bot tick (on the web host each is a JS call)
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(self.last_tick);
         if elapsed < self.tick_interval {
             return;
         } else {
-            self.last_tick = Instant::now();
+            self.last_tick = now;
         }
         // Step by the real time since the last bot tick: the host may tick
         // less often than the gate allows (an idle native host waits up to
@@ -223,7 +225,7 @@ impl BotManager {
                     }
                 };
                 // frozen like the humans at match start, in every mode
-                if bot.post_teleport_freeze_until.map_or(false, |t| t > Instant::now()) {
+                if bot.post_teleport_freeze_until.map_or(false, |t| t > now) {
                     continue;
                 }
                 let Some(state) = self.bot_states.get_mut(addr) else {
@@ -246,15 +248,11 @@ impl BotManager {
         }
 
         for addr in &self.bot_addrs {
-            if !players.get(addr).map_or(false, |p| p.is_alive) {
+            let Some(p) = players.get(addr).filter(|p| p.is_alive) else {
                 continue;
-            }
-            let is_frozen = players
-                .get(addr)
-                .map_or(false, |p| {
-                    p.world == WorldId::Maze &&
-                        p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
-                });
+            };
+            let is_frozen = p.world == WorldId::Maze &&
+                p.post_teleport_freeze_until.map_or(false, |t| t > now);
             let Some(state) = self.bot_states.get_mut(addr) else {
                 continue;
             };
@@ -333,17 +331,16 @@ impl BotManager {
         }
 
         // Run shooting logic after movement updates; collect first to avoid borrow conflicts.
+        // The clock is read again here: movement and pathfinding for every bot
+        // ran since `now`, and a freeze ending in between must not hold a shot.
+        let now = Instant::now();
         let mut pending_shots: Vec<(PeerId, u32, Option<u32>, String)> = Vec::new();
         for addr in &self.bot_addrs {
-            if !players.get(addr).map_or(false, |p| p.is_alive) {
+            let Some(p) = players.get(addr).filter(|p| p.is_alive) else {
                 continue;
-            }
-            let is_frozen = players
-                .get(addr)
-                .map_or(false, |p| {
-                    p.world == WorldId::Maze &&
-                        p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
-                });
+            };
+            let is_frozen = p.world == WorldId::Maze &&
+                p.post_teleport_freeze_until.map_or(false, |t| t > now);
             if is_frozen {
                 continue;
             }
@@ -362,8 +359,7 @@ impl BotManager {
         }
 
         // every tracer of this tick goes out ahead of the damage it deals
-        let fired: Vec<(PeerId, u32)> = pending_shots.iter().map(|(a, v, _, _)| (*a, *v)).collect();
-        send_bot_shots(socket, players, &fired);
+        send_bot_shot_iter(socket, players, pending_shots.iter().map(|(a, v, _, _)| (*a, *v)));
 
         for (attacker_addr, victim_id, damage_opt, weapon) in pending_shots {
             if let Some(damage) = damage_opt {
@@ -387,34 +383,62 @@ impl BotManager {
     }
 }
 
-/// Tell every human about `shots` (shooter, victim id) at once: one
-/// `MSG_BOT_SHOT` per player per bot tick, not one per shot. Damage moves
-/// nobody, so the tracer ends are where a shot-by-shot send found them too.
+/// [`send_bot_shot_iter`] over a slice.
+#[cfg(test)]
 pub(crate) fn send_bot_shots(socket: &Outbox, players: &HashMap<PeerId, Player>, shots: &[(PeerId, u32)]) {
-    if shots.is_empty() {
-        return;
-    }
+    send_bot_shot_iter(socket, players, shots.iter().copied());
+}
+
+/// Tell the humans in each shooter's world about `shots` (shooter, victim id)
+/// at once: one `MSG_BOT_SHOT` per player per bot tick, not one per shot.
+/// Damage moves nobody, so the tracer ends are where a shot-by-shot send
+/// found them too. Each packet's shots are built straight into the message,
+/// with no copies. A shot whose shooter or victim is gone is not sent (it
+/// would draw a tracer from or to the world origin), and humans in another
+/// world never get it (they would hear it and see its tracer at that world's
+/// coordinates).
+fn send_bot_shot_iter(
+    socket: &Outbox,
+    players: &HashMap<PeerId, Player>,
+    shots: impl Iterator<Item = (PeerId, u32)>,
+) {
     let position_of_id = |id: u32| players.values().find(|p| p.id == id).map(|p| p.position);
-    let shots: Vec<BotShot> = shots
-        .iter()
-        .map(|(attacker_addr, victim_id)| {
-            let shooter = players.get(attacker_addr);
-            let from = shooter.map(|p| p.position).unwrap_or((0.0, 0.0, 0.0));
-            let to = position_of_id(*victim_id).unwrap_or((0.0, 0.0, 0.0));
-            BotShot {
-                shooter_id: shooter.map(|p| p.id).unwrap_or(0),
-                victim_id: *victim_id,
-                start: (from.0, from.1 + 1.2, from.2),
-                end: (to.0, to.1 + 1.0, to.2),
-            }
-        })
-        .collect();
-    for batch in shots.chunks(MAX_SHOTS_PER_PACKET) {
-        let msg = ServerMsg::BotShots(batch.to_vec()).encode();
+    let send = |world: WorldId, batch: Vec<BotShot>| {
+        let msg = ServerMsg::BotShots(batch).encode();
         for (addr, p) in players.iter() {
-            if !p.is_bot {
+            if !p.is_bot && p.world == world {
                 let _ = socket.send_to(&msg, *addr);
             }
+        }
+    };
+    // bots are almost always all in one world, so this holds one batch
+    let mut batches: Vec<(WorldId, Vec<BotShot>)> = Vec::new();
+    for (attacker_addr, victim_id) in shots {
+        let Some(shooter) = players.get(&attacker_addr) else { continue };
+        let Some(to) = position_of_id(victim_id) else { continue };
+        let from = shooter.position;
+        let shot = BotShot {
+            shooter_id: shooter.id,
+            victim_id,
+            start: (from.0, from.1 + 1.2, from.2),
+            end: (to.0, to.1 + 1.0, to.2),
+        };
+        let slot = match batches.iter().position(|(w, _)| *w == shooter.world) {
+            Some(i) => i,
+            None => {
+                batches.push((shooter.world, Vec::new()));
+                batches.len() - 1
+            }
+        };
+        let (world, batch) = &mut batches[slot];
+        batch.push(shot);
+        if batch.len() == MAX_SHOTS_PER_PACKET {
+            send(*world, std::mem::take(batch));
+        }
+    }
+    for (world, batch) in batches {
+        if !batch.is_empty() {
+            send(world, batch);
         }
     }
 }

@@ -18,42 +18,38 @@ pub fn handle_position(
     pitch: Option<f32>,
 ) {
 
-    if let Some(player) = players.get_mut(&src_addr) {
-        // If the *player* is currently in their per-player post-teleport freeze,
-        // ignore movement updates from that player so they remain stationary.
-        if player
-            .post_teleport_freeze_until
-            .map_or(false, |t| t > Instant::now())
-            && player.world == WorldId::Maze
-        {
-            player.last_activity = Instant::now();
-            return;
-        }
-
-        player.position = (x, y, z);
-        player.yaw = yaw;
-        if let Some(pitch) = pitch {
-            player.pitch = pitch; // older clients dont send it, theirs stays level
-        }
-        player.last_activity = Instant::now();
+    let Some(player) = players.get_mut(&src_addr) else { return };
+    let now = Instant::now();
+    // If the *player* is currently in their per-player post-teleport freeze,
+    // ignore movement updates from that player so they remain stationary.
+    if player
+        .post_teleport_freeze_until
+        .map_or(false, |t| t > now)
+        && player.world == WorldId::Maze
+    {
+        player.last_activity = now;
+        return;
     }
+
+    player.position = (x, y, z);
+    player.yaw = yaw;
+    if let Some(pitch) = pitch {
+        player.pitch = pitch; // older clients dont send it, theirs stays level
+    }
+    player.last_activity = now;
 
     if let Some(state_flags) = state_flags {
-        if let Some(player) = players.get_mut(&src_addr) {
-            player.is_sprinting = (state_flags & FLAG_SPRINTING) != 0;
-            player.is_crouched = (state_flags & FLAG_CROUCHING) != 0;
-            player.is_ads = (state_flags & FLAG_ADS) != 0;
-            player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
-            player.is_prone = (state_flags & FLAG_PRONE) != 0;
-            player.is_sliding = (state_flags & FLAG_SLIDING) != 0;
-        }
+        player.is_sprinting = (state_flags & FLAG_SPRINTING) != 0;
+        player.is_crouched = (state_flags & FLAG_CROUCHING) != 0;
+        player.is_ads = (state_flags & FLAG_ADS) != 0;
+        player.is_airborne = (state_flags & FLAG_AIRBORNE) != 0;
+        player.is_prone = (state_flags & FLAG_PRONE) != 0;
+        player.is_sliding = (state_flags & FLAG_SLIDING) != 0;
     }
     if let Some(event_flags) = event_flags {
-        if let Some(player) = players.get_mut(&src_addr) {
-            // Kept until the next state broadcast sends them (see Server::tick).
-            player.evt_jump_start |= (event_flags & EVT_JUMP_START) != 0;
-            player.evt_landed |= (event_flags & EVT_LANDED) != 0;
-        }
+        // Kept until the next state broadcast sends them (see Server::tick).
+        player.evt_jump_start |= (event_flags & EVT_JUMP_START) != 0;
+        player.evt_landed |= (event_flags & EVT_LANDED) != 0;
     }
 
 }

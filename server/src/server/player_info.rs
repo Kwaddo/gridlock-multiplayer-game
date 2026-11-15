@@ -52,8 +52,19 @@ fn same(info: &PlayerInfo, p: &Player) -> bool {
 }
 
 fn packets<'a>(entries: impl Iterator<Item = &'a PlayerInfo>) -> Vec<Vec<u8>> {
-    let entries: Vec<PlayerInfo> = entries.cloned().collect();
-    entries.chunks(PER_PACKET).map(|c| ServerMsg::PlayerInfo(c.to_vec()).encode()).collect()
+    // each chunk is cloned once, straight into its message
+    let mut msgs = Vec::new();
+    let mut chunk: Vec<PlayerInfo> = Vec::new();
+    for info in entries {
+        chunk.push(info.clone());
+        if chunk.len() == PER_PACKET {
+            msgs.push(ServerMsg::PlayerInfo(std::mem::take(&mut chunk)).encode());
+        }
+    }
+    if !chunk.is_empty() {
+        msgs.push(ServerMsg::PlayerInfo(chunk).encode());
+    }
+    msgs
 }
 
 impl Server {
@@ -69,12 +80,12 @@ impl Server {
         }
         sync.primed.retain(|addr| players.get(addr).is_some_and(|p| !p.is_bot));
 
+        // ids only: the info itself is read back from `sent` when sent
         let mut changed = Vec::new();
         for p in players.values() {
             if !sync.sent.get(&p.id).is_some_and(|s| same(s, p)) {
-                let info = info_of(p);
-                sync.sent.insert(p.id, info.clone());
-                changed.push(info);
+                sync.sent.insert(p.id, info_of(p));
+                changed.push(p.id);
             }
         }
 
@@ -93,7 +104,7 @@ impl Server {
 
         let newcomers: Vec<PeerId> = humans.filter(|addr| !sync.primed.contains(addr)).collect();
         if !changed.is_empty() {
-            let msgs = packets(changed.iter());
+            let msgs = packets(changed.iter().map(|id| &sync.sent[id]));
             for addr in sync.primed.iter() {
                 for msg in &msgs {
                     let _ = self.outbox.send_to(msg, *addr);

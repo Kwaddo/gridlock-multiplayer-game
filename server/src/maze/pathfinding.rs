@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -19,6 +20,18 @@ impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
+}
+
+/// Grid-sized buffers kept between searches: bots path many times a second.
+#[derive(Default)]
+struct Scratch {
+    g_scores: Vec<u32>,
+    came_from: Vec<u16>,
+    open: BinaryHeap<Node>,
+}
+
+thread_local! {
+    static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::default());
 }
 
 #[inline]
@@ -68,12 +81,34 @@ pub fn astar(
     let start_idx = to_idx(start.0, start.1, width) as u16;
     let goal_idx = to_idx(goal.0, goal.1, width) as u16;
 
-    let mut g_scores = vec![u32::MAX; n]; // cost from start to node
-    let mut came_from = vec![u16::MAX; n]; // parent node index
-    let mut closed = vec![false; n]; // closed set
+    SCRATCH.with(|scratch| {
+        let scratch = &mut *scratch.borrow_mut();
+        search(cells, width, height, start, goal, start_idx, goal_idx, n, scratch)
+    })
+}
+
+fn search(
+    cells: &[u8],
+    width: u8,
+    height: u8,
+    start: (u8, u8),
+    goal: (u8, u8),
+    start_idx: u16,
+    goal_idx: u16,
+    n: usize,
+    scratch: &mut Scratch,
+) -> Option<Vec<(u8, u8)>> {
+    let Scratch { g_scores, came_from, open } = scratch;
+    g_scores.clear();
+    g_scores.resize(n, u32::MAX); // cost from start to node
+    came_from.clear();
+    came_from.resize(n, u16::MAX); // parent node index
+    // No closed set: the Manhattan heuristic is consistent on this unit-cost
+    // grid, so a node's first pop has its final g, and any older, costlier
+    // entry for it in the heap is skipped when popped.
 
     // open set as a min-heap priority queue
-    let mut open = BinaryHeap::new();
+    open.clear();
     g_scores[start_idx as usize] = 0;
 
     let f0 = manhattan(start, goal);
@@ -83,7 +118,7 @@ pub fn astar(
     while let Some(current) = open.pop() {
         // while heap is not empty
         let curr_idx = current.idx as usize;
-        if closed[curr_idx] {
+        if current.g > g_scores[curr_idx] {
             continue; // skip if already processed
         }
 
@@ -111,8 +146,6 @@ pub fn astar(
             return Some(path);
         }
 
-        closed[curr_idx] = true; // mark current node as processed
-
         let (cx, cy) = to_xy(curr_idx, width);
         let neighbors = [
             (cx.wrapping_sub(1), cy), // left
@@ -126,8 +159,8 @@ pub fn astar(
                 continue; // out of bounds
             }
             let neighbor_idx = to_idx(*nx, *ny, width) as u16;
-            if cells[neighbor_idx as usize] == 0 || closed[neighbor_idx as usize] {
-                continue; // blocked or already processed
+            if cells[neighbor_idx as usize] == 0 {
+                continue; // blocked (a processed one never gets a lower g)
             }
             let tentative_g = g_scores[curr_idx].saturating_add(1); // saturating add to prevent overflow
             if tentative_g < g_scores[neighbor_idx as usize] {

@@ -170,11 +170,14 @@ pub(crate) fn state_msg(
     include_events: bool,
     now: Instant,
 ) -> Vec<u8> {
-    let entries = players
-        .values()
-        .filter(|p| p.world == world)
-        .map(|p| player_state(p, include_events, now))
-        .collect();
+    // sized for everyone up front: a filtered collect starts empty and regrows
+    let mut entries = Vec::with_capacity(players.len());
+    entries.extend(
+        players
+            .values()
+            .filter(|p| p.world == world)
+            .map(|p| player_state(p, include_events, now)),
+    );
     ServerMsg::State { world: world.as_u8(), players: entries }.encode()
 }
 

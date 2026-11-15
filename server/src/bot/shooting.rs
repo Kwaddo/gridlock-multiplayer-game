@@ -58,6 +58,9 @@ pub fn try_shoot(
     // find target: who can we see and shoot at?
     let runtime_fov = bot_state.personality.base_fov_degrees.max(mods.fov_degrees);
     let range = bot_state.shooting_config.detection_range.unwrap_or(weapon_stats.range);
+    // the view cone depends only on the bot, so work it out once, not per candidate
+    let half_fov_cos = (runtime_fov.clamp(1.0, 359.0).to_radians() * 0.5).cos();
+    let forward = (bot.yaw.cos(), bot.yaw.sin());
     // everything but the sight line, cheapest first: teammates never get a raycast
     let can_engage = |p: &Player| {
         p.id != bot.id
@@ -69,7 +72,7 @@ pub fn try_shoot(
                 bot.is_hostile_to(p)
             })
             && distance(bot.position, p.position) <= range
-            && is_in_fov(bot, p, runtime_fov)
+            && is_in_fov(bot, p, forward, half_fov_cos)
     };
     // the current target's sight line, worked out once for both lookups
     let mut current_seen: Option<(u32, bool)> = None;
@@ -82,11 +85,12 @@ pub fn try_shoot(
             current_seen = Some((p.id, seen));
             seen
         });
-    let in_sight = |p: &Player| match current_seen {
+    // the current target only has a sight line on record once it passed can_engage
+    let engage_and_see = |p: &Player| match current_seen {
         Some((id, seen)) if id == p.id => seen,
-        _ => has_line_of_sight(bot, p, maze),
+        _ => can_engage(p) && has_line_of_sight(bot, p, maze),
     };
-    let nearest = players.values().filter(|p| can_engage(p) && in_sight(p)).min_by(|a, b| {
+    let nearest = players.values().filter(|p| engage_and_see(p)).min_by(|a, b| {
         let da = distance(bot.position, a.position);
         let db = distance(bot.position, b.position);
         da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
@@ -216,7 +220,9 @@ fn distance(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
-fn is_in_fov(bot: &Player, target: &Player, fov_degrees: f32) -> bool {
+/// `forward` is (cos yaw, sin yaw) of the bot; `half_fov_cos` the cosine of
+/// half its clamped field of view.
+fn is_in_fov(bot: &Player, target: &Player, forward: (f32, f32), half_fov_cos: f32) -> bool {
     let dx = target.position.0 - bot.position.0;
     let dz = target.position.2 - bot.position.2;
     let len_sq = dx * dx + dz * dz;
@@ -224,11 +230,8 @@ fn is_in_fov(bot: &Player, target: &Player, fov_degrees: f32) -> bool {
         return true;
     }
 
-    let fov = fov_degrees.clamp(1.0, 359.0);
-    let half_fov_cos = (fov.to_radians() * 0.5).cos();
     let inv_len = len_sq.sqrt().recip();
     let to_target = (dx * inv_len, dz * inv_len);
-    let forward = (bot.yaw.cos(), bot.yaw.sin());
     let dot = to_target.0 * forward.0 + to_target.1 * forward.1;
     dot >= half_fov_cos
 }
