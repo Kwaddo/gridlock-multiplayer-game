@@ -80,7 +80,7 @@ fn content_key(bytes: &[u8]) -> u64 {
 #[cfg(not(target_arch = "wasm32"))]
 mod predecoded {
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Condvar, Mutex};
 
     enum Slot {
         /// A worker is decoding it.
@@ -92,30 +92,70 @@ mod predecoded {
     }
 
     static SLOTS: Mutex<Option<HashMap<u64, Slot>>> = Mutex::new(None);
+    /// Signalled whenever a worker stops decoding an image.
+    static DECODED: Condvar = Condvar::new();
 
     fn with<R>(f: impl FnOnce(&mut HashMap<u64, Slot>) -> R) -> R {
         let mut guard = SLOTS.lock().unwrap_or_else(|e| e.into_inner());
         f(guard.get_or_insert_with(HashMap::new))
     }
 
+    /// A worker's claim on decoding `key`. Dropping it (also when the decode
+    /// panicked) wakes whoever waits on that image; a claim that never got
+    /// its result in leaves the image for the loader to decode.
+    struct Claim(u64);
+
+    impl Drop for Claim {
+        fn drop(&mut self) {
+            with(|slots| {
+                if matches!(slots.get(&self.0), Some(Slot::Decoding)) {
+                    slots.remove(&self.0);
+                }
+            });
+            DECODED.notify_all();
+        }
+    }
+
     /// Decode `bytes` unless another worker or the loader already did.
-    pub fn decode(key: u64, bytes: &[u8]) {
-        let claimed = with(|slots| match slots.contains_key(&key) {
-            true => false,
-            false => {
+    /// False if another worker is decoding it right now.
+    pub fn decode(key: u64, bytes: &[u8]) -> bool {
+        let claimed = with(|slots| match slots.get(&key) {
+            Some(Slot::Decoding) => None,
+            Some(_) => Some(false),
+            None => {
                 slots.insert(key, Slot::Decoding);
-                true
+                Some(true)
             }
         });
-        if !claimed {
-            return;
+        match claimed {
+            None => return false,
+            Some(false) => return true,
+            Some(true) => {}
         }
+        let _claim = Claim(key);
         let image = image::load_from_memory(bytes).ok().map(|i| i.to_rgba8());
         with(|slots| {
             if let Some(slot @ Slot::Decoding) = slots.get_mut(&key) {
                 *slot = Slot::Ready(image);
             }
         });
+        true
+    }
+
+    /// Wait until no worker is decoding any of `keys` any more. A worker that
+    /// left an image to another one waits for it before its file counts as
+    /// downloaded: the loader would otherwise find it still decoding and
+    /// decode it again on the main thread. Call it only once done with the
+    /// images claimed, so two workers never wait on each other.
+    pub fn wait_for(keys: &[u64]) {
+        let mut guard = SLOTS.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            let slots = guard.get_or_insert_with(HashMap::new);
+            if !keys.iter().any(|key| matches!(slots.get(key), Some(Slot::Decoding))) {
+                return;
+            }
+            guard = DECODED.wait(guard).unwrap_or_else(|e| e.into_inner());
+        }
     }
 
     /// The worker's result if it is done (`Some(None)`: it failed to decode);
@@ -136,6 +176,42 @@ mod predecoded {
                 }
             }
         });
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::time::Duration;
+
+        /// A worker whose file shares an image another worker is decoding
+        /// waits for it, and the loader then takes that worker's result.
+        #[test]
+        fn a_worker_waits_for_an_image_another_is_decoding() {
+            const KEY: u64 = 0xF076_F076_F076_0001;
+            with(|slots| slots.insert(KEY, Slot::Decoding));
+            let other = Claim(KEY);
+            assert!(!decode(KEY, &[]), "left to the worker decoding it");
+            let waiter = std::thread::spawn(|| wait_for(&[KEY]));
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(!waiter.is_finished(), "waits while it is being decoded");
+            with(|slots| slots.insert(KEY, Slot::Ready(None)));
+            drop(other);
+            waiter.join().unwrap();
+            assert!(matches!(take(KEY), Some(None)), "the other worker's result");
+        }
+
+        /// A decode that never finished (it panicked) wakes the waiters and
+        /// leaves the image for the loader to decode.
+        #[test]
+        fn an_unfinished_decode_leaves_the_image_to_the_loader() {
+            const KEY: u64 = 0xF076_F076_F076_0002;
+            with(|slots| slots.insert(KEY, Slot::Decoding));
+            let other = Claim(KEY);
+            let waiter = std::thread::spawn(|| wait_for(&[KEY]));
+            drop(other);
+            waiter.join().unwrap();
+            assert!(take(KEY).is_none(), "decoded by the loader");
+        }
     }
 }
 
@@ -167,6 +243,8 @@ pub fn predecode_glb_images(bytes: &[u8]) {
         return;
     };
     let used = base_colour_images(&document);
+    // Images another worker was decoding already (files often share them).
+    let mut elsewhere = Vec::new();
     for image in document.images().filter(|image| used.contains(&image.index())) {
         let gltf::image::Source::View { view, .. } = image.source() else {
             continue;
@@ -175,9 +253,13 @@ pub fn predecode_glb_images(bytes: &[u8]) {
             continue;
         }
         if let Some(encoded) = blob.get(view.offset()..view.offset() + view.length()) {
-            predecoded::decode(content_key(encoded), encoded);
+            let key = content_key(encoded);
+            if !predecoded::decode(key, encoded) {
+                elsewhere.push(key);
+            }
         }
     }
+    predecoded::wait_for(&elsewhere);
 }
 
 /// Forget images decoded ahead that nothing took (ones no mesh uses), once
