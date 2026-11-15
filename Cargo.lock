@@ -1888,6 +1888,9 @@ dependencies = [
 [[package]]
 name = "transport"
 version = "0.1.0"
+dependencies = [
+ "platform",
+]
 
 [[package]]
 name = "ttf-parser"
