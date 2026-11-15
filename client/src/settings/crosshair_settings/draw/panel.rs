@@ -6,6 +6,7 @@ use macroquad::prelude::*;
 use std::collections::HashMap;
 
 use super::super::shared::{crosshair_type_name, hsv_to_rgb, CrosshairSettingsPreview};
+use super::picker::{draw_checker, draw_hue_bar, draw_sv_square};
 use super::preview::draw_crosshair_preview;
 use super::warning::draw_shotgun_type_warning;
 use super::widgets::{
@@ -193,23 +194,7 @@ pub fn draw_crosshair_settings(
     let sv_x = slider_x;
     let sv_y = slider_y;
 
-    let steps = 20u32;
-    let cell_w = picker_size / steps as f32;
-    let cell_h = picker_size / steps as f32;
-    for sy in 0..steps {
-        for sx in 0..steps {
-            let sv_s = (sx as f32 + 0.5) / steps as f32;
-            let v = 1.0 - (sy as f32 + 0.5) / steps as f32;
-            let (r, g, b) = hsv_to_rgb(state.hue, sv_s, v);
-            draw_rectangle(
-                sv_x + sx as f32 * cell_w,
-                sv_y + sy as f32 * cell_h,
-                cell_w + 1.0,
-                cell_h + 1.0,
-                Color::new(r, g, b, 1.0),
-            );
-        }
-    }
+    draw_sv_square(state.hue, sv_x, sv_y, picker_size);
     draw_rectangle_lines(sv_x, sv_y, picker_size, picker_size, 1.0, GRAY);
 
     let cursor_x = sv_x + state.sat * picker_size;
@@ -218,19 +203,7 @@ pub fn draw_crosshair_settings(
     draw_circle_lines(cursor_x, cursor_y, 4.0 * s, 1.0, BLACK);
 
     let hue_x = sv_x + picker_size + 10.0 * s;
-    let hue_steps = 36u32;
-    let hue_cell_h = picker_size / hue_steps as f32;
-    for i in 0..hue_steps {
-        let h = (i as f32 / hue_steps as f32) * 360.0;
-        let (r, g, b) = hsv_to_rgb(h, 1.0, 1.0);
-        draw_rectangle(
-            hue_x,
-            sv_y + i as f32 * hue_cell_h,
-            hue_bar_w,
-            hue_cell_h + 1.0,
-            Color::new(r, g, b, 1.0),
-        );
-    }
+    draw_hue_bar(hue_x, sv_y, hue_bar_w, picker_size);
     draw_rectangle_lines(hue_x, sv_y, hue_bar_w, picker_size, 1.0, GRAY);
 
     let hue_cursor_y = sv_y + (state.hue / 360.0) * picker_size;
@@ -247,22 +220,7 @@ pub fn draw_crosshair_settings(
     let swatch_x = hue_x + hue_bar_w + 15.0 * s;
     let swatch_size = 40.0 * s;
     let check = 10.0 * s;
-    for cy_i in 0..4 {
-        for cx_i in 0..4 {
-            let col = if (cx_i + cy_i) % 2 == 0 {
-                Color::from_rgba(180, 180, 180, 255)
-            } else {
-                Color::from_rgba(120, 120, 120, 255)
-            };
-            draw_rectangle(
-                swatch_x + cx_i as f32 * check,
-                sv_y + cy_i as f32 * check,
-                check,
-                check,
-                col,
-            );
-        }
-    }
+    draw_checker(swatch_x, sv_y, check);
     let (pr, pg, pb) = hsv_to_rgb(state.hue, state.sat, state.val);
     draw_rectangle(
         swatch_x,

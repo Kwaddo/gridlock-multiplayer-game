@@ -1,4 +1,5 @@
 mod panel;
+mod picker;
 mod preview;
 mod save_prompt;
 mod warning;
