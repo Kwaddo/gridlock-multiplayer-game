@@ -41,9 +41,7 @@ impl ListFetch {
         let url = format!("{base}/servers");
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = list_agent()
-                .get(&url)
-                .call()
+            let result = retry_once_on_transport_error(|| list_agent().get(&url).call())
                 .and_then(|mut resp| resp.body_mut().read_to_string())
                 .map_err(|e| e.to_string())
                 .and_then(|body| serde_json::from_str(&body).map_err(|e| e.to_string()));
@@ -137,10 +135,12 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
                 created
             }
             Some(created) => {
-                let beat = agent
-                    .put(&format!("{base}/servers/{}", created.id))
-                    .header("Authorization", &format!("Bearer {}", created.token))
-                    .send_json(heartbeat_body(players()));
+                let beat = retry_once_on_transport_error(|| {
+                    agent
+                        .put(&format!("{base}/servers/{}", created.id))
+                        .header("Authorization", &format!("Bearer {}", created.token))
+                        .send_json(heartbeat_body(players()))
+                });
                 // Only a 404 means the listing is gone (it expired, or the
                 // registry lost it): register again. Other failures keep it and
                 // retry, so a passing error never lists the game twice.
@@ -159,6 +159,17 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
             .delete(&format!("{base}/servers/{}", created.id))
             .header("Authorization", &format!("Bearer {}", created.token))
             .call();
+    }
+}
+
+/// Run an idempotent request, once more if it failed below HTTP (a kept-alive
+/// connection the registry closed while idle fails like that, and ureq does
+/// not retry a reused connection). An HTTP status is never retried.
+fn retry_once_on_transport_error<T>(send: impl Fn() -> Result<T, ureq::Error>) -> Result<T, ureq::Error> {
+    match send() {
+        Err(ureq::Error::StatusCode(code)) => Err(ureq::Error::StatusCode(code)),
+        Err(_) => send(),
+        ok => ok,
     }
 }
 

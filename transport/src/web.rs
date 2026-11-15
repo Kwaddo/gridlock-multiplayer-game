@@ -101,7 +101,8 @@ impl Drop for RtcSocket {
 /// How long a URL handed to [`prewarm`] or [`preconnect`] is not handed over
 /// again. Callers repeat every frame; the JS side keeps what they started for
 /// 10-15 s, so passing on each repeat only re-parses the URL to find it.
-const REPEAT_AFTER: Duration = Duration::from_secs(1);
+// short enough that a socket JS dropped is re-warmed well before a join
+const REPEAT_AFTER: Duration = Duration::from_millis(250);
 
 thread_local! {
     static PREWARMED: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
