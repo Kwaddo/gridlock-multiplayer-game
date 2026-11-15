@@ -113,6 +113,13 @@ impl StoredMesh {
     }
 }
 
+/// Compiles the maze shader and pipeline now (during loading) instead of in
+/// the first frame that bakes the maze.
+pub(super) fn warm_up() {
+    let gl = unsafe { get_internal_gl() };
+    let _ = pipeline(gl.quad_context);
+}
+
 /// Upload `meshes` to the GPU, or keep them on the CPU if it has no shader.
 pub(super) fn store(meshes: Vec<MeshData>) -> Vec<StoredMesh> {
     use miniquad::*;

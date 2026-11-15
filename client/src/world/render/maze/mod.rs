@@ -37,6 +37,11 @@ thread_local! {
     static MESHES: RefCell<Option<MazeMeshes>> = const { RefCell::new(None) };
 }
 
+/// Compiles the maze pipeline ahead of the first maze frame.
+pub fn warm_up() {
+    gpu::warm_up();
+}
+
 /// Put macroquad's batcher in a known state (triangles, depth test, no
 /// texture), as debug draws may have left it otherwise.
 fn reset_batch_state() {

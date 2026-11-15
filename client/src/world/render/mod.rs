@@ -5,6 +5,7 @@ pub mod props;
 pub mod utils;
 
 pub use maze::draw_maze;
+pub use maze::warm_up as warm_up_maze;
 pub(crate) use maze::Frustum;
 pub use nametags::draw_nametags;
 pub use players::draw_players;
