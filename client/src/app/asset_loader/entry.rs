@@ -122,6 +122,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                             let entry = playing_state.models.entry(key_string.clone()).or_default();
                             entry.clear();
                             entry.extend(meshes);
+                            client::types::static_gpu::forget(&key_string);
                             playing_state
                                 .asset_source_paths
                                 .insert(key_string.clone(), path_string.clone());
@@ -176,6 +177,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                         let entry = playing_state.models.entry(key_string.clone()).or_default();
                         entry.clear();
                         entry.extend(meshes);
+                        client::types::static_gpu::forget(&key_string);
                         playing_state
                             .asset_source_paths
                             .insert(key_string.clone(), path_string.clone());
@@ -352,5 +354,9 @@ mod tests {
             }
         }
         println!("{checked} GLBs skip the animated loader");
+        // asked to check a folder explicitly: an empty result is a failure
+        if std::env::var_os("GRIDLOCK_ASSETS_DIR").is_some() {
+            assert!(checked > 0, "GRIDLOCK_ASSETS_DIR is set but no GLB there was checked");
+        }
     }
 }

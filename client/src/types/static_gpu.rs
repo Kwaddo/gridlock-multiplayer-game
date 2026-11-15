@@ -234,3 +234,15 @@ pub fn draw_static_meshes(key: &str, meshes: &[Mesh], transform: Mat4) -> bool {
     });
     true
 }
+
+/// Drop the buffers uploaded for `key`, so the next draw uploads its meshes
+/// again. The asset loader calls this whenever it (re)writes a model, since a
+/// reloaded model can sit at the same address with the same shape.
+pub fn forget(key: &str) {
+    let Some(entry) = CACHE.with_borrow_mut(|cache| cache.remove(key)) else { return };
+    let gl = unsafe { get_internal_gl() };
+    for b in entry.batches {
+        gl.quad_context.delete_buffer(b.vertices);
+        gl.quad_context.delete_buffer(b.indices);
+    }
+}

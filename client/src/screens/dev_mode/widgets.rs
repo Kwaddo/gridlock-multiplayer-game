@@ -6,7 +6,11 @@ use super::text_queue::{note_content_bottom, queue_fmt, queue_fmt_with, queue_te
 // A row lying entirely off screen draws nothing. Rows still run their input
 // logic when the mouse is inside their band, so behaviour is unchanged.
 fn row_culled(y: f32, row_h: f32, mouse: (f32, f32)) -> bool {
-    row_offscreen(y, row_h) && !(mouse.1 >= y && mouse.1 <= y + row_h)
+    // never while the button is held: a slider being dragged keeps its
+    // value updating even after its row scrolls off screen
+    row_offscreen(y, row_h)
+        && !(mouse.1 >= y && mouse.1 <= y + row_h)
+        && !is_mouse_button_down(MouseButton::Left)
 }
 
 // Every widget asks this first, so it also records how far down the tab's

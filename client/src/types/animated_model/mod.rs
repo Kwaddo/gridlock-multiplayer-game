@@ -170,6 +170,8 @@ impl SharedGeometry {
                 hasher.write_u64(pair(v.position.x, v.position.y));
                 hasher.write_u64(pair(v.position.z, v.uv.x));
                 hasher.write_u64(v.uv.y.to_bits() as u64 | (u32::from_le_bytes(v.color) as u64) << 32);
+                hasher.write_u64(pair(v.normal.x, v.normal.y));
+                hasher.write_u64(pair(v.normal.z, v.normal.w));
             }
             part.skin_vertices.len().hash(&mut hasher);
             for v in &part.skin_vertices {
@@ -217,6 +219,7 @@ fn same_parts(a: &[AnimatedPart], b: &[AnimatedPart]) -> bool {
                     bits3(x.position) == bits3(y.position)
                         && x.uv.to_array().map(f32::to_bits) == y.uv.to_array().map(f32::to_bits)
                         && x.color == y.color
+                        && x.normal.to_array().map(f32::to_bits) == y.normal.to_array().map(f32::to_bits)
                 })
                 && a.skin_vertices.len() == b.skin_vertices.len()
                 && a.skin_vertices.iter().zip(&b.skin_vertices).all(|(x, y)| {
