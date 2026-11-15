@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -9,13 +9,25 @@ use ureq::config::IpFamily;
 use super::{create_body, heartbeat_body, Announce, Created, Listed, HEARTBEAT_SECS, RETRY_SECS};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long an idle connection is kept for the next request. Longer than the
+/// heartbeat period (ureq's default, 15 s, is not), so a beat reuses the last
+/// one's TLS connection instead of redoing DNS, TCP and the handshake.
+const KEEP_IDLE: Duration = Duration::from_secs(60);
 
 fn agent(family: IpFamily) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(REQUEST_TIMEOUT))
         .ip_family(family)
+        .max_idle_age(KEEP_IDLE)
         .build()
         .into()
+}
+
+/// One agent for every list fetch, so a refresh can reuse the previous one's
+/// connection (a fresh agent starts with an empty pool).
+fn list_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| agent(IpFamily::Any))
 }
 
 /// The public list, fetched on a background thread.
@@ -29,7 +41,7 @@ impl ListFetch {
         let url = format!("{base}/servers");
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = agent(IpFamily::Any)
+            let result = list_agent()
                 .get(&url)
                 .call()
                 .and_then(|mut resp| resp.body_mut().read_to_string())
