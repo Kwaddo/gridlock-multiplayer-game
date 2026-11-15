@@ -34,6 +34,29 @@ const ALL_TABS: [(SettingsTab, &str); 3] = [
     (SettingsTab::Crosshair, "Crosshair"),
 ];
 
+/// A slider's value text, `format!("{:.0}", value)`, rebuilt only when the
+/// value changes.
+struct ValueText {
+    bits: Option<u32>,
+    text: String,
+}
+
+impl ValueText {
+    const fn new() -> Self {
+        Self { bits: None, text: String::new() }
+    }
+
+    fn get(&mut self, value: f32) -> &str {
+        if self.bits != Some(value.to_bits()) {
+            use std::fmt::Write as _;
+            self.text.clear();
+            let _ = write!(self.text, "{:.0}", value);
+            self.bits = Some(value.to_bits());
+        }
+        &self.text
+    }
+}
+
 /// Compute centered, width-capped panel dimensions.
 fn panel_layout(s: f32, content_top: f32) -> (f32, f32, f32) {
     let max_w = 800.0 * s;

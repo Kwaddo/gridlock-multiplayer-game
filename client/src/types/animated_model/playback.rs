@@ -31,15 +31,27 @@ impl AnimatedModel {
 
     /// Advance the clip and bring its pose up to date: every frame when the
     /// GPU skins it, otherwise re-skinning on the CPU at most ~30 times a second.
+    /// A held clip (paused, e.g. the idle first-person hands) is not
+    /// re-sampled or re-skinned while its time does not change.
     pub fn update(&mut self, dt: f32) {
         self.advance(dt);
         if self.gpu_drawn.get() {
             self.skin_accum = 0.0;
-            self.pose();
+            self.pose_if_stale();
         } else if self.skin_accum >= SKIN_INTERVAL {
             self.skin_accum = 0.0;
+            if self.cpu_skinned_time != Some(self.time) || self.needs_cpu_skin(&self.pose) {
+                self.pose_if_stale();
+                self.skin_on_cpu();
+                self.cpu_skinned_time = Some(self.time);
+            }
+        }
+    }
+
+    fn pose_if_stale(&mut self) {
+        if self.posed_time != Some(self.time) {
             self.pose();
-            self.skin_on_cpu();
+            self.posed_time = Some(self.time);
         }
     }
 
@@ -112,12 +124,13 @@ impl AnimatedModel {
             .get_or_insert_with(|| geometry.parts.iter().map(|p| clone_mesh(&p.mesh)).collect());
 
         for (part, mesh) in geometry.parts.iter().zip(skinned.iter_mut()) {
+            // Only positions are bent: no shader reads the normal (macroquad's
+            // default and the tint material are unlit), so the copy keeps its
+            // bind normals. Skin them here too if a lit material is ever used.
             for (i, vtx) in part.skin_vertices.iter().enumerate() {
                 let mut p = Vec3::ZERO;
-                let mut n = Vec3::ZERO;
                 let mut total_w = 0.0;
                 let bind_p = vtx.bind_position.extend(1.0);
-                let bind_n = vtx.bind_normal.extend(0.0);
 
                 for j in 0..4 {
                     let w = vtx.weights[j];
@@ -130,7 +143,6 @@ impl AnimatedModel {
                     }
                     let m = pose.skin_mats[joint_idx];
                     p += (m * bind_p).truncate() * w;
-                    n += (m * bind_n).truncate() * w;
                     total_w += w;
                 }
 
@@ -139,13 +151,7 @@ impl AnimatedModel {
                 } else {
                     vtx.bind_position
                 };
-                let out_n = if n.length_squared() > 0.0 {
-                    n.normalize()
-                } else {
-                    vtx.bind_normal
-                };
                 mesh.vertices[i].position = out_p;
-                mesh.vertices[i].normal = out_n.extend(0.0);
             }
         }
 
@@ -156,14 +162,10 @@ impl AnimatedModel {
                 let out_idx = part.skinned_vertex_count + i;
                 let global = pose.global_of(vtx.node_idx); // already worked out in sample_pose
                 let out_p = global.transform_point3(vtx.bind_position);
-                let out_n = (global * vtx.bind_normal.extend(0.0))
-                    .truncate()
-                    .normalize_or_zero();
                 let Some(out) = pose.cpu_meshes.as_mut().and_then(|m| m[part_idx].vertices.get_mut(out_idx)) else {
                     continue;
                 };
                 out.position = out_p;
-                out.normal = out_n.extend(0.0);
             }
         }
     }

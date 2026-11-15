@@ -1,5 +1,20 @@
-use crate::ui::fonts::{measure_game_text, text_params};
 use macroquad::prelude::*;
+use std::fmt;
+
+use super::text_queue::{note_content_bottom, queue_fmt, queue_fmt_with, queue_text};
+
+// A row lying entirely off screen draws nothing. Rows still run their input
+// logic when the mouse is inside their band, so behaviour is unchanged.
+fn row_culled(y: f32, row_h: f32, mouse: (f32, f32)) -> bool {
+    row_offscreen(y, row_h) && !(mouse.1 >= y && mouse.1 <= y + row_h)
+}
+
+// Every widget asks this first, so it also records how far down the tab's
+// content goes (the overlay clamps scrolling to it).
+fn row_offscreen(y: f32, row_h: f32) -> bool {
+    note_content_bottom(y + row_h);
+    y > screen_height() || y + row_h < 0.0
+}
 
 pub(super) fn draw_slider(
     label: &str,
@@ -20,7 +35,11 @@ pub(super) fn draw_slider(
     let slider_h = 16.0;
     let row_h = 28.0;
 
-    draw_text_ex(label, x, y + 20.0, text_params(18, WHITE));
+    if row_culled(y, row_h, mouse) {
+        return row_h;
+    }
+
+    queue_text(label, x, y + 20.0, 18, WHITE);
 
     draw_rectangle(
         slider_x,
@@ -60,12 +79,12 @@ pub(super) fn draw_slider(
         3
     };
 
-    let txt = format!("{:.*}", precision, *value);
-    draw_text_ex(
-        &txt,
+    queue_fmt(
+        format_args!("{:.*}", precision, *value),
         slider_x + slider_w + 8.0,
         y + 14.0,
-        text_params(14, WHITE),
+        14,
+        WHITE,
     );
 
     row_h
@@ -94,7 +113,11 @@ pub(super) fn draw_slider_nudge(
     let slider_h = 16.0;
     let row_h = 28.0;
 
-    draw_text_ex(label, x, y + 20.0, text_params(14, WHITE));
+    if row_culled(y, row_h, mouse) {
+        return row_h;
+    }
+
+    queue_text(label, x, y + 20.0, 14, WHITE);
 
     let slider_x = x + label_w;
     draw_rectangle(slider_x, y + 2.0, slider_w, slider_h, Color::from_rgba(40, 40, 40, 255));
@@ -109,9 +132,8 @@ pub(super) fn draw_slider_nudge(
     }
 
     let precision = if step >= 1.0 { 0 } else if step >= 0.1 { 1 } else if step >= 0.01 { 2 } else { 3 };
-    let txt = format!("{:.*}", precision, *value);
     let val_x = slider_x + slider_w + gap;
-    draw_text_ex(&txt, val_x, y + 14.0, text_params(13, WHITE));
+    queue_fmt(format_args!("{:.*}", precision, *value), val_x, y + 14.0, 13, WHITE);
 
     let minus_x = val_x + val_w;
     let plus_x = minus_x + btn_w + gap;
@@ -120,13 +142,13 @@ pub(super) fn draw_slider_nudge(
     let mhov = mouse.0 >= minus_x && mouse.0 <= minus_x + btn_w && mouse.1 >= btn_y && mouse.1 <= btn_y + btn_w;
     draw_rectangle(minus_x, btn_y, btn_w, btn_w, if mhov { Color::from_rgba(80, 80, 80, 255) } else { Color::from_rgba(40, 40, 40, 255) });
     draw_rectangle_lines(minus_x, btn_y, btn_w, btn_w, 1.0, GRAY);
-    draw_text_ex("-", minus_x + 6.0, btn_y + 14.0, text_params(14, WHITE));
+    queue_text("-", minus_x + 6.0, btn_y + 14.0, 14, WHITE);
     if clicked && mhov { *value = (*value - step).clamp(min, max); }
 
     let phov = mouse.0 >= plus_x && mouse.0 <= plus_x + btn_w && mouse.1 >= btn_y && mouse.1 <= btn_y + btn_w;
     draw_rectangle(plus_x, btn_y, btn_w, btn_w, if phov { Color::from_rgba(80, 80, 80, 255) } else { Color::from_rgba(40, 40, 40, 255) });
     draw_rectangle_lines(plus_x, btn_y, btn_w, btn_w, 1.0, GRAY);
-    draw_text_ex("+", plus_x + 5.0, btn_y + 14.0, text_params(14, WHITE));
+    queue_text("+", plus_x + 5.0, btn_y + 14.0, 14, WHITE);
     if clicked && phov { *value = (*value + step).clamp(min, max); }
 
     row_h
@@ -174,6 +196,10 @@ pub(super) fn draw_toggle(
     let box_size = 16.0;
     let row_h = 28.0;
 
+    if row_culled(y, row_h, mouse) {
+        return row_h;
+    }
+
     let bx = x;
     let by = y + 2.0;
     draw_rectangle(
@@ -203,18 +229,16 @@ pub(super) fn draw_toggle(
         *value = !*value;
     }
 
-    draw_text_ex(label, x + box_size + 8.0, y + 14.0, text_params(14, WHITE));
+    queue_text(label, x + box_size + 8.0, y + 14.0, 14, WHITE);
 
     row_h
 }
 
 pub(super) fn draw_section_header(label: &str, x: f32, y: f32) -> f32 {
-    draw_text_ex(
-        label,
-        x,
-        y + 16.0,
-        text_params(16, Color::from_rgba(80, 150, 220, 255)),
-    );
+    if row_offscreen(y, 28.0) {
+        return 28.0;
+    }
+    queue_text(label, x, y + 16.0, 16, Color::from_rgba(80, 150, 220, 255));
     draw_line(
         x,
         y + 22.0,
@@ -234,7 +258,22 @@ pub(super) fn draw_action_button(
     mouse: (f32, f32),
     clicked: bool,
 ) -> (f32, bool) {
+    draw_action_button_fmt(format_args!("{}", label), x, y, w, mouse, clicked)
+}
+
+// draw_action_button with a formatted label, so callers need no format!.
+pub(super) fn draw_action_button_fmt(
+    label: fmt::Arguments,
+    x: f32,
+    y: f32,
+    w: f32,
+    mouse: (f32, f32),
+    clicked: bool,
+) -> (f32, bool) {
     let h = 28.0;
+    if row_culled(y, h, mouse) {
+        return (32.0, false);
+    }
     let hover = mouse.0 >= x && mouse.0 <= x + w && mouse.1 >= y && mouse.1 <= y + h;
     let color = if hover {
         Color::from_rgba(60, 60, 60, 255)
@@ -243,8 +282,7 @@ pub(super) fn draw_action_button(
     };
     draw_rectangle(x, y, w, h, color);
     draw_rectangle_lines(x, y, w, h, 1.0, GRAY);
-    let tw = measure_game_text(label, 14);
-    draw_text_ex(label, x + (w - tw) / 2.0, y + 18.0, text_params(14, WHITE));
+    queue_fmt_with(label, 14, WHITE, |tw| (x + (w - tw) / 2.0, y + 18.0));
     (32.0, hover && clicked)
 }
 
@@ -272,4 +310,15 @@ pub fn draw_action_button_public(
     clicked: bool,
 ) -> (f32, bool) {
     draw_action_button(label, x, y, w, mouse, clicked)
+}
+
+pub fn draw_action_button_fmt_public(
+    label: fmt::Arguments,
+    x: f32,
+    y: f32,
+    w: f32,
+    mouse: (f32, f32),
+    clicked: bool,
+) -> (f32, bool) {
+    draw_action_button_fmt(label, x, y, w, mouse, clicked)
 }

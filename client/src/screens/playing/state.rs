@@ -139,6 +139,8 @@ pub struct PlayingState {
     // damage / hit feedback (client-side)
     pub damage_flash_timer: f32, // short red flash when we take damage
     pub last_damage_attacker: Option<String>,
+    /// Where recent hits came from (the red arcs around the crosshair).
+    pub(crate) damage_indicators: Vec<super::rendering::DamageIndicator>,
     pub stamina_depleted_vignette_alpha: f32,
 
     pub target_dummy: TargetDummy,
@@ -376,6 +378,7 @@ impl PlayingState {
 
             // damage / hit feedback (client-side)
             damage_flash_timer: 0.0,
+            damage_indicators: Vec::new(),
             last_damage_attacker: None,
             stamina_depleted_vignette_alpha: 0.0,
 

@@ -41,10 +41,12 @@ impl Pose {
     // mix another pose's bent joints into this one, w=0 all 'from', w=1 all this one
     // like ue's blend node, it mixes the local bends then finish_pose works out the rest
     // before this a clip change was an instant cut, nothing could mix two poses
+    // the blends use nlerp (Quat::lerp, normalised) not slerp, like ue does: same ends, the short way round too,
+    // within about a degree mid blend for bends under 90 degrees apart, and no acos + 3 sin per joint
     pub fn blend_from(&mut self, from: &Pose, w: f32) {
         for (mine, theirs) in self.local.iter_mut().zip(&from.local) {
             mine.translation = theirs.translation.lerp(mine.translation, w);
-            mine.rotation = theirs.rotation.slerp(mine.rotation, w); // slerp takes the short way round
+            mine.rotation = theirs.rotation.lerp(mine.rotation, w); // nlerp takes the short way round too
             mine.scale = theirs.scale.lerp(mine.scale, w);
         }
         self.global_valid.iter_mut().for_each(|v| *v = false); // the mix changed the bends, old answers are stale
@@ -58,7 +60,7 @@ impl Pose {
         }
         for (mine, theirs) in self.local.iter_mut().zip(&other.local) {
             mine.translation = mine.translation.lerp(theirs.translation, t);
-            mine.rotation = mine.rotation.slerp(theirs.rotation, t);
+            mine.rotation = mine.rotation.lerp(theirs.rotation, t); // nlerp, see blend_from
             mine.scale = mine.scale.lerp(theirs.scale, t);
         }
         self.global_valid.iter_mut().for_each(|v| *v = false);
@@ -77,6 +79,12 @@ impl Pose {
             if t <= 0.0 {
                 continue;
             }
+            // fully the layer's (arms, fingers, head while aiming), just take it, before this it slerped to the same answer
+            if t >= 1.0 {
+                *mine = *theirs;
+                continue;
+            }
+            // slerp kept here, the mask's partial weights hold for as long as the layer shows, so they stay exact
             mine.translation = mine.translation.lerp(theirs.translation, t);
             mine.rotation = mine.rotation.slerp(theirs.rotation, t);
             mine.scale = mine.scale.lerp(theirs.scale, t);
@@ -166,14 +174,17 @@ impl AnimatedModel {
     pub fn finish_pose(&self, out: &mut Pose) {
         // work out every node now not just joints, so drawing can just read them later
         // before this the cpu fallback worked out the non joint ones while drawing
-        for node in 0..self.node_rest.len() {
-            out.global(&self.node_parents, node);
+        // only the cpu fallback's rigid (unskinned) vertices read non joint nodes, so a mesh without any skips them
+        if self.geometry.parts.iter().any(|p| !p.rigid_vertices.is_empty()) {
+            for node in 0..self.node_rest.len() {
+                out.global(&self.node_parents, node);
+            }
         }
 
         // second step is to find out where each joint is in worldspace and the GPU matrix for it (for skinning)
         for (j, &node) in self.joint_nodes.iter().enumerate() {
             let global = out.global(&self.node_parents, node);
-            out.joint_positions[j] = global.transform_point3(Vec3::ZERO); // for hitboxes
+            out.joint_positions[j] = global.w_axis.truncate(); // for hitboxes, where the joint's origin lands
             out.skin_mats[j] = global * self.inverse_bind[j]; // for skinning
         }
 
@@ -228,6 +239,8 @@ mod tests {
             duration: 1.0,
             time: 0.0,
             skin_accum: 0.0,
+            posed_time: None,
+            cpu_skinned_time: None,
             playback_loop: true,
             playback_paused: false,
             playback_finished: false,
@@ -278,6 +291,30 @@ mod tests {
         mix.mix_in(&c, wc / (wa + wb + wc));
         // 0*0.5 + 10*0.3 + 100*0.2 = 23
         assert!((mix.local[0].translation.x - 23.0).abs() < 1e-4, "{:?}", mix.local[0].translation);
+    }
+
+    // nlerp in the blends stays within a degree of slerp for bends up to 90 degrees apart, ends exact
+    #[test]
+    fn blends_stay_close_to_slerp() {
+        let pose_at = |q: Quat| {
+            let mut p = Pose::new(&[rest(Vec3::ZERO)], 0);
+            p.local[0].rotation = q;
+            p
+        };
+        let a = Quat::from_euler(EulerRot::YXZ, 0.3, -0.2, 0.1);
+        let b = a * Quat::from_axis_angle(vec3(1.0, 2.0, -0.5).normalize(), std::f32::consts::FRAC_PI_2);
+        for i in 0..=20 {
+            let t = i as f32 / 20.0;
+            let mut mixed = pose_at(a);
+            mixed.mix_in(&pose_at(b), t);
+            let mut faded = pose_at(b);
+            faded.blend_from(&pose_at(a), t);
+            let want = a.slerp(b, t);
+            for got in [mixed.local[0].rotation, faded.local[0].rotation] {
+                assert!(got.angle_between(want).to_degrees() < 1.0, "t {t}: {got:?} vs {want:?}");
+                assert!(got.is_normalized());
+            }
+        }
     }
 
     // the amy crash: one pose bent on one character's mesh, then on a bigger one after a character switch

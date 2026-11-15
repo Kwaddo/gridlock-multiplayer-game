@@ -29,8 +29,13 @@ const RETRY_SECS: u64 = 5;
 /// baked in at build time on both). In the browser the page can override it at
 /// run time with `window.GRIDLOCK_REGISTRY`, which the local server
 /// (`registry/local/`) sets to itself for offline play. `None` turns online
-/// play off.
+/// play off. Read once: the Browse and Host tabs ask for it every frame.
 pub fn registry_url() -> Option<String> {
+    static URL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    URL.get_or_init(read_registry_url).clone()
+}
+
+fn read_registry_url() -> Option<String> {
     #[cfg(not(target_arch = "wasm32"))]
     let runtime = std::env::var("GRIDLOCK_REGISTRY").ok();
     #[cfg(target_arch = "wasm32")]

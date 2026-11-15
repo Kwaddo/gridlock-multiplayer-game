@@ -25,7 +25,7 @@ pub struct SyncResult {
     pub returned_to_lobby: bool, // true when a world-change back to Lobby was applied this poll
 }
 
-#[inline(always)]
+// not #[inline(always)]: it is called from 8 places and is large
 pub fn sync_world(
     link: Option<&mut dyn Link>,
     player_id: u32,
@@ -251,7 +251,11 @@ pub fn sync_world(
         // MSG_PLAYER_LIST arrives. MSG_STATE creates/updates OtherPlayer
         // objects with default colors, so without this they would lose
         // their team tint until the next (infrequent) player list packet.
-        apply_team_colors(playing_state);
+        // Colours depend only on ids, teams and the match mode, all of which
+        // arrive from the server, so a poll that received nothing skips it.
+        if updates.received_any {
+            apply_team_colors(playing_state);
+        }
     }
 
     result

@@ -2,6 +2,8 @@ mod cell_kinds;
 mod raycast;
 mod snapshot;
 mod walls;
+#[cfg(test)]
+mod tests;
 
 use ::rand::{thread_rng, Rng};
 use macroquad::prelude::*;
@@ -74,6 +76,12 @@ impl PropKind {
             PropKind::Foosball => true,
         }
     }
+
+    /// Height range (world y) holding every `bullet_hitbox` of a prop on the
+    /// floor, padded a little, so a ray that never gets this low or this high
+    /// cannot hit any prop. Barrel (-0.01..0.91) is the tallest; the test
+    /// `bullet_hitboxes_fit_in_band` keeps this in step with the table below.
+    pub const BULLET_HITBOX_Y: (f32, f32) = (-0.02, 0.92);
 
     /// Get the bullet collision box for this prop (center_offset, half_extents)
     /// Returns None if prop doesn't block bullets
@@ -186,6 +194,11 @@ impl Maze {
     }
 
     pub fn clamp_move(&self, current: Vec3, desired: Vec3, radius: f32) -> Vec3 {
+        // Standing still: every branch below returns a mix of `current` and
+        // `desired`, which hold the same bits, so skip the collision checks.
+        if desired.to_array().map(f32::to_bits) == current.to_array().map(f32::to_bits) {
+            return desired;
+        }
         let mut result = desired;
         if self.is_blocked(result, radius) {
             result.x = current.x;

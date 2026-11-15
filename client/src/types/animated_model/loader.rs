@@ -190,6 +190,8 @@ fn load_gltf_animated_model_internal(
         duration,
         time: 0.0,
         skin_accum: SKIN_INTERVAL, // force first update
+        posed_time: None,
+        cpu_skinned_time: None,
         playback_loop: true,
         playback_paused: false,
         playback_finished: false,

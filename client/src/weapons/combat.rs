@@ -1,6 +1,11 @@
 use crate::weapons::stats::WeaponStats;
 use macroquad::prelude::*;
 
+#[cfg(test)]
+pub(crate) mod reference;
+#[cfg(test)]
+pub(crate) mod tests;
+
 /*
     Actual combat entity, we make this a trait so we can apply it to anything we want
     makes it easy to scale and add new enemy types later, like a moving dummy or a real enemy with AI,
@@ -25,9 +30,14 @@ pub trait CombatEntity {
     // ray test
     fn ray_test(&self, origin: Vec3, dir: Vec3, max_dist: f32) -> Option<(HitZone, f32)> {
         let mut best: Option<(HitZone, f32)> = None;
+        // position and 1/dir are the same for every hitbox, look them up once
+        let position = self.entity_position();
+        let inv_dir = ray_inv_dir(dir);
         for hit_box in self.hitboxes() {
-            let center = self.entity_position() + hit_box.center_offset;
-            if let Some(dist) = ray_hit_aabb(origin, dir, center, hit_box.half_extents, max_dist) {
+            let center = position + hit_box.center_offset;
+            if let Some(dist) =
+                ray_hit_aabb_inv(origin, dir, inv_dir, center, hit_box.half_extents, max_dist)
+            {
                 match best {
                     None => best = Some((hit_box.zone, dist)),
                     Some((_, d)) if dist < d => best = Some((hit_box.zone, dist)),
@@ -88,9 +98,39 @@ pub fn ray_hit_aabb(
     half: Vec3,
     max_dist: f32,
 ) -> Option<f32> {
-    let min = center - half;
-    let max = center + half;
+    ray_hit_aabb_inv(origin, dir, ray_inv_dir(dir), center, half, max_dist)
+}
 
+/// `1.0 / dir` per axis, for the `_inv` ray tests. Computed once per ray it
+/// holds the very values the tests would otherwise divide out for every box.
+/// Axes with a zero component come out infinite; the tests never read them.
+pub fn ray_inv_dir(dir: Vec3) -> Vec3 {
+    vec3(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z)
+}
+
+/// `ray_hit_aabb` with `inv_dir = ray_inv_dir(dir)` passed in, so a ray
+/// tested against many boxes divides once instead of three times per box.
+/// Same result bit for bit.
+pub fn ray_hit_aabb_inv(
+    origin: Vec3,
+    dir: Vec3,
+    inv_dir: Vec3,
+    center: Vec3,
+    half: Vec3,
+    max_dist: f32,
+) -> Option<f32> {
+    ray_hit_bounds(origin, dir, inv_dir, center - half, center + half, max_dist)
+}
+
+/// `ray_hit_aabb_inv` for the box with corners `min` and `max`.
+pub fn ray_hit_bounds(
+    origin: Vec3,
+    dir: Vec3,
+    inv_dir: Vec3,
+    min: Vec3,
+    max: Vec3,
+    max_dist: f32,
+) -> Option<f32> {
     let mut tmin = 0.0_f32;
     let mut tmax = max_dist;
 
@@ -122,7 +162,11 @@ pub fn ray_hit_aabb(
                 return None;
             }
         } else {
-            let inv_d = 1.0 / d;
+            let inv_d = match i {
+                0 => inv_dir.x,
+                1 => inv_dir.y,
+                _ => inv_dir.z,
+            };
             let mut t1 = (bmin - o) * inv_d;
             let mut t2 = (bmax - o) * inv_d;
             if t1 > t2 {
@@ -142,6 +186,19 @@ pub fn ray_hit_aabb(
 pub fn ray_hit_aabb_with_normal(
     origin: Vec3,
     dir: Vec3,
+    center: Vec3,
+    half: Vec3,
+    max_dist: f32,
+) -> Option<(f32, Vec3)> {
+    ray_hit_aabb_with_normal_inv(origin, dir, ray_inv_dir(dir), center, half, max_dist)
+}
+
+/// `ray_hit_aabb_with_normal` with `inv_dir = ray_inv_dir(dir)` passed in,
+/// see `ray_hit_aabb_inv`. Same result bit for bit.
+pub fn ray_hit_aabb_with_normal_inv(
+    origin: Vec3,
+    dir: Vec3,
+    inv_dir: Vec3,
     center: Vec3,
     half: Vec3,
     max_dist: f32,
@@ -183,7 +240,11 @@ pub fn ray_hit_aabb_with_normal(
                 return None;
             }
         } else {
-            let inv_d = 1.0 / d;
+            let inv_d = match i {
+                0 => inv_dir.x,
+                1 => inv_dir.y,
+                _ => inv_dir.z,
+            };
             let mut t1 = (bmin - o) * inv_d;
             let mut t2 = (bmax - o) * inv_d;
             // t1 = entry into the min face, t2 = entry into the max face

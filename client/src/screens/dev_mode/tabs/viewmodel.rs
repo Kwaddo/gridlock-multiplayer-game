@@ -1,10 +1,10 @@
-use crate::ui::fonts::text_params;
 use crate::weapons::state::WeaponInventory;
 use macroquad::prelude::*;
 
 use super::super::state::DevModeState;
+use super::super::text_queue::queue_fmt;
 use super::super::widgets::{
-    draw_action_button, draw_section_header, draw_slider_nudge, draw_toggle,
+    draw_action_button_fmt, draw_section_header, draw_slider_nudge, draw_toggle,
 };
 use super::viewmodel_actions::draw_viewmodel_actions;
 use super::viewmodel_ads::draw_viewmodel_ads_section;
@@ -25,11 +25,12 @@ pub(in crate::screens::dev_mode) fn draw_viewmodel_tab(
 
     let weapon = inv.active_mut();
     let name = weapon.stats_data.name;
-    draw_text_ex(
-        &format!("Viewmodel: {}", name),
+    queue_fmt(
+        format_args!("Viewmodel: {}", name),
         x,
         y + 14.0,
-        text_params(16, Color::from_rgba(255, 200, 80, 255)),
+        16,
+        Color::from_rgba(255, 200, 80, 255),
     );
     y += 24.0;
 
@@ -312,15 +313,27 @@ pub(in crate::screens::dev_mode) fn draw_viewmodel_tab(
             continue;
         }
         let wname: &'static str = inv.weapons[i].stats_data.name;
-        let hip_label = format!("Copy Hip: {}", wname);
-        let (h, hip_pressed) = draw_action_button(&hip_label, x, y, 220.0, mouse, clicked);
+        let (h, hip_pressed) = draw_action_button_fmt(
+            format_args!("Copy Hip: {}", wname),
+            x,
+            y,
+            220.0,
+            mouse,
+            clicked,
+        );
         y += h;
         if hip_pressed {
             copy_hip_from_slot = Some(i);
         }
 
-        let ads_label = format!("Copy ADS: {}", wname);
-        let (h, ads_pressed) = draw_action_button(&ads_label, x, y, 220.0, mouse, clicked);
+        let (h, ads_pressed) = draw_action_button_fmt(
+            format_args!("Copy ADS: {}", wname),
+            x,
+            y,
+            220.0,
+            mouse,
+            clicked,
+        );
         y += h;
         if ads_pressed {
             copy_ads_from_slot = Some(i);

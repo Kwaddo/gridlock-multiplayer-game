@@ -281,6 +281,8 @@ pub struct OtherPlayer {
 
     // Current weapon name (e.g. "AK-47", "M4A1") — used to draw world-model gun
     pub current_weapon: String,
+    // `current_weapon` parsed, and the name it was parsed from; see weapon_id()
+    resolved_weapon: std::cell::RefCell<(String, Option<crate::weapons::stats::WeaponId>)>,
 
     // bot
     pub is_bot: bool,
@@ -353,6 +355,7 @@ impl OtherPlayer {
             last_move_time: 0.0,
             gun_level: 1,
             current_weapon: String::new(),
+            resolved_weapon: std::cell::RefCell::new((String::new(), None)),
             is_bot: false,
             is_silent: false,
             footstep_timer: 0.0,
@@ -387,6 +390,17 @@ impl OtherPlayer {
             self.render_z = z;
             self.render_yaw = yaw;
         }
+    }
+
+    /// `current_weapon` as a WeaponId. The name lookup (a case-insensitive scan
+    /// of every weapon) runs only when the name changes, not on every draw.
+    pub fn weapon_id(&self) -> Option<crate::weapons::stats::WeaponId> {
+        let mut cache = self.resolved_weapon.borrow_mut();
+        if cache.0 != self.current_weapon {
+            cache.0.clone_from(&self.current_weapon);
+            cache.1 = crate::weapons::stats::WeaponId::from_name(&self.current_weapon);
+        }
+        cache.1
     }
 
     pub fn render_position(&self) -> Vec3 {

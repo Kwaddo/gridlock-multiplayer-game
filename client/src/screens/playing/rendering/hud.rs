@@ -4,6 +4,10 @@ use crate::types::maze::Maze;
 
 use super::super::PlayingState;
 
+thread_local! {
+    static TAG_LABEL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
 impl PlayingState {
     pub(crate) fn draw_target_dummy_hud(&self, camera: &Camera3D) {
         let d = &self.target_dummy;
@@ -110,6 +114,9 @@ impl PlayingState {
             }
         }
 
+        // "[BOT] name" labels are built here, kept between frames
+        let mut label_buf = TAG_LABEL.take();
+
         // Other players
         for p in &self.other_players {
             let player_pos = p.render_position();
@@ -119,6 +126,10 @@ impl PlayingState {
             let Some((sx, sy)) = project(tag_pos) else {
                 continue;
             };
+            let display_name = Self::tag_label(&mut label_buf, p.is_bot, &p.username);
+            if !Self::tag_on_screen(sx, sy, display_name, show_hp) {
+                continue;
+            }
 
             // In team modes distinguish teammates from enemies:
             //   - teammates: always visible (no wall occlusion), shown in green
@@ -130,9 +141,8 @@ impl PlayingState {
                 continue;
             }
 
-            let display_name = Self::tag_label(p.is_bot, &p.username);
             if show_hp {
-                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
+                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, display_name);
             } else {
                 let tag_color = if is_team_mode {
                     if is_teammate {
@@ -143,7 +153,7 @@ impl PlayingState {
                 } else {
                     p.color
                 };
-                Self::draw_nametag(sx, sy, &display_name, tag_color);
+                Self::draw_nametag(sx, sy, display_name, tag_color);
             }
         }
 
@@ -156,27 +166,48 @@ impl PlayingState {
             let Some((sx, sy)) = project(tag_pos) else {
                 continue;
             };
+            let display_name = Self::tag_label(&mut label_buf, p.is_bot, &p.username);
+            if !Self::tag_on_screen(sx, sy, display_name, show_hp) {
+                continue;
+            }
 
             if is_occluded(bot_pos + vec3(0.0, 0.8, 0.0)) {
                 continue;
             }
 
-            let display_name = Self::tag_label(p.is_bot, &p.username);
             if show_hp {
-                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, &display_name);
+                Self::draw_health_bar(sx, sy, p.hp, p.max_hp, display_name);
             } else {
-                Self::draw_nametag(sx, sy, &display_name, p.color);
+                Self::draw_nametag(sx, sy, display_name, p.color);
             }
+        }
+
+        TAG_LABEL.set(label_buf);
+    }
+
+    /// Overhead label: bots get a "[BOT] " prefix (built in `buf`, which is
+    /// reused across tags and frames), players borrow their name.
+    fn tag_label<'a>(buf: &'a mut String, is_bot: bool, username: &'a str) -> &'a str {
+        if is_bot {
+            buf.clear();
+            buf.push_str("[BOT] ");
+            buf.push_str(username);
+            buf
+        } else {
+            username
         }
     }
 
-    /// Overhead label: bots get a "[BOT] " prefix, players borrow their name.
-    fn tag_label(is_bot: bool, username: &str) -> std::borrow::Cow<'_, str> {
-        if is_bot {
-            std::borrow::Cow::Owned(format!("[BOT] {}", username))
-        } else {
-            std::borrow::Cow::Borrowed(username)
-        }
+    /// Whether any of a tag centred at (sx, sy) lands on screen: its label
+    /// (and in dev mode the 60 px health bar under it) around the point.
+    fn tag_on_screen(sx: f32, sy: f32, label: &str, show_hp: bool) -> bool {
+        let label_w = crate::ui::fonts::measure_game_text(label, if show_hp { 12 } else { 14 });
+        let half_w = (label_w / 2.0).max(30.0) + 2.0;
+        // text rises about 16 px above sy; the health bar reaches 6 px below
+        sx + half_w >= 0.0
+            && sx - half_w <= screen_width()
+            && sy + 10.0 >= 0.0
+            && sy - 20.0 <= screen_height()
     }
 
     fn draw_nametag(sx: f32, sy: f32, label: &str, color: Color) {

@@ -5,6 +5,8 @@ use crate::ui::fonts::{measure_game_text, text_params};
 use macroquad::prelude::*;
 
 const GUI_SCALE_OPTIONS: &[(&str, u8)] = &[("Auto", 0), ("1", 1), ("2", 2), ("3", 3)];
+/// "Auto(n)" labels for the auto UI scale (effective_gui_scale is 1..=4 then).
+const AUTO_LABELS: [&str; 4] = ["Auto(1)", "Auto(2)", "Auto(3)", "Auto(4)"];
 const MINIMAP_SIZE_OPTIONS: &[(&str, u8)] = &[("Small", 0), ("Medium", 1), ("Large", 2)];
 const MINIMAP_SHAPE_OPTIONS: &[(&str, u8)] = &[("Circle", 0), ("Square", 1)];
 /// Master volume in percent; "Off" mutes.
@@ -157,7 +159,8 @@ pub fn draw_sliders(
         text_params(label_fs, WHITE),
     );
     let effective = config.effective_gui_scale();
-    for (i, &(label, value)) in GUI_SCALE_OPTIONS.iter().enumerate() {
+    // button shapes first, then their labels in one text batch
+    for (i, &(_, value)) in GUI_SCALE_OPTIONS.iter().enumerate() {
         let bx = gui_start_x + (gui_btn_w + gui_btn_gap) * (i as f32);
         let is_active = config.gui_scale == value;
         let bg = if is_active {
@@ -167,14 +170,17 @@ pub fn draw_sliders(
         };
         draw_rectangle(bx, gui_row_y, gui_btn_w, gui_btn_h, bg);
         draw_rectangle_lines(bx, gui_row_y, gui_btn_w, gui_btn_h, 1.0, GRAY);
+    }
+    for (i, &(label, value)) in GUI_SCALE_OPTIONS.iter().enumerate() {
+        let bx = gui_start_x + (gui_btn_w + gui_btn_gap) * (i as f32);
         let display = if value == 0 {
-            format!("Auto({})", effective)
+            AUTO_LABELS[(effective.clamp(1, 4) - 1) as usize]
         } else {
-            label.to_string()
+            label
         };
-        let tw = measure_game_text(&display, btn_fs);
+        let tw = measure_game_text(display, btn_fs);
         draw_text_ex(
-            &display,
+            display,
             bx + (gui_btn_w - tw) / 2.0,
             gui_row_y + gui_btn_h * 0.68,
             text_params(btn_fs, WHITE),
@@ -267,7 +273,8 @@ fn draw_button_row(
     gap: f32,
     fs: u16,
 ) {
-    for (i, &(label, value)) in options.iter().enumerate() {
+    // button shapes first, then their labels in one text batch
+    for (i, &(_, value)) in options.iter().enumerate() {
         let bx = start_x + (btn_w + gap) * (i as f32);
         let bg = if active == value {
             Color::from_rgba(80, 150, 220, 255)
@@ -276,6 +283,9 @@ fn draw_button_row(
         };
         draw_rectangle(bx, row_y, btn_w, btn_h, bg);
         draw_rectangle_lines(bx, row_y, btn_w, btn_h, 1.0, GRAY);
+    }
+    for (i, &(label, _)) in options.iter().enumerate() {
+        let bx = start_x + (btn_w + gap) * (i as f32);
         let tw = measure_game_text(label, fs);
         draw_text_ex(
             label,

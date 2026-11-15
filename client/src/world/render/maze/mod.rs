@@ -29,7 +29,8 @@ use crate::types::maze::Maze;
 use super::props::draw_prop_hitboxes;
 use cache::MazeMeshes;
 use constants::{MIN_RENDER_CELLS, PLACEHOLDER_COLOR, RENDER_SLACK_CELLS};
-use cull::{DistanceCull, Frustum};
+use cull::DistanceCull;
+pub(crate) use cull::Frustum;
 pub(in crate::world::render) use mesh::MeshBuilder;
 
 thread_local! {

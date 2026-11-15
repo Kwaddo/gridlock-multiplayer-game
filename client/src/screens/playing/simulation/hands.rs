@@ -320,26 +320,33 @@ impl PlayingState {
             }
         };
 
-        for (key, model) in self.animated_models.iter_mut() {
-            // player clips are never ticked here anymore, every body has its own clock (PlayerAnim)
-            // before this every player clip had one shared clock ticked here, used by everyone on it
-            let should_update = if key.starts_with("anim_") {
-                false
-            } else if key == "fp_hands_sawnoff" {
-                is_sawnoff
-            } else if key == "fp_hands_minigun" {
-                is_minigun
-            } else if key == "fp_hands"
-                || key == "fp_hands_pistol"
-                || key == "fp_hands_smg"
-                || key == "fp_hands_sniper"
-            {
-                !uses_special_hands_machine && active_hands_key == Some(key.as_str())
-            } else {
-                false
-            };
-            if should_update {
+        // Player clips are never ticked here (every body has its own clock,
+        // PlayerAnim); only the one active first-person hands rig is.
+        let update_key = if is_sawnoff {
+            Some("fp_hands_sawnoff")
+        } else if is_minigun {
+            Some("fp_hands_minigun")
+        } else if !uses_special_hands_machine
+            && matches!(active_hands_key, Some("fp_hands" | "fp_hands_pistol" | "fp_hands_smg" | "fp_hands_sniper"))
+        {
+            active_hands_key
+        } else {
+            None
+        };
+        // While the viewmodel is hidden (draw_viewmodel returns early) only the
+        // clock runs; the next visible update re-poses and re-skins at once.
+        let hands_visible = {
+            let weapon = self.weapons.active();
+            let scoped = matches!(weapon.stats().crosshair_style, crate::weapons::stats::CrosshairStyle::Scope)
+                && weapon.ads_progress > 0.85
+                && !(self.dev_mode.is_unlocked() && self.dev_mode.force_ads);
+            !self.lobby_console_open && !self.is_dead && !scoped
+        };
+        if let Some(model) = update_key.and_then(|k| self.animated_models.get_mut(k)) {
+            if hands_visible {
                 model.update(delta);
+            } else {
+                model.advance(delta);
             }
         }
         // only allocate a new key string when the active hands rig changes

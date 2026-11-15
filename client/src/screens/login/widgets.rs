@@ -22,9 +22,9 @@ impl LoginScreen {
         if text.is_empty() && !active {
             draw_text_ex(placeholder, x + 10.0, fy + 23.0, text_params(17, Color::new(0.30, 0.32, 0.42, 0.5)));
         } else {
-            draw_text_ex(text, x + 10.0, fy + 23.0, text_params(17, WHITE));
+            // draw_text_ex returns the same width measure_game_text would
+            let tw = draw_text_ex(text, x + 10.0, fy + 23.0, text_params(17, WHITE)).width;
             if active && (self.anim_time * 2.5) as i32 % 2 == 0 {
-                let tw = measure_game_text(text, 17);
                 draw_rectangle(x + 10.0 + tw + 2.0, fy + 6.0, 2.0, FIELD_H - 12.0, ACCENT);
             }
         }

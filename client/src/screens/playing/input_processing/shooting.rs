@@ -13,6 +13,26 @@ use crate::weapons::stats::melee::{
     KNIFE_MISS_MOVE_SLOW_DURATION, KNIFE_MISS_PENALTY_SECS, PUNCH_DAMAGE,
 };
 
+#[cfg(test)]
+mod tests;
+
+/// `entity`'s hit on this pellet, unless a surface at `blocking` is nearer.
+fn unblocked_hit(
+    entity: &impl CombatEntity,
+    eye: Vec3,
+    fwd: Vec3,
+    range: f32,
+    blocking: Option<f32>,
+) -> Option<(HitZone, f32)> {
+    // A hit behind the blocking surface is thrown away, so the hitboxes only
+    // need testing up to it. A box's hit distance does not depend on the
+    // range, only whether it counts, so the hits that remain are unchanged.
+    let reach = blocking.map_or(range, |d| d.min(range));
+    let (zone, dist) = entity.ray_test(eye, fwd, reach)?;
+    let blocked = blocking.map_or(false, |d| d < dist);
+    (!blocked).then_some((zone, dist))
+}
+
 impl PlayingState {
     /// One shot of the active weapon that just fired: recoil, then each
     /// pellet's ray against surfaces, the dummy, players and bots, with
@@ -124,49 +144,11 @@ impl PlayingState {
                 crate::world::mirror::nearest_mirror_hit(&self.mirrors, eye, fwd, range);
             let world_range = mirror_dist.unwrap_or(range);
             let world_dist = if self.current_world == WorldId::Maze {
-                // gather all candidate hits
-                let wall_hit = maze
-                    .as_ref()
-                    .and_then(|m| m.ray_test_walls_with_normal(eye, fwd, world_range));
-                let prop_hit = maze
-                    .as_ref()
-                    .and_then(|m| m.ray_test_props_with_normal(eye, fwd, world_range));
-                let fc_hit = maze.as_ref().and_then(|m| {
-                    m.ray_test_floor_ceiling_with_normal(eye, fwd, world_range)
+                // the closest of walls, props, floor/ceiling and lights, as
+                // (distance, normal, Option<wall_cell>, Option<light_cell>)
+                let nearest = maze.as_ref().and_then(|m| {
+                    m.ray_test_surfaces(eye, fwd, world_range, &self.destroyed_lights)
                 });
-                let light_hit = maze.as_ref().and_then(|m| {
-                    m.ray_test_ceiling_lights_with_normal(
-                        eye,
-                        fwd,
-                        world_range,
-                        &self.destroyed_lights,
-                    )
-                });
-
-                // collect all hits as (distance, normal, Option<wall_cell>, is_light_cell)
-                let candidates: [Option<(
-                    f32,
-                    Vec3,
-                    Option<(u8, u8)>,
-                    Option<(u8, u8)>,
-                )>; 4] = [
-                    wall_hit.map(|((wx, wy), d, n)| (d, n, Some((wx, wy)), None)),
-                    prop_hit.map(|(d, n)| (d, n, None, None)),
-                    fc_hit.map(|(d, n)| (d, n, None, None)),
-                    light_hit.map(|((lx, ly), d, n)| (d, n, None, Some((lx, ly)))),
-                ];
-
-                // pick the closest; on equal distance the earlier candidate
-                // wins, as the stable sort this replaces did
-                let nearest = candidates.into_iter().flatten().fold(
-                    None,
-                    |best: Option<(f32, Vec3, Option<(u8, u8)>, Option<(u8, u8)>)>, c| {
-                        match best {
-                            Some(b) if !(c.0 < b.0) => Some(b),
-                            _ => Some(c),
-                        }
-                    },
-                );
 
                 if let Some((dist, norm, wall_cell, light_cell)) = nearest {
                     // if closest hit is a wall, damage it
@@ -273,13 +255,12 @@ impl PlayingState {
             }
 
             // check target dummy first
-            if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
-                let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                if !blocked {
-                    let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
-                    if is_closer {
-                        closest = Some((EntityKind::Dummy, 0, zone, dist));
-                    }
+            if let Some((zone, dist)) =
+                unblocked_hit(&self.target_dummy, eye, fwd, range, closest_blocking_dist)
+            {
+                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                if is_closer {
+                    closest = Some((EntityKind::Dummy, 0, zone, dist));
                 }
             }
 
@@ -288,13 +269,12 @@ impl PlayingState {
                 if !other.is_alive() {
                     continue;
                 }
-                if let Some((zone, dist)) = other.ray_test(eye, fwd, range) {
-                    let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                    if !blocked {
-                        let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
-                        if is_closer {
-                            closest = Some((EntityKind::Player, idx, zone, dist));
-                        }
+                if let Some((zone, dist)) =
+                    unblocked_hit(other, eye, fwd, range, closest_blocking_dist)
+                {
+                    let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                    if is_closer {
+                        closest = Some((EntityKind::Player, idx, zone, dist));
                     }
                 }
             }
@@ -304,13 +284,12 @@ impl PlayingState {
                 if !bot.is_alive() {
                     continue;
                 }
-                if let Some((zone, dist)) = bot.ray_test(eye, fwd, range) {
-                    let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                    if !blocked {
-                        let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
-                        if is_closer {
-                            closest = Some((EntityKind::Bot, idx, zone, dist));
-                        }
+                if let Some((zone, dist)) =
+                    unblocked_hit(bot, eye, fwd, range, closest_blocking_dist)
+                {
+                    let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                    if is_closer {
+                        closest = Some((EntityKind::Bot, idx, zone, dist));
                     }
                 }
             }

@@ -349,6 +349,7 @@ pub fn draw_crosshair_settings(
         text_params(tiny_fs, WHITE),
     );
 
+    // the only painter of the warning; update.rs hit-tests its OK button
     if state.preview_weapon == WeaponCategory::Shotgun && state.shotgun_type_warning {
         draw_shotgun_type_warning(preview_x, btn_row_y, 0.0, 0.0, _mouse, false, s);
     }

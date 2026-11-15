@@ -157,15 +157,18 @@ pub(super) fn draw(meshes: &[&StoredMesh], dist: &DistanceCull) {
             let ctx = gl.quad_context;
             ctx.begin_pass(pass, miniquad::PassAction::Nothing);
             ctx.apply_pipeline(&pipeline);
+            // Uniforms only differ by cull value (cullable cells vs the rest),
+            // so they are re-sent only when it changes.
+            let mut last_cull: Option<[f32; 4]> = None;
             for m in meshes {
                 if let StoredMesh::Gpu { vertices, indices, index_count, bounds } = m {
-                    ctx.apply_bindings(&miniquad::Bindings {
-                        vertex_buffers: vec![*vertices],
-                        index_buffer: *indices,
-                        images: vec![],
-                    });
-                    let uniforms = Uniforms { projection, cull: cull_of(bounds) };
-                    ctx.apply_uniforms(miniquad::UniformsSource::table(&uniforms));
+                    ctx.apply_bindings_from_slice(&[*vertices], *indices, &[]);
+                    let cull = cull_of(bounds);
+                    if last_cull != Some(cull) {
+                        let uniforms = Uniforms { projection, cull };
+                        ctx.apply_uniforms(miniquad::UniformsSource::table(&uniforms));
+                        last_cull = Some(cull);
+                    }
                     ctx.draw(0, *index_count, 1);
                 }
             }

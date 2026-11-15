@@ -23,11 +23,12 @@ pub fn import_glb(
             }
             gltf::image::Source::Uri { .. } => None,
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let keys = encoded.iter().map(|_| std::cell::OnceCell::new()).collect();
     #[cfg(target_arch = "wasm32")]
-    let images = GlbImages { encoded, path: path.to_string() };
+    let images = GlbImages { encoded, keys, path: path.to_string() };
     #[cfg(not(target_arch = "wasm32"))]
-    let images = GlbImages { encoded };
+    let images = GlbImages { encoded, keys };
     Ok((document, buffers, images))
 }
 
@@ -37,6 +38,10 @@ pub fn import_glb(
 /// once per file saves most of the load time and GPU memory.
 pub struct GlbImages {
     encoded: Vec<Option<Vec<u8>>>,
+    /// Each image's content key, hashed the first time a mesh asks for it:
+    /// a rig's primitives share a few big images, and hashing all of one's
+    /// bytes again for every primitive cost milliseconds per rig.
+    keys: Vec<std::cell::OnceCell<u64>>,
     /// The file they came from, by which the browser's worker hands over
     /// the images it decoded.
     #[cfg(target_arch = "wasm32")]
@@ -54,7 +59,7 @@ impl GlbImages {
     /// once per distinct image.
     pub fn texture(&self, index: usize) -> Option<Texture2D> {
         let bytes = self.encoded.get(index)?.as_ref()?;
-        let key = content_key(bytes);
+        let key = *self.keys[index].get_or_init(|| content_key(bytes));
         TEXTURES.with(|textures| {
             textures.borrow_mut().entry(key).or_insert_with(|| self.decode_texture(key, index, bytes)).clone()
         })

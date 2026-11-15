@@ -10,6 +10,8 @@ pub(super) const TAB_NAMES: &[&str] = &[
     "Debug",
     "Bots",
 ];
+// index of "Debug" in TAB_NAMES, the only tab that shows the character label
+pub const DEBUG_TAB: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HandsAnimRequest {

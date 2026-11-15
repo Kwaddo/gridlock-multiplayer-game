@@ -220,12 +220,18 @@ impl MazeMeshes {
     /// Meshes that may show this frame, in the order the old path drew
     /// them: cells, then roof, pipes and fixtures, then props.
     pub fn visible(&self, frustum: &Frustum, dist: &DistanceCull) -> Vec<&StoredMesh> {
-        self.chunks
-            .iter()
-            .flatten()
-            .chain(&self.globals)
-            .chain(self.props.iter().flatten())
-            .filter(|m| visible(m.bounds(), frustum, dist))
-            .collect()
+        let total = self.chunks.iter().map(Vec::len).sum::<usize>()
+            + self.globals.len()
+            + self.props.iter().map(Vec::len).sum::<usize>();
+        let mut out = Vec::with_capacity(total);
+        out.extend(
+            self.chunks
+                .iter()
+                .flatten()
+                .chain(&self.globals)
+                .chain(self.props.iter().flatten())
+                .filter(|m| visible(m.bounds(), frustum, dist)),
+        );
+        out
     }
 }

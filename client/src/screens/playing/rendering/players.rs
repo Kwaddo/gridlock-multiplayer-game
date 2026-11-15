@@ -21,15 +21,34 @@ const WORLD_WEAPON_FORWARD_OFFSET: f32 = 0.1; // units, tweak for desired spacin
 // how far past the gun's grip its muzzle sits, roughly a rifle's length, good enough for a flash
 const MUZZLE_REACH: f32 = 0.5;
 
+// generous box around render_position() for frustum culling: body, held weapon
+// and animation overshoot in any direction, whether the anchor is feet or eyes
+const PLAYER_CULL_BELOW: Vec3 = Vec3::new(1.5, 2.2, 1.5);
+const PLAYER_CULL_ABOVE: Vec3 = Vec3::new(1.5, 2.6, 1.5);
+
 impl PlayingState {
     #[inline(always)]
     pub(crate) fn draw_other_players(&self) {
+        // skip bodies wholly outside the current camera's frustum (main or mirror pass)
+        let frustum = {
+            let gl = unsafe { get_internal_gl() };
+            crate::world::render::Frustum::new(gl.quad_gl.get_projection_matrix())
+        };
+        let may_see = |p: &crate::types::player::OtherPlayer| {
+            let c = p.render_position();
+            frustum.may_see(c - PLAYER_CULL_BELOW, c + PLAYER_CULL_ABOVE)
+        };
+
         for p in &self.other_players {
-            self.draw_player_model(p);
+            if may_see(p) {
+                self.draw_player_model(p);
+            }
         }
 
         for bot in &self.practice_bots {
-            self.draw_player_model(&bot.player);
+            if may_see(&bot.player) {
+                self.draw_player_model(&bot.player);
+            }
         }
     }
 
@@ -40,10 +59,13 @@ impl PlayingState {
         let render_yaw = p.render_yaw;
         let desired_key = p.skin_type.model_key();
         let desired_anim = desired_key.and_then(|k| self.animated_models.get(k));
-        let desired_static = desired_key.and_then(|k| self.models.get(k));
-
         let anim_model = desired_anim.or_else(|| self.animated_models.get("anim_rifle_idle"));
-        let static_mesh_list = desired_static.or_else(|| self.models.get("anim_rifle_idle"));
+        // only looked up when there is no animated model to draw
+        let static_mesh_list = || {
+            desired_key
+                .and_then(|k| self.models.get(k))
+                .or_else(|| self.models.get("anim_rifle_idle"))
+        };
 
         // draw the player body; remember whether we actually rendered a model so
         // we can fall back to cubes and still attach a weapon later.
@@ -99,7 +121,7 @@ impl PlayingState {
                         + vec3(0.0, y_offset, 0.0);
                     hand_world_pos = Some(render_pos + offset);
                 }
-            } else if let Some(meshes) = static_mesh_list {
+            } else if let Some(meshes) = static_mesh_list() {
                 drawn_body = true;
                 let transform = Mat4::from_translation(render_pos)
                     * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
@@ -146,7 +168,7 @@ impl PlayingState {
                 Some(render_pos + right * 0.3 * anim_scale + vec3(0.0, 1.0 * anim_scale, 0.0));
         }
 
-        if let Some(weapon_id) = crate::weapons::stats::WeaponId::from_name(&p.current_weapon) {
+        if let Some(weapon_id) = p.weapon_id() {
             if let Some(model_key) = weapon_id.stats().viewmodel_model {
                 // for world drawing we prefer a dedicated static model if one exists
                 // (e.g. `fp_hands_minigun` → `minigun_model`). this keeps other
@@ -270,17 +292,22 @@ impl PlayingState {
                             * Mat4::from_rotation_y(yaw_rot)
                             * Mat4::from_scale(Vec3::splat(scale_factor))
                     };
-                    wgl.quad_gl.push_model_matrix(weapon_transform);
                     if let Some(weapon_meshes) = self.models.get(world_key) {
-                        for mesh in weapon_meshes {
-                            draw_mesh(mesh);
+                        // uploaded once, drawn from GPU buffers; draw_mesh only as fallback
+                        if !crate::types::static_gpu::draw_static_meshes(world_key, weapon_meshes, weapon_transform) {
+                            wgl.quad_gl.push_model_matrix(weapon_transform);
+                            for mesh in weapon_meshes {
+                                draw_mesh(mesh);
+                            }
+                            wgl.quad_gl.pop_model_matrix();
                         }
                     } else if let Some(animated) = self.animated_models.get(world_key) {
+                        wgl.quad_gl.push_model_matrix(weapon_transform);
                         for mesh in animated.meshes() {
                             draw_mesh(mesh);
                         }
+                        wgl.quad_gl.pop_model_matrix();
                     }
-                    wgl.quad_gl.pop_model_matrix();
                     // the end of the barrel, a bit out from the gun along where they aim
                     let aim_dir = forward_dir * p.render_pitch.cos() + Vec3::Y * p.render_pitch.sin();
                     muzzle = Some(weapon_pos + aim_dir * MUZZLE_REACH);

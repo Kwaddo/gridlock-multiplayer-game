@@ -3,7 +3,7 @@ use client::net::Session;
 use platform::Instant;
 
 use client::core::{ GameConfig, GameState };
-use client::screens::dev_mode::draw_dev_overlay;
+use client::screens::dev_mode::{ draw_dev_overlay, DEBUG_TAB };
 use client::screens::{ LobbyInventoryScreen, LoginScreen, PauseAction, PauseMenu, PlayingState };
 use client::settings::SettingsScreen;
 use client::weapons::crosshair_presets::CrosshairPresetManager;
@@ -119,15 +119,8 @@ pub(super) fn settings_frame(
     preset_manager: &mut CrosshairPresetManager,
     state: &mut GameState
 ) {
-    draw_rectangle(
-        0.0,
-        0.0,
-        screen_width(),
-        screen_height(),
-        Color::from_rgba(0, 0, 0, 180)
-    );
-
-    settings_screen.draw(
+    // draw_in_game darkens the game itself (one overlay instead of two)
+    settings_screen.draw_in_game(
         config,
         &playing_state.weapons,
         preset_manager,
@@ -146,6 +139,14 @@ pub(super) fn settings_frame(
 
 /// The dev mode overlay, with its bot tab.
 pub(super) fn dev_overlay_frame(playing_state: &mut PlayingState, config: &mut GameConfig) {
+    // only the Debug tab shows it; kept fresh there so "still loading" counts down
+    // (also on a click, which may switch to the Debug tab this frame)
+    if
+        playing_state.dev_mode.active_tab == DEBUG_TAB ||
+        is_mouse_button_pressed(MouseButton::Left)
+    {
+        playing_state.dev_mode.character_label = playing_state.character_label();
+    }
     draw_dev_overlay(
         &mut playing_state.dev_mode,
         &mut playing_state.weapons,

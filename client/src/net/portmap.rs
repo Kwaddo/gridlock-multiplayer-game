@@ -35,6 +35,8 @@ pub enum PortStatus {
 pub struct PortMapping {
     status: Arc<Mutex<PortStatus>>,
     stop: Arc<AtomicBool>,
+    /// The worker, woken on drop: it sleeps until the next renewal otherwise.
+    worker: thread::Thread,
 }
 
 impl PortMapping {
@@ -42,8 +44,8 @@ impl PortMapping {
         let status = Arc::new(Mutex::new(PortStatus::Pending));
         let stop = Arc::new(AtomicBool::new(false));
         let (status_w, stop_w) = (status.clone(), stop.clone());
-        thread::spawn(move || run(local_port, &status_w, &stop_w));
-        PortMapping { status, stop }
+        let worker = thread::spawn(move || run(local_port, &status_w, &stop_w)).thread().clone();
+        PortMapping { status, stop, worker }
     }
 
     pub fn status(&self) -> PortStatus {
@@ -64,6 +66,8 @@ fn read(status: &Mutex<PortStatus>) -> PortStatus {
 impl Drop for PortMapping {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        // unpark synchronizes with the worker's park, so it sees the flag
+        self.worker.unpark();
     }
 }
 
@@ -95,7 +99,14 @@ fn run(local_port: u16, status: &Mutex<PortStatus>, stop: &AtomicBool) {
 
     let mut renewed = Instant::now();
     while !stop.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(200));
+        // Sleep until the renewal is due or the mapping is dropped (which
+        // unparks us); a spurious wake just goes round again.
+        let wait = if router.lease_secs() > 0 {
+            (renewed + LEASE / 2).saturating_duration_since(Instant::now())
+        } else {
+            LEASE / 2
+        };
+        thread::park_timeout(wait);
         if router.lease_secs() > 0 && renewed.elapsed() >= LEASE / 2 {
             renewed = Instant::now();
             if router.renew().is_err() {

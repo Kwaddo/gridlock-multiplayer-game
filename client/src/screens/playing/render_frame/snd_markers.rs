@@ -2,6 +2,20 @@ use macroquad::prelude::*;
 
 use super::PlayingState;
 
+/// Segments in each bomb-site ring.
+const RING_STEPS: usize = 32;
+
+/// (cos, sin) at each of the ring's RING_STEPS + 1 points, worked out once.
+fn unit_circle() -> &'static [(f32, f32); RING_STEPS + 1] {
+    static CIRCLE: std::sync::OnceLock<[(f32, f32); RING_STEPS + 1]> = std::sync::OnceLock::new();
+    CIRCLE.get_or_init(|| {
+        std::array::from_fn(|i| {
+            let a = (i as f32 / RING_STEPS as f32) * std::f32::consts::TAU;
+            (a.cos(), a.sin())
+        })
+    })
+}
+
 impl PlayingState {
     /// S&D: the bomb site marker and the dropped/planted bomb in 3D.
     pub(crate) fn draw_snd_world_markers(&self) {
@@ -11,38 +25,37 @@ impl PlayingState {
             ((cam_pos.x - site_x).powi(2) + (cam_pos.z - site_z).powi(2)).sqrt();
 
         // Bomb site marker — always visible (fade at very close range to avoid clutter)
-        {
-            let alpha = if site_dist <= 30.0 {
-                1.0f32
-            } else {
-                1.0 - ((site_dist - 30.0) / 10.0).clamp(0.0, 1.0)
-            };
+        let alpha = if site_dist <= 30.0 {
+            1.0f32
+        } else {
+            1.0 - ((site_dist - 30.0) / 10.0).clamp(0.0, 1.0)
+        };
+        // fully faded out (40 m and further): nothing to draw
+        if alpha > 0.0 {
             let pulse = ((get_time() as f32 * (if self.snd_bomb_planted { 4.0 } else { 1.5 })).sin() * 0.5 + 0.5) as f32;
             let site_color = if self.snd_bomb_planted {
                 Color::from_rgba(255, 50, 50, (220.0 * alpha) as u8)
             } else {
                 Color::from_rgba(255, 200, 50, ((160.0 + 60.0 * pulse) * alpha) as u8)
             };
+            let circle = unit_circle();
             // Outer ring
             let r_outer = 2.0;
-            let steps = 32;
-            for i in 0..steps {
-                let a1 = (i as f32 / steps as f32) * std::f32::consts::TAU;
-                let a2 = ((i + 1) as f32 / steps as f32) * std::f32::consts::TAU;
+            for w in circle.windows(2) {
+                let ((c1, s1), (c2, s2)) = (w[0], w[1]);
                 draw_line_3d(
-                    vec3(site_x + a1.cos() * r_outer, 0.02, site_z + a1.sin() * r_outer),
-                    vec3(site_x + a2.cos() * r_outer, 0.02, site_z + a2.sin() * r_outer),
+                    vec3(site_x + c1 * r_outer, 0.02, site_z + s1 * r_outer),
+                    vec3(site_x + c2 * r_outer, 0.02, site_z + s2 * r_outer),
                     site_color,
                 );
             }
             // Inner ring
             let r_inner = 1.0;
-            for i in 0..steps {
-                let a1 = (i as f32 / steps as f32) * std::f32::consts::TAU;
-                let a2 = ((i + 1) as f32 / steps as f32) * std::f32::consts::TAU;
+            for w in circle.windows(2) {
+                let ((c1, s1), (c2, s2)) = (w[0], w[1]);
                 draw_line_3d(
-                    vec3(site_x + a1.cos() * r_inner, 0.02, site_z + a1.sin() * r_inner),
-                    vec3(site_x + a2.cos() * r_inner, 0.02, site_z + a2.sin() * r_inner),
+                    vec3(site_x + c1 * r_inner, 0.02, site_z + s1 * r_inner),
+                    vec3(site_x + c2 * r_inner, 0.02, site_z + s2 * r_inner),
                     site_color,
                 );
             }

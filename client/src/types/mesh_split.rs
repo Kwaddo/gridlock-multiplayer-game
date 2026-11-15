@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use macroquad::models::{Mesh, Vertex};
 
 /*
@@ -21,45 +19,67 @@ pub struct Chunk {
     pub old_ids: Vec<u16>,
 }
 
+// whether a mesh is over the draw limits, so callers can skip chunk_triangles (and its copy) when it isnt
+pub fn needs_split(indices: &[u16], vertex_count: usize) -> bool {
+    indices.len() > MAX_DRAW_INDICES || vertex_count > MAX_DRAW_VERTICES
+}
+
 // cut a triangle list into pieces under the draw limits, one piece if it already fits
 pub fn chunk_triangles(indices: &[u16], vertex_count: usize) -> Vec<Chunk> {
-    if indices.len() <= MAX_DRAW_INDICES && vertex_count <= MAX_DRAW_VERTICES {
+    if !needs_split(indices, vertex_count) {
         let old_ids = (0..vertex_count as u16).collect();
         return vec![Chunk { indices: indices.to_vec(), old_ids }];
     }
+    // per original vertex, which piece last used it (piece number, 0 = none yet) and its id in that piece
+    // before this both were hash maps, about 6 SipHash calls per triangle, these are plain lookups
+    // sized by the biggest index too, so a bad index cant run off the end
+    let size = indices.iter().map(|&v| v as usize + 1).max().unwrap_or(0).max(vertex_count);
+    let mut stamp = vec![0u32; size];
+    let mut new_of = vec![0u16; size];
+    let mut piece = 1u32;
+    let mut used = 0usize;
     let mut chunks = Vec::new();
     let mut tris: Vec<[u16; 3]> = Vec::new();
-    let mut used: HashMap<u16, ()> = HashMap::new();
     for tri in indices.chunks_exact(3) {
-        let new_verts = tri.iter().filter(|v| !used.contains_key(v)).count();
-        let full = (tris.len() + 1) * 3 > MAX_DRAW_INDICES || used.len() + new_verts > MAX_DRAW_VERTICES;
+        let new_verts = tri.iter().filter(|&&v| stamp[v as usize] != piece).count();
+        let full = (tris.len() + 1) * 3 > MAX_DRAW_INDICES || used + new_verts > MAX_DRAW_VERTICES;
         if full && !tris.is_empty() {
-            chunks.push(finish_chunk(&tris));
+            chunks.push(finish_chunk(&tris, &mut new_of));
             tris.clear();
-            used.clear();
+            piece += 1;
+            used = 0;
         }
-        for v in tri {
-            used.insert(*v, ());
+        for &v in tri {
+            if stamp[v as usize] != piece {
+                stamp[v as usize] = piece;
+                used += 1;
+            }
         }
         tris.push([tri[0], tri[1], tri[2]]);
     }
     if !tris.is_empty() {
-        chunks.push(finish_chunk(&tris));
+        chunks.push(finish_chunk(&tris, &mut new_of));
     }
     chunks
 }
 
-fn finish_chunk(tris: &[[u16; 3]]) -> Chunk {
+// new_of is scratch indexed by original vertex, every id this piece reads is written first
+fn finish_chunk(tris: &[[u16; 3]], new_of: &mut [u16]) -> Chunk {
     let mut old_ids: Vec<u16> = tris.iter().flatten().copied().collect();
     old_ids.sort_unstable();
     old_ids.dedup();
-    let new_of: HashMap<u16, u16> = old_ids.iter().enumerate().map(|(n, &o)| (o, n as u16)).collect();
-    let indices = tris.iter().flatten().map(|o| new_of[o]).collect();
+    for (n, &o) in old_ids.iter().enumerate() {
+        new_of[o as usize] = n as u16;
+    }
+    let indices = tris.iter().flatten().map(|&o| new_of[o as usize]).collect();
     Chunk { indices, old_ids }
 }
 
 // split a plain mesh (static models, guns), same texture on every piece
 pub fn split_mesh(mesh: Mesh) -> Vec<Mesh> {
+    if !needs_split(&mesh.indices, mesh.vertices.len()) {
+        return vec![mesh]; // fits, before this it still copied the indices and listed every vertex to find that out
+    }
     let chunks = chunk_triangles(&mesh.indices, mesh.vertices.len());
     if chunks.len() == 1 {
         return vec![mesh];
@@ -113,5 +133,8 @@ mod tests {
         let c = &chunks[0];
         let first: Vec<u16> = c.indices[..3].iter().map(|&n| c.old_ids[n as usize]).collect();
         assert_eq!(first, idx[..3]);
+        // and so does every other one, in order
+        let back: Vec<u16> = chunks.iter().flat_map(|c| c.indices.iter().map(|&n| c.old_ids[n as usize])).collect();
+        assert_eq!(back, idx);
     }
 }

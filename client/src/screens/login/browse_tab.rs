@@ -2,6 +2,7 @@ use crate::net::browser::Origin;
 use crate::ui::fonts::{measure_game_text, text_params};
 
 use macroquad::prelude::*;
+use std::fmt::Write;
 
 use super::widgets::button;
 use super::{in_rect, LoginScreen, ACCENT, INPUT_BG, INPUT_BORDER, ROW_BG, ROW_HOVER, TEXT_DIM, TEXT_LABEL};
@@ -45,6 +46,7 @@ impl LoginScreen {
 
         let row_h = 50.0;
         let mut online_ahead = 0;
+        let mut pc = String::new(); // player count, reused for every row
         for (i, server) in self.browser.entries().iter().enumerate() {
             let ry = ly + row_h * i as f32;
             if ry + row_h > ly + lh {
@@ -77,7 +79,8 @@ impl LoginScreen {
             draw_text_ex(&server.detail, tx, ry + 41.0, text_params(12, TEXT_DIM));
 
             let full = server.players >= server.max_players;
-            let pc = format!("{}/{}", server.players, server.max_players);
+            pc.clear();
+            let _ = write!(pc, "{}/{}", server.players, server.max_players);
             let pcw = measure_game_text(&pc, 15);
             let pc_color = if full { Color::new(1.0, 0.35, 0.35, 1.0) } else { TEXT_LABEL };
             draw_text_ex(&pc, lx + lw - pcw - col_pad, ry + 30.0, text_params(15, pc_color));

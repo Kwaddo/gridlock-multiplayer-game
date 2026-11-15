@@ -4,6 +4,7 @@ use crate::net::client::{ConnectProgress, Connector};
 use crate::ui::fonts::{measure_game_text, text_params};
 use macroquad::prelude::*;
 use macroquad::rand::gen_range;
+use std::cell::RefCell;
 
 mod background;
 mod browse_tab;
@@ -75,6 +76,10 @@ pub struct LoginScreen {
     pub active_tab: MainMenuTab,
     browser: ServerBrowser,
     particles: Vec<MenuParticle>,
+    /// Reused particle and scanline geometry (see background.rs).
+    background_mesh: RefCell<background::BackgroundMesh>,
+    /// The controls overlay's rows, kept between frames (see controls.rs).
+    controls_cache: RefCell<controls::ControlsCache>,
     anim_time: f32,
     connector: Option<Connector>,
     /// Set by the SETTINGS / CONTROLS buttons; taken by the game loop.
@@ -97,6 +102,8 @@ impl LoginScreen {
             active_tab: MainMenuTab::Browse,
             browser: ServerBrowser::new(),
             particles,
+            background_mesh: RefCell::new(background::BackgroundMesh::new()),
+            controls_cache: RefCell::new(controls::ControlsCache::default()),
             anim_time: 0.0,
             connector: None,
             request: None,
@@ -239,8 +246,9 @@ fn draw_connecting(p: &ConnectProgress, sw: f32, sh: f32) {
     };
 
     // dots cycle so the panel visibly lives even when the bar barely moves
-    let dots = ".".repeat(1 + (p.elapsed.as_millis() / 400 % 3) as usize);
-    centered(&format!("CONNECTING{dots:<3}"), py + 34.0, 22, ACCENT);
+    // (padded to three so the centred title stays put)
+    const CONNECTING: [&str; 3] = ["CONNECTING.  ", "CONNECTING.. ", "CONNECTING..."];
+    centered(CONNECTING[(p.elapsed.as_millis() / 400 % 3) as usize], py + 34.0, 22, ACCENT);
     centered(&format!("Step {} of {}  -  {}", p.step, p.steps, p.stage), py + 60.0, 16, WHITE);
 
     let bx = px + pad;
@@ -256,11 +264,12 @@ fn draw_connecting(p: &ConnectProgress, sw: f32, sh: f32) {
     draw_text_ex(&pct, bx + (bw - pct_w) / 2.0, by + 16.0, text_params(14, WHITE));
 
     // long room URLs keep their distinctive end
-    let chars: Vec<char> = p.address.chars().collect();
-    let address = if chars.len() > 40 {
-        format!("...{}", chars[chars.len() - 37..].iter().collect::<String>())
+    let char_count = p.address.chars().count();
+    let address: std::borrow::Cow<str> = if char_count > 40 {
+        let start = p.address.char_indices().nth(char_count - 37).map_or(0, |(at, _)| at);
+        format!("...{}", &p.address[start..]).into()
     } else {
-        p.address.to_string()
+        p.address.into()
     };
     draw_text_ex(&address, bx, by + bh + 20.0, text_params(13, TEXT_DIM));
     let elapsed = format!("{:.1}s", p.elapsed.as_secs_f32());
