@@ -1,4 +1,5 @@
-use crate::ui::fonts::{measure_game_text, text_params};
+use crate::ui::fonts::measure_game_text;
+use crate::ui::text_batch;
 use crate::weapons::crosshair_presets::CrosshairPresetManager;
 use crate::weapons::stats::WeaponCategory;
 use crate::weapons::WeaponInventory;
@@ -14,6 +15,23 @@ use super::widgets::{
 };
 
 pub fn draw_crosshair_settings(
+    state: &CrosshairSettingsPreview,
+    weapons: &WeaponInventory,
+    presets: &CrosshairPresetManager,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    _assets: &HashMap<String, Texture2D>,
+    _mouse: (f32, f32),
+    s: f32,
+) {
+    // text is queued and drawn after the shapes it does not overlap, so the
+    // panel is a few draw calls instead of one per shape/text switch
+    text_batch::batched(|| draw_panel(state, weapons, presets, x, y, w, h, _assets, _mouse, s));
+}
+
+fn draw_panel(
     state: &CrosshairSettingsPreview,
     weapons: &WeaponInventory,
     presets: &CrosshairPresetManager,
@@ -47,26 +65,28 @@ pub fn draw_crosshair_settings(
         } else {
             Color::from_rgba(40, 40, 40, 255)
         };
-        draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-        draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, GRAY);
+        text_batch::rect(btn_x, btn_y, btn_w, btn_h, btn_color);
+        text_batch::rect_lines(btn_x, btn_y, btn_w, btn_h, 1.0, GRAY);
         let name: &str = kind.display_name();
         let text_w = measure_game_text(name, btn_fs);
-        draw_text_ex(
+        text_batch::text(
             name,
             btn_x + (btn_w - text_w) / 2.0,
             btn_y + btn_h * 0.63,
-            text_params(btn_fs, WHITE),
+            btn_fs,
+            WHITE,
         );
     }
 
     if state.preview_weapon == WeaponCategory::Sniper {
         let sniper_y = btn_y + btn_h + 60.0 * s;
         let sniper_fs = (16.0 * s) as u16;
-        draw_text_ex(
+        text_batch::text(
             "Sniper scope customization coming soon",
             x + 20.0 * s,
             sniper_y,
-            text_params(sniper_fs, YELLOW),
+            sniper_fs,
+            YELLOW,
         );
         return;
     }
@@ -89,14 +109,14 @@ pub fn draw_crosshair_settings(
         && !presets.presets[state.selected_preset].is_default;
 
     let dropdown_h = 30.0 * s;
-    draw_rectangle(
+    text_batch::rect(
         x,
         preset_y,
         preset_dropdown_w,
         dropdown_h,
         Color::from_rgba(35, 35, 35, 255),
     );
-    draw_rectangle_lines(
+    text_batch::rect_lines(
         x,
         preset_y,
         preset_dropdown_w,
@@ -105,19 +125,21 @@ pub fn draw_crosshair_settings(
         Color::from_rgba(80, 80, 80, 255),
     );
     let preset_tw = measure_game_text(preset_name, small_fs);
-    draw_text_ex(
+    text_batch::text(
         preset_name,
         x + (preset_dropdown_w - preset_tw) / 2.0,
         preset_y + dropdown_h * 0.67,
-        text_params(small_fs, WHITE),
+        small_fs,
+        WHITE,
     );
-    draw_text_ex("<", x + 6.0 * s, preset_y + dropdown_h * 0.67, text_params(small_fs, GRAY));
+    text_batch::text("<", x + 6.0 * s, preset_y + dropdown_h * 0.67, small_fs, GRAY);
     let arrow_r = measure_game_text(">", small_fs);
-    draw_text_ex(
+    text_batch::text(
         ">",
         x + preset_dropdown_w - arrow_r - 6.0 * s,
         preset_y + dropdown_h * 0.67,
-        text_params(small_fs, GRAY),
+        small_fs,
+        GRAY,
     );
 
     let delete_x = x + preset_dropdown_w + preset_btn_gap;
@@ -126,19 +148,20 @@ pub fn draw_crosshair_settings(
     } else {
         Color::from_rgba(30, 30, 30, 255)
     };
-    draw_rectangle(delete_x, preset_y, preset_btn_w, dropdown_h, del_color);
-    draw_rectangle_lines(delete_x, preset_y, preset_btn_w, dropdown_h, 1.0, GRAY);
+    text_batch::rect(delete_x, preset_y, preset_btn_w, dropdown_h, del_color);
+    text_batch::rect_lines(delete_x, preset_y, preset_btn_w, dropdown_h, 1.0, GRAY);
     let del_tw = measure_game_text("Delete", tiny_fs);
     let del_text_color = if is_custom {
         WHITE
     } else {
         Color::from_rgba(80, 80, 80, 255)
     };
-    draw_text_ex(
+    text_batch::text(
         "Delete",
         delete_x + (preset_btn_w - del_tw) / 2.0,
         preset_y + dropdown_h * 0.63,
-        text_params(tiny_fs, del_text_color),
+        tiny_fs,
+        del_text_color,
     );
 
     let slider_x = x;
@@ -181,11 +204,12 @@ pub fn draw_crosshair_settings(
     slider_y += 40.0 * s;
 
     let color_fs = (14.0 * s) as u16;
-    draw_text_ex(
+    text_batch::text(
         "COLOR",
         slider_x,
         slider_y + 14.0 * s,
-        text_params(color_fs, Color::from_rgba(100, 180, 255, 255)),
+        color_fs,
+        Color::from_rgba(100, 180, 255, 255),
     );
     slider_y += 20.0 * s;
 
@@ -194,21 +218,26 @@ pub fn draw_crosshair_settings(
     let sv_x = slider_x;
     let sv_y = slider_y;
 
+    // cells are one pixel larger than their step
+    text_batch::guard(sv_x, sv_y, picker_size + 1.0, picker_size + 1.0);
     draw_sv_square(state.hue, sv_x, sv_y, picker_size);
-    draw_rectangle_lines(sv_x, sv_y, picker_size, picker_size, 1.0, GRAY);
+    text_batch::rect_lines(sv_x, sv_y, picker_size, picker_size, 1.0, GRAY);
 
     let cursor_x = sv_x + state.sat * picker_size;
     let cursor_y = sv_y + (1.0 - state.val) * picker_size;
+    let cursor_r = 5.0 * s + 2.0;
+    text_batch::guard(cursor_x - cursor_r, cursor_y - cursor_r, cursor_r * 2.0, cursor_r * 2.0);
     draw_circle_lines(cursor_x, cursor_y, 5.0 * s, 2.0, WHITE);
     draw_circle_lines(cursor_x, cursor_y, 4.0 * s, 1.0, BLACK);
 
     let hue_x = sv_x + picker_size + 10.0 * s;
+    text_batch::guard(hue_x, sv_y, hue_bar_w, picker_size + 1.0);
     draw_hue_bar(hue_x, sv_y, hue_bar_w, picker_size);
-    draw_rectangle_lines(hue_x, sv_y, hue_bar_w, picker_size, 1.0, GRAY);
+    text_batch::rect_lines(hue_x, sv_y, hue_bar_w, picker_size, 1.0, GRAY);
 
     let hue_cursor_y = sv_y + (state.hue / 360.0) * picker_size;
-    draw_rectangle(hue_x - 2.0, hue_cursor_y - 2.0, hue_bar_w + 4.0, 4.0, WHITE);
-    draw_rectangle_lines(
+    text_batch::rect(hue_x - 2.0, hue_cursor_y - 2.0, hue_bar_w + 4.0, 4.0, WHITE);
+    text_batch::rect_lines(
         hue_x - 2.0,
         hue_cursor_y - 2.0,
         hue_bar_w + 4.0,
@@ -220,16 +249,17 @@ pub fn draw_crosshair_settings(
     let swatch_x = hue_x + hue_bar_w + 15.0 * s;
     let swatch_size = 40.0 * s;
     let check = 10.0 * s;
+    text_batch::guard(swatch_x, sv_y, check * 4.0, check * 4.0);
     draw_checker(swatch_x, sv_y, check);
     let (pr, pg, pb) = hsv_to_rgb(state.hue, state.sat, state.val);
-    draw_rectangle(
+    text_batch::rect(
         swatch_x,
         sv_y,
         swatch_size,
         swatch_size,
         Color::new(pr, pg, pb, state.alpha_val / 255.0),
     );
-    draw_rectangle_lines(swatch_x, sv_y, swatch_size, swatch_size, 1.0, WHITE);
+    text_batch::rect_lines(swatch_x, sv_y, swatch_size, swatch_size, 1.0, WHITE);
 
     let alpha_y = sv_y + picker_size + 10.0 * s;
     draw_slider_display(
@@ -249,6 +279,8 @@ pub fn draw_crosshair_settings(
     let preview_w = w * 0.45 - 40.0 * s;
     let preview_h = (h - 150.0 * s).max(100.0 * s);
 
+    // the preview draws its own text and textures unbatched
+    text_batch::flush();
     draw_crosshair_preview(weapon, state, preview_x, preview_y, preview_w, preview_h, _assets, s);
 
     let btn_row_y = preview_y + preview_h + 10.0 * s;
@@ -261,15 +293,16 @@ pub fn draw_crosshair_settings(
     } else {
         Color::from_rgba(40, 40, 40, 255)
     };
-    draw_rectangle(preview_x, btn_row_y, small_btn_w, small_btn_h, ads_color);
-    draw_rectangle_lines(preview_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
+    text_batch::rect(preview_x, btn_row_y, small_btn_w, small_btn_h, ads_color);
+    text_batch::rect_lines(preview_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
     let ads_text = if state.preview_ads { "ADS: ON" } else { "ADS: OFF" };
     let ads_tw = measure_game_text(ads_text, tiny_fs);
-    draw_text_ex(
+    text_batch::text(
         ads_text,
         preview_x + (small_btn_w - ads_tw) / 2.0,
         btn_row_y + small_btn_h * 0.67,
-        text_params(tiny_fs, WHITE),
+        tiny_fs,
+        WHITE,
     );
 
     let bg_btn_x = preview_x + small_btn_w + small_gap;
@@ -278,37 +311,41 @@ pub fn draw_crosshair_settings(
     } else {
         Color::from_rgba(40, 40, 40, 255)
     };
-    draw_rectangle(bg_btn_x, btn_row_y, small_btn_w, small_btn_h, bg_color);
-    draw_rectangle_lines(bg_btn_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
+    text_batch::rect(bg_btn_x, btn_row_y, small_btn_w, small_btn_h, bg_color);
+    text_batch::rect_lines(bg_btn_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
     let bg_text = if state.preview_light_bg { "Light" } else { "Dark" };
     let bg_tw = measure_game_text(bg_text, tiny_fs);
     let bg_text_color = if state.preview_light_bg { BLACK } else { WHITE };
-    draw_text_ex(
+    text_batch::text(
         bg_text,
         bg_btn_x + (small_btn_w - bg_tw) / 2.0,
         btn_row_y + small_btn_h * 0.67,
-        text_params(tiny_fs, bg_text_color),
+        tiny_fs,
+        bg_text_color,
     );
 
     let reset_btn_x = bg_btn_x + small_btn_w + small_gap;
-    draw_rectangle(
+    text_batch::rect(
         reset_btn_x,
         btn_row_y,
         small_btn_w,
         small_btn_h,
         Color::from_rgba(60, 40, 40, 255),
     );
-    draw_rectangle_lines(reset_btn_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
+    text_batch::rect_lines(reset_btn_x, btn_row_y, small_btn_w, small_btn_h, 1.0, GRAY);
     let reset_tw = measure_game_text("Reset", tiny_fs);
-    draw_text_ex(
+    text_batch::text(
         "Reset",
         reset_btn_x + (small_btn_w - reset_tw) / 2.0,
         btn_row_y + small_btn_h * 0.67,
-        text_params(tiny_fs, WHITE),
+        tiny_fs,
+        WHITE,
     );
 
     // the only painter of the warning; update.rs hit-tests its OK button
     if state.preview_weapon == WeaponCategory::Shotgun && state.shotgun_type_warning {
+        // the warning box covers the preview and must stay on top of its text
+        text_batch::flush();
         draw_shotgun_type_warning(preview_x, btn_row_y, 0.0, 0.0, _mouse, false, s);
     }
 }

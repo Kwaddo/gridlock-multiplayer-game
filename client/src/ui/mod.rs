@@ -4,6 +4,7 @@ use macroquad::prelude::*;
 pub mod fonts;
 pub mod hud;
 pub mod prims;
+pub mod text_batch;
 pub use crate::types::player::OtherPlayer;
 
 /// Draws a thick arc using triangle strips. Used by both HUD crosshairs and crosshair settings preview.
