@@ -79,6 +79,8 @@ impl ListFetch {
 pub struct Listing {
     stop: Arc<AtomicBool>,
     listed_addr: Arc<Mutex<Option<String>>>,
+    /// The heartbeat thread, woken on drop so it withdraws the listing at once.
+    worker: thread::Thread,
 }
 
 impl Listing {
@@ -86,8 +88,8 @@ impl Listing {
         let stop = Arc::new(AtomicBool::new(false));
         let listed_addr = Arc::new(Mutex::new(None));
         let (flag, addr) = (stop.clone(), listed_addr.clone());
-        thread::spawn(move || heartbeat_loop(&base, &announce, &flag, &addr));
-        Listing { stop, listed_addr }
+        let worker = thread::spawn(move || heartbeat_loop(&base, &announce, &flag, &addr)).thread().clone();
+        Listing { stop, listed_addr, worker }
     }
 
     /// The heartbeat runs on its own thread here; nothing to do per frame.
@@ -102,7 +104,10 @@ impl Listing {
 
 impl Drop for Listing {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        // store, then unpark: the thread checks the flag after every wake-up,
+        // and an unpark before it parks makes that park return at once
+        self.stop.store(true, Ordering::Release);
+        self.worker.unpark();
     }
 }
 
@@ -157,11 +162,15 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
     }
 }
 
+/// Sleep up to `total`, waking early when the Listing is dropped (it unparks
+/// this thread), instead of checking the flag every 100 ms.
 fn sleep_unless_stopped(total: Duration, stop: &AtomicBool) {
-    let step = Duration::from_millis(100);
-    let mut waited = Duration::ZERO;
-    while waited < total && !stop.load(Ordering::Relaxed) {
-        thread::sleep(step);
-        waited += step;
+    let deadline = std::time::Instant::now() + total;
+    while !stop.load(Ordering::Acquire) {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+        thread::park_timeout(deadline - now);
     }
 }
