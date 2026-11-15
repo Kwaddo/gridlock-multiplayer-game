@@ -1,25 +1,35 @@
 use macroquad::prelude::*;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// Parse a self-contained `.glb` from memory. The bytes are read up front with
 /// macroquad's `load_file`, which works on native builds and in the browser
 /// alike; `path` is only for error messages. Images are left encoded until a
-/// mesh asks for one (see [`GlbImages`]).
-pub fn import_glb(
+/// mesh asks for one (see [`GlbImages`]), in place in `bytes`.
+pub fn import_glb<'a>(
     path: &str,
-    bytes: &[u8],
-) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, GlbImages), String> {
+    bytes: &'a [u8],
+) -> Result<(gltf::Document, Vec<gltf::buffer::Data>, GlbImages<'a>), String> {
     let fail = |e: gltf::Error| format!("failed to import gltf '{}': {e}", path);
-    let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes).map_err(fail)?;
-    let buffers = gltf::import_buffers(&document, None, blob).map_err(fail)?;
+    let (document, bin) = parse(bytes).map_err(fail)?;
+    let in_file = match &bin {
+        Some(Cow::Borrowed(bin)) => Some(*bin),
+        _ => None,
+    };
+    let buffers = gltf::import_buffers(&document, None, bin.map(Cow::into_owned)).map_err(fail)?;
     // Only images stored in the binary chunk are supported; the game's GLBs
-    // embed all of theirs that way.
+    // embed all of theirs that way. Those are not copied: they stay where
+    // they are in the file.
     let encoded = document
         .images()
         .map(|image| match image.source() {
             gltf::image::Source::View { view, .. } => {
-                let data = &buffers[view.buffer().index()];
-                data.get(view.offset()..view.offset() + view.length()).map(<[u8]>::to_vec)
+                let range = view.offset()..view.offset() + view.length();
+                let bin = in_file.filter(|_| matches!(view.buffer().source(), gltf::buffer::Source::Bin));
+                match bin.and_then(|bin| bin.get(range.clone())) {
+                    Some(encoded) => Some(Cow::Borrowed(encoded)),
+                    None => buffers[view.buffer().index()].get(range).map(|e| Cow::Owned(e.to_vec())),
+                }
             }
             gltf::image::Source::Uri { .. } => None,
         })
@@ -32,12 +42,23 @@ pub fn import_glb(
     Ok((document, buffers, images))
 }
 
+/// Parse glTF as `gltf::Gltf::from_slice` does (the document validated), but
+/// with a .glb's binary chunk borrowed from `bytes` instead of copied.
+fn parse(bytes: &[u8]) -> gltf::Result<(gltf::Document, Option<Cow<'_, [u8]>>)> {
+    if !bytes.starts_with(b"glTF") {
+        return gltf::Gltf::from_slice(bytes).map(|gltf| (gltf.document, gltf.blob.map(Cow::Owned)));
+    }
+    let glb = gltf::Glb::from_slice(bytes)?;
+    let document = gltf::Document::from_json(gltf::json::deserialize::from_slice(&glb.json)?)?;
+    Ok((document, glb.bin))
+}
+
 /// A GLB's embedded images (PNG or JPEG), decoded when a mesh uses one.
 /// Decoded textures are shared by content: the player's animation files each
 /// embed the same textures, and decoding and uploading those once instead of
 /// once per file saves most of the load time and GPU memory.
-pub struct GlbImages {
-    encoded: Vec<Option<Vec<u8>>>,
+pub struct GlbImages<'a> {
+    encoded: Vec<Option<Cow<'a, [u8]>>>,
     /// Each image's content key, hashed the first time a mesh asks for it:
     /// a rig's primitives share a few big images, and hashing all of one's
     /// bytes again for every primitive cost milliseconds per rig.
@@ -54,7 +75,7 @@ thread_local! {
         std::cell::RefCell::new(HashMap::new());
 }
 
-impl GlbImages {
+impl GlbImages<'_> {
     /// The image at `index` as a texture (nearest filtering), decoded at most
     /// once per distinct image.
     pub fn texture(&self, index: usize) -> Option<Texture2D> {
@@ -236,10 +257,7 @@ fn base_colour_images(document: &gltf::Document) -> std::collections::HashSet<us
 /// Native builds only: the browser build has no threads.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn predecode_glb_images(bytes: &[u8]) {
-    let Ok(gltf::Gltf { document, blob }) = gltf::Gltf::from_slice(bytes) else {
-        return;
-    };
-    let Some(blob) = blob else {
+    let Ok((document, Some(blob))) = parse(bytes) else {
         return;
     };
     let used = base_colour_images(&document);
@@ -271,7 +289,7 @@ pub fn release_predecoded() {
     super::web_decoded::clear();
 }
 
-impl GlbImages {
+impl GlbImages<'_> {
     /// Decode image `index` (encoded as `bytes`), or take it from whoever
     /// decoded it ahead, and upload it.
     fn decode_texture(&self, _key: u64, _index: usize, bytes: &[u8]) -> Option<Texture2D> {
@@ -323,6 +341,43 @@ mod tests {
         assert!(predecoded::take(key).is_none(), "taken only once");
         predecode_glb_images(&bytes);
         assert!(predecoded::take(key).is_none(), "not decoded again after it was taken");
+    }
+
+    /// Importing without copying the binary chunk or the images gives what
+    /// gltf's own parser gives: the same document, buffers and image bytes.
+    #[test]
+    fn import_matches_gltf_from_slice() {
+        let models = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/models");
+        let mut paths: Vec<std::path::PathBuf> = ["hand", "weapons/Pistols"]
+            .iter()
+            .filter_map(|dir| std::fs::read_dir(format!("{models}/{dir}")).ok())
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "glb"))
+            .collect();
+        paths.push(format!("{models}/player/Compressed/Crouch.glb").into());
+        for path in paths {
+            let Ok(bytes) = std::fs::read(&path) else { continue };
+            let name = path.display().to_string();
+            let reference = gltf::Gltf::from_slice(&bytes).unwrap();
+            let ref_buffers = gltf::import_buffers(&reference.document, None, reference.blob).unwrap();
+            let (document, buffers, images) = import_glb(&name, &bytes).unwrap();
+            let json = |d: &gltf::Document| gltf::json::serialize::to_string(d.as_json()).unwrap();
+            assert_eq!(json(&document), json(&reference.document), "{name}");
+            assert_eq!(buffers.len(), ref_buffers.len(), "{name}");
+            for (a, b) in buffers.iter().zip(&ref_buffers) {
+                assert!(a.0 == b.0, "{name}: buffer differs");
+            }
+            assert_eq!(images.encoded.len(), reference.document.images().count(), "{name}");
+            for image in reference.document.images() {
+                let gltf::image::Source::View { view, .. } = image.source() else { continue };
+                let expected = ref_buffers[view.buffer().index()].get(view.offset()..view.offset() + view.length());
+                let got = images.encoded[image.index()].as_deref();
+                assert!(got == expected, "{name}: image {} differs", image.index());
+                assert!(matches!(images.encoded[image.index()], Some(Cow::Borrowed(_))), "{name}: copied");
+            }
+        }
     }
 
     /// Only the images a material takes its colour from are decoded ahead:
