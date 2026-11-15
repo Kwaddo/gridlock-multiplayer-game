@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::{PeerId, Server};
+use crate::{Packet, PeerId, Server};
 
 pub const DEFAULT_PORT: u16 = 7878;
 
@@ -32,6 +32,8 @@ pub struct UdpHost {
     next_peer: u32,
     last_prune: Instant,
     next_tick: Instant,
+    /// Packets taken from the server for sending; kept so its capacity is reused.
+    sending: Vec<(PeerId, Packet)>,
 }
 
 impl UdpHost {
@@ -48,6 +50,7 @@ impl UdpHost {
             next_peer: 1,
             last_prune: Instant::now(),
             next_tick: Instant::now(),
+            sending: Vec::new(),
         })
     }
 
@@ -112,7 +115,8 @@ impl UdpHost {
     }
 
     fn flush(&mut self) {
-        for (peer, bytes) in self.server.drain_outbox() {
+        self.server.drain_outbox_into(&mut self.sending);
+        for (peer, bytes) in self.sending.drain(..) {
             if let Some(addr) = self.addr_of.get(&peer) {
                 let _ = self.socket.send_to(&bytes, addr);
             }

@@ -4,7 +4,7 @@ use super::*;
 use crate::net::BOT_PEER_BASE;
 use crate::player::Team;
 
-fn to(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<ServerMsg> {
+fn to(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<ServerMsg> {
     out.iter().filter(|(p, _)| *p == peer).filter_map(|(_, b)| ServerMsg::decode(b)).collect()
 }
 

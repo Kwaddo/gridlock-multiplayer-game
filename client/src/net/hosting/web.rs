@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use gridlock_server::{PeerId, Server, MAX_PLAYERS};
+use gridlock_server::{Packet, PeerId, Server, MAX_PLAYERS};
 use rand::Rng;
 use transport::web::{RtcEvent, RtcSocket};
 use transport::{Link, LinkStatus};
@@ -29,6 +29,8 @@ pub struct LocalHost {
     local: Rc<RefCell<Loopback>>,
     players: Arc<AtomicUsize>,
     notice: Option<String>,
+    /// Packets taken from the server for sending; kept so its capacity is reused.
+    sending: Vec<(PeerId, Packet)>,
 }
 
 /// Packets between the hosting player and the in-tab server.
@@ -68,7 +70,7 @@ impl LocalHost {
             None => "Online play is not configured in this build: only you can join.".to_string(),
         });
 
-        Ok(LocalHost { listing, room, server, code, local: Default::default(), players, notice })
+        Ok(LocalHost { listing, room, server, code, local: Default::default(), players, notice, sending: Vec::new() })
     }
 
     /// What the hosting player is connected to; keys the asset cache.
@@ -103,9 +105,10 @@ impl LocalHost {
 
         self.server.tick();
 
-        for (peer, bytes) in self.server.drain_outbox() {
+        self.server.drain_outbox_into(&mut self.sending);
+        for (peer, bytes) in self.sending.drain(..) {
             if peer == LOCAL_PEER {
-                self.local.borrow_mut().to_player.push(bytes.into());
+                self.local.borrow_mut().to_player.push(Box::from(&*bytes));
             } else if let Some(room) = &mut self.room {
                 room.send(peer.0, &bytes);
             }
