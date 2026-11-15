@@ -139,8 +139,25 @@ mod predecoded {
     }
 }
 
+/// The images a material takes its colour from: the game samples no others
+/// (`parts.rs`, `app/obj_loader.rs`), and a model often embeds big normal and
+/// roughness maps too. Any other a mesh asks for is decoded then.
+#[cfg(not(target_arch = "wasm32"))]
+fn base_colour_images(document: &gltf::Document) -> std::collections::HashSet<usize> {
+    document
+        .materials()
+        .flat_map(|material| {
+            let base = material.pbr_metallic_roughness().base_color_texture();
+            let diffuse = material.pbr_specular_glossiness().and_then(|sg| sg.diffuse_texture());
+            let base = base.map(|info| info.texture().source().index());
+            base.into_iter().chain(diffuse.map(|info| info.texture().source().index()))
+        })
+        .collect()
+}
+
 /// Decode a GLB's embedded images on the calling (worker) thread, ahead of
-/// the loader. Native builds only: the browser build has no threads.
+/// the loader: only those a mesh samples (see [`base_colour_images`]).
+/// Native builds only: the browser build has no threads.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn predecode_glb_images(bytes: &[u8]) {
     let Ok(gltf::Gltf { document, blob }) = gltf::Gltf::from_slice(bytes) else {
@@ -149,7 +166,8 @@ pub fn predecode_glb_images(bytes: &[u8]) {
     let Some(blob) = blob else {
         return;
     };
-    for image in document.images() {
+    let used = base_colour_images(&document);
+    for image in document.images().filter(|image| used.contains(&image.index())) {
         let gltf::image::Source::View { view, .. } = image.source() else {
             continue;
         };
@@ -212,15 +230,40 @@ mod tests {
     fn predecoded_images_are_taken_once() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/models/hand/fps_pistol_animated.glb");
         let Ok(bytes) = std::fs::read(path) else { return };
-        let (_, _, images) = import_glb(path, &bytes).unwrap();
-        let encoded: Vec<&Vec<u8>> = images.encoded.iter().flatten().collect();
-        assert!(!encoded.is_empty(), "fixture has embedded images");
+        let (document, _, images) = import_glb(path, &bytes).unwrap();
+        let used = base_colour_images(&document);
+        let first = used.iter().copied().min().expect("fixture has a textured material");
+        let encoded = images.encoded[first].as_ref().expect("embedded in the binary chunk");
         predecode_glb_images(&bytes);
-        let key = content_key(encoded[0]);
+        let key = content_key(encoded);
         let image = predecoded::take(key).expect("decoded by the worker").expect("a valid image");
         assert!(image.width() > 0);
         assert!(predecoded::take(key).is_none(), "taken only once");
         predecode_glb_images(&bytes);
         assert!(predecoded::take(key).is_none(), "not decoded again after it was taken");
+    }
+
+    /// Only the images a material takes its colour from are decoded ahead:
+    /// the carbine rig also embeds normal and roughness maps no mesh samples.
+    #[test]
+    fn only_base_colour_images_are_predecoded() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/models/hand/fps_animated_carbine.glb");
+        let Ok(bytes) = std::fs::read(path) else { return };
+        let (document, _, images) = import_glb(path, &bytes).unwrap();
+        let used = base_colour_images(&document);
+        assert!(!used.is_empty() && used.len() < images.encoded.len(), "fixture has unused maps");
+        for material in document.materials() {
+            if let Some(info) = material.pbr_metallic_roughness().base_color_texture() {
+                assert!(used.contains(&info.texture().source().index()));
+            }
+        }
+        predecode_glb_images(&bytes);
+        for (index, encoded) in images.encoded.iter().enumerate() {
+            let Some(encoded) = encoded else { continue };
+            let key = content_key(encoded);
+            if !used.contains(&index) && !used.iter().any(|&u| images.encoded[u].as_ref() == Some(encoded)) {
+                assert!(predecoded::take(key).is_none(), "image {index} is no material's colour");
+            }
+        }
     }
 }
