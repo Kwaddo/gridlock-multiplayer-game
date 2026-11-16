@@ -1,5 +1,9 @@
 use macroquad::prelude::*;
 
+/// top of the head sits this far above the eyes, the collider is eye height plus this
+/// before this the collider stopped at the eyes, so your head poked through low ceilings
+pub const HEAD_ABOVE_EYE: f32 = 0.12;
+
 /*
    MOVEMENT STATE
     This struct holds the current movement state of the player, such as velocity,
@@ -48,11 +52,20 @@ impl MovementState {
             is_stamina_depleted: false,
         }
     }
+    /// collider height for the current stance, eye height plus the head on top
+    pub fn collider_height(&self) -> f32 {
+        collider_height(self.height)
+    }
     pub fn is_moving(&self) -> bool {
         // true if player has significant horizontal velocity
         let h_speed_sq = self.velocity.x * self.velocity.x + self.velocity.z * self.velocity.z;
         h_speed_sq > 0.5
     }
+}
+
+/// collider height for a given eye height
+pub fn collider_height(eye_height: f32) -> f32 {
+    eye_height + HEAD_ABOVE_EYE
 }
 
 /*

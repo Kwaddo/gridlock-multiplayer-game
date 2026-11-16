@@ -143,19 +143,21 @@ impl PlayingState {
         }
         self.apply_gravity(delta);
 
+        // collide with the whole body, eyes plus the head on top
+        let body_height = self.movement_state.collider_height();
         match self.current_world {
             WorldId::Lobby => {
                 collision::resolve_vertical(
                     &mut self.position,
                     &mut self.movement_state.velocity,
-                    self.movement_state.height,
+                    body_height,
                     &mut self.movement_state.is_grounded,
                 );
                 self.apply_movement(delta);
                 collision::resolve_horizontal(
                     &mut self.position,
                     &mut self.movement_state.velocity,
-                    self.movement_state.height,
+                    body_height,
                     self.movement_state.is_grounded,
                 );
             }
@@ -193,7 +195,7 @@ impl PlayingState {
         collision::resolve_mirrors(
             &mut self.position,
             &mut self.movement_state.velocity,
-            self.movement_state.height,
+            body_height,
             &self.mirrors,
         );
         self.resolve_box_collision();
