@@ -118,7 +118,7 @@ pub const MSG_MATCH_TIMER: u8 = 25; // server -> all: authoritative match time r
                                     // format: [MSG_MATCH_TIMER][secs_hi:1][secs_lo:1] (big-endian u16)
                                     // value 0 means time is up; max representable duration is 65535s (~18h).
 pub const MSG_SET_TEAM: u8 = 26; // client -> server: set preferred team (team:u8)
-pub const MSG_SND_ROUND_STATE: u8 = 27; // server -> all: S&D round state (round:1, max_rounds:1, red_wins:1, blue_wins:1, phase:1, bomb_carrier_id:4, bomb_x:f32, bomb_y:f32, bomb_z:f32, bomb_site_x:f32, bomb_site_y:f32, bomb_site_z:f32, bomb_planted:1, plant_progress:f32, defuse_progress:f32)
+pub const MSG_SND_ROUND_STATE: u8 = 27; // server -> all: S&D round state (round:1, max_rounds:1, red_wins:1, blue_wins:1, phase:1, bomb_carrier_id:4, bomb_x:f32, bomb_y:f32, bomb_z:f32, bomb_site_x:f32, bomb_site_y:f32, bomb_site_z:f32, bomb_planted:1, plant_progress:f32, defuse_progress:f32, phase_timer:f32, bomb_dropped:1)
 pub const MSG_SND_BOMB_PICKUP: u8 = 28; // client -> server: request to pick up dropped bomb
 pub const MSG_SND_PLANT_START: u8 = 29; // client -> server: start planting bomb
 pub const MSG_SND_PLANT_STOP: u8 = 30; // client -> server: stop planting bomb

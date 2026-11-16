@@ -84,12 +84,25 @@ impl PlayingState {
             }
         }
 
-        // Dropped bomb — always visible to dead spectators, distance-gated for live players
-        if let Some((bx, _by, bz)) = self.snd_bomb_dropped {
+        // Dropped bomb — always visible to dead spectators and to attackers (who
+        // need to find it), distance-gated for live defenders
+        if let Some((bx, by, bz)) = self.snd_bomb_dropped {
             let bomb_dist =
                 ((cam_pos.x - bx).powi(2) + (cam_pos.z - bz).powi(2)).sqrt();
-            if self.is_dead || bomb_dist <= 10.0 {
-                let bomb_alpha = if self.is_dead || bomb_dist <= 6.0 {
+            let is_attacker =
+                self.snd_attacking_team != 0 && self.local_team == self.snd_attacking_team;
+            if is_attacker && !self.is_dead {
+                // Beam above the bomb so attackers can spot it over the walls
+                let pulse = (get_time() as f32 * 3.0).sin() * 0.5 + 0.5;
+                let beam_color = Color::from_rgba(255, 150, 50, (140.0 + 80.0 * pulse) as u8);
+                for seg in 0..10u32 {
+                    let y0 = by + 0.6 + seg as f32 * 0.4;
+                    let y1 = y0 + 0.4;
+                    draw_line_3d(vec3(bx, y0, bz), vec3(bx, y1, bz), beam_color);
+                }
+            }
+            if self.is_dead || is_attacker || bomb_dist <= 10.0 {
+                let bomb_alpha = if self.is_dead || is_attacker || bomb_dist <= 6.0 {
                     1.0
                 } else {
                     1.0 - ((bomb_dist - 6.0) / 4.0).clamp(0.0, 1.0)

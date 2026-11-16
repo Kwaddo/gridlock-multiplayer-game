@@ -20,6 +20,7 @@ pub(super) struct RoundStateKey {
     pub attacking_team: u8,
     pub bomb_carrier: u32,
     pub bomb_pos: (f32, f32, f32),
+    pub bomb_dropped: bool,
     pub bomb_planted: bool,
     pub plant_step: i32,
     pub defuse_step: i32,
@@ -81,6 +82,7 @@ mod tests {
             attacking_team: 1,
             bomb_carrier: 7,
             bomb_pos: (0.0, 0.0, 0.0),
+            bomb_dropped: false,
             bomb_planted: false,
             plant_step: RoundStateKey::progress_step(plant),
             defuse_step: 0,
@@ -135,5 +137,18 @@ mod tests {
         let mut changed = key(9.96, 0.1);
         changed.players = 5;
         assert!(gate.should_send(changed, dt));
+    }
+
+    #[test]
+    fn bomb_drop_is_sent_at_once() {
+        let dt = 1.0 / 60.0;
+        let mut gate = RoundStateGate::default();
+        assert!(gate.should_send(key(50.5, 0.0), dt));
+        // dropped at the origin: only the dropped flag tells it apart
+        let mut dropped = key(50.5, 0.0);
+        dropped.bomb_carrier = 0;
+        assert!(gate.should_send(dropped, dt));
+        dropped.bomb_dropped = true;
+        assert!(gate.should_send(dropped, dt));
     }
 }

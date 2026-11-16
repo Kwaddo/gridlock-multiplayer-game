@@ -183,6 +183,7 @@ impl ServerMsg {
                 w.u8(s.phase).u8(s.attacking_team).u32(s.bomb_carrier_id);
                 w.vec3(s.bomb_pos).vec3(s.bomb_site).bool(s.bomb_planted);
                 w.f32(s.plant_progress).f32(s.defuse_progress).f32(s.phase_timer);
+                w.bool(s.bomb_dropped);
                 w.finish()
             }
             ServerMsg::LobbyLeader { id } => Writer::new(MSG_LOBBY_LEADER).u32(*id).finish(),
@@ -334,6 +335,7 @@ impl ServerMsg {
                 plant_progress: r.f32()?,
                 defuse_progress: r.f32()?,
                 phase_timer: r.f32()?,
+                bomb_dropped: r.bool().unwrap_or(false), // older packets have no bomb_dropped byte
             }),
             MSG_LOBBY_LEADER => ServerMsg::LobbyLeader { id: r.u32()? },
             MSG_BOT_SHOT => {

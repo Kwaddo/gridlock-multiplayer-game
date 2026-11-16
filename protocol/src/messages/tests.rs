@@ -89,9 +89,8 @@ fn server_messages_round_trip() {
     rt_server(ServerMsg::PlayerLeft { id: 4, name: "bob".into(), reason: LEAVE_TIMED_OUT });
 }
 
-#[test]
-fn snd_round_state_is_48_bytes() {
-    let m = ServerMsg::SndRoundState(SndRound {
+fn snd_round(bomb_dropped: bool) -> SndRound {
+    SndRound {
         round: 1,
         max_rounds: 7,
         red_wins: 0,
@@ -105,9 +104,24 @@ fn snd_round_state_is_48_bytes() {
         plant_progress: 0.25,
         defuse_progress: 0.0,
         phase_timer: 30.0,
-    });
-    assert_eq!(m.encode().len(), 48);
+        bomb_dropped,
+    }
+}
+
+#[test]
+fn snd_round_state_is_49_bytes() {
+    let m = ServerMsg::SndRoundState(snd_round(true));
+    assert_eq!(m.encode().len(), 49);
     rt_server(m);
+    rt_server(ServerMsg::SndRoundState(snd_round(false)));
+}
+
+#[test]
+fn snd_round_state_from_an_older_server_has_no_dropped_bomb() {
+    // older servers send 48 bytes, without the trailing bomb_dropped byte
+    let mut bytes = ServerMsg::SndRoundState(snd_round(true)).encode();
+    bytes.pop();
+    assert_eq!(ServerMsg::decode(&bytes), Some(ServerMsg::SndRoundState(snd_round(false))));
 }
 
 #[test]

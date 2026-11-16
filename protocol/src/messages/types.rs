@@ -150,7 +150,8 @@ pub struct MazeLayout {
     pub cells: Vec<u8>,
 }
 
-/// `MSG_SND_ROUND_STATE` (fixed 47-byte payload).
+/// `MSG_SND_ROUND_STATE` (48-byte payload; packets from older servers stop
+/// one byte short, before `bomb_dropped`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SndRound {
     pub round: u8,
@@ -161,13 +162,16 @@ pub struct SndRound {
     pub attacking_team: u8,
     // 0 = no carrier
     pub bomb_carrier_id: u32,
-    // dropped bomb position, zeros when not dropped
+    // dropped bomb position, only meaningful while `bomb_dropped`
     pub bomb_pos: Vec3,
     pub bomb_site: Vec3,
     pub bomb_planted: bool,
     pub plant_progress: f32,
     pub defuse_progress: f32,
     pub phase_timer: f32,
+    /// The bomb lies on the floor at `bomb_pos`. Older servers never drop it
+    /// and leave the byte out, which reads as false.
+    pub bomb_dropped: bool,
 }
 
 /// What the host has picked in the lobby console for the next match. The

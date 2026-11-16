@@ -10,6 +10,8 @@ struct SndTexts {
     red: CachedText<u8>,
     blue: CachedText<u8>,
     timer: CachedText<u32>,
+    /// metres to the dropped bomb
+    bomb: CachedText<u32>,
 }
 
 thread_local! {
@@ -19,6 +21,7 @@ thread_local! {
             red: CachedText::new(),
             blue: CachedText::new(),
             timer: CachedText::new(),
+            bomb: CachedText::new(),
         })
     };
 }
@@ -209,9 +212,14 @@ impl PlayingState {
                 sh - 120.0,
                 crate::ui::fonts::text_params(16, Color::from_rgba(255, 200, 50, 255)),
             );
-        } else if self.snd_bomb_dropped.is_some() && is_attacker {
-            // Bomb is on the ground
-            let bomb_text = "BOMB DROPPED - Pick it up!";
+        } else if let (Some((bx, _by, bz)), true) = (self.snd_bomb_dropped, is_attacker) {
+            // Bomb is on the ground: say how far, the beam above it shows where
+            let dist = ((self.position.x - bx).powi(2) + (self.position.z - bz).powi(2))
+                .sqrt()
+                .round() as u32;
+            let bomb_text = texts
+                .bomb
+                .get(dist, || format!("BOMB DROPPED {dist}m AWAY - Pick it up!"));
             let bw = crate::ui::fonts::measure_game_text(bomb_text, 16);
             draw_text_ex(
                 bomb_text,
