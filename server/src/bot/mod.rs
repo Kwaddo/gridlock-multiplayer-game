@@ -8,3 +8,5 @@ pub mod personality;
 pub mod behavior;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod decision_tests;

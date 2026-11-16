@@ -179,7 +179,8 @@ impl BotManager {
             idle_look_timer: 0.0,
             current_yaw: 0.0,
             current_pitch: 0.0,
-            tactics: Default::default(),
+            // a stance from the first decision on, not always a push
+            tactics: ai::BotTactics { stance_roll: rand::random(), ..Default::default() },
         };
 
         let addr = self.spawn_bot(players, bot_player, bot_state);
@@ -211,6 +212,8 @@ impl BotManager {
         match_mode: u8,
         maze: Option<&crate::maze::MazeData>,
         team_score: &mut crate::server::game::TeamScore,
+        // S&D freeze time: every bot in the maze stands still
+        round_frozen: bool,
     ) {
         // one clock read for the whole bot tick (on the web host each is a JS call)
         let now = Instant::now();
@@ -236,8 +239,8 @@ impl BotManager {
                         continue;
                     }
                 };
-                // frozen like the humans at match start, in every mode
-                if bot.post_teleport_freeze_until.map_or(false, |t| t > now) {
+                // frozen like the humans at match start and in S&D freeze time
+                if is_frozen(bot, now, round_frozen) {
                     continue;
                 }
                 let Some(state) = self.bot_states.get_mut(addr) else {
@@ -263,8 +266,7 @@ impl BotManager {
             let Some(p) = players.get(addr).filter(|p| p.is_alive) else {
                 continue;
             };
-            let is_frozen = p.world == WorldId::Maze &&
-                p.post_teleport_freeze_until.map_or(false, |t| t > now);
+            let is_frozen = is_frozen(p, now, round_frozen);
             let Some(state) = self.bot_states.get_mut(addr) else {
                 continue;
             };
@@ -296,41 +298,7 @@ impl BotManager {
                     // remember last known enemy position for investigation behavior
                     state.last_known_enemy_pos = Some(target_pos);
                 }
-                if let Some(look_pos) = target_pos.or(alert_pos) {
-                    let dx = look_pos.0 - bot.position.0;
-                    let dy = look_pos.1 - bot.position.1;
-                    let dz = look_pos.2 - bot.position.2;
-                    let horiz_dist = (dx * dx + dz * dz).sqrt(); // for FOV and yaw calculations
-                    if horiz_dist > 0.01 {
-                        let target_yaw = dz.atan2(dx); // atan2 is a method that returns the angle between the positive x-axis and the point (dx, dz)
-                        let target_pitch = -(dy / horiz_dist.max(0.001)).atan(); // negative because in most FPS coordinate systems, looking up is negative pitch
-
-                        // Smoothly rotate towards target based on personality turn_rate.
-                        // turn_rate_mult > 1 means slower (easier bots), so divide.
-                        let turn_rate = state.personality.base_turn_rate
-                            / personality::difficulty_mods(state.difficulty).turn_rate_mult.max(0.01);
-
-                        // lerp yaw
-                        let yaw_diff = {
-                            let d = target_yaw - state.current_yaw;
-                            ((d + PI).rem_euclid(2.0 * PI)) - PI // shortest angle difference
-                        };
-
-                        let max_turn = turn_rate * dt;
-                        state.current_yaw += yaw_diff.clamp(-max_turn, max_turn);
-
-                        let pitch_diff = target_pitch - state.current_pitch;
-                        state.current_pitch += pitch_diff.clamp(-max_turn * 0.6, max_turn * 0.6);
-
-                        bot.yaw = state.current_yaw;
-                        bot.pitch = state.current_pitch;
-                    }
-                } else {
-                    // nothing to aim at: the aim follows where the bot looks, so
-                    // spotting someone turns from here, not from a stale angle
-                    state.current_yaw = bot.yaw;
-                    state.current_pitch = bot.pitch;
-                }
+                aim_at(bot, state, target_pos.or(alert_pos), dt);
 
                 // the alert fades, and ends once we see someone
                 if let Some((_, _, left)) = &mut state.tactics.alert {
@@ -348,12 +316,7 @@ impl BotManager {
         let now = Instant::now();
         let mut pending_shots: Vec<(PeerId, u32, Option<u32>, String)> = Vec::new();
         for addr in &self.bot_addrs {
-            let Some(p) = players.get(addr).filter(|p| p.is_alive) else {
-                continue;
-            };
-            let is_frozen = p.world == WorldId::Maze &&
-                p.post_teleport_freeze_until.map_or(false, |t| t > now);
-            if is_frozen {
+            if players.get(addr).filter(|p| p.is_alive).map_or(true, |p| is_frozen(p, now, round_frozen)) {
                 continue;
             }
             if let Some(state) = self.bot_states.get_mut(addr) {
@@ -393,6 +356,53 @@ impl BotManager {
             }
         }
     }
+}
+
+/// A bot that may not move, turn or shoot: in the maze during its
+/// post-teleport freeze, or during S&D freeze time (`round_frozen`).
+fn is_frozen(p: &Player, now: Instant, round_frozen: bool) -> bool {
+    p.world == WorldId::Maze && (round_frozen || p.post_teleport_freeze_until.is_some_and(|t| t > now))
+}
+
+/// Turn the bot's aim toward `look_pos` at its turn rate. Whenever it has
+/// something to aim at, the yaw/pitch everyone sees is the aim it shoots
+/// with, not the way it walks.
+pub(crate) fn aim_at(bot: &mut Player, state: &mut BotState, look_pos: Option<(f32, f32, f32)>, dt: f32) {
+    let Some(look_pos) = look_pos else {
+        // nothing to aim at: the aim follows where the bot looks, so
+        // spotting someone turns from here, not from a stale angle
+        state.current_yaw = bot.yaw;
+        state.current_pitch = bot.pitch;
+        return;
+    };
+    let dx = look_pos.0 - bot.position.0;
+    let dy = look_pos.1 - bot.position.1;
+    let dz = look_pos.2 - bot.position.2;
+    let horiz_dist = (dx * dx + dz * dz).sqrt(); // for FOV and yaw calculations
+    if horiz_dist > 0.01 {
+        let target_yaw = dz.atan2(dx); // atan2 is a method that returns the angle between the positive x-axis and the point (dx, dz)
+        let target_pitch = -(dy / horiz_dist.max(0.001)).atan(); // negative because in most FPS coordinate systems, looking up is negative pitch
+
+        // Smoothly rotate towards target based on personality turn_rate.
+        // turn_rate_mult > 1 means slower (easier bots), so divide.
+        let turn_rate = state.personality.base_turn_rate
+            / personality::difficulty_mods(state.difficulty).turn_rate_mult.max(0.01);
+
+        // lerp yaw
+        let yaw_diff = {
+            let d = target_yaw - state.current_yaw;
+            ((d + PI).rem_euclid(2.0 * PI)) - PI // shortest angle difference
+        };
+
+        let max_turn = turn_rate * dt;
+        state.current_yaw += yaw_diff.clamp(-max_turn, max_turn);
+
+        let pitch_diff = target_pitch - state.current_pitch;
+        state.current_pitch += pitch_diff.clamp(-max_turn * 0.6, max_turn * 0.6);
+    }
+    // standing on top of them too: tick_bot faced the way it walked
+    bot.yaw = state.current_yaw;
+    bot.pitch = state.current_pitch;
 }
 
 /// [`send_bot_shot_iter`] over a slice.

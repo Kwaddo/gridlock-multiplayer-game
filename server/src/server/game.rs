@@ -327,10 +327,13 @@ pub fn process_auto_respawns(
 
 /// Regenerate player health after 7 seconds out of combat.
 /// Applies to all worlds; combat resets the timer via regen_resume_at.
+/// Match bots in the maze heal the same way (a wounded bot falls back until
+/// it has); shooting-range bots don't.
 pub fn process_lobby_regen(players: &mut HashMap<PeerId, Player>) {
     let now = Instant::now();
     for player in players.values_mut() {
-        if player.is_bot || !player.is_alive {
+        let range_bot = player.is_bot && player.world != WorldId::Maze;
+        if range_bot || !player.is_alive {
             // In lobby, keep human players alive (no real death)
             if player.world == WorldId::Lobby && !player.is_bot && !player.is_alive {
                 player.is_alive = true;

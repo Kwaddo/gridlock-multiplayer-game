@@ -13,7 +13,13 @@ mod routing;
 mod tactics;
 
 use routing::{dist2, find_enemy, is_enemy, route, route_to_player, route_to_pos};
-use tactics::{flank_behind_enemy, pick_hold_angle, retreat_from_enemy, roam_to_random_point};
+use tactics::{
+    flank_behind_enemy, hold_here, pick_hold_angle, retreat_from_enemy, roam_to_random_point, stance, Stance,
+};
+
+/// Seconds a wounded bot holds an angle where it got away to, while its
+/// health comes back, before it falls back somewhere else.
+const WOUNDED_HOLD_SECS: f32 = 8.0;
 
 /*
     The "brain" of the bot. Called every tick from manager.rs before tick_bot (the "legs").
@@ -89,18 +95,26 @@ pub fn decide_behavior(
         });
     let threatened = visible.is_some() || alerted.is_some();
 
-    // retreat when hurt
+    // Retreat when hurt. Health comes back out of combat (as it does for
+    // players), so this ends: until then the bot falls back, holds, falls back.
     let health_ratio = (bot.health as f32) / (bot.max_health.max(1) as f32);
-    if health_ratio < state.personality.retreat_health_threshold {
-        if let BotBehavior::Retreat { path, path_index } = &state.behavior {
-            if *path_index < path.len() {
+    let wounded = health_ratio < state.personality.retreat_health_threshold;
+    if wounded {
+        match &state.behavior {
+            BotBehavior::Retreat { path, path_index } if *path_index < path.len() => {
                 return None; // keep retreating
             }
-            // got away: hold an angle back toward them
-            return pick_hold_angle(bot_cell, visible.or(nearest_enemy), analysis, maze, state, &nav_cells);
-        }
-        if !matches!(state.behavior, BotBehavior::HoldAngle { .. }) {
-            return retreat_from_enemy(bot_cell, visible.or(nearest_enemy), maze, &nav_cells);
+            // got away: hold an angle back toward them while health comes back
+            BotBehavior::Retreat { .. } => {
+                return Some(hold_here(bot, visible.or(nearest_enemy), WOUNDED_HOLD_SECS));
+            }
+            // holding: the hold ends as usual below
+            BotBehavior::HoldAngle { .. } => {}
+            _ => {
+                if let Some(b) = retreat_from_enemy(bot_cell, visible.or(nearest_enemy), maze, &nav_cells) {
+                    return Some(b);
+                }
+            }
         }
     }
 
@@ -149,12 +163,16 @@ pub fn decide_behavior(
         }
 
         BotBehavior::HoldAngle { hold_timer, max_hold_time, .. } => {
+            let holding = *hold_timer < *max_hold_time;
             if let Some(enemy) = visible {
                 if dist2(enemy.position, bot.position).sqrt() <= state.personality.range_max {
                     return None; // they walked into our angle: fight from here
                 }
-                // seen but out of reach: go after them
-            } else if alerted.is_none() && *hold_timer < *max_hold_time {
+                // seen but out of reach: go after them, unless set on holding
+                if holding && stance(state) == Stance::Hold {
+                    return None;
+                }
+            } else if alerted.is_none() && holding {
                 return None; // keep holding
             }
             // shot from somewhere unseen, or held long enough: move
@@ -175,7 +193,9 @@ pub fn decide_behavior(
         BotBehavior::Reposition { path, path_index, hold_face } => {
             let destination = path.last().copied();
             if *path_index < path.len() {
-                if !threatened {
+                // set on holding, an enemy in sight doesn't turn us from the spot
+                let keep_going = hold_face.is_some() && stance(state) == Stance::Hold && alerted.is_none();
+                if !threatened || keep_going {
                     return None; // still on the way
                 }
             } else if threatened {
@@ -205,6 +225,13 @@ pub fn decide_behavior(
 
     // --- Pick a new behavior ---
 
+    // still hurt (a hold to recover ended, say): fall back somewhere else
+    if wounded {
+        if let Some(b) = retreat_from_enemy(bot_cell, visible.or(nearest_enemy), maze, &nav_cells) {
+            return Some(b);
+        }
+    }
+
     // someone we can't see shot us: go and find them
     if visible.is_none() {
         if let Some((attacker, pos)) = alerted {
@@ -224,31 +251,28 @@ pub fn decide_behavior(
         }
     }
 
+    // The stance is rolled every few seconds (tick_bot), not per decision, so
+    // the bot doesn't flip between pushing and holding. Whatever it can't do
+    // from here, it does one of the others instead of standing still.
     if let Some(enemy) = visible.or(nearest_enemy) {
-        let roll = rand::thread_rng().gen::<f32>();
-        let total = (state.personality.push_weight
-            + state.personality.flank_weight
-            + state.personality.hold_angle_weight)
-            .max(0.001);
-
-        let push_chance = state.personality.push_weight / total;
-        let flank_chance = state.personality.flank_weight / total;
-
-        if roll < push_chance {
-            // HUNT — A* directly to the enemy
-            let path = route_to_player(&nav_cells, maze, bot_cell, enemy)?;
-            return Some(BotBehavior::Hunt {
-                path,
-                path_idx: 0,
-                target_player_id: enemy.id,
-                repath_timer: state.personality.base_repath_interval,
-            });
-        } else if roll < push_chance + flank_chance {
-            // FLANK — path to cell behind the enemy
-            return flank_behind_enemy(bot_cell, enemy, state, maze, &nav_cells);
-        } else {
-            // HOLD ANGLE — find a strategic position
-            return pick_hold_angle(bot_cell, Some(enemy), analysis, maze, state, &nav_cells);
+        // HUNT — A* directly to the enemy
+        let push = || route_to_player(&nav_cells, maze, bot_cell, enemy).map(|path| BotBehavior::Hunt {
+            path,
+            path_idx: 0,
+            target_player_id: enemy.id,
+            repath_timer: state.personality.base_repath_interval,
+        });
+        // FLANK — path to cell behind the enemy
+        let flank = || flank_behind_enemy(bot_cell, enemy, state, maze, &nav_cells);
+        // HOLD ANGLE — find a strategic position
+        let hold = || pick_hold_angle(bot_cell, Some(enemy), analysis, maze, state, &nav_cells);
+        let picked = match stance(state) {
+            Stance::Push => push().or_else(flank).or_else(hold),
+            Stance::Flank => flank().or_else(push).or_else(hold),
+            Stance::Hold => hold().or_else(push).or_else(flank),
+        };
+        if picked.is_some() {
+            return picked;
         }
     }
 
@@ -266,11 +290,11 @@ pub fn decide_behavior(
         }
     }
 
-    // idle behavior based on archetype
+    // idle behavior based on archetype, else the other one
+    let hold = || pick_hold_angle(bot_cell, None, analysis, maze, state, &nav_cells);
+    let roam = || roam_to_random_point(bot_cell, analysis, maze, &nav_cells);
     match state.personality.archetype {
-        BotArchetype::Camper | BotArchetype::Sniper => {
-            pick_hold_angle(bot_cell, None, analysis, maze, state, &nav_cells)
-        }
-        _ => { roam_to_random_point(bot_cell, analysis, maze, &nav_cells) }
+        BotArchetype::Camper | BotArchetype::Sniper => hold().or_else(roam),
+        _ => roam().or_else(hold),
     }
 }

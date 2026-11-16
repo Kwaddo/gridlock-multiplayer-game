@@ -53,7 +53,9 @@ impl Server {
         // smoke break runs its own rounds, and cleans up once its match is fully over
         self.forget_smoke_break();
         self.tick_smoke_break(dt);
-        // tick bots
+        // tick bots; in S&D freeze time they stand still like the humans
+        let round_frozen = self.match_mode == MODE_SEARCH_AND_DESTROY
+            && self.snd_state.as_ref().is_some_and(|s| s.phase == super::snd::SndPhase::FreezeTime);
         self.bot_manager.tick(
             &self.outbox,
             &mut self.players,
@@ -61,6 +63,7 @@ impl Server {
             self.match_mode,
             self.maze.as_ref(),
             &mut self.team_score,
+            round_frozen,
         );
         if self.bot_manager.handle_range_challenge_timeout(&mut self.players) {
             broadcast::broadcast_state(&self.outbox, &self.players);

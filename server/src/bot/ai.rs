@@ -42,10 +42,17 @@ pub struct BotTactics {
     /// The target we last lost sight of and how long ago; seeing them again
     /// soon after needs no fresh reaction time.
     pub lost_target: Option<(u32, f32)>,
+    /// 0..1 roll that picks push, flank or hold against an enemy. Kept for a
+    /// few seconds so the bot doesn't flip between holding and pushing.
+    pub stance_roll: f32,
+    /// Seconds until the stance is rolled again.
+    pub stance_timer: f32,
 }
 
 /// Seconds a bot keeps turning toward / hunting someone who shot it unseen.
 pub const ALERT_SECS: f32 = 3.0;
+/// How long a bot keeps one push/flank/hold stance before rolling again.
+const STANCE_SECS: std::ops::Range<f32> = 3.0..6.0;
 
 impl BotState {
     /// We were shot by `attacker_id` standing at `pos`.
@@ -292,6 +299,13 @@ pub fn tick_bot(
         let mut rng = rand::thread_rng();
         state.tactics.strafe_sign = if rng.gen_bool(0.5) { 1.0 } else { -1.0 };
         state.tactics.strafe_timer = rng.gen_range(0.6..1.4);
+    }
+    // and push, flank or hold for a few seconds at a time
+    state.tactics.stance_timer -= dt;
+    if state.tactics.stance_timer <= 0.0 {
+        let mut rng = rand::thread_rng();
+        state.tactics.stance_roll = rng.gen();
+        state.tactics.stance_timer = rng.gen_range(STANCE_SECS);
     }
 
     // save old position for collision rollback in case we walk into a wall

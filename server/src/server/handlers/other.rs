@@ -417,9 +417,8 @@ pub fn apply_damage(
         // apply non-lethal damage
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.health -= damage;
-            if !vmut.is_bot {
-                vmut.regen_resume_at = Some(Instant::now() + Duration::from_secs(7));
-            }
+            // bots too: match bots regenerate like players (game::process_lobby_regen)
+            vmut.regen_resume_at = Some(Instant::now() + Duration::from_secs(7));
         }
 
         // stun when punched
