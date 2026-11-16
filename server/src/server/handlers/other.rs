@@ -156,25 +156,12 @@ pub fn handle_respawn_request(
         let _ = socket.send_to(&resp, src_addr);
     }
 
-    // Determine and assign a weapon without holding overlapping borrows.
-    // In Gun Game, the weapon is determined by gun_level, not by team loadout.
-    let chosen = if let Some(pref) = players.get(&src_addr) {
-        let gl = pref.gun_level as usize;
-        if gl >= 1 && gl <= game::GUN_GAME_PROGRESSION.len() {
-            // Gun Game: assign weapon matching current progression level
-            game::GUN_GAME_PROGRESSION[gl - 1].to_string()
-        } else if gl > game::GUN_GAME_PROGRESSION.len() {
-            "Punch".to_string()
-        } else if pref.team != Team::Spectator {
-            game::choose_team_weapon_for_player(players, pref)
-        } else {
-            "Knife".to_string()
-        }
-    } else {
-        "Knife".to_string()
-    };
-
-    if let Some(player) = players.get_mut(&src_addr) {
+    // same rule as the timed auto-respawn: in a team mode the player keeps
+    // the weapon they hold, only Gun Game picks one from their level
+    let chosen = players
+        .get(&src_addr)
+        .map(|p| game::respawn_weapon_for(players, p, match_mode));
+    if let (Some(chosen), Some(player)) = (chosen, players.get_mut(&src_addr)) {
         player.current_weapon = chosen;
     }
 }

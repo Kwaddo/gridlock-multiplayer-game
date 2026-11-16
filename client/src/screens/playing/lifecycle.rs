@@ -218,6 +218,9 @@ impl PlayingState {
         self.my_death = None; // next death gets picked fresh
         self.death_weapon_name = None;
         self.death_camera_phase = super::state::DeathCameraPhase::None;
+        // resend the weapon in hand: the server picks one on respawn, and
+        // must show everyone the one we actually hold
+        self.last_sent_weapon.clear();
     }
 
     /// Full-screen victory overlay displayed when the match ends.

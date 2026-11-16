@@ -20,6 +20,8 @@ mod tests;
 #[cfg(test)]
 mod late_join_tests;
 #[cfg(test)]
+mod team_rules_tests;
+#[cfg(test)]
 mod wire_tests;
 
 use crate::bot::manager::BotManager;

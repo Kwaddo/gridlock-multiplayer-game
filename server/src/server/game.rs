@@ -185,7 +185,33 @@ pub fn choose_team_weapon_for_player(
         .unwrap_or_else(|| "Knife".to_string())
 }
 
-/// iterate over all alive/dead players and automatically respawn as needed
+/// The weapon `player` respawns with, the same for both respawn paths
+/// (timed auto-respawn and the client's `RespawnRequest`):
+/// - Gun Game: the weapon of their `gun_level` (Punch past the last level).
+/// - TDM / S&D: the weapon they hold, or one from their team's loadout.
+/// - Otherwise (or with no team): Knife.
+pub fn respawn_weapon_for(
+    players: &HashMap<PeerId, Player>,
+    player: &Player,
+    match_mode: u8,
+) -> String {
+    use crate::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH};
+    match match_mode {
+        MODE_GUN_GAME => {
+            let level = (player.gun_level as usize).max(1);
+            GUN_GAME_PROGRESSION.get(level - 1).unwrap_or(&"Punch").to_string()
+        }
+        MODE_TEAM_DEATHMATCH | MODE_SEARCH_AND_DESTROY if player.team != Team::Spectator => {
+            if player.current_weapon.is_empty() {
+                choose_team_weapon_for_player(players, player)
+            } else {
+                player.current_weapon.clone()
+            }
+        }
+        _ => "Knife".to_string(),
+    }
+}
+
 /// Choose a spawn point in the maze that is at least `min_dist` away
 /// from every other player.  Falls back to a normal random spawn if no
 /// suitable spot is found after a few tries.
@@ -284,30 +310,9 @@ pub fn process_auto_respawns(
             kind: Some(*used_fallback as u8),
         }
         .encode();
-        // choose weapon for the respawned player based on mode
-        let chosen_weapon = if let Some(pref) = players.get(socket_addr) {
-            if match_mode == crate::protocols::MODE_GUN_GAME {
-                let gl = pref.gun_level as usize;
-                if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
-                    GUN_GAME_PROGRESSION[gl - 1].to_string()
-                } else if gl > GUN_GAME_PROGRESSION.len() {
-                    "Punch".to_string()
-                } else {
-                    GUN_GAME_PROGRESSION[0].to_string()
-                }
-            } else if pref.team != Team::Spectator {
-                // TDM/S&D: keep current weapon, or pick from team loadout
-                if !pref.current_weapon.is_empty() {
-                    pref.current_weapon.clone()
-                } else {
-                    choose_team_weapon_for_player(players, pref)
-                }
-            } else {
-                "Knife".to_string()
-            }
-        } else {
-            "Knife".to_string()
-        };
+        let chosen_weapon = players
+            .get(socket_addr)
+            .map_or_else(|| "Knife".to_string(), |p| respawn_weapon_for(players, p, match_mode));
         if let Some(pmut) = players.get_mut(socket_addr) {
             pmut.current_weapon = chosen_weapon;
         }

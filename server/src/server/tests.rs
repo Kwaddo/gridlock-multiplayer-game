@@ -2,11 +2,11 @@ use super::*;
 use crate::player::Team;
 use crate::player::WorldId;
 
-fn to(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<ServerMsg> {
+pub(super) fn to(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<ServerMsg> {
     out.iter().filter(|(p, _)| *p == peer).filter_map(|(_, b)| ServerMsg::decode(b)).collect()
 }
 
-fn start_match(server: &mut Server, host: PeerId) {
+pub(super) fn start_match(server: &mut Server, host: PeerId) {
     let start = ClientMsg::StartGame { mode: Some(MODE_TEAM_DEATHMATCH), duration: Some(0), autofill: None, blue_bots: None };
     server.handle_packet(host, &start.encode());
     // skip the warmup countdown
@@ -74,7 +74,7 @@ fn statuses(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<u8> {
         .collect()
 }
 
-fn two_players() -> (Server, PeerId, PeerId) {
+pub(super) fn two_players() -> (Server, PeerId, PeerId) {
     let mut server = Server::new();
     let (a, b) = (PeerId(1), PeerId(2));
     server.handle_packet(a, &ClientMsg::join("alice").encode());
