@@ -222,7 +222,7 @@ pub fn apply_damage(
     _maze: Option<&MazeData>,
     team_score: &mut game::TeamScore,
 ) {
-    let (attacker, attacker_world, attacker_is_bot) = match players.get(&attacker_addr) {
+    let (attacker, attacker_world, attacker_is_bot, attacker_team) = match players.get(&attacker_addr) {
         Some(a) => {
             if a.post_teleport_freeze_until
                 .map_or(false, |t| t > Instant::now())
@@ -230,7 +230,7 @@ pub fn apply_damage(
             {
                 return;
             }
-            (attacker_addr, a.world, a.is_bot)
+            (attacker_addr, a.world, a.is_bot, a.team)
         }
         None => return,
     };
@@ -251,6 +251,12 @@ pub fn apply_damage(
         }
         // In lobby, allow only player<->bot combat (no player<->player).
         if attacker_world == WorldId::Lobby && !(attacker_is_bot || victim_ref.is_bot) {
+            return;
+        }
+        // friendly fire is off in the team modes, for bots too
+        if attacker_world == WorldId::Maze
+            && is_friendly_fire(match_mode, attacker_team.as_u8(), victim_ref.team.as_u8())
+        {
             return;
         }
         if victim_ref

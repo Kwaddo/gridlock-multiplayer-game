@@ -1,4 +1,4 @@
-//! Team-mode rules: the weapon a player respawns with.
+//! Team-mode rules: the weapon a player respawns with, and no friendly fire.
 
 use super::tests::{start_match, two_players};
 use super::*;
@@ -68,4 +68,48 @@ fn tdm_respawn_request_keeps_the_weapon_held() {
     server.handle_packet(a, &ClientMsg::RespawnRequest.encode());
     assert!(server.players[&a].is_alive);
     assert_eq!(server.players[&a].current_weapon, "M4A1");
+}
+
+/// alice, bob and cat: alice and cat are Red, bob is Blue.
+fn three_players(mode: u8) -> (Server, PeerId, PeerId, PeerId) {
+    let (mut server, a, b) = two_players();
+    let c = PeerId(3);
+    server.handle_packet(c, &ClientMsg::join("cat").encode());
+    let start = ClientMsg::StartGame { mode: Some(mode), duration: Some(0), autofill: None, blue_bots: None };
+    server.handle_packet(a, &start.encode());
+    server.match_warmup_end = Some(Instant::now());
+    server.tick();
+    assert!(server.match_running);
+    unfreeze(&mut server);
+    (server, a, b, c)
+}
+
+#[test]
+fn no_friendly_fire_in_team_deathmatch() {
+    let (mut server, a, b, c) = three_players(MODE_TEAM_DEATHMATCH);
+    assert_eq!(server.players[&a].team, Team::Red);
+    assert_eq!(server.players[&b].team, Team::Blue);
+    assert_eq!(server.players[&c].team, Team::Red);
+    let full = server.players[&c].max_health;
+
+    // Red on Red: nothing, not even a kill
+    hit(&mut server, a, c, 30.0);
+    assert_eq!(server.players[&c].health, full);
+    hit(&mut server, a, c, 500.0);
+    assert!(server.players[&c].is_alive);
+    assert_eq!(server.players[&a].kills, 0);
+
+    // Red on Blue: hurts
+    hit(&mut server, a, b, 30.0);
+    assert_eq!(server.players[&b].health, full - 30);
+}
+
+#[test]
+fn gun_game_damage_applies_between_anyone() {
+    let (mut server, a, b, c) = three_players(MODE_GUN_GAME);
+    let full = server.players[&c].max_health;
+    hit(&mut server, a, c, 30.0);
+    assert_eq!(server.players[&c].health, full - 30);
+    hit(&mut server, a, b, 30.0);
+    assert_eq!(server.players[&b].health, full - 30);
 }

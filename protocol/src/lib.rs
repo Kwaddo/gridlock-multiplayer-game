@@ -90,6 +90,15 @@ pub const MODE_TEAM_DEATHMATCH: u8 = 2;
 pub const MODE_SEARCH_AND_DESTROY: u8 = 3;
 pub const MODE_SMOKE_BREAK: u8 = 4;
 
+/// Friendly fire is off in the team modes: a hit on someone of your own
+/// team (both Red = 1, or both Blue = 2) does nothing. Gun Game puts
+/// everyone on no team (0), so every hit there counts.
+pub fn is_friendly_fire(mode: u8, attacker_team: u8, victim_team: u8) -> bool {
+    matches!(mode, MODE_TEAM_DEATHMATCH | MODE_SEARCH_AND_DESTROY)
+        && matches!(attacker_team, 1 | 2)
+        && attacker_team == victim_team
+}
+
 // Auto-fill bot limits for MSG_START_GAME, shared so the host's lobby console
 // offers exactly what the server accepts
 pub const MAX_BOTS_PER_TEAM: u8 = 8; // team modes, per team
@@ -189,5 +198,24 @@ mod bot_split_tests {
         assert_eq!(balanced_bot_order(1, 1, 2), vec![true, false]);
         // lopsided humans: every bot goes to the small team until it catches up
         assert_eq!(balanced_bot_order(3, 0, 3), vec![false, false, false]);
+    }
+}
+
+#[cfg(test)]
+mod friendly_fire_tests {
+    use super::*;
+
+    #[test]
+    fn same_team_hits_are_friendly_fire_only_in_team_modes() {
+        for mode in [MODE_TEAM_DEATHMATCH, MODE_SEARCH_AND_DESTROY] {
+            assert!(is_friendly_fire(mode, 1, 1));
+            assert!(is_friendly_fire(mode, 2, 2));
+            assert!(!is_friendly_fire(mode, 1, 2));
+            assert!(!is_friendly_fire(mode, 0, 0));
+        }
+        // Gun Game (no teams) and no mode at all: every hit counts
+        assert!(!is_friendly_fire(MODE_GUN_GAME, 1, 1));
+        assert!(!is_friendly_fire(MODE_GUN_GAME, 0, 0));
+        assert!(!is_friendly_fire(0, 1, 1));
     }
 }

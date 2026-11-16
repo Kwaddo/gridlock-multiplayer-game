@@ -69,3 +69,18 @@ fn unblocked_hit_matches_original_bit_for_bit() {
     assert!(hits > 20_000, "only {hits} hits");
     assert!(blocked > 5_000, "only {blocked} blocked hits");
 }
+
+#[test]
+fn shots_pass_through_teammates_only_in_team_mode_matches() {
+    use super::skips_teammate;
+    use crate::net::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH};
+    for mode in [MODE_TEAM_DEATHMATCH, MODE_SEARCH_AND_DESTROY] {
+        assert!(skips_teammate(true, Some(mode), 1, 1));
+        assert!(skips_teammate(true, Some(mode), 2, 2));
+        assert!(!skips_teammate(true, Some(mode), 1, 2), "enemies are hit");
+        assert!(!skips_teammate(true, Some(mode), 0, 0), "team not known yet");
+        assert!(!skips_teammate(false, Some(mode), 1, 1), "the lobby keeps its rules");
+    }
+    assert!(!skips_teammate(true, Some(MODE_GUN_GAME), 0, 0));
+    assert!(!skips_teammate(true, None, 1, 1));
+}

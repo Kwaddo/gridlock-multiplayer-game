@@ -33,6 +33,12 @@ fn unblocked_hit(
     (!blocked).then_some((zone, dist))
 }
 
+/// Whether a shot passes through a player on `their_team` without hitting
+/// them: a teammate in a team-mode match (the lobby keeps its own rules).
+fn skips_teammate(in_maze: bool, mode: Option<u8>, my_team: u8, their_team: u8) -> bool {
+    in_maze && mode.map_or(false, |m| crate::net::protocols::is_friendly_fire(m, my_team, their_team))
+}
+
 impl PlayingState {
     /// One shot of the active weapon that just fired: recoil, then each
     /// pellet's ray against surfaces, the dummy, players and bots, with
@@ -110,6 +116,11 @@ impl PlayingState {
 
         // one impact sound per shot, not one per shotgun pellet
         let mut impact_at: Option<Vec3> = None;
+
+        // no friendly fire in the team modes: teammates aren't hit at all
+        let (in_maze, mode, my_team) =
+            (self.current_world == WorldId::Maze, self.match_mode, self.local_team);
+        let friendly_fire_off = |team: u8| skips_teammate(in_maze, mode, my_team, team);
 
         for i in 0..stats.pellet_count as usize {
             // per-pellet nearest-target (reset for each pellet)
@@ -274,9 +285,13 @@ impl PlayingState {
                 }
             }
 
-            // check other players (client-side prediction / hit registration)
+            // check other players (client-side prediction / hit registration);
+            // teammates are skipped, so the bullet carries on past them
             for (idx, other) in self.other_players.iter().enumerate() {
-                if !other.is_alive() || box_targets_carrier(&self.cardboard.boxes, other.id) {
+                if !other.is_alive()
+                    || friendly_fire_off(other.team)
+                    || box_targets_carrier(&self.cardboard.boxes, other.id)
+                {
                     continue;
                 }
                 if let Some((zone, dist)) =
