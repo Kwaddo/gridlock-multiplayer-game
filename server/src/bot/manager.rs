@@ -71,6 +71,16 @@ impl BotManager {
         self.bot_addrs.clear();
         self.range_challenge_deadline = None;
     }
+    /// Despawn one bot (say, to make room for a player joining late).
+    /// Returns its player, or None if `addr` isn't one of ours.
+    pub fn despawn_bot(&mut self, players: &mut HashMap<PeerId, Player>, addr: PeerId) -> Option<Player> {
+        if !self.bot_addrs.contains(&addr) {
+            return None;
+        }
+        self.bot_addrs.retain(|a| *a != addr);
+        self.bot_states.remove(&addr);
+        players.remove(&addr)
+    }
     /// Despawn only shooting-range bots (those without a personality_id).
     /// Game bots with personalities are left intact.
     pub fn despawn_range_bots(&mut self, players: &mut HashMap<PeerId, Player>) {

@@ -116,6 +116,8 @@ impl Server {
             &mut self.match_warmup_end,
             &mut self.match_end_pending,
             &mut self.match_total_maze_entries,
+            &mut self.bot_manager,
+            &mut self.snd_state,
             self.match_mode,
             &mut self.match_duration,
             requested_duration,

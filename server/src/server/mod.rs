@@ -16,6 +16,8 @@ mod version;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod late_join_tests;
+#[cfg(test)]
 mod wire_tests;
 
 use crate::bot::manager::BotManager;
