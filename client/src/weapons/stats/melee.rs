@@ -71,7 +71,6 @@ pub const KNIFE: WeaponStats = WeaponStats {
     fsa_suppresses_kick: false,
 
     // --- HUD icon
-    fire_sound_asset_key: "knife_slash", // TODO: add knife sound to manifest
     icon_asset_key: "knife_icon", // TODO: add knife icon to manifest
     icon_width: 80.0,
     icon_height: 40.0,

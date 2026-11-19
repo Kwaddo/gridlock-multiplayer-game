@@ -48,7 +48,6 @@ pub const BOLT_ACTION: WeaponStats = WeaponStats {
     fsa_time: None,
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "sniper_shot",
     icon_asset_key: "sniper_icon",
     icon_width: 110.0,
     icon_height: 40.0,
@@ -122,7 +121,6 @@ pub const HUNTING_RIFLE: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard, // no scope — standard crosshair
     fsa_time: None,
 
-    fire_sound_asset_key: "sniper_shot",
     icon_asset_key: "sniper_icon",
 
     viewmodel_model: Some("hunting_rifle_model"),
@@ -176,7 +174,6 @@ pub const SEMI_AUTO_SNIPER: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Scope,
     fsa_time: None,
 
-    fire_sound_asset_key: "sniper_shot",
     icon_asset_key: "sniper_icon",
 
     viewmodel_model: Some("semi_auto_sniper_model"),

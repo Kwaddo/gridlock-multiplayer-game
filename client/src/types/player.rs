@@ -286,8 +286,6 @@ pub struct OtherPlayer {
     pub is_bot: bool,
     pub is_silent: bool, // no footstep sounds
 
-    // footstep audio
-    pub footstep_timer: f32,
 
     // death animation: when Some, the player is dying and will be removed when timer hits 0
     pub death_timer: Option<f32>,
@@ -355,7 +353,6 @@ impl OtherPlayer {
             current_weapon: String::new(),
             is_bot: false,
             is_silent: false,
-            footstep_timer: 0.0,
             death_timer: None,
             anim: crate::types::player_anim::PlayerAnim::new(),
             fired: false,

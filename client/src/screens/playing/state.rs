@@ -72,7 +72,6 @@ pub struct PlayingState {
     pub bob_timer: f32,
     pub audio: crate::audio::Audio,
     /// Last frame's state, for sounds played on state changes.
-    pub event_sounds: super::simulation::EventSoundState,
     pub assets: HashMap<String, Texture2D>,
     // static meshes keyed by logical asset name; some glTF files contain multiple
     // primitives with different textures, so we now store a vector of meshes
@@ -233,7 +232,6 @@ pub struct PlayingState {
     pub snd_last_pickup_sent: Option<platform::Instant>,
 
     // local player footstep timer
-    pub local_footstep_timer: f32,
 
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
@@ -310,7 +308,6 @@ impl PlayingState {
             movement_config: MovementConfig::new(),
             bob_timer: 0.0,
             audio: crate::audio::Audio::new(),
-            event_sounds: Default::default(),
             assets: HashMap::new(),
             models: HashMap::new(),
             animated_models: HashMap::new(),
@@ -432,7 +429,6 @@ impl PlayingState {
             local_team: 0,
             snd_last_pickup_sent: None,
 
-            local_footstep_timer: 0.0,
             destroyed_lights: HashSet::new(),
             cardboard: Default::default(),
 

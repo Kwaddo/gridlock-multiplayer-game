@@ -27,7 +27,6 @@ pub fn apply_taurus_raging_pistol_mode(stats: &mut WeaponStats) {
     stats.crosshair_kick_per_shot = 1.7;
     stats.crosshair_kick_decay = 6.0;
     stats.crosshair_kick_max = 2.3;
-    stats.fire_sound_asset_key = "revolver_shot";
     stats.falloff_start = 20.0;
     stats.falloff_end = 45.0;
     stats.falloff_min_mult = 0.55;
@@ -68,7 +67,6 @@ pub fn apply_taurus_raging_shotgun_mode(stats: &mut WeaponStats) {
     stats.crosshair_kick_per_shot = 2.5;
     stats.crosshair_kick_decay = 6.0;
     stats.crosshair_kick_max = 4.0;
-    stats.fire_sound_asset_key = "shotgun_shot";
     stats.falloff_start = 4.0;
     stats.falloff_end = 12.0;
     stats.falloff_min_mult = 0.2;

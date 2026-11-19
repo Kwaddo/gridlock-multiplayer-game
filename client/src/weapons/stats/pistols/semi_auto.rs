@@ -49,7 +49,6 @@ pub const M1911: WeaponStats = WeaponStats {
     fsa_time: Some(0.25),
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "pistol_shot",
     icon_asset_key: "pistol_icon",
     icon_width: 80.0,
     icon_height: 50.0,
@@ -137,7 +136,6 @@ pub const DEAGLE: WeaponStats = WeaponStats {
     fsa_time: Some(0.3),
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "deagle_shot",
     icon_asset_key: "pistol_icon",
     icon_width: 90.0,
     icon_height: 50.0,
@@ -218,7 +216,6 @@ pub const SUPPRESSED_PISTOL: WeaponStats = WeaponStats {
     fsa_time: Some(0.2),
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "pistol_shot",
     icon_asset_key: "pistol_icon",
 
     viewmodel_model: Some("suppressed_pistol_model"),

@@ -377,11 +377,6 @@ impl PlayingState {
         }
 
         if total_dmg > 0.0 {
-            self.audio.play_cue(if any_headshot {
-                crate::audio::catalog::HEADSHOT
-            } else {
-                crate::audio::catalog::HIT_MARKER
-            });
             self.hit_marker_timer = 0.35;
             self.hit_marker_headshot = any_headshot;
             self.hit_marker_pellet_mask = pellet_mask;
@@ -404,11 +399,6 @@ impl PlayingState {
         if weapon.id == crate::weapons::stats::WeaponId::Knife && total_dmg <= 0.0 {
             self.knife_attack_lock_timer += KNIFE_MISS_PENALTY_SECS;
             self.knife_miss_slow_timer = KNIFE_MISS_MOVE_SLOW_DURATION;
-        }
-
-        if let Some(at) = impact_at {
-            let impact = crate::audio::catalog::WALL_IMPACT;
-            self.play_spatial_sound(impact.key, at, Vec3::ZERO, impact.volume, None);
         }
 
         for id in boxes_hit {

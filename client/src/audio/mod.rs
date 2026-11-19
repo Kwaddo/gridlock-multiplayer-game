@@ -2,16 +2,13 @@
 //! `gridlock_web` JS plugin; rodio's browser backend would need wasm-bindgen).
 //! Both play each sample fire-and-forget with its own speed, volume and pan.
 //!
-//! Every sound the game plays has a key (see [`catalog`]). At startup each key
-//! gets a synthesized placeholder ([`synth`]), so the game is never silent. A
-//! manifest entry with the same key (e.g. `"footstep": "assets/sounds/x.ogg"`)
-//! replaces the placeholder once the file loads: adding real sounds later needs
-//! only the file and its manifest line, no code.
+//! Every sound the game plays has a key (see [`catalog`]). A sound exists only
+//! when its file is listed in the manifest (e.g. `"coin": "assets/sounds/coin.ogg"`),
+//! nothing is generated, so the game is silent unless we add a sound on purpose.
 
 pub mod catalog;
-mod synth;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub use catalog::Cue;
 
@@ -30,8 +27,6 @@ pub struct Audio {
     #[cfg(target_arch = "wasm32")]
     sounds: HashMap<String, u32>,
 
-    /// Keys still playing their synthesized placeholder (no file loaded yet).
-    placeholders: HashSet<String>,
     /// Master volume (0..1) times every play; 0 while muted. Starts silent
     /// until the settings are applied with [`Audio::set_levels`].
     master: f32,
@@ -40,30 +35,18 @@ pub struct Audio {
 impl Audio {
     pub fn new() -> Self {
         #[cfg(not(target_arch = "wasm32"))]
-        let mut audio = Audio {
+        let audio = Audio {
             output: rodio::OutputStream::try_default()
                 .map_err(|e| println!("Failed to initialize audio output stream: {:?}", e))
                 .ok(),
             samples: HashMap::new(),
-            placeholders: HashSet::new(),
             master: 0.0,
         };
 
         #[cfg(target_arch = "wasm32")]
-        let mut audio = Audio { sounds: HashMap::new(), placeholders: HashSet::new(), master: 0.0 };
+        let audio = Audio { sounds: HashMap::new(), master: 0.0 };
 
-        audio.install_placeholders();
         audio
-    }
-
-    /// Synthesize a placeholder for every key in the catalogue.
-    fn install_placeholders(&mut self) {
-        for &key in catalog::ALL_KEYS {
-            let Some(wav) = synth::placeholder(key) else { continue };
-            if self.insert_bytes(key.to_string(), wav).is_ok() {
-                self.placeholders.insert(key.to_string());
-            }
-        }
     }
 
     /// Apply the player's volume settings. Cheap; called every frame.
@@ -71,7 +54,7 @@ impl Audio {
         self.master = if muted { 0.0 } else { volume.clamp(0.0, 1.0) };
     }
 
-    /// Whether `key` can play (a loaded file or its placeholder).
+    /// Whether `key` can play (its file has loaded).
     pub fn has(&self, key: &str) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         return self.samples.contains_key(key);
@@ -80,17 +63,14 @@ impl Audio {
         return self.sounds.contains_key(key);
     }
 
-    /// Whether `key` plays a loaded file rather than its placeholder.
+    /// Whether `key`'s file has loaded (the asset loader skips it then).
     pub fn has_file(&self, key: &str) -> bool {
-        self.has(key) && !self.placeholders.contains(key)
+        self.has(key)
     }
 
-    /// Register an encoded sample (e.g. Ogg) under `key`, replacing any
-    /// placeholder for it.
+    /// Register an encoded sample (e.g. Ogg) under `key`.
     pub async fn insert(&mut self, key: String, bytes: Vec<u8>) -> Result<(), String> {
-        self.insert_bytes(key.clone(), bytes)?;
-        self.placeholders.remove(&key);
-        Ok(())
+        self.insert_bytes(key, bytes)
     }
 
     fn insert_bytes(&mut self, key: String, bytes: Vec<u8>) -> Result<(), String> {

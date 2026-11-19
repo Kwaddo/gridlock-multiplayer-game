@@ -9,7 +9,6 @@ use crate::weapons::recoil::recover;
 use crate::weapons::{recoil, SpreadContext};
 
 use macroquad::prelude::*;
-use macroquad::rand::gen_range;
 
 use super::PlayingState;
 
@@ -138,7 +137,6 @@ impl PlayingState {
         let spread = recoil::current_spread(self.weapons.active(), &ctx);
         self.weapons.active_mut().computed_spread = spread;
 
-        let mut fire_sound_key: Option<&'static str> = None;
 
         // Punch button: fire melee hit immediately, auto-return to gun when animation ends.
         let mut punch_fire_this_frame = false;
@@ -180,17 +178,8 @@ impl PlayingState {
                     if weapon.id == crate::weapons::stats::WeaponId::Sawnoff {
                         self.sawnoff_shot_requested = true;
                     }
-                    fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 
                     self.fire_hitscan(&mut maze);
-                } else if config.bind_fire.is_pressed()
-                    && weapon.id != crate::weapons::stats::WeaponId::Knife
-                    && weapon.ammo == 0
-                    && weapon.reserve == 0
-                    && !weapon.is_reloading
-                {
-                    // out of ammo entirely: the trigger only clicks
-                    self.audio.play_cue(crate::audio::catalog::DRY_FIRE);
                 }
                 // `fire_hitscan` borrowed all of `self`; take the active weapon again
                 let weapon = self.weapons.active_mut();
@@ -203,18 +192,8 @@ impl PlayingState {
             weapon.trigger_held = false;
         }
 
-        if let Some(sound_key) = fire_sound_key {
-            self.play_weapon_shot_sound(sound_key, config);
-        }
-
         // teleporter interaction removed; lobby console handled earlier
 
         return None;
-    }
-
-    fn play_weapon_shot_sound(&self, sound_key: &str, _config: &GameConfig) {
-        let pitch = gen_range(0.94f32, 1.06f32);
-        let volume = crate::audio::catalog::SHOT_VOLUME * gen_range(0.92f32, 1.0f32);
-        self.audio.play(sound_key, pitch, volume);
     }
 }

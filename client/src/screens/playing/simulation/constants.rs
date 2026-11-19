@@ -1,16 +1,6 @@
-// ── Footstep constants ──
-/// Maximum distance (world units) at which footsteps are audible
-pub(super) const FOOTSTEP_MAX_DIST: f32 = 30.0;
-/// Footstep intervals (seconds between steps)
-pub(super) const FOOTSTEP_INTERVAL_WALK: f32 = 0.50;
-pub(super) const FOOTSTEP_INTERVAL_SPRINT: f32 = 0.32;
-pub(super) const FOOTSTEP_INTERVAL_CROUCH: f32 = 0.72;
-/// Base volumes per movement type (before distance attenuation)
-pub(super) const FOOTSTEP_VOLUME_WALK: f32 = 0.45;
-pub(super) const FOOTSTEP_VOLUME_SPRINT: f32 = 0.75;
-pub(super) const FOOTSTEP_VOLUME_CROUCH: f32 = 0.22;
-/// Slide sound volume
-pub(super) const SLIDE_SOUND_VOLUME: f32 = 0.6;
+// ── Sound placement ──
+/// Maximum distance (world units) a sound in the world can be heard from
+pub(super) const SOUND_MAX_DIST: f32 = 30.0;
 /// Height (world units) at which wall occlusion between listener and
 /// source is tested: above props, below the top of maze walls.
 pub(super) const SOUND_EAR_HEIGHT: f32 = 0.8;
