@@ -82,6 +82,8 @@ pub struct Player {
     pub auto_respawn: bool,
     // Regen delay anchor: health won't regenerate until this instant has passed.
     pub regen_resume_at: Option<Instant>,
+    // bots act like you're not there at all
+    pub in_box: bool,
 }
 
 impl Player {
@@ -117,6 +119,7 @@ impl Player {
             is_silent: false,
             auto_respawn: true,
             regen_resume_at: None,
+            in_box: false,
         }
     }
 

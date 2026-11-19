@@ -42,6 +42,21 @@ impl PlayingState {
             self.draw_target_dummy();
         }
 
+        // cardboard boxes, only if the list is for this world (an old one can show up mid-teleport)
+        if self.boxes_world == self.current_world {
+            for b in &self.boxes {
+                let (at, yaw, roll, floor) = self.box_draw(b);
+                // a camera this close is inside our own box
+                if self.in_box == Some(b.id) && (eye - at).length() < 0.9 {
+                    continue;
+                }
+                crate::world::render::cardboard_box::draw_cardboard_box(at, yaw, roll);
+                crate::world::render::cardboard_box::draw_box_shadow(floor, yaw, at.y - floor.y);
+            }
+        }
+
+        self.draw_box_bursts();
+
         self.draw_other_players();
         self.draw_death_corpse();
         self.draw_player_hitboxes();

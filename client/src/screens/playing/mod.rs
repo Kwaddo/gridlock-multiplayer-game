@@ -1,4 +1,5 @@
 mod camera;
+mod cardboard;
 mod characters;
 pub mod chat;
 mod movement;

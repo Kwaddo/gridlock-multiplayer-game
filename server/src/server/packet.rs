@@ -215,6 +215,7 @@ impl Server {
                         is_silent: false,
                         auto_respawn: false,
                         regen_resume_at: None,
+                        in_box: false,
 
                     };
 
@@ -291,6 +292,10 @@ impl Server {
                 &text,
             ),
             ClientMsg::EndMatch => self.handle_end_match(src_addr),
+
+            ClientMsg::BoxEnter { id } => self.handle_box_enter(src_addr, id),
+            ClientMsg::BoxExit => self.boxes.exit(&self.players, src_addr),
+            ClientMsg::BoxShot { id } => self.boxes.shot(&self.players, src_addr, id),
 
         }
     }

@@ -3,6 +3,7 @@ use std::time::Duration;
 use platform::Instant;
 
 pub mod broadcast;
+mod boxes;
 pub mod game;
 pub mod handlers;
 pub mod snd;
@@ -85,6 +86,8 @@ pub struct Server {
     info_sync: player_info::InfoSync,
     /// Clients of another protocol version, turned away at the door.
     rejected: HashMap<PeerId, version::Rejected>,
+    /// every cardboard box
+    boxes: boxes::Boxes,
 }
 
 impl Server {
@@ -128,6 +131,7 @@ impl Server {
             last_team_score_sent: None,
             info_sync: player_info::InfoSync::default(),
             rejected: HashMap::new(),
+            boxes: boxes::Boxes::new(),
         }
     }
 

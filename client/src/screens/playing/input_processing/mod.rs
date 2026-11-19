@@ -112,7 +112,15 @@ impl PlayingState {
             return None;
         }
 
+        if let (Some(id), true) = (self.in_box, config.bind_fire.is_pressed()) {
+            self.break_box(id);
+        }
+        if self.in_box.is_some() || self.box_tween.is_some() {
+            weapon_input_locked = true;
+        }
         self.process_look_and_movement(config, weapon_input_locked);
+        self.lock_box_movement();
+        self.process_box_key();
 
         let delta = raw_delta.min(0.05);
         let vel = self.movement_state.velocity;

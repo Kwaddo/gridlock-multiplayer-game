@@ -47,6 +47,10 @@ pub enum ServerMsg {
     MatchStatus { status: u8 },
     TeamScore { red: u16, blue: u16, to_win: u16 },
     LobbySettings(LobbySettings),
+    /// Every box in `world`, whole, sent on join/world change and after any change
+    /// (enter, exit, destroyed, respawned). It's also the answer to `BoxEnter`:
+    /// if the box doesn't list you as carrier, you didn't get in.
+    Boxes { world: u8, boxes: Vec<CardboardBox> },
 }
 
 impl ServerMsg {
@@ -220,6 +224,14 @@ impl ServerMsg {
             ServerMsg::TeamScore { red, blue, to_win } => {
                 Writer::new(MSG_TEAM_SCORE).u16(*red).u16(*blue).u16(*to_win).finish()
             }
+            ServerMsg::Boxes { world, boxes } => {
+                let mut w = Writer::new(MSG_BOXES);
+                w.u8(*world).u8(boxes.len().min(255) as u8);
+                for b in boxes.iter().take(255) {
+                    b.write(&mut w);
+                }
+                w.finish()
+            }
         }
     }
 
@@ -358,6 +370,14 @@ impl ServerMsg {
             MSG_MATCH_STATUS => ServerMsg::MatchStatus { status: r.u8()? },
             MSG_TEAM_SCORE => ServerMsg::TeamScore { red: r.u16()?, blue: r.u16()?, to_win: r.u16()? },
             MSG_LOBBY_SETTINGS => ServerMsg::LobbySettings(LobbySettings::read(&mut r)?),
+            MSG_BOXES => {
+                let world = r.u8()?;
+                let mut boxes = Vec::new();
+                for _ in 0..r.u8()? {
+                    boxes.push(CardboardBox::read(&mut r)?);
+                }
+                ServerMsg::Boxes { world, boxes }
+            }
             _ => return None,
         };
         Some(msg)

@@ -32,6 +32,16 @@ impl PlayingState {
                 s.send(&ClientMsg::EndMatch.encode());
             }
 
+            if let Some(id) = self.pending_box_enter.take() {
+                s.send(&ClientMsg::BoxEnter { id }.encode());
+            }
+            if std::mem::take(&mut self.pending_box_exit) {
+                s.send(&ClientMsg::BoxExit.encode());
+            }
+            for id in std::mem::take(&mut self.pending_box_shots) {
+                s.send(&ClientMsg::BoxShot { id }.encode());
+            }
+
             for text in self.chat.take_outgoing() {
                 s.send(&ClientMsg::Chat { text }.encode());
             }

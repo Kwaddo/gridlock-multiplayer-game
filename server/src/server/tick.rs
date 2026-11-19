@@ -70,6 +70,10 @@ impl Server {
         }
         // what rarely changes goes out ahead of the state that may first show it
         self.sync_player_info();
+
+        // sync boxes with clients
+        self.sync_boxes();
+
         let due = self
             .last_state_broadcast
             .map_or(true, |t| t.elapsed() >= game::STATE_BROADCAST_INTERVAL);

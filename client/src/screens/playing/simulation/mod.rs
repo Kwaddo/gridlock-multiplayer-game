@@ -60,6 +60,8 @@ impl PlayingState {
             self.dev_mode.character_label = self.character_label(); // kept fresh so "still loading" counts down
         }
 
+        self.update_box_feel(delta);
+
         // update kill feed timers and drop expired entries in a single pass
         self.kill_feed.retain_mut(|entry| {
             entry.timer -= delta;

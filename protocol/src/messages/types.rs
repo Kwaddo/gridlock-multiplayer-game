@@ -47,6 +47,37 @@ impl PlayerState {
     }
 }
 
+/*
+    one cardboard box in msg_boxes (id, x,y,z,yaw,carrier)
+    14 bytes, server ownns every boxm client draws what it last sent
+    Carried box sits on its carrier so position is where the server last saw it
+    clients should draw at the carrier instead
+*/
+
+#[derive(Clone,Copy,Debug,PartialEq)]
+pub struct CardboardBox {
+    pub id: u16,
+    pub position: Vec3,
+    pub yaw: f32,
+    // player inside, 0 = empty (player ids start at 1, same as LobbyLeader)
+    pub carrier: u32,
+}
+
+impl CardboardBox {
+    pub(super) fn write(&self, w: &mut Writer) {
+        // 14 bytes: [id:2][x,y,z:3x i16][yaw:u16][carrier:u32]
+        w.u16(self.id).pos16(self.position).u16(quantize_yaw(self.yaw)).u32(self.carrier);    }
+
+    pub(super) fn read(r: &mut Reader) -> Option<Self> {
+        Some(CardboardBox {
+            id: r.u16()?,
+            position: r.pos16()?,
+            yaw: dequantize_yaw(r.u16()?),
+            carrier: r.u32()?,
+        })
+    }
+}
+
 /// One entry of `MSG_PLAYER_INFO`: what `MSG_STATE` leaves out because it
 /// rarely changes. `[id:4][name:str8][team:1][weapon:str8][kills:4]
 /// [gun_level:1][max_health:u16]`.

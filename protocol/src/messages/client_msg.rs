@@ -43,6 +43,9 @@ pub enum ClientMsg {
     BotDespawnAll,
     Chat { text: String },
     EndMatch,
+    BoxEnter{id: u16},
+    BoxExit,
+    BoxShot { id: u16 },
 }
 
 /// Marks the version at the end of a `Join`; 16 bits follow, see [`write_join_version`].
@@ -153,6 +156,9 @@ impl ClientMsg {
             ClientMsg::BotDespawnAll => vec![MSG_BOT_DESPAWN_ALL],
             ClientMsg::Chat { text } => Writer::new(MSG_CHAT).str8(text).finish(),
             ClientMsg::EndMatch => vec![MSG_END_MATCH],
+            ClientMsg::BoxEnter{ id } => Writer::new(MSG_BOX_ENTER).u16(*id).finish(),
+            ClientMsg::BoxExit => vec![MSG_BOX_EXIT],
+            ClientMsg::BoxShot { id } => Writer::new(MSG_BOX_SHOT).u16(*id).finish(),
         }
     }
 
@@ -205,6 +211,9 @@ impl ClientMsg {
             MSG_BOT_DESPAWN_ALL => ClientMsg::BotDespawnAll,
             MSG_CHAT => ClientMsg::Chat { text: r.str8()? },
             MSG_END_MATCH => ClientMsg::EndMatch,
+            MSG_BOX_ENTER => ClientMsg::BoxEnter { id: r.u16()? },
+            MSG_BOX_EXIT => ClientMsg::BoxExit,
+            MSG_BOX_SHOT => ClientMsg::BoxShot { id: r.u16()? },
             _ => return None,
         };
         Some(msg)

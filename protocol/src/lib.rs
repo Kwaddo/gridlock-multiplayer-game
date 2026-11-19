@@ -10,7 +10,7 @@ pub use messages::*;
 /// `ServerMsg::Welcome`). Builds from before the check have no version on
 /// the wire and count as 1.
 // 3: pitch added to MSG_STATE (one byte) and MSG_POSITION, so a 2 cant read a 3's state packets
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4; // protocol version changed from 3 to 4. Added cardboard shit
 
 /// What the server tells a client of another version once it has let it in
 /// far enough to be heard: a chat notice is all an old build can show.
@@ -124,6 +124,14 @@ pub const MSG_SND_PLANT_START: u8 = 29; // client -> server: start planting bomb
 pub const MSG_SND_PLANT_STOP: u8 = 30; // client -> server: stop planting bomb
 pub const MSG_SND_DEFUSE_START: u8 = 31; // client -> server: start defusing bomb
 pub const MSG_SND_DEFUSE_STOP: u8 = 32; // client -> server: stop defusing bomb
+
+// carboard yeet
+pub const MSG_BOXES: u8 = 43; // server -> client, every box in one world
+pub const MSG_BOX_ENTER: u8 = 44; // client -> server, let me in the box 
+pub const MSG_BOX_EXIT: u8 = 45; // client -> server, let me out of the box and leave it here
+pub const MSG_BOX_SHOT: u8 = 46; // client -> server, I shot this box (mine from inside, or anyone's), its gone
+
+pub const BOX_ENTER_RANGE: f32 = 2.0; // flat metres, server checks it, client picks a box with it
 
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;

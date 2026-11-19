@@ -18,6 +18,8 @@ impl PlayingState {
     /// pellet's ray against surfaces, the dummy, players and bots, with
     /// tracers, bullet holes, hit markers and hit reports.
     pub(super) fn fire_hitscan(&mut self, maze: &mut Option<&mut Maze>) {
+        let box_targets = self.box_targets();
+        let mut boxes_hit: Vec<u16> = Vec::new();
         let weapon = self.weapons.active_mut();
 
         if self.dev_mode.infinite_ammo {
@@ -214,6 +216,15 @@ impl PlayingState {
                 }
                 (None, None) => None,
             };
+            // a box stops the bullet and breaks, no bullet hole on it
+            let box_hit = super::super::cardboard::ray_test_boxes(&box_targets, eye, fwd, world_range)
+                .filter(|(_, d)| closest_blocking_dist.map_or(true, |w| *d < w));
+            if let Some((id, _)) = box_hit {
+                surface_hit = true;
+                surface_normal = None;
+                boxes_hit.push(id);
+            }
+            let closest_blocking_dist = box_hit.map(|(_, d)| d).or(closest_blocking_dist);
 
             let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
             let tracer_end = if let Some(dist) = closest_blocking_dist {
@@ -285,7 +296,7 @@ impl PlayingState {
 
             // check other players (client-side prediction / hit registration)
             for (idx, other) in self.other_players.iter().enumerate() {
-                if !other.is_alive() {
+                if !other.is_alive() || box_targets_carrier(&self.boxes, other.id) {
                     continue;
                 }
                 if let Some((zone, dist)) = other.ray_test(eye, fwd, range) {
@@ -400,5 +411,13 @@ impl PlayingState {
             let impact = crate::audio::catalog::WALL_IMPACT;
             self.play_spatial_sound(impact.key, at, Vec3::ZERO, impact.volume, None);
         }
+
+        for id in boxes_hit {
+            self.break_box(id);
+        }
     }
+}
+
+fn box_targets_carrier(boxes: &[crate::net::protocols::CardboardBox], player_id: u32) -> bool {
+    boxes.iter().any(|b| b.carrier == player_id)
 }

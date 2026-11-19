@@ -15,5 +15,5 @@ pub use client_msg::ClientMsg;
 pub use server_msg::ServerMsg;
 pub use types::{
     BotShot, LobbySettings, MazeLayout, MazeLight, MazeProp, MazeRoom, PlayerInfo, PlayerListEntry,
-    PlayerState, SndRound,
+    PlayerState, SndRound, CardboardBox,
 };

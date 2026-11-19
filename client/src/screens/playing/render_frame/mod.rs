@@ -19,7 +19,7 @@ impl PlayingState {
         maze: Option<&Maze>,
     ) {
         self.update_head_bob(get_frame_time());
-        let camera = self.build_camera(config);
+        let camera = self.build_camera(config, maze);
         // update cached shapes first, so every camera below only reads
         self.bake_bullet_holes();
         // your body's colour, your player colour alive, white as a corpse, same as before
@@ -82,14 +82,20 @@ impl PlayingState {
 
         self.draw_player_overhead(&camera, maze, player_id);
         self.draw_lobby_console_prompt();
+        if !self.is_dead && !self.lobby_console_open {
+            self.draw_box_prompt();
+        }
         self.draw_shooting_range_prompt();
 
         // Lobby console (Start Game) overlay
         self.draw_lobby_console(config, player_id);
 
         // Don't draw viewmodel while dead or when lobby console is open
-        if !self.is_dead && !self.lobby_console_open {
+        if !self.is_dead && !self.lobby_console_open && self.in_box.is_none() {
             self.draw_viewmodel();
+        }
+        if self.box_eye_slot(config) {
+            super::cardboard::draw_box_slit();
         }
 
         // When lobby console is open, suppress regular HUD (crosshair, minimap, status panels, etc.)

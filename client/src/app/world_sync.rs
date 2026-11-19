@@ -234,6 +234,10 @@ pub fn sync_world(
         if let Some(score) = updates.team_score {
             playing_state.team_score = Some(score);
         }
+        // the server always sends the full list, so just swap ours out
+        if let Some((world, boxes)) = updates.boxes {
+            playing_state.take_box_list(world, boxes, player_id);
+        }
         if let Some(settings) = updates.lobby_settings {
             playing_state.host_settings = Some(settings);
         }

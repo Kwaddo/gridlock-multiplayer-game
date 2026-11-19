@@ -238,6 +238,19 @@ pub struct PlayingState {
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
 
+    // cardboard boxes the server last told us about, and which world that list is for
+    pub boxes: Vec<crate::net::protocols::CardboardBox>,
+    pub boxes_world: WorldId,
+    pub in_box: Option<u16>,
+    pub pending_box_enter: Option<u16>,
+    pub pending_box_exit: bool,
+    pub box_tween: Option<super::cardboard::BoxTween>,
+    pub box_feel: HashMap<u16, super::cardboard::BoxFeel>,
+    pub box_cam_blend: f32,
+    pub box_bursts: Vec<super::cardboard::BoxBurst>,
+    pub broken_boxes: Vec<(u16, f64)>,
+    pub pending_box_shots: Vec<u16>,
+
     // cached strings used by render to avoid reallocating each frame
     pub(crate) match_start_cached_secs: i32,
     pub(crate) match_start_cached_text: String,
@@ -432,6 +445,17 @@ impl PlayingState {
 
             local_footstep_timer: 0.0,
             destroyed_lights: HashSet::new(),
+            boxes: Vec::new(),
+            boxes_world: WorldId::Lobby,
+            in_box: None,
+            pending_box_enter: None,
+            pending_box_exit: false,
+            box_tween: None,
+            box_feel: HashMap::new(),
+            box_cam_blend: 0.0,
+            box_bursts: Vec::new(),
+            broken_boxes: Vec::new(),
+            pending_box_shots: Vec::new(),
 
             match_start_cached_secs: -1,
             match_start_cached_text: String::new(),
