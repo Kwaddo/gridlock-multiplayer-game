@@ -46,6 +46,7 @@ pub enum ClientMsg {
     BoxEnter{id: u16},
     BoxExit,
     BoxShot { id: u16 },
+    SmokeVote { stay: bool },
 }
 
 /// Marks the version at the end of a `Join`; 16 bits follow, see [`write_join_version`].
@@ -159,6 +160,7 @@ impl ClientMsg {
             ClientMsg::BoxEnter{ id } => Writer::new(MSG_BOX_ENTER).u16(*id).finish(),
             ClientMsg::BoxExit => vec![MSG_BOX_EXIT],
             ClientMsg::BoxShot { id } => Writer::new(MSG_BOX_SHOT).u16(*id).finish(),
+            ClientMsg::SmokeVote { stay } => Writer::new(MSG_SMOKE_VOTE).bool(*stay).finish(),
         }
     }
 
@@ -214,6 +216,7 @@ impl ClientMsg {
             MSG_BOX_ENTER => ClientMsg::BoxEnter { id: r.u16()? },
             MSG_BOX_EXIT => ClientMsg::BoxExit,
             MSG_BOX_SHOT => ClientMsg::BoxShot { id: r.u16()? },
+            MSG_SMOKE_VOTE => ClientMsg::SmokeVote { stay: r.bool()? },
             _ => return None,
         };
         Some(msg)

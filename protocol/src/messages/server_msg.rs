@@ -51,6 +51,11 @@ pub enum ServerMsg {
     /// (enter, exit, destroyed, respawned). It's also the answer to `BoxEnter`:
     /// if the box doesn't list you as carrier, you didn't get in.
     Boxes { world: u8, boxes: Vec<CardboardBox> },
+    SmokeRound(SmokeRound),
+    // where every coin still is, only hiders get it
+    SmokeCoins(Vec<Vec3>),
+    SmokeScores(Vec<SmokeScore>),
+    SmokeCoinTaken { at: Vec3 },
 }
 
 impl ServerMsg {
@@ -232,6 +237,28 @@ impl ServerMsg {
                 }
                 w.finish()
             }
+            ServerMsg::SmokeRound(h) => {
+                let mut w = Writer::new(MSG_SMOKE_ROUND);
+                h.write(&mut w);
+                w.finish()
+            }
+            ServerMsg::SmokeCoins(coins) => {
+                let mut w = Writer::new(MSG_SMOKE_COINS);
+                w.u8(coins.len().min(255) as u8);
+                for c in coins.iter().take(255) {
+                    w.pos16(*c);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeScores(scores) => {
+                let mut w = Writer::new(MSG_SMOKE_SCORES);
+                w.u8(scores.len().min(255) as u8);
+                for s in scores.iter().take(255) {
+                    s.write(&mut w);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeCoinTaken { at } => Writer::new(MSG_SMOKE_COIN_TAKEN).pos16(*at).finish(),
         }
     }
 
@@ -378,6 +405,22 @@ impl ServerMsg {
                 }
                 ServerMsg::Boxes { world, boxes }
             }
+            MSG_SMOKE_ROUND => ServerMsg::SmokeRound(SmokeRound::read(&mut r)?),
+            MSG_SMOKE_COINS => {
+                let mut coins = Vec::new();
+                for _ in 0..r.u8()? {
+                    coins.push(r.pos16()?);
+                }
+                ServerMsg::SmokeCoins(coins)
+            }
+            MSG_SMOKE_SCORES => {
+                let mut scores = Vec::new();
+                for _ in 0..r.u8()? {
+                    scores.push(SmokeScore::read(&mut r)?);
+                }
+                ServerMsg::SmokeScores(scores)
+            }
+            MSG_SMOKE_COIN_TAKEN => ServerMsg::SmokeCoinTaken { at: r.pos16()? },
             _ => return None,
         };
         Some(msg)

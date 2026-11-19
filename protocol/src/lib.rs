@@ -10,7 +10,7 @@ pub use messages::*;
 /// `ServerMsg::Welcome`). Builds from before the check have no version on
 /// the wire and count as 1.
 // 3: pitch added to MSG_STATE (one byte) and MSG_POSITION, so a 2 cant read a 3's state packets
-pub const PROTOCOL_VERSION: u16 = 4; // protocol version changed from 3 to 4. Added cardboard shit
+pub const PROTOCOL_VERSION: u16 = 5; // 4 added cardboard shit, 5 added smoke break
 
 /// What the server tells a client of another version once it has let it in
 /// far enough to be heard: a chat notice is all an old build can show.
@@ -87,6 +87,7 @@ pub const MSG_START_GAME: u8 = 19; // client -> server: request to start a match
 pub const MODE_GUN_GAME: u8 = 1;
 pub const MODE_TEAM_DEATHMATCH: u8 = 2;
 pub const MODE_SEARCH_AND_DESTROY: u8 = 3;
+pub const MODE_SMOKE_BREAK: u8 = 4;
 
 // Auto-fill bot limits for MSG_START_GAME, shared so the host's lobby console
 // offers exactly what the server accepts
@@ -132,6 +133,21 @@ pub const MSG_BOX_EXIT: u8 = 45; // client -> server, let me out of the box and 
 pub const MSG_BOX_SHOT: u8 = 46; // client -> server, I shot this box (mine from inside, or anyone's), its gone
 
 pub const BOX_ENTER_RANGE: f32 = 2.0; // flat metres, server checks it, client picks a box with it
+
+// smoke break
+pub const MSG_SMOKE_ROUND: u8 = 47; // server -> each player, the round as they see it, see 'SmokeRound'
+pub const MSG_SMOKE_COINS: u8 = 48; // server -> hiders only, every coin still out, hunters never get this
+pub const MSG_SMOKE_SCORES: u8 = 49; // server -> all, everyones points so far
+pub const MSG_SMOKE_VOTE: u8 = 53; // client -> server, stay for another round or not
+pub const MSG_SMOKE_COIN_TAKEN: u8 = 54; // server -> all, someone grabbed a coin here, play the sound
+
+pub const SMOKE_PHASE_BLIND: u8 = 0; // hunters frozen and blind, hiders spread out
+pub const SMOKE_PHASE_RELEASED: u8 = 1; // hunters out, no coins yet
+pub const SMOKE_PHASE_COINS: u8 = 2; // coins out, the real round
+pub const SMOKE_PHASE_VOTE: u8 = 3; // round over, scores up, stay or leave
+
+pub const SMOKE_SIDE_HIDER: u8 = 0;
+pub const SMOKE_SIDE_HUNTER: u8 = 1;
 
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;

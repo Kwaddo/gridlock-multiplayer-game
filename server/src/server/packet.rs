@@ -296,6 +296,8 @@ impl Server {
             ClientMsg::BoxEnter { id } => self.handle_box_enter(src_addr, id),
             ClientMsg::BoxExit => self.boxes.exit(&self.players, src_addr),
             ClientMsg::BoxShot { id } => self.boxes.shot(&self.players, src_addr, id),
+            // the round loop comes next step, till then votes go nowhere
+            ClientMsg::SmokeVote { .. } => {}
 
         }
     }

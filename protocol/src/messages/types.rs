@@ -201,6 +201,59 @@ pub struct SndRound {
     pub phase_timer: f32,
 }
 
+/*
+    smoke break round as one player sees it, 12 bytes
+    sent to each player on its own cause side is theirs, on change and every second
+*/
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SmokeRound {
+    pub round: u16,
+    pub phase: u8, // SMOKE_PHASE_*
+    pub phase_timer: f32, // seconds left in this phase
+    pub coins_left: u16,
+    pub side: u8, // SMOKE_SIDE_*
+    // vote phase only, zeros otherwise
+    pub votes_stay: u8,
+    pub voters: u8,
+}
+
+impl SmokeRound {
+    pub(super) fn write(&self, w: &mut Writer) {
+        w.u16(self.round).u8(self.phase).f32(self.phase_timer).u16(self.coins_left);
+        w.u8(self.side).u8(self.votes_stay).u8(self.voters);
+    }
+
+    pub(super) fn read(r: &mut Reader) -> Option<Self> {
+        Some(SmokeRound {
+            round: r.u16()?,
+            phase: r.u8()?,
+            phase_timer: r.f32()?,
+            coins_left: r.u16()?,
+            side: r.u8()?,
+            votes_stay: r.u8()?,
+            voters: r.u8()?,
+        })
+    }
+}
+
+// one row of the smoke break scoreboard, 9 bytes, points can go below zero from shooting decoys
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SmokeScore {
+    pub id: u32,
+    pub points: i32,
+    pub side: u8,
+}
+
+impl SmokeScore {
+    pub(super) fn write(&self, w: &mut Writer) {
+        w.u32(self.id).u32(self.points as u32).u8(self.side);
+    }
+
+    pub(super) fn read(r: &mut Reader) -> Option<Self> {
+        Some(SmokeScore { id: r.u32()?, points: r.u32()? as i32, side: r.u8()? })
+    }
+}
+
 /// What the host has picked in the lobby console for the next match. The
 /// host sends it as it changes; the server passes it to everyone so the
 /// other players can see what is coming.
