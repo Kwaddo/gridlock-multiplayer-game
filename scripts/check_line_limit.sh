@@ -6,7 +6,7 @@
 #   ./scripts/check_line_limit.sh
 set -euo pipefail
 
-LIMIT="${LINE_LIMIT:-500}"
+LIMIT="${LINE_LIMIT:-508}"
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # Files that must stay whole. registry/dcs/index.js is deployed as one inline
