@@ -127,7 +127,7 @@ impl PlayerSkin {
             PlayerSkin::Land => Some("anim_land"),
             PlayerSkin::DeathFront => Some("anim_death_front"),
             PlayerSkin::DeathBack => Some("anim_death_back"),
-            // no left death clip, the right one covers both sides (ahmed's call)
+            // no left death clip, the right one covers both sides
             PlayerSkin::DeathSide => Some("anim_death_right"),
             PlayerSkin::DeathFrontHeadshot => Some("anim_death_front_headshot"),
             PlayerSkin::DeathBackHeadshot => Some("anim_death_back_headshot"),
