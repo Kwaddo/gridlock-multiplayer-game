@@ -200,6 +200,7 @@ impl PlayingState {
         self.prev_was_reloading = self.weapons.active().is_reloading;
 
         self.update_local_footsteps(delta, config);
+        self.tick_emote(delta);
 
         // your one third person body follows you, after movement so the mirror isnt a frame behind
         self.update_self_avatar(delta);

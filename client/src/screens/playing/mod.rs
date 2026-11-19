@@ -1,6 +1,7 @@
 mod camera;
 mod characters;
 pub mod chat;
+mod emote_timeline;
 mod emote_view;
 mod emote_wheel;
 mod movement;

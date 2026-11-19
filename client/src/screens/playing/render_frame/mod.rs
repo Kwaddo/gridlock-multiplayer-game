@@ -41,7 +41,7 @@ impl PlayingState {
         // the 3D world, then the mirrors on top of it
         self.draw_world(maze, camera.position);
         // third person while emoting, so your own body shows outside mirrors too
-        if self.is_emoting() {
+        if self.shows_own_body() {
             self.draw_self_avatar();
         }
         self.draw_mirrors(&live_mirrors);
@@ -92,7 +92,7 @@ impl PlayingState {
         self.draw_lobby_console(config, player_id);
 
         // Don't draw viewmodel while dead, emoting, or when lobby console is open
-        if !self.is_dead && !self.lobby_console_open && !self.is_emoting() {
+        if !self.is_dead && !self.lobby_console_open && self.emote_view_t() <= 0.0 {
             self.draw_viewmodel();
         }
 
@@ -136,7 +136,7 @@ impl PlayingState {
                 self.current_world,
                 local_team,
                 config,
-                !self.is_emoting(), // third person: a centre crosshair would point nowhere
+                self.emote_view_t() <= 0.0, // out of first person a centre crosshair points nowhere
             );
 
             let dt = get_frame_time();

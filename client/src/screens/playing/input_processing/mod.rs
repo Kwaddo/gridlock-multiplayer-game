@@ -113,6 +113,12 @@ impl PlayingState {
             return None;
         }
 
+        // blending back to first person: hold still so others see the dance finish in place
+        if self.emote_timeline.is_ending() {
+            self.halt_local_input();
+            return None;
+        }
+
         let (mx, my) = mouse_position();
         let mouse_delta = vec2(mx - self.last_mouse_pos.0, my - self.last_mouse_pos.1);
         if self.emote_wheel.update(config.bind_emote.is_down(), mouse_delta, self.yaw) {
@@ -120,12 +126,16 @@ impl PlayingState {
             return None;
         }
 
+        // the gun is put away for the whole emote: no fire, aim, reload, switch or punch
+        if self.is_emoting() {
+            weapon_input_locked = true;
+            self.weapons.active_mut().is_aiming = false;
+        }
+
         self.process_look_and_movement(config, weapon_input_locked);
 
-        // mouse look only orbits the emote camera; any real action ends the emote
-        if self.is_emoting() && self.emote_interrupted(config) {
-            self.emote_wheel.playing = crate::net::protocols::EMOTE_NONE;
-        }
+        // mouse look only orbits the emote camera; moving ends the emote
+        self.interrupt_emote(config);
 
         let delta = raw_delta.min(0.05);
         let vel = self.movement_state.velocity;
