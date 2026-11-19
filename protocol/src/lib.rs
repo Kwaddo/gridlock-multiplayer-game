@@ -10,7 +10,11 @@ pub use messages::*;
 /// `ServerMsg::Welcome`). Builds from before the check have no version on
 /// the wire and count as 1.
 // 3: pitch added to MSG_STATE (one byte) and MSG_POSITION, so a 2 cant read a 3's state packets
-pub const PROTOCOL_VERSION: u16 = 3;
+// 4: emote byte added to MSG_STATE and MSG_POSITION, so a 3 cant read a 4's packets
+pub const PROTOCOL_VERSION: u16 = 4;
+
+pub const EMOTE_NONE: u8 = 0; // emote ids: 0 none, 1..=EMOTE_COUNT index PlayerSkin::EMOTES (id-1)
+pub const EMOTE_COUNT: u8 = 5;
 
 /// What the server tells a client of another version once it has let it in
 /// far enough to be heard: a chat notice is all an old build can show.

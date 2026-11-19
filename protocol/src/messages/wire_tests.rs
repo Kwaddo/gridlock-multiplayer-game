@@ -15,6 +15,7 @@ fn state(id: u32, position: Vec3, yaw: f32) -> PlayerState {
         health: 125,
         alive: true,
         freeze_secs: 0,
+        emote: 0,
     }
 }
 
@@ -111,7 +112,7 @@ fn yaw_comes_back_within_a_hundredth_of_a_degree() {
 }
 
 #[test]
-fn state_entries_are_19_bytes() {
+fn state_entries_are_20_bytes() {
     let one = ServerMsg::State { world: 1, players: vec![state(1, (1.0, 0.0, 1.0), 0.3)] };
     let sixteen = ServerMsg::State {
         world: 1,
@@ -120,7 +121,7 @@ fn state_entries_are_19_bytes() {
     let header = 1 + 1 + 2;
     assert_eq!(one.encode().len(), header + PlayerState::WIRE_BYTES);
     assert_eq!(sixteen.encode().len(), header + 16 * PlayerState::WIRE_BYTES);
-    assert_eq!(PlayerState::WIRE_BYTES, 19); // 18 before pitch was added
+    assert_eq!(PlayerState::WIRE_BYTES, 20);
     // health saturates in u16 on the server side; flags and freeze pass through
     let got = decode_state(&sixteen);
     assert_eq!(got.len(), 16);

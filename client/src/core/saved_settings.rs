@@ -104,6 +104,7 @@ bindings! {
     "prone" => bind_prone,
     "fullscreen" => bind_fullscreen,
     "chat" => bind_chat,
+    "emote" => bind_emote,
     "weapon1" => bind_weapon1,
     "weapon2" => bind_weapon2,
     "weapon3" => bind_weapon3,

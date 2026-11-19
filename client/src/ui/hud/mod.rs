@@ -45,6 +45,7 @@ pub fn draw_hud(
     current_world: WorldId,
     local_team: u8,
     config: &GameConfig,
+    show_crosshair: bool,
 ) {
     let cy = screen_height() / 2.0;
 
@@ -84,15 +85,17 @@ pub fn draw_hud(
         }
     }
 
-    crosshair::draw_crosshair_and_combat_feedback(
-        cx,
-        cy,
-        weapons,
-        hit_marker_timer,
-        hit_marker_headshot,
-        damage_numbers,
-        hit_marker_pellet_mask,
-    );
+    if show_crosshair {
+        crosshair::draw_crosshair_and_combat_feedback(
+            cx,
+            cy,
+            weapons,
+            hit_marker_timer,
+            hit_marker_headshot,
+            damage_numbers,
+            hit_marker_pellet_mask,
+        );
+    }
 
     status::draw_status_panels(
         movement_state,

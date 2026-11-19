@@ -2,9 +2,9 @@
 
 use crate::codec::{dequantize_pitch, dequantize_yaw, quantize_pitch, quantize_yaw, Reader, Vec3, Writer};
 
-/// One entry of `MSG_STATE`: what changes from tick to tick. 19 bytes on the
+/// One entry of `MSG_STATE`: what changes from tick to tick. 20 bytes on the
 /// wire: `[id:4][x,y,z: fixed-point i16 each][yaw:u16][pitch:i8 degrees][state_flags:1]
-/// [event_flags:1][health:u16][alive:1][freeze_secs:1]`. Position, yaw and pitch
+/// [event_flags:1][health:u16][alive:1][freeze_secs:1][emote:1]`. Position, yaw and pitch
 /// come back quantized (see `codec::quantize_coord`, `codec::quantize_yaw`, `codec::quantize_pitch`).
 /// What rarely changes travels in `PlayerInfo` instead.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -20,16 +20,18 @@ pub struct PlayerState {
     pub alive: bool,
     // remaining post-teleport freeze seconds (0 = none)
     pub freeze_secs: u8,
+    // emote being played (0 = none)
+    pub emote: u8,
 }
 
 impl PlayerState {
-    pub const WIRE_BYTES: usize = 19;
+    pub const WIRE_BYTES: usize = 20;
 
     pub(super) fn write(&self, w: &mut Writer) {
         w.u32(self.id).pos16(self.position).u16(quantize_yaw(self.yaw));
         w.u8(quantize_pitch(self.pitch));
         w.u8(self.state_flags).u8(self.event_flags).u16(self.health);
-        w.bool(self.alive).u8(self.freeze_secs);
+        w.bool(self.alive).u8(self.freeze_secs).u8(self.emote);
     }
 
     pub(super) fn read(r: &mut Reader) -> Option<Self> {
@@ -43,6 +45,7 @@ impl PlayerState {
             health: r.u16()?,
             alive: r.bool()?,
             freeze_secs: r.u8()?,
+            emote: r.u8()?,
         })
     }
 }

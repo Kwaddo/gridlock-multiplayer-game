@@ -187,6 +187,8 @@ pub struct PlayingState {
     pub announcements: Vec<(String, f32)>,
     /// Text chat and join/leave notices.
     pub chat: super::chat::Chat,
+    /// Hold-to-open emote picker and the emote being played.
+    pub emote_wheel: super::emote_wheel::EmoteWheel,
     /// Host asked (pause menu) to end the running match for everyone.
     pub pending_end_match: bool,
     pub lobby_console_message: Option<String>,
@@ -386,6 +388,7 @@ impl PlayingState {
             range_phase: 1,
             announcements: Vec::with_capacity(Self::INIT_ANNOUNCEMENTS),
             chat: Default::default(),
+            emote_wheel: Default::default(),
             pending_end_match: false,
             connected_players: Vec::new(),
             hands_playback_mode: HandsPlaybackMode::IdleLoop,

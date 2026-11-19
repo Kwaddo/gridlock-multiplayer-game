@@ -6,6 +6,7 @@ use super::PlayingState;
 
 impl PlayingState {
     pub fn clear_input(&mut self) {
+        self.emote_wheel.close();
         self.move_dir = Vec3::ZERO;
         self.movement_state.is_sprinting = false;
         self.movement_state.is_slow_walking = false;

@@ -52,7 +52,7 @@ impl Server {
             ClientMsg::Disconnect => {
                 handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr)
             }
-            ClientMsg::Position { position, yaw, state_flags, event_flags, pitch } => {
+            ClientMsg::Position { position, yaw, state_flags, event_flags, pitch, emote } => {
                 handlers::handle_position(
                     &self.outbox,
                     &mut self.players,
@@ -62,6 +62,7 @@ impl Server {
                     state_flags,
                     event_flags,
                     pitch,
+                    emote,
                 );
             },
 
@@ -191,6 +192,7 @@ impl Server {
                         position: bot_cfg.position,
                         yaw: std::f32::consts::PI,
                         pitch: 0.0,
+                        emote: 0,
                         health: hp,
                         max_health: hp,
                         is_alive: true,

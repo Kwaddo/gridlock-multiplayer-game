@@ -105,6 +105,7 @@ impl BotManager {
             position: spawn_pos,
             yaw: 0.0,
             pitch: 0.0,
+            emote: 0,
             health: 125,
             max_health: 125,
             is_alive: true,

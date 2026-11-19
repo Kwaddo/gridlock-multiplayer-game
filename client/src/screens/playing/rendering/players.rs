@@ -137,6 +137,11 @@ impl PlayingState {
             );
         }
 
+        // dancing needs both hands, so no gun (and no muzzle) while emoting
+        if p.skin_type.is_emote() {
+            return None;
+        }
+
         // === weapon rendering (runs regardless of body type) ===
         if hand_world_pos.is_none() {
             // no joint calculated earlier; use generic shoulder/hand offset

@@ -108,11 +108,24 @@ impl PlayingState {
             {
                 self.pending_respawn = true;
             }
+            self.emote_wheel.reset();
             self.clear_input();
             return None;
         }
 
+        let (mx, my) = mouse_position();
+        let mouse_delta = vec2(mx - self.last_mouse_pos.0, my - self.last_mouse_pos.1);
+        if self.emote_wheel.update(config.bind_emote.is_down(), mouse_delta, self.yaw) {
+            self.halt_local_input(); // resyncs last_mouse_pos, so no camera jump on close
+            return None;
+        }
+
         self.process_look_and_movement(config, weapon_input_locked);
+
+        // mouse look only orbits the emote camera; any real action ends the emote
+        if self.is_emoting() && self.emote_interrupted(config) {
+            self.emote_wheel.playing = crate::net::protocols::EMOTE_NONE;
+        }
 
         let delta = raw_delta.min(0.05);
         let vel = self.movement_state.velocity;

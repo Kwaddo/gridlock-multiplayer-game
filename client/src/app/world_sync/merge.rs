@@ -42,7 +42,10 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
             let dx = x - current.x;
             let dz = z - current.z;
             let pos_changed = dx * dx + dz * dz > 1.0e-4;
+            let emote_changed = incoming.emote != current.emote;
+            current.emote = incoming.emote;
             let state_changed = flags.sprinting != current.is_sprinting
+                || emote_changed
                 || flags.ads != current.is_ads
                 || flags.crouching != current.is_crouching
                 || flags.prone != current.is_prone
@@ -70,7 +73,7 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
                 if candidate_dir != MoveDir::None {
                     current.last_move_dir = candidate_dir;
                 }
-                current.skin_type = AnimState::skin_from_state(anim_state, None);
+                current.skin_type = AnimState::skin_from_state(anim_state, PlayerSkin::emote(current.emote));
                 current.last_move_time = macroquad::time::get_time();
             }
             // When position is unchanged we do nothing — the per-frame
@@ -119,7 +122,7 @@ pub(super) fn merge_players(playing_state: &mut PlayingState, snapshot: StateSna
                 joined.is_sliding,
                 joined.evt_jump_start,
             );
-            joined.skin_type = AnimState::skin_from_state(anim_state, None);
+            joined.skin_type = AnimState::skin_from_state(anim_state, PlayerSkin::emote(joined.emote));
             joined.last_move_dir = anim_state.move_dir;
             joined.apply_snapshot(joined.x, joined.y, joined.z, joined.yaw);
             playing_state.player_index.insert(joined.id, playing_state.other_players.len());
@@ -190,6 +193,7 @@ fn new_player(e: &PlayerState, flags: &Flags, world: WorldId, info: Option<&Play
     (p.x, p.y, p.z) = e.position;
     p.yaw = e.yaw;
     p.pitch = e.pitch;
+    p.emote = e.emote;
     p.render_pitch = e.pitch;
     p.is_sprinting = flags.sprinting;
     p.is_crouching = flags.crouching;

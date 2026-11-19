@@ -225,7 +225,8 @@ impl PlayerAnim {
         self.layer_upper(wants, fired, dt, models, model, pose);
 
         // look up/down, not while dying or lying prone (bending a body on the floor looks broken)
-        if !is_one_shot(skin) && !is_prone(skin) {
+        // emotes skip the bend too, it would break the dance pose
+        if !is_one_shot(skin) && !is_prone(skin) && !skin.is_emote() {
             model.bend_upper_body(pose, pitch);
         }
 

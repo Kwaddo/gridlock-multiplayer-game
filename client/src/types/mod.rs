@@ -7,5 +7,6 @@ pub mod mesh_split;
 pub mod orientation;
 pub mod player;
 pub mod player_anim;
+pub mod player_skin;
 pub mod world;
 pub mod animation_state;

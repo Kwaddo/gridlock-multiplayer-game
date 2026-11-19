@@ -89,6 +89,7 @@ mod tests {
             health: 90,
             alive,
             freeze_secs: 3,
+            emote: 0,
         }
     }
 
