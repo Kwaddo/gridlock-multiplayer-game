@@ -124,7 +124,9 @@ impl PlayingState {
             // gets hit (no wall damage, no hole, no light broken).
             let mirror_dist =
                 crate::world::mirror::nearest_mirror_hit(&self.mirrors, eye, fwd, range);
-            let world_range = mirror_dist.unwrap_or(range);
+            // boxes too, nothing behind one gets hit
+            let box_hit = super::super::cardboard::ray_test_boxes(&box_targets, eye, fwd, mirror_dist.unwrap_or(range));
+            let world_range = box_hit.map(|(_, d)| d).or(mirror_dist).unwrap_or(range);
             let world_dist = if self.current_world == WorldId::Maze {
                 // gather all candidate hits
                 let wall_hit = maze
@@ -206,25 +208,22 @@ impl PlayingState {
             } else {
                 None
             };
-            // nothing in the world was closer, but a mirror was: the bullet
-            // stops at the glass. No normal = no bullet hole.
-            let closest_blocking_dist = match (world_dist, mirror_dist) {
-                (Some(d), _) => Some(d),
-                (None, Some(md)) => {
+            // nothing in the world was closer, so a box or a mirror stops it.
+            // No normal = no bullet hole.
+            let closest_blocking_dist = match (world_dist, box_hit, mirror_dist) {
+                (Some(d), _, _) => Some(d),
+                // a box stops the bullet and breaks, no bullet hole on it
+                (None, Some((id, d)), _) => {
+                    surface_hit = true;
+                    boxes_hit.push(id);
+                    Some(d)
+                }
+                (None, None, Some(md)) => {
                     surface_hit = true;
                     Some(md)
                 }
-                (None, None) => None,
+                (None, None, None) => None,
             };
-            // a box stops the bullet and breaks, no bullet hole on it
-            let box_hit = super::super::cardboard::ray_test_boxes(&box_targets, eye, fwd, world_range)
-                .filter(|(_, d)| closest_blocking_dist.map_or(true, |w| *d < w));
-            if let Some((id, _)) = box_hit {
-                surface_hit = true;
-                surface_normal = None;
-                boxes_hit.push(id);
-            }
-            let closest_blocking_dist = box_hit.map(|(_, d)| d).or(closest_blocking_dist);
 
             let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
             let tracer_end = if let Some(dist) = closest_blocking_dist {
@@ -296,7 +295,7 @@ impl PlayingState {
 
             // check other players (client-side prediction / hit registration)
             for (idx, other) in self.other_players.iter().enumerate() {
-                if !other.is_alive() || box_targets_carrier(&self.boxes, other.id) {
+                if !other.is_alive() || box_targets_carrier(&self.cardboard.boxes, other.id) {
                     continue;
                 }
                 if let Some((zone, dist)) = other.ray_test(eye, fwd, range) {

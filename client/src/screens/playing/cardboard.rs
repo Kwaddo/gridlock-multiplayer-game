@@ -5,11 +5,12 @@ use std::collections::HashMap;
 
 use crate::core::GameConfig;
 use crate::net::protocols::{CardboardBox, BOX_ENTER_RANGE};
+use crate::physics::collision::PLAYER_RADIUS;
 use crate::types::animation_state::MoveDir;
 use crate::types::maze::Maze;
 use crate::types::world::WorldId;
 use crate::world::lobby::ray_test_lobby;
-use crate::world::render::cardboard_box::{BOX_D, BOX_H, BOX_W};
+use crate::world::render::cardboard_box::{BoxLook, BOX_D, BOX_H, BOX_W};
 
 use super::PlayingState;
 
@@ -38,6 +39,26 @@ struct BurstPiece {
     size: Vec3,
     color: Color,
     floor: f32,
+}
+
+/// Everything boxes need kept between frames.
+#[derive(Default)]
+pub struct BoxState {
+    // the server's last list, and which world it's for
+    pub boxes: Vec<CardboardBox>,
+    pub world: WorldId,
+    pub in_box: Option<u16>,
+    pub pending_enter: Option<u16>,
+    pub pending_exit: bool,
+    pub tween: Option<BoxTween>,
+    pub feel: HashMap<u16, BoxFeel>,
+    pub cam_blend: f32,
+    pub bursts: Vec<BoxBurst>,
+    pub broken: Vec<(u16, f64)>,
+    pub pending_shots: Vec<u16>,
+    pub look: BoxLook,
+    // the box we just got out of, not solid until we've walked off it
+    pub ghost: Option<u16>,
 }
 
 /// Where every box we could shoot is right now: (id, bottom centre, yaw).
@@ -80,48 +101,53 @@ fn ease_out(t: f32) -> f32 {
 impl PlayingState {
     // the server decides, we find out from the next box list
     pub(super) fn process_box_key(&mut self) {
-        if !is_key_pressed(KeyCode::E) || self.boxes_world != self.current_world {
+        if is_key_pressed(KeyCode::F6) {
+            self.cardboard.look = self.cardboard.look.next();
+            self.lobby_console_message = Some(format!("Box look: {}", self.cardboard.look.name()));
+            self.lobby_console_message_timer = 2.0;
+        }
+        if !is_key_pressed(KeyCode::E) || self.cardboard.world != self.current_world {
             return;
         }
-        if self.box_tween.is_some() {
+        if self.cardboard.tween.is_some() {
             return;
         }
-        if let Some(id) = self.in_box {
-            self.pending_box_exit = true;
+        if let Some(id) = self.cardboard.in_box {
+            self.cardboard.pending_exit = true;
             let here = self.position;
-            self.box_tween = Some(BoxTween { id, from: here, to: here, entering: false, age: 0.0 });
+            self.cardboard.tween = Some(BoxTween { id, from: here, to: here, entering: false, age: 0.0 });
             return;
         }
         if let Some(b) = self.box_in_reach() {
             let (id, to) = (b.id, vec3(b.position.0, self.position.y, b.position.2));
-            self.pending_box_enter = Some(id);
-            self.box_tween = Some(BoxTween { id, from: self.position, to, entering: true, age: 0.0 });
+            self.cardboard.pending_enter = Some(id);
+            self.cardboard.tween = Some(BoxTween { id, from: self.position, to, entering: true, age: 0.0 });
         }
     }
 
     fn box_in_reach(&self) -> Option<&CardboardBox> {
-        if self.boxes_world != self.current_world {
+        if self.cardboard.world != self.current_world {
             return None;
         }
         let flat_dist = |p: (f32, f32, f32)| vec2(p.0 - self.position.x, p.2 - self.position.z).length();
-        self.boxes
+        self.cardboard.boxes
             .iter()
             .filter(|b| b.carrier == 0 && flat_dist(b.position) <= BOX_ENTER_RANGE)
             .min_by(|a, b| flat_dist(a.position).total_cmp(&flat_dist(b.position)))
     }
 
     pub(super) fn is_boxed(&self, player_id: u32) -> bool {
-        self.boxes_world == self.current_world && self.boxes.iter().any(|b| b.carrier == player_id)
+        self.cardboard.world == self.current_world && self.cardboard.boxes.iter().any(|b| b.carrier == player_id)
     }
 
     // a carried box sits on its carrier, the server's copy only catches up every few seconds
     pub(super) fn box_pose(&self, b: &CardboardBox) -> (Vec3, f32) {
-        if let Some(tw) = self.box_tween.as_ref().filter(|tw| tw.id == b.id && !tw.entering) {
+        if let Some(tw) = self.cardboard.tween.as_ref().filter(|tw| tw.id == b.id && !tw.entering) {
             let t = ease_out((tw.age / TWEEN_TIME).min(1.0));
             let arc = (t * std::f32::consts::PI).sin() * TWEEN_HEIGHT * 0.5;
             return (tw.from + vec3(0.0, arc, 0.0), self.yaw);
         }
-        if self.in_box == Some(b.id) {
+        if self.cardboard.in_box == Some(b.id) {
             return (self.position, self.yaw);
         }
         if b.carrier != 0 {
@@ -135,7 +161,7 @@ impl PlayingState {
     /// `box_pose` plus lift, bob and roll, and the floor under it for the shadow.
     pub(super) fn box_draw(&self, b: &CardboardBox) -> (Vec3, f32, f32, Vec3) {
         let (at, yaw) = self.box_pose(b);
-        let (lift, clock) = self.box_feel.get(&b.id).map_or((0.0, 0.0), |f| (f.lift, f.clock));
+        let (lift, clock) = self.cardboard.feel.get(&b.id).map_or((0.0, 0.0), |f| (f.lift, f.clock));
         let k = lift / LIFT;
         let bob = (clock * 7.0).sin().abs() * 0.015 * k;
         let roll = (clock * 7.0).sin() * 0.02 * k;
@@ -144,7 +170,7 @@ impl PlayingState {
     }
 
     fn box_floor_y(&self, b: &CardboardBox) -> f32 {
-        if self.in_box == Some(b.id) {
+        if self.cardboard.in_box == Some(b.id) {
             return self.position.y;
         }
         let carrier = self.other_players.iter().find(|p| b.carrier != 0 && p.id == b.carrier);
@@ -152,7 +178,7 @@ impl PlayingState {
     }
 
     fn box_moving(&self, b: &CardboardBox) -> bool {
-        if self.in_box == Some(b.id) {
+        if self.cardboard.in_box == Some(b.id) {
             return vec2(self.movement_state.velocity.x, self.movement_state.velocity.z).length() > 0.3;
         }
         b.carrier != 0 && self.other_players.iter().any(|p| p.id == b.carrier && p.last_move_dir != MoveDir::None)
@@ -161,10 +187,11 @@ impl PlayingState {
     /// The server's new list: drop boxes we already broke, burst any that vanished, see if we're in one.
     pub fn take_box_list(&mut self, world: WorldId, mut boxes: Vec<CardboardBox>, player_id: u32) {
         let now = get_time();
-        self.broken_boxes.retain(|(_, at)| now - at < BROKEN_MEMORY);
-        boxes.retain(|b| !self.broken_boxes.iter().any(|(id, _)| *id == b.id));
-        if world == self.boxes_world {
+        self.cardboard.broken.retain(|(_, at)| now - at < BROKEN_MEMORY);
+        boxes.retain(|b| !self.cardboard.broken.iter().any(|(id, _)| *id == b.id));
+        if world == self.cardboard.world {
             let gone: Vec<Vec3> = self
+                .cardboard
                 .boxes
                 .iter()
                 .filter(|old| !boxes.iter().any(|b| b.id == old.id))
@@ -174,18 +201,22 @@ impl PlayingState {
                 self.spawn_box_burst(at);
             }
         }
-        self.in_box = boxes.iter().find(|b| b.carrier == player_id).map(|b| b.id);
-        self.boxes_world = world;
-        self.boxes = boxes;
+        let was_in = self.cardboard.in_box;
+        self.cardboard.in_box = boxes.iter().find(|b| b.carrier == player_id).map(|b| b.id);
+        if self.cardboard.in_box.is_none() && was_in.is_some() {
+            self.cardboard.ghost = was_in;
+        }
+        self.cardboard.world = world;
+        self.cardboard.boxes = boxes;
     }
 
     pub(super) fn box_targets(&self) -> BoxTargets {
-        if self.boxes_world != self.current_world {
+        if self.cardboard.world != self.current_world {
             return Vec::new();
         }
-        self.boxes
+        self.cardboard.boxes
             .iter()
-            .filter(|b| self.in_box != Some(b.id))
+            .filter(|b| self.cardboard.in_box != Some(b.id))
             .map(|b| {
                 let (at, yaw) = self.box_pose(b);
                 (b.id, at, yaw)
@@ -193,19 +224,54 @@ impl PlayingState {
             .collect()
     }
 
+    /// Every box is solid, empty or not, so bumping into one gives nothing away.
+    pub(super) fn resolve_box_collision(&mut self) {
+        let skip = self.cardboard.tween.as_ref().map(|tw| tw.id);
+        let (hw, hd) = (BOX_W / 2.0 + PLAYER_RADIUS, BOX_D / 2.0 + PLAYER_RADIUS);
+        let mut still_in_ghost = false;
+        for (id, at, yaw) in self.box_targets() {
+            if Some(id) == skip {
+                continue;
+            }
+            let turn = Quat::from_rotation_y(yaw);
+            let local = turn * (self.position - at);
+            if local.x.abs() >= hw || local.z.abs() >= hd {
+                continue;
+            }
+            // the box we just got out of, you walk off it freely
+            if self.cardboard.ghost == Some(id) {
+                still_in_ghost = true;
+                continue;
+            }
+            let (px, pz) = (hw - local.x.abs(), hd - local.z.abs());
+            let side = if px < pz { vec3(local.x.signum(), 0.0, 0.0) } else { vec3(0.0, 0.0, local.z.signum()) };
+            let normal = turn.inverse() * side;
+            self.position += normal * px.min(pz);
+            let v = &mut self.movement_state.velocity;
+            let into = v.x * normal.x + v.z * normal.z;
+            if into < 0.0 {
+                v.x -= into * normal.x;
+                v.z -= into * normal.z;
+            }
+        }
+        if !still_in_ghost {
+            self.cardboard.ghost = None;
+        }
+    }
+
     /// Break it here right away and tell the server.
     pub(super) fn break_box(&mut self, id: u16) {
-        let Some(i) = self.boxes.iter().position(|b| b.id == id) else {
+        let Some(i) = self.cardboard.boxes.iter().position(|b| b.id == id) else {
             return;
         };
-        let at = self.box_pose(&self.boxes[i]).0;
-        self.boxes.remove(i);
-        if self.in_box == Some(id) {
-            self.in_box = None;
-            self.box_tween = None;
+        let at = self.box_pose(&self.cardboard.boxes[i]).0;
+        self.cardboard.boxes.remove(i);
+        if self.cardboard.in_box == Some(id) {
+            self.cardboard.in_box = None;
+            self.cardboard.tween = None;
         }
-        self.broken_boxes.push((id, get_time()));
-        self.pending_box_shots.push(id);
+        self.cardboard.broken.push((id, get_time()));
+        self.cardboard.pending_shots.push(id);
         self.spawn_box_burst(at);
     }
 
@@ -224,11 +290,11 @@ impl PlayingState {
                 }
             })
             .collect();
-        self.box_bursts.push(BoxBurst { pieces, age: 0.0 });
+        self.cardboard.bursts.push(BoxBurst { pieces, age: 0.0 });
     }
 
     pub(super) fn draw_box_bursts(&self) {
-        for burst in &self.box_bursts {
+        for burst in &self.cardboard.bursts {
             // shrink away over the last 0.3 s
             let size = ((BURST_LIFE - burst.age) / 0.3).clamp(0.0, 1.0);
             for p in &burst.pieces {
@@ -238,7 +304,7 @@ impl PlayingState {
     }
 
     pub(super) fn update_box_feel(&mut self, delta: f32) {
-        for burst in &mut self.box_bursts {
+        for burst in &mut self.cardboard.bursts {
             burst.age += delta;
             for p in &mut burst.pieces {
                 p.vel.y -= 9.8 * delta;
@@ -249,18 +315,18 @@ impl PlayingState {
                 }
             }
         }
-        self.box_bursts.retain(|b| b.age < BURST_LIFE);
+        self.cardboard.bursts.retain(|b| b.age < BURST_LIFE);
 
-        let moving: HashMap<u16, bool> = self.boxes.iter().map(|b| (b.id, self.box_moving(b))).collect();
-        self.box_feel.retain(|id, _| moving.contains_key(id));
+        let moving: HashMap<u16, bool> = self.cardboard.boxes.iter().map(|b| (b.id, self.box_moving(b))).collect();
+        self.cardboard.feel.retain(|id, _| moving.contains_key(id));
         for (id, is_moving) in moving {
-            let f = self.box_feel.entry(id).or_default();
+            let f = self.cardboard.feel.entry(id).or_default();
             let (target, time) = if is_moving { (LIFT, 0.12) } else { (0.0, 0.05) };
             f.lift += (target - f.lift) * (delta / time).min(1.0);
             f.clock = if is_moving { f.clock + delta } else { 0.0 };
         }
 
-        if let Some(tw) = &mut self.box_tween {
+        if let Some(tw) = &mut self.cardboard.tween {
             tw.age += delta;
             if tw.entering {
                 let t = ease_out((tw.age / TWEEN_TIME).min(1.0));
@@ -268,21 +334,21 @@ impl PlayingState {
                 self.position.x = at.x;
                 self.position.z = at.z;
             }
-            let answered = if tw.entering { self.in_box == Some(tw.id) } else { self.in_box.is_none() };
+            let answered = if tw.entering { self.cardboard.in_box == Some(tw.id) } else { self.cardboard.in_box.is_none() };
             if (tw.age >= TWEEN_TIME && answered) || tw.age >= TWEEN_TIMEOUT {
-                self.box_tween = None;
+                self.cardboard.tween = None;
             }
         }
 
-        self.box_cam_blend = if self.in_box.is_some() { (self.box_cam_blend + delta / TWEEN_TIME).min(1.0) } else { 0.0 };
+        self.cardboard.cam_blend = if self.cardboard.in_box.is_some() { (self.cardboard.cam_blend + delta / TWEEN_TIME).min(1.0) } else { 0.0 };
     }
 
     pub(super) fn box_eye_slot(&self, config: &GameConfig) -> bool {
-        self.in_box.is_some() && !self.chat.is_open() && config.bind_aim.is_down()
+        self.cardboard.in_box.is_some() && !self.chat.is_open() && config.bind_aim.is_down()
     }
 
     pub(super) fn box_camera(&self, config: &GameConfig, maze: Option<&Maze>) -> Option<Camera3D> {
-        self.in_box?;
+        self.cardboard.in_box?;
         let forward = vec3(self.yaw.cos() * self.pitch.cos(), self.pitch.sin(), self.yaw.sin() * self.pitch.cos());
         let (eye, target) = if self.box_eye_slot(config) {
             let eye = self.position + vec3(0.0, SLIT_EYE, 0.0);
@@ -293,7 +359,7 @@ impl PlayingState {
             eye.y = eye.y.max(self.position.y + 0.3);
             // swing out from where your head was
             let head = self.position + vec3(0.0, self.movement_state.height, 0.0);
-            let t = ease_out(self.box_cam_blend);
+            let t = ease_out(self.cardboard.cam_blend);
             (head.lerp(eye, t), (head + forward).lerp(pivot + forward, t))
         };
         Some(Camera3D {
@@ -323,11 +389,11 @@ impl PlayingState {
     }
 
     pub(super) fn lock_box_movement(&mut self) {
-        if self.box_tween.is_some() {
+        if self.cardboard.tween.is_some() {
             self.move_dir = Vec3::ZERO;
             self.movement_state.velocity = Vec3::ZERO;
         }
-        if self.in_box.is_none() && self.box_tween.is_none() {
+        if self.cardboard.in_box.is_none() && self.cardboard.tween.is_none() {
             return;
         }
         let forward = vec3(self.yaw.cos(), 0.0, self.yaw.sin());
@@ -356,10 +422,10 @@ pub(super) fn draw_box_slit() {
 impl PlayingState {
     pub(super) fn draw_box_prompt(&self) {
         use crate::ui::fonts::{measure_game_text, text_params};
-        if self.box_tween.is_some() {
+        if self.cardboard.tween.is_some() {
             return;
         }
-        let text = if self.in_box.is_some() {
+        let text = if self.cardboard.in_box.is_some() {
             "[E]  GET OUT"
         } else if self.box_in_reach().is_some() {
             "[E]  HIDE"

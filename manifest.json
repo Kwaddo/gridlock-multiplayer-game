@@ -1,5 +1,7 @@
 {
   "global": {
+    "cardboard_box_lowpoly": "assets/models/props/cardboard_box_lowpoly.glb",
+    "cardboard_box_old": "assets/models/props/cardboard_box_old.glb",
     "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
     "fp_hands_pistol": "assets/models/hand/fps_pistol_animated.glb",
     "fp_hands_smg": "assets/models/hand/fps_animated_smg.glb",

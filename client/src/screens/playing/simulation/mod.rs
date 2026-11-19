@@ -193,6 +193,7 @@ impl PlayingState {
             self.movement_state.height,
             &self.mirrors,
         );
+        self.resolve_box_collision();
 
         if !was_grounded && self.movement_state.is_grounded {
             self.just_landed = true;

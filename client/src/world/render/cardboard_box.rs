@@ -37,13 +37,53 @@ fn shadow_texture() -> Texture2D {
     tex
 }
 
+/// Which box gets drawn. The models are made the same size as the code box (scripts/box_to_glb.py),
+/// so everything else (hitbox, shadow, camera) stays the same whichever one it is.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoxLook {
+    #[default]
+    Code,
+    LowPoly,
+    Old,
+}
+
+impl BoxLook {
+    pub fn model_key(self) -> Option<&'static str> {
+        match self {
+            BoxLook::Code => None,
+            BoxLook::LowPoly => Some("cardboard_box_lowpoly"),
+            BoxLook::Old => Some("cardboard_box_old"),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            BoxLook::Code => BoxLook::LowPoly,
+            BoxLook::LowPoly => BoxLook::Old,
+            BoxLook::Old => BoxLook::Code,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BoxLook::Code => "code-built",
+            BoxLook::LowPoly => "LowPoly Cardboard Box",
+            BoxLook::Old => "Old Cardboard Box",
+        }
+    }
+}
+
 /// Draw one box with its bottom at `position`, turned to `yaw`, nose tipped up/down by `rock`.
-pub fn draw_cardboard_box(position: Vec3, yaw: f32, rock: f32) {
+/// `model` is the loaded model for the current look; `None` draws the code-built box.
+pub fn draw_cardboard_box(position: Vec3, yaw: f32, rock: f32, model: Option<&[Mesh]>) {
     let gl = unsafe { get_internal_gl() };
     gl.quad_gl.push_model_matrix(
         Mat4::from_translation(position) * Mat4::from_rotation_y(-yaw) * Mat4::from_rotation_z(rock),
     );
-    BOX_MESH.with(draw_mesh);
+    match model {
+        Some(meshes) => meshes.iter().for_each(draw_mesh),
+        None => BOX_MESH.with(draw_mesh),
+    }
     gl.quad_gl.pop_model_matrix();
 }
 

@@ -43,14 +43,15 @@ impl PlayingState {
         }
 
         // cardboard boxes, only if the list is for this world (an old one can show up mid-teleport)
-        if self.boxes_world == self.current_world {
-            for b in &self.boxes {
+        if self.cardboard.world == self.current_world {
+            for b in &self.cardboard.boxes {
                 let (at, yaw, roll, floor) = self.box_draw(b);
                 // a camera this close is inside our own box
-                if self.in_box == Some(b.id) && (eye - at).length() < 0.9 {
+                if self.cardboard.in_box == Some(b.id) && (eye - at).length() < 0.9 {
                     continue;
                 }
-                crate::world::render::cardboard_box::draw_cardboard_box(at, yaw, roll);
+                let model = self.cardboard.look.model_key().and_then(|k| self.models.get(k)).map(|m| m.as_slice());
+                crate::world::render::cardboard_box::draw_cardboard_box(at, yaw, roll, model);
                 crate::world::render::cardboard_box::draw_box_shadow(floor, yaw, at.y - floor.y);
             }
         }

@@ -32,13 +32,13 @@ impl PlayingState {
                 s.send(&ClientMsg::EndMatch.encode());
             }
 
-            if let Some(id) = self.pending_box_enter.take() {
+            if let Some(id) = self.cardboard.pending_enter.take() {
                 s.send(&ClientMsg::BoxEnter { id }.encode());
             }
-            if std::mem::take(&mut self.pending_box_exit) {
+            if std::mem::take(&mut self.cardboard.pending_exit) {
                 s.send(&ClientMsg::BoxExit.encode());
             }
-            for id in std::mem::take(&mut self.pending_box_shots) {
+            for id in std::mem::take(&mut self.cardboard.pending_shots) {
                 s.send(&ClientMsg::BoxShot { id }.encode());
             }
 

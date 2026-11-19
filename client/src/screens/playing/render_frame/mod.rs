@@ -91,7 +91,7 @@ impl PlayingState {
         self.draw_lobby_console(config, player_id);
 
         // Don't draw viewmodel while dead or when lobby console is open
-        if !self.is_dead && !self.lobby_console_open && self.in_box.is_none() {
+        if !self.is_dead && !self.lobby_console_open && self.cardboard.in_box.is_none() {
             self.draw_viewmodel();
         }
         if self.box_eye_slot(config) {

@@ -112,10 +112,10 @@ impl PlayingState {
             return None;
         }
 
-        if let (Some(id), true) = (self.in_box, config.bind_fire.is_pressed()) {
+        if let (Some(id), true) = (self.cardboard.in_box, config.bind_fire.is_pressed()) {
             self.break_box(id);
         }
-        if self.in_box.is_some() || self.box_tween.is_some() {
+        if self.cardboard.in_box.is_some() || self.cardboard.tween.is_some() {
             weapon_input_locked = true;
         }
         self.process_look_and_movement(config, weapon_input_locked);

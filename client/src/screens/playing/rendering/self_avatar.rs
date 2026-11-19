@@ -40,7 +40,7 @@ impl PlayingState {
     // before this it built a brand new throwaway body every frame, so its animation clock reset every frame
     // only the mirror pass draws it, in first person you never see your own body
     pub(crate) fn draw_self_avatar(&self) {
-        if self.is_dead || self.in_box.is_some() {
+        if self.is_dead || self.cardboard.in_box.is_some() {
             return; // the death camera draws your corpse instead
         }
         let muzzle = self.draw_player_model(&self.self_body);
