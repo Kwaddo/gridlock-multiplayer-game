@@ -223,11 +223,12 @@ impl PlayingState {
             if due || event_flags != 0 || state_flags != self.last_state_flags_sent {
                 let msg = ClientMsg::Position {
                     position: (self.position.x, self.position.y, self.position.z),
-                    yaw: self.yaw,
+                    yaw: self.body_yaw(), // emoting: others see the frozen body, not your orbit
                     state_flags: Some(state_flags),
                     event_flags: Some(event_flags),
                     // where you look up or down, so others see it, before this it was never sent
                     pitch: Some(self.pitch),
+                    emote: Some(self.emote_wheel.playing),
                 }
                 .encode();
                 s.send(&msg);

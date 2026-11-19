@@ -100,6 +100,7 @@ pub fn send_position(link: &mut dyn Link, position: Vec3, yaw: f32) {
         state_flags: None,
         event_flags: None,
         pitch: None,
+        emote: None,
     }
     .encode();
     link.send(&pos_msg);

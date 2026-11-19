@@ -214,6 +214,7 @@ pub(crate) fn player_state(player: &Player, include_events: bool, now: Instant) 
         health: player.health.min(u16::MAX as u32) as u16,
         alive: player.is_alive,
         freeze_secs,
+        emote: if player.is_alive { player.emote } else { EMOTE_NONE },
     }
 }
 
@@ -273,5 +274,14 @@ mod tests {
             assert_eq!(shared, per_receiver(&players, include_events));
             assert_eq!(shared.len(), players.values().filter(|p| !p.is_bot).count());
         }
+    }
+
+    #[test]
+    fn emote_is_relayed_only_while_alive() {
+        let mut p = Player::new(1, "a".into());
+        p.emote = 3;
+        assert_eq!(player_state(&p, false, Instant::now()).emote, 3);
+        p.is_alive = false;
+        assert_eq!(player_state(&p, false, Instant::now()).emote, EMOTE_NONE);
     }
 }

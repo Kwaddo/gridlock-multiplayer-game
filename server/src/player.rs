@@ -47,6 +47,7 @@ pub struct Player {
     pub position: (f32, f32, f32),
     pub yaw: f32,
     pub pitch: f32,
+    pub emote: u8, // 0 = none, see EMOTE_*
     pub health: u32,
     pub max_health: u32,
     pub is_alive: bool,
@@ -92,6 +93,7 @@ impl Player {
             position: (0.0, 0.0, 0.0),
             yaw: 0.0,
             pitch: 0.0,
+            emote: 0,
             health: 125,
             max_health: 125,
             is_alive: true,

@@ -50,6 +50,7 @@ fn every_server_packet_decodes() {
         state_flags: Some(0),
         event_flags: Some(0),
         pitch: Some(0.2),
+        emote: Some(2),
     });
     step(&mut server, a, ClientMsg::Hit {
         victim_id: 2,

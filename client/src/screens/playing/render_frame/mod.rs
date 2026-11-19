@@ -19,7 +19,7 @@ impl PlayingState {
         maze: Option<&Maze>,
     ) {
         self.update_head_bob(get_frame_time());
-        let camera = self.build_camera(config);
+        let camera = self.build_camera(config, maze);
         // update cached shapes first, so every camera below only reads
         self.bake_bullet_holes();
         // your body's colour, your player colour alive, white as a corpse, same as before
@@ -40,6 +40,10 @@ impl PlayingState {
 
         // the 3D world, then the mirrors on top of it
         self.draw_world(maze, camera.position);
+        // third person while emoting, so your own body shows outside mirrors too
+        if self.shows_own_body() {
+            self.draw_self_avatar();
+        }
         self.draw_mirrors(&live_mirrors);
         if self.dev_mode.ruler_active {
             if let (Some(mut start), Some(mut end)) = (self.dev_mode.ruler_start, self.dev_mode.ruler_end) {
@@ -87,8 +91,8 @@ impl PlayingState {
         // Lobby console (Start Game) overlay
         self.draw_lobby_console(config, player_id);
 
-        // Don't draw viewmodel while dead or when lobby console is open
-        if !self.is_dead && !self.lobby_console_open {
+        // Don't draw viewmodel while dead, emoting, or when lobby console is open
+        if !self.is_dead && !self.lobby_console_open && self.emote_view_t() <= 0.0 {
             self.draw_viewmodel();
         }
 
@@ -132,6 +136,7 @@ impl PlayingState {
                 self.current_world,
                 local_team,
                 config,
+                self.emote_view_t() <= 0.0, // out of first person a centre crosshair points nowhere
             );
 
             let dt = get_frame_time();
@@ -325,6 +330,7 @@ impl PlayingState {
             self.draw_snd_hud(player_id);
         }
 
+        self.emote_wheel.draw(config.gui_scale_factor(), get_frame_time());
         self.chat.draw();
     }
 }

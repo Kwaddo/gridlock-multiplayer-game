@@ -16,6 +16,7 @@ pub fn handle_position(
     state_flags: Option<u8>,
     event_flags: Option<u8>,
     pitch: Option<f32>,
+    emote: Option<u8>,
 ) {
 
     if let Some(player) = players.get_mut(&src_addr) {
@@ -34,6 +35,9 @@ pub fn handle_position(
         player.yaw = yaw;
         if let Some(pitch) = pitch {
             player.pitch = pitch; // older clients dont send it, theirs stays level
+        }
+        if let Some(e) = emote {
+            player.emote = if e <= EMOTE_COUNT { e } else { EMOTE_NONE };
         }
         player.last_activity = Instant::now();
     }

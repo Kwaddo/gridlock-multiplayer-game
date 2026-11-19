@@ -11,7 +11,7 @@ pub enum ClientMsg {
     Join { username: String, version: Option<u16> },
     /// `pitch` (look up/down, + = up) trails the event flags and is only written when both flags are,
     /// before this pitch was never sent so nobody saw where you looked up or down
-    Position { position: Vec3, yaw: f32, state_flags: Option<u8>, event_flags: Option<u8>, pitch: Option<f32> },
+    Position { position: Vec3, yaw: f32, state_flags: Option<u8>, event_flags: Option<u8>, pitch: Option<f32>, emote: Option<u8> },
     Disconnect,
     WorldChange { target: u8 },
     Discover,
@@ -88,7 +88,7 @@ impl ClientMsg {
                 }
                 w.finish()
             }
-            ClientMsg::Position { position, yaw, state_flags, event_flags, pitch } => {
+            ClientMsg::Position { position, yaw, state_flags, event_flags, pitch, emote } => {
                 let mut w = Writer::new(MSG_POSITION);
                 w.vec3(*position).f32(*yaw);
                 if let Some(s) = state_flags {
@@ -97,6 +97,9 @@ impl ClientMsg {
                         w.u8(*e);
                         if let Some(p) = pitch {
                             w.u8(quantize_pitch(*p));
+                            if let Some(e) = emote {
+                                w.u8(*e);
+                            }
                         }
                     }
                 }
@@ -170,6 +173,7 @@ impl ClientMsg {
                 state_flags: r.u8(),
                 event_flags: r.u8(),
                 pitch: r.u8().map(dequantize_pitch),
+                emote: r.u8(),
             },
             MSG_DISCONNECT => ClientMsg::Disconnect,
             MSG_WORLD_CHANGE => ClientMsg::WorldChange { target: r.u8()? },

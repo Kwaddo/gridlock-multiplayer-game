@@ -26,6 +26,7 @@ const BIND_ACTIONS: &[(&str, &str)] = &[
     ("Prone", "prone"),
     ("Fullscreen", "fullscreen"),
     ("Chat", "chat"),
+    ("Emote", "emote"),
 ];
 
 fn get_binding(config: &GameConfig, action: &str) -> InputBinding {
@@ -52,6 +53,7 @@ fn get_binding(config: &GameConfig, action: &str) -> InputBinding {
         "prone" => config.bind_prone,
         "fullscreen" => config.bind_fullscreen,
         "chat" => config.bind_chat,
+        "emote" => config.bind_emote,
         _ => InputBinding::Key(KeyCode::Unknown),
     }
 }
@@ -80,6 +82,7 @@ fn set_binding(config: &mut GameConfig, action: &str, binding: InputBinding) {
         "prone" => config.bind_prone = binding,
         "fullscreen" => config.bind_fullscreen = binding,
         "chat" => config.bind_chat = binding,
+        "emote" => config.bind_emote = binding,
         _ => {}
     }
 }

@@ -22,6 +22,7 @@ fn server_messages_round_trip() {
         health: 80,
         alive: true,
         freeze_secs: 2,
+        emote: 3,
     };
     rt_server(ServerMsg::State { world: 1, players: vec![ps, PlayerState { id: 8, ..ps }] });
     rt_server(ServerMsg::State { world: 0, players: Vec::new() });
@@ -116,7 +117,7 @@ fn client_messages_round_trip() {
     rt_client(ClientMsg::join("alice"));
     rt_client(ClientMsg::Join { username: "bob".into(), version: Some(0) });
     rt_client(ClientMsg::Join { username: "bob".into(), version: Some(u16::MAX) });
-    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: Some(1), event_flags: Some(2), pitch: None });
+    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: Some(1), event_flags: Some(2), pitch: None, emote: None });
     // pitch in whole degrees comes back exact
     rt_client(ClientMsg::Position {
         position: (1.0, 2.0, 3.0),
@@ -124,8 +125,17 @@ fn client_messages_round_trip() {
         state_flags: Some(1),
         event_flags: Some(2),
         pitch: Some((45.0f32).to_radians()),
+        emote: None,
     });
-    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: None, event_flags: None, pitch: None });
+    rt_client(ClientMsg::Position {
+        position: (1.0, 2.0, 3.0),
+        yaw: 0.1,
+        state_flags: Some(1),
+        event_flags: Some(2),
+        pitch: Some(45f32.to_radians()),
+        emote: Some(2),
+    });
+    rt_client(ClientMsg::Position { position: (1.0, 2.0, 3.0), yaw: 0.1, state_flags: None, event_flags: None, pitch: None, emote: None });
     rt_client(ClientMsg::Hit { victim_id: 2, damage: 30.0, weapon: Some("AK".into()), backstab: Some(false), headshot: None });
     rt_client(ClientMsg::Hit { victim_id: 2, damage: 30.0, weapon: Some("AK".into()), backstab: Some(false), headshot: Some(true) });
     rt_client(ClientMsg::StartGame { mode: Some(3), duration: Some(0), autofill: Some((4, 0b11111)), blue_bots: None });

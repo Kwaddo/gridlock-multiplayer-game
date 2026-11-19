@@ -61,7 +61,8 @@ pub(super) fn wanted_assets(playing_state: &PlayingState, loadout: &Loadout) -> 
     let skins = playing_state.other_players
         .iter()
         .map(|p| p.skin_type)
-        .chain(playing_state.practice_bots.iter().map(|b| b.player.skin_type));
+        .chain(playing_state.practice_bots.iter().map(|b| b.player.skin_type))
+        .chain([playing_state.self_body.skin_type]);
     keys.extend(skins.filter_map(|skin| skin.model_key()));
     // skin test: with dev mode unlocked load every character, otherwise only the default one is ever needed
     if playing_state.dev_mode.is_unlocked() {

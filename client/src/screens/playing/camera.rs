@@ -1,4 +1,5 @@
 use crate::core::GameConfig;
+use crate::types::maze::Maze;
 use macroquad::prelude::*;
 
 use super::state::DeathCameraPhase;
@@ -12,7 +13,7 @@ const DEATH_CAM_BEHIND_DIST: f32 = 3.0;
 const DEATH_CAM_HEIGHT: f32 = 2.0;
 
 impl PlayingState {
-    pub(super) fn build_camera(&self, config: &GameConfig) -> Camera3D {
+    pub(super) fn build_camera(&self, config: &GameConfig, maze: Option<&Maze>) -> Camera3D {
         // If in death camera mode, use the death camera instead
         if let Some((t_interp, corpse_pos, corpse_yaw)) = match self.death_camera_phase {
             DeathCameraPhase::ZoomOut { timer, corpse_pos, corpse_yaw } => {
@@ -88,7 +89,7 @@ impl PlayingState {
         // slow walk focus, fades out as ads takes over so the two zooms dont stack
         let fov = fov * self.slow_walk_fov_factor();
 
-        Camera3D {
+        let first_person = Camera3D {
             position: eye_pos,
             target: eye_pos + forward,
             up: vec3(0.0, 1.0, 0.0),
@@ -99,7 +100,8 @@ impl PlayingState {
             projection: Projection::Perspective,
             render_target: None,
             viewport: None,
-        }
+        };
+        self.apply_emote_view(first_person, config, maze)
     }
 
     /// How much slow walk narrows the view, 1.0 = not at all. Fades out as ADS takes over so the
