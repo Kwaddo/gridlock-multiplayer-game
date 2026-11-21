@@ -3,6 +3,7 @@ use std::time::Duration;
 use platform::Instant;
 
 pub mod broadcast;
+pub mod smoke_break;
 mod boxes;
 pub mod game;
 pub mod handlers;
