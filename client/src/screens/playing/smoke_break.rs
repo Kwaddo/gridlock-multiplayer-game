@@ -217,7 +217,7 @@ impl PlayingState {
         if round.side == SMOKE_SIDE_HUNTER {
             self.hold_hunter_gun();
         }
-        if self.chat.is_open() || self.lobby_console_open {
+        if self.chat.is_open() || self.lobby_console_open || self.is_dead {
             return;
         }
         // the server says when it's allowed (not used yet, not blind, not the last 30 s, not after the round)
