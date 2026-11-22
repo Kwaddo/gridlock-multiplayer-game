@@ -14,7 +14,7 @@ fn one_hunter_per_six_and_only_humans_hunt() {
 }
 
 #[test]
-fn coins_are_four_a_hider_but_never_under_twenty() {
+fn coins_are_four_a_hider_but_never_under_ten() {
     assert_eq!(coin_count(1), 10);
     assert_eq!(coin_count(2), 10);
     assert_eq!(coin_count(3), 12);
@@ -22,7 +22,7 @@ fn coins_are_four_a_hider_but_never_under_twenty() {
 }
 
 #[test]
-fn phases_run_blind_released_coins_vote() {
+fn phases_run_blind_released_coins_results() {
     let mut s = SmokeState::new();
     s.new_round();
     assert_eq!((s.round, s.phase), (1, SmokePhase::Blind));

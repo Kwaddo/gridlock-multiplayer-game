@@ -36,7 +36,7 @@ pub enum GoldenNews {
 }
 
 impl SmokeState {
-    /// the coin phase starts: 4 per human hider (never under 20) at random spots
+    /// the coin phase starts: 4 per human hider (never under 10) at random spots
     pub(super) fn place_coins(&mut self) {
         let mut rng = rand::thread_rng();
         let want = coin_count(self.hiders_at_start);
