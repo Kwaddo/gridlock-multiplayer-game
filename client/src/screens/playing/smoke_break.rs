@@ -237,7 +237,12 @@ impl PlayingState {
         if !self.smoke_on() {
             return None;
         }
-        let hunters = self.smoke.scores.iter().filter(|s| s.side == SMOKE_SIDE_HUNTER).map(|s| s.id).collect();
+        // a hider gets no player dots at all, not even the hunters
+        let hunters = if self.smoke_hiding() {
+            Vec::new()
+        } else {
+            self.smoke.scores.iter().filter(|s| s.side == SMOKE_SIDE_HUNTER).map(|s| s.id).collect()
+        };
         let mut markers = Vec::new();
         if let Some((at, _)) = self.smoke.gold_coin {
             markers.push((at, GOLD));
