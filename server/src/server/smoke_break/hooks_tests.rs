@@ -206,3 +206,16 @@ fn when_the_match_ends_the_crowd_never_reaches_the_lobby() {
     assert!(server.players.keys().all(|p| !is_decoy(*p)), "the decoys are gone");
     assert!(server.smoke_state.is_none());
 }
+
+#[test]
+fn a_refused_box_shot_sends_no_player_list() {
+    let (mut server, _, _) = match_of_two();
+    server.tick();
+    let hider = *server.smoke_state.as_ref().unwrap().hiders.iter().next().unwrap();
+    let id = server.boxes.box_of(hider).unwrap();
+    server.drain_outbox();
+    // hiders can't shoot, nothing changed
+    server.handle_packet(hider, &ClientMsg::BoxShot { id }.encode());
+    let out = server.drain_outbox();
+    assert!(!out.iter().any(|(_, m)| matches!(ServerMsg::decode(m), Some(ServerMsg::PlayerList(_)))));
+}

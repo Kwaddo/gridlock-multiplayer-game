@@ -230,7 +230,8 @@ impl Server {
         }
         let Some(smoke) = self.smoke_state.as_mut() else { return };
         let players_before = self.players.len();
-        match smoke.box_shot(peer, id, &mut self.players, &mut self.boxes) {
+        let shot = smoke.box_shot(peer, id, &mut self.players, &mut self.boxes);
+        match shot {
             // not theirs to shoot, their game already broke it so it gets the list back
             // finds and decoys go out as feed lines with the next send, no chat notice
             Shot::NotAllowed => self.boxes.resend_to(peer),
@@ -239,7 +240,10 @@ impl Server {
         if self.players.len() != players_before {
             broadcast::broadcast_state(&self.outbox, &self.players);
         }
-        broadcast::broadcast_player_list(&self.outbox, &self.players);
+        // a find hands the hider a gun, nothing else here changes the list
+        if matches!(shot, Shot::Found(_)) {
+            broadcast::broadcast_player_list(&self.outbox, &self.players);
+        }
     }
 
     pub(in crate::server) fn smoke_go_golden(&mut self, peer: PeerId) {
