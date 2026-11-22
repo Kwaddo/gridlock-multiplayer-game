@@ -147,3 +147,20 @@ fn mvp_is_picked_before_the_win_bonus() {
     assert_eq!(s.points[&hunter], SMOKE_POINTS_FIND + SMOKE_POINTS_MVP);
     assert_eq!(s.points[&hider], SMOKE_POINTS_COIN + SMOKE_POINTS_WIN);
 }
+
+#[test]
+fn mvp_skips_whoever_left_and_a_tie_goes_to_the_lowest() {
+    let mut s = SmokeState::new();
+    let (gone, a, b) = (PeerId(1), PeerId(2), PeerId(3));
+    s.new_round();
+    s.hiders.insert(a);
+    s.hiders.insert(b);
+    // the round's best walked out, they're in no side any more
+    s.add_points(gone, SMOKE_POINTS_FIND);
+    s.add_points(b, SMOKE_POINTS_COIN);
+    s.add_points(a, SMOKE_POINTS_COIN);
+    s.end_round(SMOKE_SIDE_HUNTER);
+    assert_eq!(s.points[&gone], SMOKE_POINTS_FIND, "no mvp for someone who left");
+    assert_eq!(s.points[&a], SMOKE_POINTS_COIN + SMOKE_POINTS_MVP, "tie, the lowest gets it");
+    assert_eq!(s.points[&b], SMOKE_POINTS_COIN);
+}

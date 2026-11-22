@@ -249,9 +249,11 @@ impl SmokeState {
     // the round is over, winners get their bonus, the rounds best gets the mvp, then the results board
     fn end_round(&mut self, winner: u8) {
         // mvp from what they did this round, before the side bonus
+        // only someone still in the match, and a tie goes to the lowest peer so it's the same every time
         let mvp = self.round_points
             .iter()
-            .max_by_key(|(_, pts)| **pts)
+            .filter(|(peer, _)| self.hunters.contains(peer) || self.hiders.contains(peer) || self.starting_hunters.contains(peer))
+            .max_by(|(a, a_pts), (b, b_pts)| a_pts.cmp(b_pts).then(b.cmp(a)))
             .filter(|(_, pts)| **pts > 0)
             .map(|(peer, _)| *peer);
         let winners: Vec<PeerId> = if winner == SMOKE_SIDE_HIDER {
