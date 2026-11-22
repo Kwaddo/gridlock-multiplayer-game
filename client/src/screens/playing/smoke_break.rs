@@ -88,6 +88,14 @@ impl PlayingState {
     }
 
     pub fn take_smoke_round(&mut self, round: SmokeRound) {
+        // a new round: last round's found card, taunt repeats and an unsent taunt go,
+        // the rest (coins, golden coin, dots, golden ids) the server resends itself
+        if self.smoke.round.is_some_and(|r| r.round != round.round) {
+            self.smoke.found = None;
+            self.smoke.found_timer = 0.0;
+            self.smoke.taunts.clear();
+            self.smoke.pending_golden = false;
+        }
         self.smoke.timer = round.phase_timer;
         self.smoke.gun_lock = round.gun_lock;
         self.smoke.round = Some(round);

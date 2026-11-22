@@ -98,6 +98,7 @@ pub fn sync_world(
         let mut world_change_applied = false;
         if let Some((world_id, spawn, freeze_secs, timer_secs)) = updates.world_change {
             playing_state.current_world = world_id;
+            playing_state.box_world_changed(world_id);
             playing_state.mirrors = client::world::mirror::mirrors_for_world(world_id);
             playing_state.position = spawn;
             playing_state.movement_state.velocity = Vec3::ZERO;

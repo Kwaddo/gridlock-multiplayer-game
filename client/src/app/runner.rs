@@ -158,9 +158,7 @@ pub async fn run() {
                     login_screen.update()
                 };
                 if let Some(joined) = joined {
-                    playing_state.chat.clear();
-                    // ids belong to the server that handed them out
-                    playing_state.player_info.clear();
+                    playing_state.forget_server();
                     pause_menu.reset();
                     username = joined.username.clone();
                     player_id = joined.player_id;
