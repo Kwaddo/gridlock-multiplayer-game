@@ -69,7 +69,7 @@ impl Server {
             if self.match_mode == MODE_SMOKE_BREAK {
                 // smoke break has no clock, the lobby's "duration" is the round count
                 self.smoke_rounds = duration
-                    .map(|d| d as u8)
+                    .and_then(|d| u8::try_from(d).ok())
                     .filter(|n| super::smoke_break::SMOKE_ROUND_CHOICES.contains(n))
                     .unwrap_or(super::smoke_break::SMOKE_DEFAULT_ROUNDS);
             }

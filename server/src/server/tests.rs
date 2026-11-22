@@ -169,6 +169,13 @@ fn smoke_break_takes_its_round_count_from_the_start_request() {
     // not one of 3 / 5 / 10, back to the default
     server.handle_packet(a, &start(7).encode());
     assert_eq!(server.smoke_rounds, crate::server::smoke_break::SMOKE_DEFAULT_ROUNDS);
+    // 261 is 5 in a u8, it must not wrap into a valid choice
+    server.match_warmup_end = None;
+    server.handle_packet(a, &start(10).encode());
+    assert_eq!(server.smoke_rounds, 10);
+    server.match_warmup_end = None;
+    server.handle_packet(a, &start(261).encode());
+    assert_eq!(server.smoke_rounds, crate::server::smoke_break::SMOKE_DEFAULT_ROUNDS);
 }
 
 #[test]
