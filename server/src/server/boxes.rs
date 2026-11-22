@@ -368,6 +368,26 @@ mod tests {
     }
 
     #[test]
+    fn a_hit_on_someone_in_a_box_does_nothing() {
+        let mut server = Server::new();
+        let (a, b) = (PeerId(1), PeerId(2));
+        server.handle_packet(a, &ClientMsg::join("alice").encode());
+        server.handle_packet(b, &ClientMsg::join("bob").encode());
+        server.tick();
+        let id = boxes_for(&server.drain_outbox(), a).unwrap()[0].id;
+        walk_to(&mut server, a, (-4.0, 0.0, -4.5));
+        server.handle_packet(a, &ClientMsg::BoxEnter { id }.encode());
+        server.tick();
+        // the lobby only lets bots and humans hurt each other, bob stands in for a bot
+        server.players.get_mut(&b).unwrap().is_bot = true;
+        let hp = server.players[&a].health;
+        let hit = ClientMsg::Hit { victim_id: id_of(&server, a), damage: 30.0, weapon: None, backstab: None, headshot: None };
+        server.handle_packet(b, &hit.encode());
+        assert_eq!(server.players[&a].health, hp, "the box took it");
+        assert!(server.boxes.is_carrying(a));
+    }
+
+    #[test]
     fn whoever_is_in_a_box_is_flagged_for_bots() {
         let mut server = Server::new();
         let a = PeerId(1);
