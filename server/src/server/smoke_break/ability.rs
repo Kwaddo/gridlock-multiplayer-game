@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use super::round_start::is_smoke_entity;
 use super::{SmokePhase, SmokeState};
 use crate::net::PeerId;
 use crate::player::Player;
@@ -88,7 +87,7 @@ impl SmokeState {
         // too close to the end, nobody would have time to catch them
         let too_late = self.phase == SmokePhase::Coins && self.phase_timer <= GOLDEN_CUTOFF;
         // humans still hiding, once a round
-        live && !too_late && !is_smoke_entity(peer) && self.hiders.contains(&peer) && !self.golden_used.contains(&peer)
+        live && !too_late && self.hiders.contains(&peer) && !self.golden_used.contains(&peer)
     }
 
     /// gold right now, or was in the last RED_HANDED_TIME seconds
@@ -114,7 +113,7 @@ mod tests {
             })
             .collect();
         let mut boxes = Boxes::new();
-        let mut s = SmokeState::new(0);
+        let mut s = SmokeState::new();
         s.start_round(&mut players, &mut boxes);
         s.tick(SMOKE_BLIND_TIME);
         let hunter = *s.hunters.iter().next().unwrap();
@@ -153,23 +152,26 @@ mod tests {
         // a new round, it's back
         s.start_round(&mut players, &mut boxes);
         s.tick(SMOKE_BLIND_TIME);
-        let hider = *s.hiders.iter().find(|p| !is_smoke_entity(**p)).unwrap();
+        let hider = *s.hiders.iter().next().unwrap();
         assert!(s.go_golden(hider));
     }
 
     #[test]
-    fn hunters_bots_and_blind_hiders_cant() {
+    fn hunters_and_blind_hiders_cant() {
         let mut players: HashMap<PeerId, Player> = HashMap::new();
-        let mut me = Player::new(1, "p".into());
-        me.world = WorldId::Maze;
-        players.insert(PeerId(1), me);
-        let mut s = SmokeState::new(2);
+        for i in 1..=2 {
+            let mut p = Player::new(i, format!("p{i}"));
+            p.world = WorldId::Maze;
+            players.insert(PeerId(i), p);
+        }
+        let mut s = SmokeState::new();
         s.start_round(&mut players, &mut Boxes::new());
-        let bot = *s.hiders.iter().next().unwrap();
-        assert!(!s.go_golden(bot), "blind, and a bot");
+        let hider = *s.hiders.iter().next().unwrap();
+        let hunter = *s.hunters.iter().next().unwrap();
+        assert!(!s.go_golden(hider), "still blind");
         s.tick(SMOKE_BLIND_TIME);
-        assert!(!s.go_golden(bot), "bots never go golden");
-        assert!(!s.go_golden(PeerId(1)), "the hunter");
+        assert!(!s.go_golden(hunter), "the hunter");
+        assert!(s.go_golden(hider), "a hider once they're out");
     }
 
     #[test]
@@ -193,8 +195,8 @@ mod tests {
         let id = box_of(&boxes, hider);
         s.box_shot(hunter, id, &mut players, &mut boxes);
         assert_eq!(s.points[&hider], hider_before + RED_HANDED_LOSS);
-        // +75, then it was the last hider so +30 win and +10 mvp
-        assert_eq!(s.points[&hunter], RED_HANDED_FIND + 30 + 10);
+        // +75, then it was the last hider so +30 win and +10 mvp, both at x1.2 after the find
+        assert_eq!(s.points[&hunter], RED_HANDED_FIND + 36 + 12);
     }
 
     #[test]

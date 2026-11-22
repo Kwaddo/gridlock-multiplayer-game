@@ -301,7 +301,6 @@ impl Server {
             ClientMsg::BoxEnter { id } => self.handle_box_enter(src_addr, id),
             ClientMsg::BoxExit => self.boxes.exit(&self.players, src_addr),
             ClientMsg::BoxShot { id } => self.boxes.shot(&self.players, src_addr, id),
-            ClientMsg::SmokeVote { stay } => self.smoke_vote(src_addr, stay),
             ClientMsg::SmokeGoGolden => self.smoke_go_golden(src_addr),
 
         }

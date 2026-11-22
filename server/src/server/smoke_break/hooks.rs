@@ -8,10 +8,9 @@ use std::time::Duration;
 use platform::Instant;
 
 use super::coins::GoldenNews;
-use super::round_start::{humans_in_match, is_smoke_entity, HUNTER_WEAPON};
+use super::round_start::{humans_in_match, HUNTER_WEAPON};
 use super::shots::Shot;
-use super::vote::VoteEnd;
-use super::SmokePhase;
+use super::{AfterResults, SmokePhase};
 use crate::net::PeerId;
 use crate::player::{Team, WorldId};
 use crate::protocols::*;
@@ -32,12 +31,20 @@ impl Server {
             return;
         }
         let players_before = self.players.len();
-        self.keep_sides_tidy();
+        if self.keep_sides_tidy() {
+            // under 2 people left, nobody to hunt or hide from: the match is over, most points wins
+            handlers::broadcast_notice(&self.outbox, &self.players, "Not enough players left, the match is over");
+            return self.end_smoke_break();
+        }
+        let rounds = self.smoke_rounds;
         let Some(smoke) = self.smoke_state.as_mut() else { return };
 
-        // the very first round starts on the first tick of the match
+        // the very first round starts on the first tick of the match, and knows how many rounds the lobby picked
+        if smoke.round == 0 {
+            smoke.max_rounds = rounds;
+        }
         if smoke.round == 0 && !smoke.start_round(&mut self.players, &mut self.boxes) {
-            let text = "Smoke Break needs a hider and a hunter, add bot hiders to play alone";
+            let text = "Smoke Break needs at least 2 players";
             handlers::broadcast_notice(&self.outbox, &self.players, text);
             return self.end_smoke_break();
         }
@@ -47,15 +54,11 @@ impl Server {
         smoke.pick_up_coins(&self.players);
         smoke.tick_ability(dt, &self.players);
 
-        match smoke.check_vote(&self.players) {
-            VoteEnd::Waiting => {}
-            VoteEnd::MatchOver => return self.end_smoke_break(),
-            VoteEnd::NextRound { leavers } => {
-                // leavers go first so the next round is only the ones who stayed
-                for peer in leavers {
-                    handlers::handle_world_change(&self.outbox, self.maze.as_ref(), &mut self.players, peer, WorldId::Lobby.as_u8());
-                }
-                let Some(smoke) = self.smoke_state.as_mut() else { return };
+        // the results board ran out: the next round, or that was the last
+        match smoke.after_results(humans_in_match(&self.players).len()) {
+            AfterResults::Waiting => {}
+            AfterResults::MatchOver => return self.end_smoke_break(),
+            AfterResults::NextRound => {
                 if !smoke.start_round(&mut self.players, &mut self.boxes) {
                     return self.end_smoke_break();
                 }
@@ -73,14 +76,14 @@ impl Server {
     /// people who left drop out of the round, people who just walked in hunt (they missed the hide)
     // I realize this makes it so the rule of hunters number < hiders number is not always true, but I figure its fine so we can have anyone join in
     // and for the next round its gonna be a new set of hunters and hiders anyway, so its not like it matters
-    fn keep_sides_tidy(&mut self) {
-        let Some(smoke) = self.smoke_state.as_mut() else { return };
+    /// true when fewer than 2 are left and the match has to end
+    fn keep_sides_tidy(&mut self) -> bool {
+        let Some(smoke) = self.smoke_state.as_mut() else { return false };
         let players = &mut self.players;
-        let here = |peer: &PeerId| is_smoke_entity(*peer) || players.get(peer).is_some_and(|p| p.world == WorldId::Maze);
+        let here = |peer: &PeerId| super::is_decoy(*peer) || players.get(peer).is_some_and(|p| p.world == WorldId::Maze);
         smoke.hunters.retain(here);
         smoke.hiders.retain(here);
         smoke.starting_hunters.retain(here);
-        smoke.votes.retain(|peer, _| here(peer));
         if smoke.round > 0 {
             for peer in humans_in_match(players) {
                 if !smoke.hunters.contains(&peer) && !smoke.hiders.contains(&peer) {
@@ -92,11 +95,20 @@ impl Server {
                 }
             }
         }
-        // the last hider walked out, so that's a hunters win
-        let live = matches!(smoke.phase, SmokePhase::Blind | SmokePhase::Released | SmokePhase::Coins);
-        if smoke.round > 0 && live && smoke.hiders.is_empty() {
-            smoke.end_round(SMOKE_SIDE_HUNTER);
+        if smoke.round > 0 && humans_in_match(players).len() < 2 {
+            return true;
         }
+        let live = matches!(smoke.phase, SmokePhase::Blind | SmokePhase::Released | SmokePhase::Coins);
+        if smoke.round > 0 && live {
+            if smoke.hiders.is_empty() {
+                // the last hider walked out, so that's a hunters win
+                smoke.end_round(SMOKE_SIDE_HUNTER);
+            } else if smoke.hunters.is_empty() {
+                // every hunter walked out, the hiders win it and the next round reshuffles
+                smoke.end_round(SMOKE_SIDE_HIDER);
+            }
+        }
+        false
     }
 
     /// what changed goes out now, everyone's own view of the round goes out every SEND_EVERY
@@ -139,6 +151,19 @@ impl Server {
             }
         }
 
+        // box shots for the kill feed, everyone sees who found who and who's shooting decoys
+        for line in smoke.feed.drain(..) {
+            let id_of = |peer: PeerId| self.players.get(&peer).map_or(0, |p| p.id);
+            let msg = ServerMsg::SmokeFeed {
+                shooter: id_of(line.shooter),
+                target: line.found.map_or(0, id_of),
+                red_handed: line.red_handed,
+                points: line.points.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+            }
+            .encode();
+            broadcast::to_humans(&self.outbox, &self.players, &msg);
+        }
+
         if self.smoke_last_send.is_some_and(|t| t.elapsed() < SEND_EVERY) {
             return;
         }
@@ -147,7 +172,7 @@ impl Server {
         let golden = ServerMsg::SmokeGolden(smoke.golden_ids(&self.players)).encode();
         for peer in humans_in_match(&self.players) {
             let messages = [
-                ServerMsg::SmokeRound(smoke.round_for(peer, &self.players)).encode(),
+                ServerMsg::SmokeRound(smoke.round_for(peer)).encode(),
                 ServerMsg::SmokeCoins(smoke.coins_for(peer)).encode(),
                 ServerMsg::SmokeGoldCoin(smoke.gold_coin_for(peer)).encode(),
                 ServerMsg::SmokeDots(smoke.dots_for(peer, &self.players)).encode(),
@@ -158,8 +183,8 @@ impl Server {
         }
     }
 
-    /// not enough players or nobody wanted another round: the end screen, the usual countdown sends everyone home
-    fn end_smoke_break(&mut self) {
+    /// the last round's done, too few are left, or the host ended it: the end screen, the usual countdown sends everyone home
+    pub(in crate::server) fn end_smoke_break(&mut self) {
         let (winner_id, winner_name) = self
             .smoke_state
             .as_ref()
@@ -197,23 +222,14 @@ impl Server {
         let players_before = self.players.len();
         match smoke.box_shot(peer, id, &mut self.players, &mut self.boxes) {
             // not theirs to shoot, their game already broke it so it gets the list back
+            // finds and decoys go out as feed lines with the next send, no chat notice
             Shot::NotAllowed => self.boxes.resend_to(peer),
-            Shot::Found(found) => {
-                let name = self.players.get(&found).map(|p| p.username.clone()).unwrap_or_default();
-                handlers::broadcast_notice(&self.outbox, &self.players, &format!("{name} was found!"));
-            }
-            Shot::Decoy | Shot::Empty => {}
+            Shot::Found(_) | Shot::Decoy | Shot::Empty => {}
         }
         if self.players.len() != players_before {
             broadcast::broadcast_state(&self.outbox, &self.players);
         }
         broadcast::broadcast_player_list(&self.outbox, &self.players);
-    }
-
-    pub(in crate::server) fn smoke_vote(&mut self, peer: PeerId, stay: bool) {
-        if let Some(smoke) = self.smoke_state.as_mut() {
-            smoke.vote(peer, stay);
-        }
     }
 
     pub(in crate::server) fn smoke_go_golden(&mut self, peer: PeerId) {
@@ -229,7 +245,7 @@ mod tests {
     use crate::server::smoke_break::{is_decoy, SmokeState, SMOKE_BLIND_TIME, SMOKE_RELEASED_TIME};
 
     // two people joined and standing in a smoke break match, first tick not run yet
-    fn match_of_two(bots: usize) -> (Server, PeerId, PeerId) {
+    fn match_of_two() -> (Server, PeerId, PeerId) {
         let mut server = Server::new();
         let (a, b) = (PeerId(1), PeerId(2));
         server.handle_packet(a, &ClientMsg::join("alice").encode());
@@ -240,7 +256,7 @@ mod tests {
         server.match_mode = MODE_SMOKE_BREAK;
         server.match_running = true;
         server.maze = Some(crate::maze::MazeData::smoke_break_arena());
-        server.smoke_state = Some(SmokeState::new(bots));
+        server.smoke_state = Some(SmokeState::new());
         (server, a, b)
     }
 
@@ -250,7 +266,7 @@ mod tests {
 
     #[test]
     fn the_first_tick_starts_round_1_and_moves_everyone() {
-        let (mut server, a, b) = match_of_two(2);
+        let (mut server, a, b) = match_of_two();
         server.tick();
         let smoke = server.smoke_state.as_ref().unwrap();
         assert_eq!(smoke.round, 1);
@@ -265,7 +281,7 @@ mod tests {
 
     #[test]
     fn coins_only_ever_reach_hiders() {
-        let (mut server, a, b) = match_of_two(0);
+        let (mut server, a, b) = match_of_two();
         server.tick();
         {
             let smoke = server.smoke_state.as_mut().unwrap();
@@ -293,31 +309,89 @@ mod tests {
     }
 
     #[test]
-    fn alone_with_no_bots_the_match_ends_with_a_notice() {
+    fn alone_the_match_ends_with_a_notice() {
         let mut server = Server::new();
         server.handle_packet(PeerId(1), &ClientMsg::join("alice").encode());
         server.players.get_mut(&PeerId(1)).unwrap().world = WorldId::Maze;
         server.match_mode = MODE_SMOKE_BREAK;
         server.match_running = true;
-        server.smoke_state = Some(SmokeState::new(0));
+        server.smoke_state = Some(SmokeState::new());
         server.tick();
         assert!(!server.match_running);
         assert!(server.match_end_pending.is_some());
     }
 
     #[test]
-    fn a_hider_quitting_mid_round_ends_it_for_the_hunters() {
-        let (mut server, _, _) = match_of_two(0);
+    fn one_left_and_the_match_ends_with_a_winner() {
+        let (mut server, _, _) = match_of_two();
         server.tick();
         let hider = *server.smoke_state.as_ref().unwrap().hiders.iter().next().unwrap();
         server.players.remove(&hider);
         server.tick();
-        assert_eq!(server.smoke_state.as_ref().unwrap().phase, SmokePhase::Vote);
+        assert!(!server.match_running);
+        assert!(server.match_end_pending.is_some(), "the winner screen");
+    }
+
+    #[test]
+    fn every_hunter_leaving_gives_the_hiders_the_round() {
+        let (mut server, _, _) = match_of_two();
+        server.handle_packet(PeerId(3), &ClientMsg::join("cara").encode());
+        server.players.get_mut(&PeerId(3)).unwrap().world = WorldId::Maze;
+        server.tick();
+        let hunter = *server.smoke_state.as_ref().unwrap().hunters.iter().next().unwrap();
+        server.players.remove(&hunter);
+        server.tick();
+        let smoke = server.smoke_state.as_ref().unwrap();
+        assert_eq!((smoke.phase, smoke.winner), (SmokePhase::Results, SMOKE_SIDE_HIDER));
+    }
+
+    #[test]
+    fn after_the_results_the_next_round_starts_on_its_own() {
+        let (mut server, _, _) = match_of_two();
+        server.tick();
+        {
+            let smoke = server.smoke_state.as_mut().unwrap();
+            smoke.end_round(SMOKE_SIDE_HIDER);
+            smoke.phase_timer = 0.0;
+        }
+        server.tick();
+        let smoke = server.smoke_state.as_ref().unwrap();
+        assert_eq!((smoke.round, smoke.phase), (2, SmokePhase::Blind));
+    }
+
+    #[test]
+    fn the_last_round_ends_the_match() {
+        let (mut server, _, _) = match_of_two();
+        server.tick();
+        {
+            let smoke = server.smoke_state.as_mut().unwrap();
+            smoke.max_rounds = 1;
+            smoke.end_round(SMOKE_SIDE_HIDER);
+            smoke.phase_timer = 0.0;
+        }
+        server.tick();
+        assert!(server.match_end_pending.is_some());
+    }
+
+    #[test]
+    fn the_first_round_takes_the_lobbys_round_count() {
+        let (mut server, _, _) = match_of_two();
+        server.smoke_rounds = 10;
+        server.tick();
+        assert_eq!(server.smoke_state.as_ref().unwrap().max_rounds, 10);
+    }
+
+    #[test]
+    fn the_host_ending_it_shows_the_winner_first() {
+        let (mut server, a, _) = match_of_two();
+        server.tick();
+        server.handle_packet(a, &ClientMsg::EndMatch.encode());
+        assert!(server.match_end_pending.is_some(), "the winner screen, not straight home");
     }
 
     #[test]
     fn nobody_takes_damage_and_nobody_climbs_out() {
-        let (mut server, a, b) = match_of_two(0);
+        let (mut server, a, b) = match_of_two();
         server.tick();
         let hp = server.players[&b].health;
         let hit = ClientMsg::Hit { victim_id: server.players[&b].id, damage: 50.0, weapon: None, backstab: None, headshot: None };
@@ -331,11 +405,17 @@ mod tests {
 
     #[test]
     fn when_the_match_ends_the_crowd_never_reaches_the_lobby() {
-        let (mut server, _, _) = match_of_two(2);
+        let (mut server, _, _) = match_of_two();
         server.tick();
         server.handle_packet(PeerId(1), &ClientMsg::EndMatch.encode());
+        // the winner screen's countdown runs out
+        if let Some(end) = server.match_end_pending.as_mut() {
+            end.0 = Instant::now();
+        }
+        // one tick sends everyone home, the next clears the smoke break away
         server.tick();
-        assert!(server.players.keys().all(|p| !is_smoke_entity(*p)), "decoys and bots are gone");
+        server.tick();
+        assert!(server.players.keys().all(|p| !is_decoy(*p)), "the decoys are gone");
         assert!(server.smoke_state.is_none());
     }
 }

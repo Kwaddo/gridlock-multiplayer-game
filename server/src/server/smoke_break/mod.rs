@@ -17,7 +17,6 @@ mod round_start;
 mod coins;
 mod shots;
 mod ability;
-mod vote;
 mod view;
 
 mod hooks;
@@ -32,24 +31,28 @@ pub enum SmokePhase {
     Blind = 0, // hunters frozen and blind, hiders spread out
     Released = 1, // hunters out, no coins yet so hiders can practise blending in
     Coins = 2, // coins out
-    Vote = 3, // round over, scores up, stay or leave
+    Results = 3, // round over, scores up for a few seconds, then the next round or the end
 }
 
 // how long each phase lasts
 pub const SMOKE_BLIND_TIME: f32 = 15.0;
 pub const SMOKE_RELEASED_TIME: f32 = 5.0;
 pub const SMOKE_ROUND_TIME: f32 = 180.0; // starts when the coins come out
-pub const SMOKE_VOTE_TIME: f32 = 15.0;
+pub const SMOKE_RESULTS_TIME: f32 = 10.0;
+
+// how many rounds a match can be, picked in the lobby
+pub const SMOKE_ROUND_CHOICES: [u8; 3] = [3, 5, 10];
+pub const SMOKE_DEFAULT_ROUNDS: u8 = 3;
 
 // at most this many hiders for every hunter, 6 players = 5 + 1, 7 = 5 + 2
 pub const SMOKE_HIDERS_PER_HUNTER: usize = 5;
 
-// coins are 4 per hider but never under 20, so 5 hiders = 20, 6 = 24, 10 = 40
-pub const SMOKE_COINS_BASE: usize = 20;
+// coins are 4 per hider but never under 10, so 2 hiders = 10, 3 = 12, 5 = 20
+pub const SMOKE_COINS_BASE: usize = 10;
 pub const SMOKE_COINS_PER_HIDER: usize = 4;
 
 // points as of now
-pub const SMOKE_POINTS_COIN: i32 = 10;
+pub const SMOKE_POINTS_COIN: i32 = 5;
 pub const SMOKE_POINTS_ALIVE: i32 = 1; // every SMOKE_ALIVE_EVERY seconds still hidden
 pub const SMOKE_ALIVE_EVERY: f32 = 5.0; // as of now every 5 seconds alive is 1 point, will likely increase time to 10 seconds or more
 pub const SMOKE_POINTS_FIND: i32 = 50;
@@ -61,6 +64,22 @@ pub const SMOKE_POINTS_MVP: i32 = 10;
 // every decoy you shoot makes your gains worse for the rest of the round, so shooting at 0 points still costs something
 pub const SMOKE_DECOY_MULT_STEP: f32 = 0.1; // 1.0 -> 0.9 -> 0.8 ...
 pub const SMOKE_MULT_MIN: f32 = 0.3; // never worse than this, a find is still worth something
+// every find wins some of it back and can go past 1, 3 clean finds in a row hits the cap
+pub const SMOKE_FIND_MULT_STEP: f32 = 0.2; // the find pays at the old multiplier, then this goes on
+pub const SMOKE_MULT_MAX: f32 = 1.5;
+
+// a found hider shooting a decoy locks their gun this long, each miss the next step, capped at the last
+pub const SMOKE_GUN_LOCKS: [f32; 5] = [2.0, 3.0, 5.0, 10.0, 20.0];
+// this long without a miss (once the lock is over) and they're back to the first step
+pub const SMOKE_CLEAN_RESET: f32 = 30.0;
+
+/// a found hider's gun: how far up the lock steps they are, time left locked, time since the lock ended
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GunLock {
+    pub step: usize,
+    pub locked_for: f32,
+    pub clean_for: f32,
+}
 
 // everything the server remembers while a match plays out
 pub struct SmokeState {
@@ -81,9 +100,7 @@ pub struct SmokeState {
     // counts up to SMOKE_ALIVE_EVERY then pays every hider
     alive_clock: f32,
 
-    // (peer, id, name), the same bot hiders every round
-    bot_hiders: Vec<(PeerId, u32, String)>,
-    // a brain for every decoy and bot hider this round
+    // a brain for every decoy this round
     walkers: Vec<Walker>,
     // humans the round start moved, their games get told where they are now
     pub(super) respawns: Vec<(PeerId, (f32, f32, f32))>,
@@ -104,12 +121,20 @@ pub struct SmokeState {
     golden_used: HashSet<PeerId>,
     /// everyone gold right now or still in their red handed window
     pub goldens: HashMap<PeerId, ability::Golden>,
-    /// stay (true) or leave (false), only during the vote
-    pub votes: HashMap<PeerId, bool>,
+    /// how many rounds this match plays, picked in the lobby
+    pub max_rounds: u8,
+    /// who won the round once it's over (SMOKE_SIDE_*), SMOKE_NO_WINNER while it plays
+    pub winner: u8,
+    /// box shots since the last send, for everyone's kill feed
+    pub(super) feed: Vec<shots::FeedLine>,
+    /// hiders found this round, they hunt but can only lose points now
+    pub found: HashSet<PeerId>,
+    /// found hiders' guns
+    pub gun_locks: HashMap<PeerId, GunLock>,
 }
 
 impl SmokeState {
-    pub fn new(bot_hiders: usize) -> Self {
+    pub fn new() -> Self {
         SmokeState {
             round: 0,
             phase: SmokePhase::Blind,
@@ -121,7 +146,6 @@ impl SmokeState {
             round_points: HashMap::new(),
             multipliers: HashMap::new(),
             alive_clock: 0.0,
-            bot_hiders: round_start::bot_hider_roster(bot_hiders),
             walkers: Vec::new(),
             respawns: Vec::new(),
             coins: Vec::new(),
@@ -132,14 +156,19 @@ impl SmokeState {
             golden_news: Vec::new(),
             golden_used: HashSet::new(),
             goldens: HashMap::new(),
-            votes: HashMap::new(),
+            max_rounds: SMOKE_DEFAULT_ROUNDS,
+            winner: SMOKE_NO_WINNER,
+            feed: Vec::new(),
+            found: HashSet::new(),
+            gun_locks: HashMap::new(),
         }
     }
 
-    fn add_points(&mut self, peer: PeerId, points: i32) {
-        // bots are just noise, they never score
-        if round_start::is_smoke_entity(peer) {
-            return;
+    /// gives (or takes) points and says what really changed, after the multiplier and the 0 floor
+    fn add_points(&mut self, peer: PeerId, points: i32) -> i32 {
+        // found hiders lost their round, they can only lose points from here
+        if points > 0 && self.found.contains(&peer) {
+            return 0;
         }
         let points = if points > 0 {
             let mult = self.multipliers.get(&peer).copied().unwrap_or(1.0);
@@ -151,7 +180,9 @@ impl SmokeState {
         let before = *total;
         *total = (before + points).max(0);
         // the round counts what really changed so the mvp matches the scoreboard
-        *self.round_points.entry(peer).or_insert(0) += *total - before;
+        let changed = *total - before;
+        *self.round_points.entry(peer).or_insert(0) += changed;
+        changed
     }
 
     fn set_phase(&mut self, phase: SmokePhase, time: f32) {
@@ -167,7 +198,9 @@ impl SmokeState {
         self.alive_clock = 0.0;
         self.golden_used.clear();
         self.goldens.clear();
-        self.votes.clear();
+        self.winner = SMOKE_NO_WINNER;
+        self.found.clear();
+        self.gun_locks.clear();
     }
 
     // one server tick of the clock that moves the round on when a phase runs out
@@ -181,6 +214,7 @@ impl SmokeState {
             }
             SmokePhase::Released => {
                 self.alive_points(dt);
+                self.tick_gun_locks(dt);
                 if self.phase_timer <= 0.0 {
                     self.place_coins();
                     self.set_phase(SmokePhase::Coins, SMOKE_ROUND_TIME);
@@ -189,13 +223,14 @@ impl SmokeState {
             SmokePhase::Coins => {
                 self.alive_points(dt);
                 self.tick_golden(dt);
+                self.tick_gun_locks(dt);
                 // every coin taken, or they outlasted the clock
                 if self.coins.is_empty() || self.phase_timer <= 0.0 {
                     self.end_round(SMOKE_SIDE_HIDER);
                 }
             }
-            // what happens after the vote comes with the vote piece
-            SmokePhase::Vote => {}
+            // the board is up, hooks.rs starts the next round (or ends the match) once it runs out
+            SmokePhase::Results => {}
         }
     }
 
@@ -211,7 +246,7 @@ impl SmokeState {
         }
     }
 
-    // the round is over, winners get their bonus, the rounds best gets the mvp, then everyone votes if they want to continue or no
+    // the round is over, winners get their bonus, the rounds best gets the mvp, then the results board
     fn end_round(&mut self, winner: u8) {
         // mvp from what they did this round, before the side bonus
         let mvp = self.round_points
@@ -233,8 +268,30 @@ impl SmokeState {
         self.coins.clear();
         self.golden = None;
         self.golden_due = None;
-        self.goldens.clear();   
-        self.set_phase(SmokePhase::Vote, SMOKE_VOTE_TIME);
+        self.goldens.clear();
+        self.winner = winner;
+        self.set_phase(SmokePhase::Results, SMOKE_RESULTS_TIME);
+    }
+}
+
+/// what happens when the results board runs out
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AfterResults {
+    Waiting,
+    NextRound,
+    MatchOver,
+}
+
+impl SmokeState {
+    /// once the board's time is up: another round, or that was the last one (or too few are left)
+    pub(in crate::server) fn after_results(&self, humans: usize) -> AfterResults {
+        if self.phase != SmokePhase::Results || self.phase_timer > 0.0 {
+            AfterResults::Waiting
+        } else if self.round >= self.max_rounds as u16 || hunter_count(humans, humans) == 0 {
+            AfterResults::MatchOver
+        } else {
+            AfterResults::NextRound
+        }
     }
 }
 

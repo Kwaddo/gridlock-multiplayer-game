@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use rand::Rng;
-use super::round_start::is_smoke_entity;
+use super::round_start::is_decoy;
 use super::spots::{random_spot, route, walkable};
 use super::{SmokePhase, SmokeState};
 use crate::net::PeerId;
@@ -298,15 +298,15 @@ fn step(me: &mut Player, by: (f32, f32)) -> bool {
 }
 
 impl SmokeState {
-    /// every decoy and bot hider takes a step, they all see the same crowd map, nobody moves during the vote
+    /// every decoy and bot hider takes a step, they all see the same crowd map, nobody moves while the results are up
     pub(in crate::server) fn walk_crowd(&mut self, dt: f32, players: &mut HashMap<PeerId, Player>) {
-        if self.phase == SmokePhase::Vote {
+        if self.phase == SmokePhase::Results {
             return;
         }
         // every box, humans hiding too, so decoys keep clear of them the same way
         let boxes: Vec<(f32, f32)> = players
             .iter()
-            .filter(|(peer, p)| p.is_alive && (is_smoke_entity(**peer) || self.hiders.contains(peer)))
+            .filter(|(peer, p)| p.is_alive && (is_decoy(**peer) || self.hiders.contains(peer)))
             .map(|(_, p)| (p.position.0, p.position.2))
             .collect();
         let heading: Vec<(f32, f32)> = self.walkers.iter().filter_map(|w| w.heading()).collect();

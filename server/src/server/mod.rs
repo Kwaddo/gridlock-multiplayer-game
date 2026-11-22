@@ -61,6 +61,8 @@ pub struct Server {
     /// smoke break's round, only Some while a smoke break match is on
     smoke_state: Option<smoke_break::SmokeState>,
     smoke_last_send: Option<Instant>,
+    /// rounds the host picked for the next smoke break match
+    smoke_rounds: u8,
     // Auto-fill bot settings (set by the client that starts the match)
     // auto-fill bot counts: Red/Blue in team modes; Gun Game uses only
     // `autofill_red_bots`, as the total (0 = no bots)
@@ -116,6 +118,7 @@ impl Server {
             snd_state: None,
             smoke_state: None,
             smoke_last_send: None,
+            smoke_rounds: smoke_break::SMOKE_DEFAULT_ROUNDS,
             autofill_red_bots: 0,
             autofill_blue_bots: 0,
             autofill_diff_mask: 0b11111,

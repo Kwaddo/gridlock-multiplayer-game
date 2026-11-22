@@ -144,6 +144,34 @@ fn start_requests_while_starting_or_ending_are_refused_with_a_reason() {
 }
 
 #[test]
+fn smoke_break_needs_two_players_to_start() {
+    let mut server = Server::new();
+    let a = PeerId(1);
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    let start = ClientMsg::StartGame { mode: Some(MODE_SMOKE_BREAK), duration: Some(0), autofill: None, blue_bots: None };
+    server.handle_packet(a, &start.encode());
+    assert!(to(&server.drain_outbox(), a)
+        .contains(&ServerMsg::StartDenied { reason: Some(START_DENIED_TOO_FEW) }));
+    assert!(server.match_warmup_end.is_none(), "alone, no countdown");
+
+    server.handle_packet(PeerId(2), &ClientMsg::join("bob").encode());
+    server.handle_packet(a, &start.encode());
+    assert!(server.match_warmup_end.is_some(), "two of us, it counts down");
+}
+
+#[test]
+fn smoke_break_takes_its_round_count_from_the_start_request() {
+    let (mut server, a, _) = two_players();
+    let start = |rounds| ClientMsg::StartGame { mode: Some(MODE_SMOKE_BREAK), duration: Some(rounds), autofill: None, blue_bots: None };
+    server.handle_packet(a, &start(5).encode());
+    assert_eq!(server.smoke_rounds, 5);
+    server.match_warmup_end = None;
+    // not one of 3 / 5 / 10, back to the default
+    server.handle_packet(a, &start(7).encode());
+    assert_eq!(server.smoke_rounds, crate::server::smoke_break::SMOKE_DEFAULT_ROUNDS);
+}
+
+#[test]
 fn match_status_follows_the_match() {
     let (mut server, a, b) = two_players();
     assert_eq!(statuses(&server.drain_outbox(), b).last(), Some(&MATCH_STATUS_NONE));

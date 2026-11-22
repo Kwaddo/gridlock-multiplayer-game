@@ -66,6 +66,13 @@ impl Server {
                     self.match_mode = requested;
                 }
             }
+            if self.match_mode == MODE_SMOKE_BREAK {
+                // smoke break has no clock, the lobby's "duration" is the round count
+                self.smoke_rounds = duration
+                    .map(|d| d as u8)
+                    .filter(|n| super::smoke_break::SMOKE_ROUND_CHOICES.contains(n))
+                    .unwrap_or(super::smoke_break::SMOKE_DEFAULT_ROUNDS);
+            }
             // auto-fill settings: bot counts and difficulty mask
             if let Some((bots, diff_mask)) = autofill {
                 if self.match_mode == MODE_GUN_GAME || self.match_mode == MODE_SMOKE_BREAK {
@@ -189,6 +196,11 @@ impl Server {
         }
         let host = self.players.get(&src_addr).map(|p| p.username.clone()).unwrap_or_default();
         log!("Match ended by host '{}'", host);
+        if self.smoke_active() {
+            // smoke break shows who won before everyone goes back
+            handlers::broadcast_notice(&self.outbox, &self.players, &format!("{} ended the match", host));
+            return self.end_smoke_break();
+        }
         self.end_match_now();
         handlers::broadcast_notice(&self.outbox, &self.players, &format!("{} ended the match", host));
     }

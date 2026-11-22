@@ -7,8 +7,8 @@
 
 use std::collections::HashMap;
 
-use super::round_start::{humans_in_match, is_smoke_entity};
-use super::{SmokePhase, SmokeState};
+use super::round_start::humans_in_match;
+use super::SmokeState;
 use crate::net::PeerId;
 use crate::player::Player;
 use crate::protocols::*;
@@ -24,21 +24,22 @@ impl SmokeState {
 
     /// a human still hiding, the only ones who ever get told where coins are
     fn hiding(&self, peer: PeerId) -> bool {
-        self.hiders.contains(&peer) && !is_smoke_entity(peer)
+        self.hiders.contains(&peer)
     }
 
     /// the round as `peer` sees it
-    pub(in crate::server) fn round_for(&self, peer: PeerId, players: &HashMap<PeerId, Player>) -> SmokeRound {
-        let in_vote = self.phase == SmokePhase::Vote;
+    pub(in crate::server) fn round_for(&self, peer: PeerId) -> SmokeRound {
         SmokeRound {
             round: self.round,
             phase: self.phase as u8,
             phase_timer: self.phase_timer.max(0.0),
             coins_left: self.coins.len() as u16,
             side: self.side_of(peer),
-            votes_stay: if in_vote { self.votes.values().filter(|stay| **stay).count() as u8 } else { 0 },
-            voters: if in_vote { humans_in_match(players).len() as u8 } else { 0 },
+            max_rounds: self.max_rounds,
             golden_ready: self.can_go_golden(peer),
+            winner: self.winner,
+            found: self.found.contains(&peer),
+            gun_lock: self.gun_locks.get(&peer).map_or(0.0, |l| l.locked_for),
         }
     }
 
@@ -49,7 +50,15 @@ impl SmokeState {
             .filter_map(|peer| {
                 let p = players.get(&peer)?;
                 let points = self.points.get(&peer).copied().unwrap_or(0);
-                Some(SmokeScore { id: p.id, points, side: self.side_of(peer) })
+                let round_points = self.round_points.get(&peer).copied().unwrap_or(0);
+                let mult = self.multipliers.get(&peer).copied().unwrap_or(1.0);
+                Some(SmokeScore {
+                    id: p.id,
+                    points,
+                    side: self.side_of(peer),
+                    round_points: round_points.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+                    mult_tenths: (mult * 10.0).round() as u8,
+                })
             })
             .collect();
         rows.sort_by(|a, b| b.points.cmp(&a.points).then(a.id.cmp(&b.id)));
@@ -114,8 +123,8 @@ mod tests {
     use crate::server::smoke_break::round_start::is_decoy;
     use crate::server::smoke_break::{SMOKE_BLIND_TIME, SMOKE_RELEASED_TIME};
 
-    // `humans` people and `bots` bot hiders, ticked into the coin phase
-    fn coin_phase(humans: u32, bots: usize) -> (SmokeState, HashMap<PeerId, Player>) {
+    // `humans` people, ticked into the coin phase
+    fn coin_phase(humans: u32) -> (SmokeState, HashMap<PeerId, Player>) {
         let mut players: HashMap<PeerId, Player> = (1..=humans)
             .map(|i| {
                 let mut p = Player::new(i, format!("p{i}"));
@@ -123,7 +132,7 @@ mod tests {
                 (PeerId(i), p)
             })
             .collect();
-        let mut s = SmokeState::new(bots);
+        let mut s = SmokeState::new();
         s.start_round(&mut players, &mut Boxes::new());
         s.tick(SMOKE_BLIND_TIME);
         s.tick(SMOKE_RELEASED_TIME);
@@ -132,24 +141,24 @@ mod tests {
 
     fn sides(s: &SmokeState) -> (PeerId, PeerId) {
         let hunter = *s.hunters.iter().next().unwrap();
-        let hider = *s.hiders.iter().find(|p| !is_smoke_entity(**p)).unwrap();
+        let hider = *s.hiders.iter().next().unwrap();
         (hunter, hider)
     }
 
     #[test]
     fn hunters_never_get_coins_or_the_golden_coin() {
-        let (mut s, _) = coin_phase(2, 0);
+        let (mut s, _) = coin_phase(2);
         let (hunter, hider) = sides(&s);
         s.golden = Some(((5.0, 0.0, 5.0), 20.0));
         assert!(s.coins_for(hunter).is_empty());
         assert_eq!(s.gold_coin_for(hunter), None);
-        assert_eq!(s.coins_for(hider).len(), 20);
+        assert_eq!(s.coins_for(hider).len(), crate::server::smoke_break::SMOKE_COINS_BASE);
         assert!(s.gold_coin_for(hider).is_some());
     }
 
     #[test]
     fn hiders_never_get_golden_dots() {
-        let (mut s, players) = coin_phase(3, 0);
+        let (mut s, players) = coin_phase(3);
         let (hunter, hider) = sides(&s);
         assert!(s.go_golden(hider));
         assert_eq!(s.dots_for(hunter, &players), vec![(players[&hider].position, true)]);
@@ -159,7 +168,7 @@ mod tests {
 
     #[test]
     fn everyone_is_told_who_is_gold() {
-        let (mut s, players) = coin_phase(2, 0);
+        let (mut s, players) = coin_phase(2);
         let (_, hider) = sides(&s);
         assert!(s.golden_ids(&players).is_empty());
         s.go_golden(hider);
@@ -168,20 +177,20 @@ mod tests {
 
     #[test]
     fn the_round_shows_your_side_and_if_golden_is_ready() {
-        let (mut s, players) = coin_phase(2, 0);
+        let (mut s, _) = coin_phase(2);
         let (hunter, hider) = sides(&s);
-        assert_eq!(s.round_for(hunter, &players).side, SMOKE_SIDE_HUNTER);
-        assert!(!s.round_for(hunter, &players).golden_ready, "hunters don't go golden");
-        assert_eq!(s.round_for(hider, &players).side, SMOKE_SIDE_HIDER);
-        assert!(s.round_for(hider, &players).golden_ready);
+        assert_eq!(s.round_for(hunter).side, SMOKE_SIDE_HUNTER);
+        assert!(!s.round_for(hunter).golden_ready, "hunters don't go golden");
+        assert_eq!(s.round_for(hider).side, SMOKE_SIDE_HIDER);
+        assert!(s.round_for(hider).golden_ready);
         s.go_golden(hider);
-        assert!(!s.round_for(hider, &players).golden_ready, "used it");
-        assert_eq!(s.round_for(hider, &players).coins_left, 20);
+        assert!(!s.round_for(hider).golden_ready, "used it");
+        assert_eq!(s.round_for(hider).coins_left, crate::server::smoke_break::SMOKE_COINS_BASE as u16);
     }
 
     #[test]
     fn scores_are_humans_only_best_first() {
-        let (mut s, players) = coin_phase(2, 3);
+        let (mut s, players) = coin_phase(2);
         let (hunter, hider) = sides(&s);
         s.points.insert(hider, 40);
         s.points.insert(hunter, 90);

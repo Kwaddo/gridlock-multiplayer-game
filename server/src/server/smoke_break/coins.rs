@@ -1,11 +1,10 @@
 /*
     COINS. only hiders ever know where they are and they come out when the coin phase starts, a human hider walking over one grabs it,
-    bots walk right over them so a coin going missing always means a human took it (or in some cases, expired)
+    a coin going missing always means a hider took it (or the golden one expired)
 */
 
 use std::collections::HashMap;
 
-use super::round_start::is_smoke_entity;
 use super::spots::random_spot;
 use super::{coin_count, SmokeState, SMOKE_POINTS_COIN, SMOKE_ROUND_TIME};
 use crate::net::PeerId;
@@ -82,7 +81,7 @@ impl SmokeState {
 
     /// human hiders standing on a coin grab it (+10 times their multiplier)
     pub(in crate::server) fn pick_up_coins(&mut self, players: &HashMap<PeerId, Player>) {
-        let humans: Vec<PeerId> = self.hiders.iter().copied().filter(|p| !is_smoke_entity(*p)).collect();
+        let humans: Vec<PeerId> = self.hiders.iter().copied().collect();
         for peer in humans {
             let Some(p) = players.get(&peer) else { continue };
             let here = (p.position.0, p.position.2);
@@ -118,8 +117,8 @@ mod tests {
     use crate::server::smoke_break::spots::walkable;
     use crate::server::smoke_break::{SmokePhase, SMOKE_BLIND_TIME, SMOKE_RELEASED_TIME};
 
-    // a round with `humans` people and `bots` bot hiders, ticked into the coin phase
-    fn coin_phase(humans: u32, bots: usize) -> (SmokeState, HashMap<PeerId, Player>) {
+    // a round with `humans` people, ticked into the coin phase
+    fn coin_phase(humans: u32) -> (SmokeState, HashMap<PeerId, Player>) {
         let mut players: HashMap<PeerId, Player> = (1..=humans)
             .map(|i| {
                 let mut p = Player::new(i, format!("p{i}"));
@@ -127,7 +126,7 @@ mod tests {
                 (PeerId(i), p)
             })
             .collect();
-        let mut s = SmokeState::new(bots);
+        let mut s = SmokeState::new();
         s.start_round(&mut players, &mut Boxes::new());
         s.tick(SMOKE_BLIND_TIME);
         s.tick(SMOKE_RELEASED_TIME);
@@ -136,13 +135,13 @@ mod tests {
     }
 
     fn human_hider(s: &SmokeState) -> PeerId {
-        *s.hiders.iter().find(|p| !is_smoke_entity(**p)).unwrap()
+        *s.hiders.iter().next().unwrap()
     }
 
     #[test]
     fn coins_come_out_spread_apart_where_a_box_fits() {
-        let (s, _) = coin_phase(2, 0);
-        assert_eq!(s.coins.len(), 20);
+        let (s, _) = coin_phase(2);
+        assert_eq!(s.coins.len(), crate::server::smoke_break::SMOKE_COINS_BASE);
         for (i, a) in s.coins.iter().enumerate() {
             assert!(walkable(a.0, a.2), "coin in a wall at {a:?}");
             for b in &s.coins[i + 1..] {
@@ -153,31 +152,21 @@ mod tests {
 
     #[test]
     fn walking_over_a_coin_grabs_it() {
-        let (mut s, mut players) = coin_phase(2, 0);
+        let (mut s, mut players) = coin_phase(2);
         let hider = human_hider(&s);
         let coin = s.coins[0];
         // they already earned an alive point while released
         let before = s.points.get(&hider).copied().unwrap_or(0);
         players.get_mut(&hider).unwrap().position = coin;
         s.pick_up_coins(&players);
-        assert_eq!(s.coins.len(), 19);
+        assert_eq!(s.coins.len(), crate::server::smoke_break::SMOKE_COINS_BASE - 1);
         assert_eq!(s.taken, vec![coin], "the grab is remembered for the sound");
         assert_eq!(s.points[&hider], before + SMOKE_POINTS_COIN);
     }
 
     #[test]
-    fn bots_walk_right_over_coins() {
-        let (mut s, mut players) = coin_phase(1, 2);
-        let bot = *s.hiders.iter().next().unwrap();
-        assert!(is_smoke_entity(bot));
-        players.get_mut(&bot).unwrap().position = s.coins[0];
-        s.pick_up_coins(&players);
-        assert_eq!(s.coins.len(), 20, "a bot can't take a coin");
-    }
-
-    #[test]
     fn hunters_cant_take_coins() {
-        let (mut s, mut players) = coin_phase(2, 0);
+        let (mut s, mut players) = coin_phase(2);
         let hunter = *s.hunters.iter().next().unwrap();
         // tuck the hider away so they can't grab anything themselves
         let hider = human_hider(&s);
@@ -191,7 +180,7 @@ mod tests {
 
     #[test]
     fn every_coin_taken_and_the_hiders_win() {
-        let (mut s, mut players) = coin_phase(2, 0);
+        let (mut s, mut players) = coin_phase(2);
         let hider = human_hider(&s);
         for coin in s.coins.clone() {
             players.get_mut(&hider).unwrap().position = coin;
@@ -199,17 +188,14 @@ mod tests {
         }
         assert!(s.coins.is_empty());
         s.tick(0.0);
-        assert_eq!(s.phase, SmokePhase::Vote);
+        assert_eq!(s.phase, SmokePhase::Results);
     }
 
     #[test]
-    fn more_human_hiders_more_coins_bots_dont_count() {
+    fn more_hiders_more_coins() {
         // 8 humans: 2 hunt, 6 hide = 24 coins
-        let (s, _) = coin_phase(8, 0);
+        let (s, _) = coin_phase(8);
         assert_eq!(s.coins.len(), 24);
-        // 6 humans + 6 bots: 12 players so 2 hunt, 4 humans + 6 bots hide, only the 4 count = 20 (40 if bots counted)
-        let (s, _) = coin_phase(6, 6);
-        assert_eq!(s.coins.len(), 20);
     }
 
     // force the golden coin out now
@@ -222,7 +208,7 @@ mod tests {
     #[test]
     fn golden_coin_comes_out_once_in_the_middle_of_the_coin_phase() {
         for _ in 0..20 {
-            let (mut s, _) = coin_phase(2, 0);
+            let (mut s, _) = coin_phase(2);
             let mut out_at = Vec::new();
             for second in 0..SMOKE_ROUND_TIME as u32 {
                 s.tick(1.0);
@@ -240,7 +226,7 @@ mod tests {
 
     #[test]
     fn golden_coin_goes_after_30s_if_nobody_takes_it() {
-        let (mut s, _) = coin_phase(2, 0);
+        let (mut s, _) = coin_phase(2);
         golden_now(&mut s);
         s.tick(GOLDEN_LIFE - 1.0);
         assert!(s.golden.is_some());
@@ -251,7 +237,7 @@ mod tests {
 
     #[test]
     fn grabbing_the_golden_coin_is_worth_a_find() {
-        let (mut s, mut players) = coin_phase(2, 0);
+        let (mut s, mut players) = coin_phase(2);
         let hider = human_hider(&s);
         let at = golden_now(&mut s);
         // a normal coin can land right next to it, keep them out of the way so we only count the golden one
@@ -265,18 +251,8 @@ mod tests {
     }
 
     #[test]
-    fn bots_cant_take_the_golden_coin() {
-        let (mut s, mut players) = coin_phase(1, 2);
-        let bot = *s.hiders.iter().next().unwrap();
-        let at = golden_now(&mut s);
-        players.get_mut(&bot).unwrap().position = at;
-        s.pick_up_coins(&players);
-        assert!(s.golden.is_some());
-    }
-
-    #[test]
     fn golden_coin_doesnt_count_toward_all_coins_taken() {
-        let (mut s, mut players) = coin_phase(2, 0);
+        let (mut s, mut players) = coin_phase(2);
         let hider = human_hider(&s);
         golden_now(&mut s);
         // tuck it in a wall so the walk below can't grab it by accident
@@ -287,7 +263,7 @@ mod tests {
         }
         // every normal coin gone, the golden one still out, hiders still win
         s.tick(0.0);
-        assert_eq!(s.phase, SmokePhase::Vote);
+        assert_eq!(s.phase, SmokePhase::Results);
         assert!(s.golden.is_none(), "it goes when the round ends");
     }
 }

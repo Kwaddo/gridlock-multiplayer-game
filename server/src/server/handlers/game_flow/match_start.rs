@@ -136,7 +136,7 @@ pub fn maybe_start_match(
             }
 
             if match_mode == MODE_SMOKE_BREAK {
-                *smoke_state = Some(crate::server::smoke_break::SmokeState::new(autofill_red_bots as usize));
+                *smoke_state = Some(crate::server::smoke_break::SmokeState::new());
             }
 
             for addr in joiners.iter() {
