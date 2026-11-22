@@ -25,6 +25,12 @@ impl Server {
         self.match_running && self.match_mode == MODE_SMOKE_BREAK && self.smoke_state.is_some()
     }
 
+    /// a smoke break match exists, running or on its winner screen, so its packet rules still hold
+    /// (smoke_active is false during the winner countdown, but the boxes and the crowd are still out)
+    pub(in crate::server) fn smoke_on(&self) -> bool {
+        self.match_mode == MODE_SMOKE_BREAK && self.smoke_state.is_some()
+    }
+
     /// one tick of the round, then whatever it needs sent
     pub(in crate::server) fn tick_smoke_break(&mut self, dt: f32) {
         if !self.smoke_active() {
@@ -218,6 +224,10 @@ impl Server {
 
     /// a box got shot during smoke break, the round decides what happens
     pub(in crate::server) fn smoke_box_shot(&mut self, peer: PeerId, id: u16) {
+        // the winner screen is up, nothing scores any more
+        if !self.match_running {
+            return self.boxes.resend_to(peer);
+        }
         let Some(smoke) = self.smoke_state.as_mut() else { return };
         let players_before = self.players.len();
         match smoke.box_shot(peer, id, &mut self.players, &mut self.boxes) {
@@ -233,6 +243,9 @@ impl Server {
     }
 
     pub(in crate::server) fn smoke_go_golden(&mut self, peer: PeerId) {
+        if !self.match_running {
+            return;
+        }
         if let Some(smoke) = self.smoke_state.as_mut() {
             smoke.go_golden(peer);
         }

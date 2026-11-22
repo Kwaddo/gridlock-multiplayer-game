@@ -163,6 +163,35 @@ fn nobody_takes_damage_and_nobody_climbs_out() {
 }
 
 #[test]
+fn on_the_winner_screen_box_packets_still_follow_smoke_rules() {
+    let (mut server, a, _) = match_of_two();
+    server.tick();
+    {
+        let smoke = server.smoke_state.as_mut().unwrap();
+        smoke.tick(SMOKE_BLIND_TIME);
+    }
+    let smoke = server.smoke_state.as_ref().unwrap();
+    let (hunter, hider) = (*smoke.hunters.iter().next().unwrap(), *smoke.hiders.iter().next().unwrap());
+    server.handle_packet(a, &ClientMsg::EndMatch.encode());
+    assert!(!server.match_running && server.smoke_state.is_some(), "the winner countdown");
+
+    // the hider can't climb out, the hunter can't find them, nobody gets hurt
+    server.handle_packet(hider, &ClientMsg::BoxExit.encode());
+    server.tick();
+    let id = server.boxes.box_of(hider).expect("still boxed");
+    let points = server.smoke_state.as_ref().unwrap().points.clone();
+    server.handle_packet(hunter, &ClientMsg::BoxShot { id }.encode());
+    let hp = server.players[&hider].health;
+    let hit = ClientMsg::Hit { victim_id: server.players[&hider].id, damage: 50.0, weapon: None, backstab: None, headshot: None };
+    server.handle_packet(hunter, &hit.encode());
+    server.tick();
+    assert_eq!(server.boxes.box_of(hider), Some(id), "the box stays");
+    let smoke = server.smoke_state.as_ref().unwrap();
+    assert!(smoke.hiders.contains(&hider) && smoke.points == points, "no find after the match is over");
+    assert_eq!(server.players[&hider].health, hp);
+}
+
+#[test]
 fn when_the_match_ends_the_crowd_never_reaches_the_lobby() {
     let (mut server, _, _) = match_of_two();
     server.tick();

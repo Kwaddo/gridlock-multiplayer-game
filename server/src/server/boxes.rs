@@ -115,6 +115,12 @@ impl Boxes {
     }
 
 
+    /// the box `peer` is in, if any
+    #[cfg(test)]
+    pub fn box_of(&self, peer: PeerId) -> Option<u16> {
+        self.list.iter().find(|b| b.carrier == Some(peer)).map(|b| b.id)
+    }
+
     pub fn is_carrying(&self, peer: PeerId) -> bool {
         self.list.iter().any(|b| b.carrier == Some(peer))
     }
