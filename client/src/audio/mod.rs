@@ -8,7 +8,8 @@
 
 pub mod catalog;
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 pub use catalog::Cue;
 
@@ -30,6 +31,9 @@ pub struct Audio {
     /// Master volume (0..1) times every play; 0 while muted. Starts silent
     /// until the settings are applied with [`Audio::set_levels`].
     master: f32,
+
+    /// Keys played with no file loaded, so each one is warned about once.
+    warned: RefCell<HashSet<String>>,
 }
 
 impl Audio {
@@ -41,10 +45,11 @@ impl Audio {
                 .ok(),
             samples: HashMap::new(),
             master: 0.0,
+            warned: RefCell::default(),
         };
 
         #[cfg(target_arch = "wasm32")]
-        let audio = Audio { sounds: HashMap::new(), master: 0.0 };
+        let audio = Audio { sounds: HashMap::new(), master: 0.0, warned: RefCell::default() };
 
         audio
     }
@@ -124,7 +129,11 @@ impl Audio {
         #[cfg(not(target_arch = "wasm32"))]
         {
             use rodio::Source;
-            let (Some(sample), Some((_, handle))) = (self.samples.get(key), &self.output) else {
+            let Some((_, handle)) = &self.output else {
+                return;
+            };
+            let Some(sample) = self.samples.get(key) else {
+                self.warn_missing(key);
                 return;
             };
             let source = sample.clone().speed(speed).amplify(volume);
@@ -141,9 +150,21 @@ impl Audio {
 
         #[cfg(target_arch = "wasm32")]
         {
-            if let Some(&id) = self.sounds.get(key) {
-                unsafe { web::gridlock_audio_play(id, speed, volume, pan) };
+            match self.sounds.get(key) {
+                Some(&id) => unsafe { web::gridlock_audio_play(id, speed, volume, pan) },
+                None => self.warn_missing(key),
             }
+        }
+    }
+
+    /// A key with no file behind it (not in the manifest, or it failed to load).
+    /// Only reached when a play misses, and it says so once per key.
+    #[cold]
+    fn warn_missing(&self, key: &str) {
+        let mut warned = self.warned.borrow_mut();
+        if !warned.contains(key) {
+            macroquad::logging::warn!("sound '{}' isn't loaded, is it in manifest.json?", key);
+            warned.insert(key.to_string());
         }
     }
 }

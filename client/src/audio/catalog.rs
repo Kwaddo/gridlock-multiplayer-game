@@ -2,7 +2,7 @@
 //! only exists if it's here and its file is in the manifest.
 //!
 //! Adding one: drop the file in client/assets/sounds, add
-//! `"<key>": "assets/sounds/<file>.ogg"` to the `global` section of manifest.json,
+//! `"<key>": "assets/sounds/<file>.ogg"` (or .mp3) to the `global` section of manifest.json,
 //! add its cue below with a volume, and play it from one place.
 
 /// A sound with its default mix level.
@@ -29,3 +29,15 @@ pub const TAUNT_LENGTH: f32 = 0.65;
 /// smoke break: any coin grabbed (the golden one too for now), everyone hears it from where it was,
 /// that's how a hunter knows someone just took one
 pub const COIN_PICKUP: Cue = cue("coin_pickup", 0.8, 0.05);
+
+#[cfg(test)]
+mod tests {
+    // a cue whose key isn't in the manifest never loads and never plays
+    #[test]
+    fn every_cue_is_in_the_manifest() {
+        let manifest = include_str!("../../../manifest.json");
+        for cue in [super::TAUNT, super::COIN_PICKUP] {
+            assert!(manifest.contains(&format!("\"{}\": \"assets/sounds/", cue.key)), "{} missing", cue.key);
+        }
+    }
+}

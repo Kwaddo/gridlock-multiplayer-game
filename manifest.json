@@ -94,7 +94,9 @@
     "anim_emote_moonwalk": "assets/models/animations/Emote_Moonwalk.glb",
     "punch1": "assets/images/weapons/FPS Weapon Sprites/frames/punch1.png",
     "punch2": "assets/images/weapons/FPS Weapon Sprites/frames/punch2.png",
-    "punch3": "assets/images/weapons/FPS Weapon Sprites/frames/punch3.png"
+    "punch3": "assets/images/weapons/FPS Weapon Sprites/frames/punch3.png",
+    "taunt": "assets/sounds/taunt.mp3",
+    "coin_pickup": "assets/sounds/coin_pickup.mp3"
   },
   "lobby": {
     "floor_texture": "assets/images/textures/rocks.png"
