@@ -18,10 +18,12 @@ mod coins;
 mod shots;
 mod ability;
 mod view;
+mod alias;
 
 mod hooks;
 
 pub use round_start::{is_decoy, remove_smoke_entities, HUNTER_WEAPON};
+pub use alias::{alias_for, masked_info, masked_pose, masked_state};
 
 use walker::Walker;
 
@@ -131,6 +133,8 @@ pub struct SmokeState {
     pub found: HashSet<PeerId>,
     /// found hiders' guns
     pub gun_locks: HashMap<PeerId, GunLock>,
+    /// box aliases handed out this match, the next one counts on from here (alias.rs)
+    aliases_used: u32,
 }
 
 impl SmokeState {
@@ -161,6 +165,7 @@ impl SmokeState {
             feed: Vec::new(),
             found: HashSet::new(),
             gun_locks: HashMap::new(),
+            aliases_used: 0,
         }
     }
 

@@ -133,6 +133,7 @@ impl BotManager {
             auto_respawn: true,
             regen_resume_at: None,
             in_box: false,
+            smoke_alias: None,
         };
 
         let bot_state = BotState {

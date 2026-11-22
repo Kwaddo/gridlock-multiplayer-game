@@ -122,11 +122,20 @@ impl SmokeState {
         // coins come out based on how many are hiding
         self.hiders_at_start = self.hiders.len();
 
-        // every hider and decoy starts in a box
-        let boxed: Vec<PeerId> = self.hiders.iter().copied().chain(self.walkers.iter().map(|w| w.peer)).collect();
+        // every hider and decoy starts in a box, in a random order so neither the box ids nor the aliases
+        // say who's inside, and everyone else only ever sees a box under its alias (alias.rs)
+        let mut boxed: Vec<PeerId> = self.hiders.iter().copied().chain(self.walkers.iter().map(|w| w.peer)).collect();
+        boxed.shuffle(&mut rng);
+        for p in players.values_mut() {
+            p.smoke_alias = None;
+        }
         for peer in boxed {
             if !boxes.is_carrying(peer) {
                 boxes.spawn_carried(players, peer);
+            }
+            let alias = self.next_alias();
+            if let Some(p) = players.get_mut(&peer) {
+                p.smoke_alias = Some(alias);
             }
         }
         true

@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use platform::Instant;
 
-use super::Server;
+use super::{smoke_break, Server};
 use crate::net::PeerId;
 use crate::player::Player;
 use crate::protocols::*;
@@ -63,14 +63,34 @@ impl Server {
         let sync = &mut self.info_sync;
         let players = &self.players;
 
-        if sync.sent.len() > players.len() {
-            let ids: HashSet<u32> = players.values().map(|p| p.id).collect();
+        // in smoke break a box goes out under its alias with what a decoy has (nothing), a hider's
+        // real id keeps its name for the scores, a decoy's real id is never used so it goes nowhere
+        let shown = |(peer, p): (&PeerId, &Player)| !(p.smoke_alias.is_some() && smoke_break::is_decoy(*peer));
+        let expected = players.iter().filter(|e| shown(*e)).count()
+            + players.values().filter(|p| p.smoke_alias.is_some()).count();
+        if sync.sent.len() > expected {
+            let ids: HashSet<u32> = players
+                .iter()
+                .filter(|e| shown(*e))
+                .map(|(_, p)| p.id)
+                .chain(players.values().filter_map(|p| p.smoke_alias))
+                .collect();
             sync.sent.retain(|id, _| ids.contains(id));
         }
         sync.primed.retain(|addr| players.get(addr).is_some_and(|p| !p.is_bot));
 
         let mut changed = Vec::new();
-        for p in players.values() {
+        for (peer, p) in players.iter() {
+            if let Some(alias) = p.smoke_alias {
+                let info = smoke_break::masked_info(alias);
+                if sync.sent.get(&alias) != Some(&info) {
+                    sync.sent.insert(alias, info.clone());
+                    changed.push(info);
+                }
+            }
+            if !shown((peer, p)) {
+                continue;
+            }
             if !sync.sent.get(&p.id).is_some_and(|s| same(s, p)) {
                 let info = info_of(p);
                 sync.sent.insert(p.id, info.clone());

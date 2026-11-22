@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use platform::Instant;
 
-use super::Server;
+use super::{smoke_break, Server};
 use crate::net::PeerId;
 use crate::player::{ Player, WorldId };
 use crate::protocols::*;
@@ -214,16 +214,26 @@ impl Boxes {
     }
 
     // generate a list of boxes for a given world, including the player id of the carrier (if any)
-    fn list_for(&self, world: WorldId, players: &HashMap<PeerId, Player>) -> Vec<u8> {
+    // in smoke break a box someone else is in shows its alias instead (and a pose that gives nothing away),
+    // `me` is the receiver when they're in a box themselves, they get theirs under their real id
+    fn list_for(&self, world: WorldId, players: &HashMap<PeerId, Player>, me: Option<PeerId>) -> Vec<u8> {
         let boxes = self.list
             .iter()
             .filter(|b| b.world == world)
-            .map(|b| CardboardBox {
-                id: b.id,
-                position: b.position,
-                yaw: b.yaw,
-                // wire carrier is the player id, 0 = empty
-                carrier: b.carrier.and_then(|peer| players.get(&peer)).map_or(0, |p| p.id),
+            .map(|b| {
+                let carried = b.carrier.and_then(|peer| players.get(&peer).map(|p| (peer, p)));
+                let alias = carried.and_then(|(peer, p)| smoke_break::alias_for(peer, p, me));
+                let (position, yaw) = match alias {
+                    Some(_) => smoke_break::masked_pose(b.position, b.yaw),
+                    None => (b.position, b.yaw),
+                };
+                CardboardBox {
+                    id: b.id,
+                    position,
+                    yaw,
+                    // wire carrier is the player id (or alias), 0 = empty
+                    carrier: alias.or(carried.map(|(_, p)| p.id)).unwrap_or(0),
+                }
             })
             .collect();
         (ServerMsg::Boxes { world: world as u8, boxes }).encode()
@@ -236,21 +246,27 @@ impl Server {
         self.boxes.update(&self.players);
         for (peer, p) in self.players.iter_mut() {
             p.in_box = self.boxes.is_carrying(*peer);
+            // out of the box (found, left the maze, the round's over) is out of disguise
+            if !p.in_box {
+                p.smoke_alias = None;
+            }
         }
         let full = self.boxes.last_full.map_or(true, |t| t.elapsed() >= RESEND_EVERY);
         if full {
             self.boxes.last_full = Some(Instant::now());
         }
         // send each human player their world list if it has changed since the last time we sent it to them
-        let mut packets: HashMap<u8, Vec<u8>> = HashMap::new();
+        // one list per world, plus one each for whoever is boxed in smoke break (see list_for)
+        let mut packets: HashMap<(u8, Option<PeerId>), Vec<u8>> = HashMap::new();
         for (peer, p) in self.players.iter().filter(|(_, p)| !p.is_bot) {
             let stale = self.boxes.sent_world.get(peer) != Some(&p.world);
             if !(full || stale || self.boxes.changed) {
                 continue;
             }
+            let me = p.smoke_alias.map(|_| *peer);
             let packet = packets
-                .entry(p.world as u8)
-                .or_insert_with(|| self.boxes.list_for(p.world, &self.players));
+                .entry((p.world as u8, me))
+                .or_insert_with(|| self.boxes.list_for(p.world, &self.players, me));
             let _ = self.outbox.send_to(packet, *peer);
             self.boxes.sent_world.insert(*peer, p.world);
         }

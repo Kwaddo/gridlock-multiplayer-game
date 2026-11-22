@@ -143,10 +143,10 @@ impl Server {
                     "A golden coin just appeared! It's on your minimap for 30 s".to_string(),
                     "A golden coin just appeared somewhere...".to_string(),
                 ),
+                // hunters don't get the name, it'd say which side of the board to look at for a box
                 GoldenNews::Taken(peer) => {
                     let name = self.players.get(&peer).map(|p| p.username.clone()).unwrap_or_default();
-                    let text = format!("{name} grabbed the golden coin!");
-                    (text.clone(), text)
+                    (format!("{name} grabbed the golden coin!"), "Someone grabbed the golden coin!".to_string())
                 }
                 GoldenNews::Gone => ("The golden coin is gone".to_string(), "The golden coin is gone".to_string()),
             };
@@ -175,15 +175,15 @@ impl Server {
         }
         self.smoke_last_send = Some(Instant::now());
         let scores = ServerMsg::SmokeScores(smoke.scores(&self.players)).encode();
-        let golden = ServerMsg::SmokeGolden(smoke.golden_ids(&self.players)).encode();
         for peer in humans_in_match(&self.players) {
             let messages = [
                 ServerMsg::SmokeRound(smoke.round_for(peer)).encode(),
                 ServerMsg::SmokeCoins(smoke.coins_for(peer)).encode(),
                 ServerMsg::SmokeGoldCoin(smoke.gold_coin_for(peer)).encode(),
                 ServerMsg::SmokeDots(smoke.dots_for(peer, &self.players)).encode(),
+                ServerMsg::SmokeGolden(smoke.golden_ids(peer, &self.players)).encode(),
             ];
-            for msg in messages.iter().chain([&scores, &golden]) {
+            for msg in messages.iter().chain([&scores]) {
                 let _ = self.outbox.send_to(msg, peer);
             }
         }
@@ -219,6 +219,9 @@ impl Server {
             self.smoke_last_send = None;
             self.boxes.clear_world(WorldId::Maze);
             super::remove_smoke_entities(&mut self.players);
+            for p in self.players.values_mut() {
+                p.smoke_alias = None;
+            }
         }
     }
 

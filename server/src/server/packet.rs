@@ -218,6 +218,7 @@ impl Server {
                         auto_respawn: false,
                         regen_resume_at: None,
                         in_box: false,
+                        smoke_alias: None,
 
                     };
 

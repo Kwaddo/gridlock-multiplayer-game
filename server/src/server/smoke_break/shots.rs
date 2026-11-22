@@ -95,6 +95,8 @@ impl SmokeState {
                 self.hunters.insert(found);
                 if let Some(p) = players.get_mut(&found) {
                     p.current_weapon = HUNTER_WEAPON.to_string();
+                    // out of the box, everyone sees who they are now
+                    p.smoke_alias = None;
                 }
                 Shot::Found(found)
             }

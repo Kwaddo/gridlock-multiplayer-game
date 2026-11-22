@@ -86,12 +86,16 @@ impl SmokeState {
         self.golden.filter(|_| self.hiding(peer))
     }
 
-    /// player ids of everyone gold right now, everyone gets this so the box glows for whoever can see it
-    pub(in crate::server) fn golden_ids(&self, players: &HashMap<PeerId, Player>) -> Vec<u32> {
+    /// ids of everyone gold right now as `receiver` knows them, everyone gets this so the box glows for whoever can see it
+    /// a gold box is still a box, so it's the alias for everyone but the one inside (alias.rs)
+    pub(in crate::server) fn golden_ids(&self, receiver: PeerId, players: &HashMap<PeerId, Player>) -> Vec<u32> {
         self.goldens
             .iter()
             .filter(|(_, g)| g.is_gold())
-            .filter_map(|(peer, _)| players.get(peer).map(|p| p.id))
+            .filter_map(|(peer, _)| {
+                let p = players.get(peer)?;
+                Some(super::alias_for(*peer, p, Some(receiver)).unwrap_or(p.id))
+            })
             .collect()
     }
 
@@ -170,9 +174,11 @@ mod tests {
     fn everyone_is_told_who_is_gold() {
         let (mut s, players) = coin_phase(2);
         let (_, hider) = sides(&s);
-        assert!(s.golden_ids(&players).is_empty());
+        let (hunter, _) = sides(&s);
+        assert!(s.golden_ids(hunter, &players).is_empty());
         s.go_golden(hider);
-        assert_eq!(s.golden_ids(&players), vec![players[&hider].id]);
+        assert_eq!(s.golden_ids(hunter, &players), vec![players[&hider].smoke_alias.unwrap()], "others see the alias");
+        assert_eq!(s.golden_ids(hider, &players), vec![players[&hider].id], "the hider sees their own id");
     }
 
     #[test]
