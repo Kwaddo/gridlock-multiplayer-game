@@ -140,6 +140,10 @@ pub const MSG_SMOKE_COINS: u8 = 48; // server -> hiders only, every coin still o
 pub const MSG_SMOKE_SCORES: u8 = 49; // server -> all, everyones points so far
 pub const MSG_SMOKE_VOTE: u8 = 53; // client -> server, stay for another round or not
 pub const MSG_SMOKE_COIN_TAKEN: u8 = 54; // server -> all, someone grabbed a coin here, play the sound
+pub const MSG_SMOKE_GOLD_COIN: u8 = 55; // server -> hiders only, where the golden coin is and how long it has left, or that it's gone
+pub const MSG_SMOKE_GOLDEN: u8 = 56; // server -> all, which players are gold right now so their box glows
+pub const MSG_SMOKE_DOTS: u8 = 57; // server -> hunters only, minimap dots on gold hiders and where they were last seen
+pub const MSG_SMOKE_GO_GOLDEN: u8 = 58; // client -> server, i'm going golden
 
 pub const SMOKE_PHASE_BLIND: u8 = 0; // hunters frozen and blind, hiders spread out
 pub const SMOKE_PHASE_RELEASED: u8 = 1; // hunters out, no coins yet

@@ -23,7 +23,7 @@ fn coins_are_four_a_hider_but_never_under_twenty() {
 
 #[test]
 fn phases_run_blind_released_coins_vote() {
-    let mut s = SmokeState::new();
+    let mut s = SmokeState::new(0);
     s.new_round();
     assert_eq!((s.round, s.phase), (1, SmokePhase::Blind));
     // a second short of the end is still blind
@@ -41,7 +41,7 @@ fn phases_run_blind_released_coins_vote() {
 #[test]
 fn ticks_that_skip_past_zero_still_move_on() {
     // the clock goes 0.02 -> -0.01, it never lands on exactly 0
-    let mut s = SmokeState::new();
+    let mut s = SmokeState::new(0);
     s.new_round();
     s.tick(SMOKE_BLIND_TIME - 0.02);
     s.tick(0.03);
@@ -50,7 +50,7 @@ fn ticks_that_skip_past_zero_still_move_on() {
 
 #[test]
 fn a_new_round_wipes_round_things_but_keeps_match_points() {
-    let mut s = SmokeState::new();
+    let mut s = SmokeState::new(0);
     let me = PeerId(1);
     s.new_round();
     s.add_points(me, 40);
@@ -66,7 +66,7 @@ fn a_new_round_wipes_round_things_but_keeps_match_points() {
 
 #[test]
 fn points_never_go_under_zero_and_gains_use_the_multiplier() {
-    let mut s = SmokeState::new();
+    let mut s = SmokeState::new(0);
     let me = PeerId(1);
     s.add_points(me, SMOKE_POINTS_DECOY);
     assert_eq!(s.points[&me], 0, "a decoy at 0 points leaves you at 0");
@@ -81,7 +81,7 @@ fn points_never_go_under_zero_and_gains_use_the_multiplier() {
 
 #[test]
 fn hiders_earn_while_hidden_but_not_while_blind() {
-    let mut s = SmokeState::new();
+    let mut s = SmokeState::new(0);
     let hider = PeerId(2);
     s.new_round();
     s.hiders.insert(hider);
@@ -98,7 +98,7 @@ fn hiders_earn_while_hidden_but_not_while_blind() {
 
 #[test]
 fn clock_running_out_means_hiders_win() {
-    let mut s = SmokeState::new();
+    let mut s = SmokeState::new(0);
     let (hunter, hider) = (PeerId(1), PeerId(2));
     s.new_round();
     s.hunters.insert(hunter);
@@ -119,7 +119,7 @@ fn clock_running_out_means_hiders_win() {
 
 #[test]
 fn starting_hunters_get_the_win_but_found_hiders_dont() {
-    let mut s = SmokeState::new();
+    let mut s = SmokeState::new(0);
     let (hunter, found) = (PeerId(1), PeerId(2));
     s.new_round();
     s.hunters.insert(hunter);
@@ -135,7 +135,7 @@ fn starting_hunters_get_the_win_but_found_hiders_dont() {
 
 #[test]
 fn mvp_is_picked_before_the_win_bonus() {
-    let mut s = SmokeState::new();
+    let mut s = SmokeState::new(0);
     let (hunter, hider) = (PeerId(1), PeerId(2));
     s.new_round();
     s.starting_hunters.insert(hunter);

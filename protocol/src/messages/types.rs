@@ -202,7 +202,7 @@ pub struct SndRound {
 }
 
 /*
-    smoke break round as one player sees it, 12 bytes
+    smoke break round as one player sees it, 13 bytes
     sent to each player on its own cause side is theirs, on change and every second
 */
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -215,12 +215,14 @@ pub struct SmokeRound {
     // vote phase only, zeros otherwise
     pub votes_stay: u8,
     pub voters: u8,
+    // a hider who hasn't gone golden yet this round and still can
+    pub golden_ready: bool,
 }
 
 impl SmokeRound {
     pub(super) fn write(&self, w: &mut Writer) {
         w.u16(self.round).u8(self.phase).f32(self.phase_timer).u16(self.coins_left);
-        w.u8(self.side).u8(self.votes_stay).u8(self.voters);
+        w.u8(self.side).u8(self.votes_stay).u8(self.voters).bool(self.golden_ready);
     }
 
     pub(super) fn read(r: &mut Reader) -> Option<Self> {
@@ -232,6 +234,7 @@ impl SmokeRound {
             side: r.u8()?,
             votes_stay: r.u8()?,
             voters: r.u8()?,
+            golden_ready: r.bool()?,
         })
     }
 }

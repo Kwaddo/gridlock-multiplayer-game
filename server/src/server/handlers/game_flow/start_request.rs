@@ -120,7 +120,7 @@ pub fn handle_start_game(
                         }
                     };
                     // assign team by balancing current maze teams (skip for Gun Game)
-                    if match_mode != MODE_GUN_GAME {
+                    if match_mode != MODE_GUN_GAME && match_mode != MODE_SMOKE_BREAK {
                         req_player.team = if red_count <= blue_count {
                             Team::Red
                         } else {

@@ -184,7 +184,7 @@ fn long_strings_are_clamped() {
 
 #[test]
 fn smoke_break_messages_round_trip() {
-    let round = SmokeRound { round: 3, phase: SMOKE_PHASE_VOTE, phase_timer: 7.5, coins_left: 12, side: SMOKE_SIDE_HUNTER, votes_stay: 2, voters: 5 };
+    let round = SmokeRound { round: 3, phase: SMOKE_PHASE_VOTE, phase_timer: 7.5, coins_left: 12, side: SMOKE_SIDE_HUNTER, votes_stay: 2, voters: 5, golden_ready: true };
     rt_server(ServerMsg::SmokeRound(round));
     rt_server(ServerMsg::SmokeCoins(vec![(1.0, 0.0, -2.5), (10.0, 0.0, 4.0)]));
     rt_server(ServerMsg::SmokeCoins(Vec::new()));
@@ -196,9 +196,19 @@ fn smoke_break_messages_round_trip() {
 
 #[test]
 fn smoke_break_message_sizes() {
-    let round = SmokeRound { round: 1, phase: 0, phase_timer: 15.0, coins_left: 20, side: 0, votes_stay: 0, voters: 0 };
-    assert_eq!(ServerMsg::SmokeRound(round).encode().len(), 1 + 12);
+    let round = SmokeRound { round: 1, phase: 0, phase_timer: 15.0, coins_left: 20, side: 0, votes_stay: 0, voters: 0, golden_ready: false };
+    assert_eq!(ServerMsg::SmokeRound(round).encode().len(), 1 + 13);
     let row = SmokeScore { id: 1, points: 0, side: 0 };
     assert_eq!(ServerMsg::SmokeScores(vec![row; 4]).encode().len(), 2 + 4 * 9);
     assert_eq!(ServerMsg::SmokeCoins(vec![(0.0, 0.0, 0.0); 20]).encode().len(), 2 + 20 * 6);
+}
+
+#[test]
+fn smoke_break_golden_messages_round_trip() {
+    rt_server(ServerMsg::SmokeGoldCoin(Some(((4.0, 0.0, 9.0), 27.5))));
+    rt_server(ServerMsg::SmokeGoldCoin(None));
+    rt_server(ServerMsg::SmokeGolden(vec![3, 9001]));
+    rt_server(ServerMsg::SmokeGolden(Vec::new()));
+    rt_server(ServerMsg::SmokeDots(vec![((1.0, 0.0, 2.0), true), ((30.0, 0.0, 8.0), false)]));
+    rt_client(ClientMsg::SmokeGoGolden);
 }

@@ -56,6 +56,12 @@ pub enum ServerMsg {
     SmokeCoins(Vec<Vec3>),
     SmokeScores(Vec<SmokeScore>),
     SmokeCoinTaken { at: Vec3 },
+    // where the golden coin is and seconds left, None once it's taken or gone
+    SmokeGoldCoin(Option<(Vec3, f32)>),
+    // player ids of everyone gold right now
+    SmokeGolden(Vec<u32>),
+    // (where, gold right now) for each dot, false is a "last seen here" dot
+    SmokeDots(Vec<(Vec3, bool)>),
 }
 
 impl ServerMsg {
@@ -259,6 +265,30 @@ impl ServerMsg {
                 w.finish()
             }
             ServerMsg::SmokeCoinTaken { at } => Writer::new(MSG_SMOKE_COIN_TAKEN).pos16(*at).finish(),
+            ServerMsg::SmokeGoldCoin(coin) => {
+                let mut w = Writer::new(MSG_SMOKE_GOLD_COIN);
+                w.bool(coin.is_some());
+                if let Some((at, left)) = coin {
+                    w.pos16(*at).f32(*left);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeGolden(ids) => {
+                let mut w = Writer::new(MSG_SMOKE_GOLDEN);
+                w.u8(ids.len().min(255) as u8);
+                for id in ids.iter().take(255) {
+                    w.u32(*id);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeDots(dots) => {
+                let mut w = Writer::new(MSG_SMOKE_DOTS);
+                w.u8(dots.len().min(255) as u8);
+                for (at, gold) in dots.iter().take(255) {
+                    w.pos16(*at).bool(*gold);
+                }
+                w.finish()
+            }
         }
     }
 
@@ -421,6 +451,24 @@ impl ServerMsg {
                 ServerMsg::SmokeScores(scores)
             }
             MSG_SMOKE_COIN_TAKEN => ServerMsg::SmokeCoinTaken { at: r.pos16()? },
+            MSG_SMOKE_GOLD_COIN => {
+                let coin = if r.bool()? { Some((r.pos16()?, r.f32()?)) } else { None };
+                ServerMsg::SmokeGoldCoin(coin)
+            }
+            MSG_SMOKE_GOLDEN => {
+                let mut ids = Vec::new();
+                for _ in 0..r.u8()? {
+                    ids.push(r.u32()?);
+                }
+                ServerMsg::SmokeGolden(ids)
+            }
+            MSG_SMOKE_DOTS => {
+                let mut dots = Vec::new();
+                for _ in 0..r.u8()? {
+                    dots.push((r.pos16()?, r.bool()?));
+                }
+                ServerMsg::SmokeDots(dots)
+            }
             _ => return None,
         };
         Some(msg)

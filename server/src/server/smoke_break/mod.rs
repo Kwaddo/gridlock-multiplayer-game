@@ -11,6 +11,20 @@ use crate::net::PeerId;
 
 #[cfg(test)]
 mod tests;
+mod spots;
+mod walker;
+mod round_start;
+mod coins;
+mod shots;
+mod ability;
+mod vote;
+mod view;
+
+mod hooks;
+
+pub use round_start::{is_decoy, remove_smoke_entities, HUNTER_WEAPON};
+
+use walker::Walker;
 
 // what part of the round we're in, numbers match SMOKE_PHASE_* so they go on the wire as they are
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +53,7 @@ pub const SMOKE_POINTS_COIN: i32 = 10;
 pub const SMOKE_POINTS_ALIVE: i32 = 1; // every SMOKE_ALIVE_EVERY seconds still hidden
 pub const SMOKE_ALIVE_EVERY: f32 = 5.0; // as of now every 5 seconds alive is 1 point, will likely increase time to 10 seconds or more
 pub const SMOKE_POINTS_FIND: i32 = 50;
+pub const SMOKE_POINTS_FOUND: i32 = -50; // a found hider loses this but never goes under 0
 pub const SMOKE_POINTS_DECOY: i32 = -10; // shot a decoy, no hp lost just points
 pub const SMOKE_POINTS_WIN: i32 = 30;
 pub const SMOKE_POINTS_MVP: i32 = 10;
@@ -46,7 +61,6 @@ pub const SMOKE_POINTS_MVP: i32 = 10;
 // every decoy you shoot makes your gains worse for the rest of the round, so shooting at 0 points still costs something
 pub const SMOKE_DECOY_MULT_STEP: f32 = 0.1; // 1.0 -> 0.9 -> 0.8 ...
 pub const SMOKE_MULT_MIN: f32 = 0.3; // never worse than this, a find is still worth something
-
 
 // everything the server remembers while a match plays out
 pub struct SmokeState {
@@ -66,10 +80,36 @@ pub struct SmokeState {
     multipliers: HashMap<PeerId, f32>,
     // counts up to SMOKE_ALIVE_EVERY then pays every hider
     alive_clock: f32,
+
+    // (peer, id, name), the same bot hiders every round
+    bot_hiders: Vec<(PeerId, u32, String)>,
+    // a brain for every decoy and bot hider this round
+    walkers: Vec<Walker>,
+    // humans the round start moved, their games get told where they are now
+    pub(super) respawns: Vec<(PeerId, (f32, f32, f32))>,
+
+    /// where every coin still out is
+    pub coins: Vec<(f32, f32, f32)>,
+    /// human hiders when the round started, how many coins come out is based on this
+    hiders_at_start: usize,
+    /// coins grabbed since the last send, everyone hears them
+    pub(super) taken: Vec<(f32, f32, f32)>,
+    /// how far into the coin phase the golden coin comes out, None once it's out or the round is done with it
+    golden_due: Option<f32>,
+    /// the golden coin while it's out: where, and seconds left before it goes
+    pub golden: Option<((f32, f32, f32), f32)>,
+    /// golden coin news since the last send (out, taken, gone)
+    pub(super) golden_news: Vec<coins::GoldenNews>,
+    /// who went golden this round already, it's once a round
+    golden_used: HashSet<PeerId>,
+    /// everyone gold right now or still in their red handed window
+    pub goldens: HashMap<PeerId, ability::Golden>,
+    /// stay (true) or leave (false), only during the vote
+    pub votes: HashMap<PeerId, bool>,
 }
 
 impl SmokeState {
-    pub fn new() -> Self {
+    pub fn new(bot_hiders: usize) -> Self {
         SmokeState {
             round: 0,
             phase: SmokePhase::Blind,
@@ -81,19 +121,35 @@ impl SmokeState {
             round_points: HashMap::new(),
             multipliers: HashMap::new(),
             alive_clock: 0.0,
+            bot_hiders: round_start::bot_hider_roster(bot_hiders),
+            walkers: Vec::new(),
+            respawns: Vec::new(),
+            coins: Vec::new(),
+            hiders_at_start: 0,
+            taken: Vec::new(),
+            golden_due: None,
+            golden: None,
+            golden_news: Vec::new(),
+            golden_used: HashSet::new(),
+            goldens: HashMap::new(),
+            votes: HashMap::new(),
         }
     }
 
     fn add_points(&mut self, peer: PeerId, points: i32) {
+        // bots are just noise, they never score
+        if round_start::is_smoke_entity(peer) {
+            return;
+        }
         let points = if points > 0 {
-            let mult = self.multipliers.get(&peer).copied().unwrap_or(1.0); 
-            (points as f32 * mult).round() as i32 
+            let mult = self.multipliers.get(&peer).copied().unwrap_or(1.0);
+            ((points as f32) * mult).round() as i32
         } else {
             points
         };
         let total = self.points.entry(peer).or_insert(0);
         let before = *total;
-        *total = (before + points).max(0); 
+        *total = (before + points).max(0);
         // the round counts what really changed so the mvp matches the scoreboard
         *self.round_points.entry(peer).or_insert(0) += *total - before;
     }
@@ -103,13 +159,15 @@ impl SmokeState {
         self.phase_timer = time;
     }
 
-
     fn new_round(&mut self) {
         self.round += 1;
         self.set_phase(SmokePhase::Blind, SMOKE_BLIND_TIME);
         self.round_points.clear();
         self.multipliers.clear();
         self.alive_clock = 0.0;
+        self.golden_used.clear();
+        self.goldens.clear();
+        self.votes.clear();
     }
 
     // one server tick of the clock that moves the round on when a phase runs out
@@ -124,13 +182,15 @@ impl SmokeState {
             SmokePhase::Released => {
                 self.alive_points(dt);
                 if self.phase_timer <= 0.0 {
+                    self.place_coins();
                     self.set_phase(SmokePhase::Coins, SMOKE_ROUND_TIME);
                 }
             }
             SmokePhase::Coins => {
                 self.alive_points(dt);
-                // they outlasted the clock
-                if self.phase_timer <= 0.0 {
+                self.tick_golden(dt);
+                // every coin taken, or they outlasted the clock
+                if self.coins.is_empty() || self.phase_timer <= 0.0 {
                     self.end_round(SMOKE_SIDE_HIDER);
                 }
             }
@@ -154,8 +214,7 @@ impl SmokeState {
     // the round is over, winners get their bonus, the rounds best gets the mvp, then everyone votes if they want to continue or no
     fn end_round(&mut self, winner: u8) {
         // mvp from what they did this round, before the side bonus
-        let mvp = self
-            .round_points
+        let mvp = self.round_points
             .iter()
             .max_by_key(|(_, pts)| **pts)
             .filter(|(_, pts)| **pts > 0)
@@ -171,22 +230,26 @@ impl SmokeState {
         if let Some(peer) = mvp {
             self.add_points(peer, SMOKE_POINTS_MVP);
         }
+        self.coins.clear();
+        self.golden = None;
+        self.golden_due = None;
+        self.goldens.clear();   
         self.set_phase(SmokePhase::Vote, SMOKE_VOTE_TIME);
     }
 }
 
-// how many player hunt is decided by the number of players and the number of humans, but never more than players - 1, and as of now we only have human hunters cause 
-// idk how wed do AI ones like ?? 
+// how many player hunt is decided by the number of players and the number of humans, but never more than players - 1, and as of now we only have human hunters cause
+// idk how wed do AI ones like ??
 pub fn hunter_count(players: usize, humans: usize) -> usize {
     if players < 2 || humans == 0 {
         return 0;
     }
     let want = (players + SMOKE_HIDERS_PER_HUNTER) / (SMOKE_HIDERS_PER_HUNTER + 1);
-    want.max(1).min(humans).min(players - 1)
+    want.max(1)
+        .min(humans)
+        .min(players - 1)
 }
 
 pub fn coin_count(hiders: usize) -> usize {
     (hiders * SMOKE_COINS_PER_HIDER).max(SMOKE_COINS_BASE)
 }
-
-

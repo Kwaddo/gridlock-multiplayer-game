@@ -105,6 +105,8 @@ impl Server {
                 }
             }
             ClientMsg::Discover => handlers::handle_discover(&self.outbox, &self.players, &self.name, src_addr),
+            // nobody gets hurt in smoke break, finds are box shots
+            ClientMsg::Hit { .. } if self.smoke_active() => {}
             ClientMsg::Hit { victim_id, damage, weapon, backstab, headshot } => handlers::handle_hit(
                 &self.outbox,
                 &mut self.players,
@@ -293,11 +295,14 @@ impl Server {
             ),
             ClientMsg::EndMatch => self.handle_end_match(src_addr),
 
+            // smoke break: nobody gets in or out of a box by hand, the round does that
+            ClientMsg::BoxEnter { .. } | ClientMsg::BoxExit if self.smoke_active() => self.boxes.resend_to(src_addr),
+            ClientMsg::BoxShot { id } if self.smoke_active() => self.smoke_box_shot(src_addr, id),
             ClientMsg::BoxEnter { id } => self.handle_box_enter(src_addr, id),
             ClientMsg::BoxExit => self.boxes.exit(&self.players, src_addr),
             ClientMsg::BoxShot { id } => self.boxes.shot(&self.players, src_addr, id),
-            // the round loop comes next step, till then votes go nowhere
-            ClientMsg::SmokeVote { .. } => {}
+            ClientMsg::SmokeVote { stay } => self.smoke_vote(src_addr, stay),
+            ClientMsg::SmokeGoGolden => self.smoke_go_golden(src_addr),
 
         }
     }

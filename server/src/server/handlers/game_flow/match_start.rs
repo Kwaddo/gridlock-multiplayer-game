@@ -31,6 +31,7 @@ pub fn maybe_start_match(
     match_total_maze_entries: &mut usize,
     match_mode: u8,
     snd_state: &mut Option<crate::server::snd::SndState>,
+    smoke_state: &mut Option<crate::server::smoke_break::SmokeState>,
     match_duration: Option<Duration>,
     bot_manager: &mut BotManager,
     autofill_red_bots: u8,
@@ -46,15 +47,24 @@ pub fn maybe_start_match(
             game::balance_lobby_teams(players);
             let (red_humans, blue_humans) = game::lobby_team_counts(players);
             let humans = red_humans + blue_humans;
-            let bot_slots = bot_team_slots(
-                match_mode,
-                autofill_red_bots,
-                autofill_blue_bots,
-                (red_humans, blue_humans),
-                eligible_bot_personalities(autofill_diff_mask).len(),
-            );
+            // smoke break's bots are hiders it makes itself, not fighting bots
+            let bot_slots = if match_mode == MODE_SMOKE_BREAK {
+                Vec::new()
+            } else {
+                bot_team_slots(
+                    match_mode,
+                    autofill_red_bots,
+                    autofill_blue_bots,
+                    (red_humans, blue_humans),
+                    eligible_bot_personalities(autofill_diff_mask).len(),
+                )
+            };
             let side = game::maze_side_for_players(humans + bot_slots.len());
-            *maze = Some(MazeData::new(side, side));
+            *maze = Some(if match_mode == MODE_SMOKE_BREAK {
+                MazeData::smoke_break_arena()
+            } else {
+                MazeData::new(side, side)
+            });
             let Some(current_maze) = maze.as_ref() else { return; };
             let lobby_count = players
                 .values()
@@ -66,7 +76,7 @@ pub fn maybe_start_match(
             };
             log!(
                 "Match warmup complete — starting {} match with seed {} on a {}x{} maze (moving {} players, {} bots)",
-                dur_desc, current_maze.seed, side, side, lobby_count, bot_slots.len()
+                dur_desc, current_maze.seed, current_maze.width, current_maze.height, lobby_count, bot_slots.len()
             );
 
             *match_running = true;
@@ -125,6 +135,10 @@ pub fn maybe_start_match(
                 ));
             }
 
+            if match_mode == MODE_SMOKE_BREAK {
+                *smoke_state = Some(crate::server::smoke_break::SmokeState::new(autofill_red_bots as usize));
+            }
+
             for addr in joiners.iter() {
                 if let Some(player) = players.get_mut(addr) {
                     player.world = WorldId::Maze;
@@ -160,6 +174,10 @@ pub fn maybe_start_match(
                         // assign the first weapon from Gun Game progression
                         player.current_weapon =
                             crate::server::game::GUN_GAME_PROGRESSION[0].to_string();
+                    } else if match_mode == MODE_SMOKE_BREAK {
+                        // no teams, sides get picked every round
+                        player.team = Team::Spectator;
+                        player.current_weapon = crate::server::smoke_break::HUNTER_WEAPON.to_string();
                     } else {
                         // Team modes (TDM, S&D): assign balanced teams
                         let team = if player.team == Team::Blue { Team::Blue } else { Team::Red };
@@ -293,7 +311,7 @@ pub fn maybe_start_match(
                 } else {
                     log!("Auto-filled {} bots into match ({} red, {} blue)", red + blue, red, blue);
                 }
-            } else if autofill_red_bots + autofill_blue_bots > 0 {
+            } else if autofill_red_bots + autofill_blue_bots > 0 && match_mode != MODE_SMOKE_BREAK {
                 log!("Auto-fill: no eligible bot personalities (diff mask {:05b})", autofill_diff_mask);
             }
 

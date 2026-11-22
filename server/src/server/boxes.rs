@@ -76,6 +76,45 @@ impl Boxes {
         self.changed = true;
     }
 
+    /// a box that starts on someone, smoke break puts every hider and decoy in one like this
+    pub fn spawn_carried(&mut self, players: &HashMap<PeerId, Player>, peer: PeerId) {
+        let Some(p) = players.get(&peer) else {
+            return;
+        };
+        self.spawn(p.world, p.position, p.yaw, false);
+        if let Some(b) = self.list.last_mut() {
+            b.carrier = Some(peer);
+            b.carrier_health = p.health;
+        }
+    }
+
+    /// every box in a world gone (a smoke break round or match is over)
+    pub fn clear_world(&mut self, world: WorldId) {
+        let before = self.list.len();
+        self.list.retain(|b| b.world != world);
+        if self.list.len() != before {
+            self.changed = true;
+        }
+    }
+
+    
+    /// who's inside this box, if anyone
+    pub fn carrier_of(&self, id: u16) -> Option<PeerId> {
+        self.list.iter().find(|b| b.id == id).and_then(|b| b.carrier)
+    }
+
+    /// gone, like a shot but without the shooter checks (smoke break decides those itself)
+    pub fn break_box(&mut self, id: u16) -> bool {
+        match self.list.iter().position(|b| b.id == id) {
+            Some(i) => {
+                self.destroy(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+
     pub fn is_carrying(&self, peer: PeerId) -> bool {
         self.list.iter().any(|b| b.carrier == Some(peer))
     }

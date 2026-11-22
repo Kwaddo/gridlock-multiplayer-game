@@ -26,8 +26,9 @@ pub fn send_player_list(
 
 fn player_list_msg(players: &HashMap<PeerId, Player>) -> Vec<u8> {
     let entries = players
-        .values()
-        .map(|p| PlayerListEntry {
+        .iter()
+        .filter(|(peer, _)| !crate::server::smoke_break::is_decoy(**peer))
+        .map(|(_, p)| PlayerListEntry {
             id: p.id,
             name: p.username.clone(),
             kills: p.kills,
