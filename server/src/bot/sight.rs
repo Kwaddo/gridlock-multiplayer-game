@@ -26,6 +26,11 @@ pub fn has_line_of_sight(bot: &Player, target: &Player, maze: Option<&MazeData>)
     segment_clear(&maze.cells, maze.width, maze.height, (x0, z0), (x1, z1))
 }
 
+/// Whether nothing in the maze's wall grid stands between two points (world x/z).
+pub fn clear_between(maze: &MazeData, from: (f32, f32), to: (f32, f32)) -> bool {
+    segment_clear(&maze.cells, maze.width, maze.height, from, to)
+}
+
 /// Whether the segment `from`..`to` (world x/z) crosses open cells only. An
 /// exact walk over every grid cell it passes through (Amanatides-Woo), so it
 /// cannot skip the corner of a wall the way point samples along the ray did.

@@ -135,6 +135,8 @@ pub struct SmokeState {
     pub gun_locks: HashMap<PeerId, GunLock>,
     /// box aliases handed out this match, the next one counts on from here (alias.rs)
     aliases_used: u32,
+    /// when each hunter's last box shot went through, they can't fire faster than the deagle
+    last_shot: HashMap<PeerId, platform::Instant>,
 }
 
 impl SmokeState {
@@ -166,6 +168,7 @@ impl SmokeState {
             found: HashSet::new(),
             gun_locks: HashMap::new(),
             aliases_used: 0,
+            last_shot: HashMap::new(),
         }
     }
 

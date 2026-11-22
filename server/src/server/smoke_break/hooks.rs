@@ -232,6 +232,13 @@ impl Server {
             return self.boxes.resend_to(peer);
         }
         let Some(smoke) = self.smoke_state.as_mut() else { return };
+        // the box has to be one they could have hit, with the deagle, and no faster than it fires
+        let fair = self.boxes.in_reach(&self.players, self.maze.as_ref(), peer, id)
+            && self.players.get(&peer).is_some_and(|p| p.current_weapon == HUNTER_WEAPON)
+            && smoke.fire_ok(peer);
+        if !fair {
+            return self.boxes.resend_to(peer);
+        }
         let players_before = self.players.len();
         let shot = smoke.box_shot(peer, id, &mut self.players, &mut self.boxes);
         match shot {

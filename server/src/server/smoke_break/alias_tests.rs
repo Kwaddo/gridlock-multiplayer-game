@@ -152,6 +152,10 @@ fn a_hider_still_sees_itself_under_its_real_id() {
 fn a_found_hider_shows_up_under_their_real_id() {
     let (mut server, hunter, hiders) = round_of_three();
     server.smoke_state.as_mut().unwrap().tick(super::super::SMOKE_BLIND_TIME);
+    // right in front of the hunter, so the shot is a fair one
+    let at = server.players[&hunter].position;
+    server.players.get_mut(&hiders[0]).unwrap().position = (at.0 + 2.0, 0.0, at.2);
+    server.sync_boxes();
     let id = server.boxes.box_of(hiders[0]).unwrap();
     server.handle_packet(hunter, &ClientMsg::BoxShot { id }.encode());
     server.tick();

@@ -5,6 +5,9 @@
 */
 
 use std::collections::HashMap;
+use std::time::Duration;
+
+use platform::Instant;
 
 use super::round_start::{ is_decoy, HUNTER_WEAPON };
 use super::{
@@ -26,6 +29,10 @@ use crate::net::PeerId;
 use crate::player::Player;
 use crate::protocols::SMOKE_SIDE_HUNTER;
 use crate::server::boxes::Boxes;
+use crate::weapons_stats::get_weapon_stats;
+
+/// a shot may come in this much of the deagle's gap after the last one, 0.6 = up to 40% early
+const FIRE_SLACK: f32 = 0.6;
 
 /// what a shot did, so the right people get told
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -124,6 +131,17 @@ impl SmokeState {
             self.end_round(SMOKE_SIDE_HUNTER);
         }
         shot
+    }
+
+    /// a hunter's shots can't come in faster than the deagle fires (with some room, packets bunch up)
+    pub(in crate::server) fn fire_ok(&mut self, shooter: PeerId) -> bool {
+        let gap = Duration::from_secs_f32(FIRE_SLACK / get_weapon_stats(HUNTER_WEAPON).shots_per_sec);
+        let now = Instant::now();
+        if self.last_shot.get(&shooter).is_some_and(|t| now.saturating_duration_since(*t) < gap) {
+            return false;
+        }
+        self.last_shot.insert(shooter, now);
+        true
     }
 
     /// locks run down, then 30 s clean after one and the steps start over

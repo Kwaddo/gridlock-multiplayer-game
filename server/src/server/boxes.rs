@@ -8,9 +8,12 @@ use std::time::Duration;
 use platform::Instant;
 
 use super::{smoke_break, Server};
+use crate::bot::sight;
+use crate::maze::MazeData;
 use crate::net::PeerId;
 use crate::player::{ Player, WorldId };
 use crate::protocols::*;
+use crate::weapons_stats::get_weapon_stats;
 
 pub const LOBBY_BOX_SPOT: (f32, f32, f32) = (-4.0, 0.0, -4.0);
 // a destroyed lobby box comes back after this
@@ -18,6 +21,11 @@ const LOBBY_BOX_RESPAWN: Duration = Duration::from_secs(5);
 
 /// how often we resend box information, since packets can get lost
 const RESEND_EVERY: Duration = Duration::from_secs(2);
+
+/// a shot reaches this much past the gun's range: the box and the shooter both moved since the server saw them
+const SHOT_RANGE_SLACK: f32 = 3.0;
+/// half a box's width, a shot can see an edge of it round a corner
+const BOX_HALF: f32 = 0.5;
 
 struct ServerBox {
     id: u16,
@@ -167,17 +175,40 @@ impl Boxes {
         self.changed = true;
     }
 
-    // someone shot this box (theirs from inside, or anyone's), its gone
-    pub fn shot(&mut self, players: &HashMap<PeerId, Player>, peer: PeerId, id: u16) {
-        let Some(p) = players.get(&peer) else {
-            return;
+    /// could `peer` have shot box `id` from where the server last saw them: alive, same world, within their gun's
+    /// range and no maze wall in the way (to the middle or either side of it), their own box from inside always
+    pub fn in_reach(&self, players: &HashMap<PeerId, Player>, maze: Option<&MazeData>, peer: PeerId, id: u16) -> bool {
+        let (Some(p), Some(b)) = (players.get(&peer), self.list.iter().find(|b| b.id == id)) else {
+            return false;
         };
-        if !p.is_alive {
-            return;
+        if !p.is_alive || b.world != p.world {
+            return false;
         }
-        if let Some(i) = self.list.iter().position(|b| b.id == id && b.world == p.world) {
-            self.destroy(i);
+        if b.carrier == Some(peer) {
+            return true;
         }
+        let (from, to) = ((p.position.0, p.position.2), (b.position.0, b.position.2));
+        let (dx, dz) = (to.0 - from.0, to.1 - from.1);
+        let dist = (dx * dx + dz * dz).sqrt();
+        if dist > get_weapon_stats(&p.current_weapon).range + SHOT_RANGE_SLACK {
+            return false;
+        }
+        // the lobby has no wall grid on the server
+        let Some(maze) = maze.filter(|_| b.world == WorldId::Maze) else {
+            return true;
+        };
+        let side = if dist > 1e-3 { (-dz / dist * BOX_HALF, dx / dist * BOX_HALF) } else { (0.0, 0.0) };
+        [(0.0, 0.0), side, (-side.0, -side.1)]
+            .iter()
+            .any(|(ox, oz)| sight::clear_between(maze, from, (to.0 + ox, to.1 + oz)))
+    }
+
+    // someone shot this box (theirs from inside, or anyone's they could reach), its gone, false if refused
+    pub fn shot(&mut self, players: &HashMap<PeerId, Player>, maze: Option<&MazeData>, peer: PeerId, id: u16) -> bool {
+        if !self.in_reach(players, maze, peer, id) {
+            return false;
+        }
+        self.break_box(id)
     }
 
     // update box positions based on the players carrying them, and respawn lobby boxes if needed
@@ -359,6 +390,12 @@ mod tests {
         server.tick();
         let id = boxes_for(&server.drain_outbox(), a).unwrap()[0].id;
 
+        // a knife doesn't reach it from the spawn, she gets the list back
+        server.handle_packet(a, &ClientMsg::BoxShot { id }.encode());
+        server.tick();
+        assert_eq!(boxes_for(&server.drain_outbox(), a).unwrap().len(), 1);
+        // a gun does
+        server.players.get_mut(&a).unwrap().current_weapon = "M4A1".into();
         server.handle_packet(a, &ClientMsg::BoxShot { id }.encode());
         server.tick();
         assert!(boxes_for(&server.drain_outbox(), a).unwrap().is_empty());

@@ -219,3 +219,65 @@ fn a_refused_box_shot_sends_no_player_list() {
     let out = server.drain_outbox();
     assert!(!out.iter().any(|(_, m)| matches!(ServerMsg::decode(m), Some(ServerMsg::PlayerList(_)))));
 }
+
+// released, a decoy put where `at` says and its box moved with it, the hunter and that box
+fn hunter_and_decoy_at(server: &mut Server, hunter_at: (f32, f32), decoy_at: (f32, f32)) -> (PeerId, u16) {
+    server.smoke_state.as_mut().unwrap().tick(SMOKE_BLIND_TIME);
+    let hunter = *server.smoke_state.as_ref().unwrap().hunters.iter().next().unwrap();
+    let decoy = *server.players.keys().find(|p| is_decoy(**p)).unwrap();
+    server.players.get_mut(&hunter).unwrap().position = (hunter_at.0, 0.0, hunter_at.1);
+    server.players.get_mut(&decoy).unwrap().position = (decoy_at.0, 0.0, decoy_at.1);
+    server.sync_boxes();
+    (hunter, server.boxes.box_of(decoy).unwrap())
+}
+
+fn shoot(server: &mut Server, hunter: PeerId, id: u16) -> bool {
+    server.handle_packet(hunter, &ClientMsg::BoxShot { id }.encode());
+    server.boxes.carrier_of(id).is_none()
+}
+
+#[test]
+fn a_box_shot_has_to_be_one_the_hunter_could_make() {
+    let (mut server, _, _) = match_of_two();
+    server.tick();
+    let maze = server.maze.as_ref().unwrap();
+    let (cells, width, height) = (maze.cells.clone(), maze.width as usize, maze.height as usize);
+    let size = crate::server::game::MAZE_CELL_SIZE;
+    let open = |x: usize, z: usize| cells[z * width + x] != 0;
+    // open floor, then a wall, then open floor again further along the same row, well in range
+    let (x0, x1, z) = (0..height)
+        .flat_map(|z| (0..width - 1).map(move |x| (x, z)))
+        .filter(|&(x, z)| open(x, z) && !open(x + 1, z))
+        .find_map(|(x, z)| (x + 2..width).find(|&x1| open(x1, z)).map(|x1| (x, x1, z)))
+        .filter(|&(x0, x1, _)| (x1 - x0) as f32 * size < 40.0)
+        .expect("no wall to hide behind");
+    let mid = |x: usize| (x as f32 + 0.5) * size;
+    let (left, right) = ((mid(x0), mid(z)), (mid(x1), mid(z)));
+    // where the round put the hunter, the middle of a room
+    let hunter = *server.smoke_state.as_ref().unwrap().hunters.iter().next().unwrap();
+    let hunter_at = server.players[&hunter].position;
+    let (hunter, id) = hunter_and_decoy_at(&mut server, left, right);
+    assert!(!shoot(&mut server, hunter, id), "through a wall");
+
+    // in the open, close by: fine, once, but not again straight away
+    let near = (hunter_at.0 + 1.5, hunter_at.2);
+    let decoy = server.players.iter().find(|(p, _)| is_decoy(**p) && server.boxes.box_of(**p) != Some(id)).map(|(p, _)| *p).unwrap();
+    server.players.get_mut(&decoy).unwrap().position = (near.0, 0.0, near.1);
+    // too far first
+    server.players.get_mut(&hunter).unwrap().position = (near.0 - 60.0, 0.0, near.1);
+    server.sync_boxes();
+    let near_id = server.boxes.box_of(decoy).unwrap();
+    assert!(!shoot(&mut server, hunter, near_id), "out of the deagle's range");
+    server.players.get_mut(&hunter).unwrap().position = (near.0 - 1.5, 0.0, near.1);
+    // not with anything else
+    server.players.get_mut(&hunter).unwrap().current_weapon = "M4A1".into();
+    assert!(!shoot(&mut server, hunter, near_id), "only the deagle");
+    server.players.get_mut(&hunter).unwrap().current_weapon = HUNTER_WEAPON.into();
+    assert!(shoot(&mut server, hunter, near_id), "a fair shot");
+
+    let other = server.players.iter().find(|(p, _)| is_decoy(**p) && server.boxes.box_of(**p).is_some()).map(|(p, _)| *p).unwrap();
+    server.players.get_mut(&other).unwrap().position = (near.0, 0.0, near.1);
+    server.sync_boxes();
+    let other_id = server.boxes.box_of(other).unwrap();
+    assert!(!shoot(&mut server, hunter, other_id), "faster than the deagle fires");
+}

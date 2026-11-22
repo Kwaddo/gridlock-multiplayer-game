@@ -302,7 +302,12 @@ impl Server {
             ClientMsg::BoxShot { id } if self.smoke_on() => self.smoke_box_shot(src_addr, id),
             ClientMsg::BoxEnter { id } => self.handle_box_enter(src_addr, id),
             ClientMsg::BoxExit => self.boxes.exit(&self.players, src_addr),
-            ClientMsg::BoxShot { id } => self.boxes.shot(&self.players, src_addr, id),
+            ClientMsg::BoxShot { id } => {
+                // refused: their game already broke it, it gets the list back
+                if !self.boxes.shot(&self.players, self.maze.as_ref(), src_addr, id) {
+                    self.boxes.resend_to(src_addr);
+                }
+            }
             ClientMsg::SmokeGoGolden => self.smoke_go_golden(src_addr),
 
         }
