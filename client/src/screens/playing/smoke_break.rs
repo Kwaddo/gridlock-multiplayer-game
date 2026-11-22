@@ -166,12 +166,12 @@ impl PlayingState {
 
     /// everyone gold is taunting, the sound repeats from their box till they stop being gold
     fn play_taunts(&mut self, delta: f32) {
-        let golden = self.smoke.golden.clone();
-        self.smoke.taunts.retain(|(id, _)| golden.contains(id));
-        for id in golden {
-            if !self.smoke.taunts.iter().any(|(t, _)| *t == id) {
+        let SmokeView { golden, taunts, .. } = &mut self.smoke;
+        taunts.retain(|(id, _)| golden.contains(id));
+        for &id in golden.iter() {
+            if !taunts.iter().any(|(t, _)| *t == id) {
                 // just went gold, play straight away
-                self.smoke.taunts.push((id, 0.0));
+                taunts.push((id, 0.0));
             }
         }
         let mut due = Vec::new();

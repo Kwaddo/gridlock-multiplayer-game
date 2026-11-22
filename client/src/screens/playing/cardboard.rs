@@ -326,9 +326,12 @@ impl PlayingState {
         }
         self.cardboard.bursts.retain(|b| b.age < BURST_LIFE);
 
-        let moving: HashMap<u16, bool> = self.cardboard.boxes.iter().map(|b| (b.id, self.box_moving(b))).collect();
-        self.cardboard.feel.retain(|id, _| moving.contains_key(id));
-        for (id, is_moving) in moving {
+        // a few dozen boxes at most, so a scan beats building a map every frame
+        let boxes = &self.cardboard.boxes;
+        self.cardboard.feel.retain(|id, _| boxes.iter().any(|b| b.id == *id));
+        for i in 0..self.cardboard.boxes.len() {
+            let b = &self.cardboard.boxes[i];
+            let (id, is_moving) = (b.id, self.box_moving(b));
             let f = self.cardboard.feel.entry(id).or_default();
             let (target, time) = if is_moving { (LIFT, 0.12) } else { (0.0, 0.05) };
             f.lift += (target - f.lift) * (delta / time).min(1.0);

@@ -96,17 +96,19 @@ pub fn draw_box_shadow(floor: Vec3, yaw: f32, height: f32) {
     let (s, c) = (-yaw).sin_cos();
     let corner = |x: f32, z: f32| floor + vec3(x * c + z * s, 0.005, -x * s + z * c);
     let tint = Color::new(1.0, 1.0, 1.0, alpha);
-    let mesh = Mesh {
-        vertices: vec![
-            Vertex::new2(corner(-hw, -hd), vec2(0.0, 0.0), tint),
-            Vertex::new2(corner(hw, -hd), vec2(1.0, 0.0), tint),
-            Vertex::new2(corner(hw, hd), vec2(1.0, 1.0), tint),
-            Vertex::new2(corner(-hw, hd), vec2(0.0, 1.0), tint),
-        ],
-        indices: vec![0, 1, 2, 0, 2, 3],
-        texture: Some(SHADOW.with(|t| t.clone())),
-    };
-    draw_mesh(&mesh);
+    let vertices = [
+        Vertex::new2(corner(-hw, -hd), vec2(0.0, 0.0), tint),
+        Vertex::new2(corner(hw, -hd), vec2(1.0, 0.0), tint),
+        Vertex::new2(corner(hw, hd), vec2(1.0, 1.0), tint),
+        Vertex::new2(corner(-hw, hd), vec2(0.0, 1.0), tint),
+    ];
+    // what draw_mesh does, straight from the stack instead of a new Mesh per box per frame
+    SHADOW.with(|t| {
+        let gl = unsafe { get_internal_gl() };
+        gl.quad_gl.texture(Some(t));
+        gl.quad_gl.draw_mode(DrawMode::Triangles);
+        gl.quad_gl.geometry(&vertices, &[0, 1, 2, 0, 2, 3]);
+    });
 }
 
 // 0xRRGGBB, times `mul` (1.0 = as is, lower = darker)
