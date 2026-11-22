@@ -53,6 +53,8 @@ impl Server {
                 handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr)
             }
             ClientMsg::Position { position, yaw, state_flags, event_flags, pitch } => {
+                // a boxed hider's box only goes where a box could have gone
+                let position = self.smoke_trusted_position(src_addr, position).unwrap_or(position);
                 handlers::handle_position(
                     &self.outbox,
                     &mut self.players,

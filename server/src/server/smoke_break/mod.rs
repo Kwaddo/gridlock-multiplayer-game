@@ -19,6 +19,7 @@ mod shots;
 mod ability;
 mod view;
 mod alias;
+mod moves;
 
 mod hooks;
 
@@ -137,6 +138,8 @@ pub struct SmokeState {
     aliases_used: u32,
     /// when each hunter's last box shot went through, they can't fire faster than the deagle
     last_shot: HashMap<PeerId, platform::Instant>,
+    /// how far each boxed hider's box may still move, so a game can't teleport its box (moves.rs)
+    moves: HashMap<PeerId, moves::MoveBudget>,
 }
 
 impl SmokeState {
@@ -169,6 +172,7 @@ impl SmokeState {
             gun_locks: HashMap::new(),
             aliases_used: 0,
             last_shot: HashMap::new(),
+            moves: HashMap::new(),
         }
     }
 
@@ -209,6 +213,8 @@ impl SmokeState {
         self.winner = SMOKE_NO_WINNER;
         self.found.clear();
         self.gun_locks.clear();
+        // everyone starts from where the round put them with a full budget
+        self.moves.clear();
     }
 
     // one server tick of the clock that moves the round on when a phase runs out

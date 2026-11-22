@@ -281,3 +281,20 @@ fn a_box_shot_has_to_be_one_the_hunter_could_make() {
     let other_id = server.boxes.box_of(other).unwrap();
     assert!(!shoot(&mut server, hunter, other_id), "faster than the deagle fires");
 }
+
+#[test]
+fn a_boxed_hider_cant_teleport_and_gets_told_where_it_is() {
+    let (mut server, _, _) = match_of_two();
+    server.tick();
+    let hider = *server.smoke_state.as_ref().unwrap().hiders.iter().next().unwrap();
+    let start = server.players[&hider].position;
+    server.drain_outbox();
+    let far = (start.0 + 20.0, 0.0, start.2 + 20.0);
+    let msg = ClientMsg::Position { position: far, yaw: 0.0, state_flags: None, event_flags: None, pitch: None };
+    server.handle_packet(hider, &msg.encode());
+    assert_eq!(server.players[&hider].position, start, "the box stayed");
+    let told = messages(&server.drain_outbox(), hider)
+        .into_iter()
+        .any(|m| matches!(m, ServerMsg::Respawn { position, .. } if position == start));
+    assert!(told, "their game is put back");
+}
