@@ -64,6 +64,7 @@ pub const MATCH_STATUS_ENDING: u8 = 3; // winner shown, everyone returns to the 
 pub const START_DENIED_NOT_HOST: u8 = 1;
 pub const START_DENIED_STARTING: u8 = 2;
 pub const START_DENIED_ENDING: u8 = 3;
+pub const START_DENIED_TOO_FEW: u8 = 4; // smoke break needs 2 humans
 
 // MSG_PLAYER_LEFT reasons
 pub const LEAVE_QUIT: u8 = 0;
@@ -138,20 +139,21 @@ pub const BOX_ENTER_RANGE: f32 = 2.0; // flat metres, server checks it, client p
 pub const MSG_SMOKE_ROUND: u8 = 47; // server -> each player, the round as they see it, see 'SmokeRound'
 pub const MSG_SMOKE_COINS: u8 = 48; // server -> hiders only, every coin still out, hunters never get this
 pub const MSG_SMOKE_SCORES: u8 = 49; // server -> all, everyones points so far
-pub const MSG_SMOKE_VOTE: u8 = 53; // client -> server, stay for another round or not
 pub const MSG_SMOKE_COIN_TAKEN: u8 = 54; // server -> all, someone grabbed a coin here, play the sound
 pub const MSG_SMOKE_GOLD_COIN: u8 = 55; // server -> hiders only, where the golden coin is and how long it has left, or that it's gone
 pub const MSG_SMOKE_GOLDEN: u8 = 56; // server -> all, which players are gold right now so their box glows
 pub const MSG_SMOKE_DOTS: u8 = 57; // server -> hunters only, minimap dots on gold hiders and where they were last seen
 pub const MSG_SMOKE_GO_GOLDEN: u8 = 58; // client -> server, i'm going golden
+pub const MSG_SMOKE_FEED: u8 = 59; // server -> all, someone got found or someone shot a decoy, for the kill feed
 
 pub const SMOKE_PHASE_BLIND: u8 = 0; // hunters frozen and blind, hiders spread out
 pub const SMOKE_PHASE_RELEASED: u8 = 1; // hunters out, no coins yet
 pub const SMOKE_PHASE_COINS: u8 = 2; // coins out, the real round
-pub const SMOKE_PHASE_VOTE: u8 = 3; // round over, scores up, stay or leave
+pub const SMOKE_PHASE_RESULTS: u8 = 3; // round over, scores up for a few seconds, then the next round or the end
 
 pub const SMOKE_SIDE_HIDER: u8 = 0;
 pub const SMOKE_SIDE_HUNTER: u8 = 1;
+pub const SMOKE_NO_WINNER: u8 = 255; // the round isn't over yet
 
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;

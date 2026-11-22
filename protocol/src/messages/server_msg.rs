@@ -62,6 +62,8 @@ pub enum ServerMsg {
     SmokeGolden(Vec<u32>),
     // (where, gold right now) for each dot, false is a "last seen here" dot
     SmokeDots(Vec<(Vec3, bool)>),
+    // a box got shot: target is who was found, 0 when it was a decoy. points is what it cost (the found hider, or the shooter for a decoy)
+    SmokeFeed { shooter: u32, target: u32, red_handed: bool, points: i16 },
 }
 
 impl ServerMsg {
@@ -281,6 +283,9 @@ impl ServerMsg {
                 }
                 w.finish()
             }
+            ServerMsg::SmokeFeed { shooter, target, red_handed, points } => {
+                Writer::new(MSG_SMOKE_FEED).u32(*shooter).u32(*target).bool(*red_handed).u16(*points as u16).finish()
+            }
             ServerMsg::SmokeDots(dots) => {
                 let mut w = Writer::new(MSG_SMOKE_DOTS);
                 w.u8(dots.len().min(255) as u8);
@@ -469,6 +474,12 @@ impl ServerMsg {
                 }
                 ServerMsg::SmokeDots(dots)
             }
+            MSG_SMOKE_FEED => ServerMsg::SmokeFeed {
+                shooter: r.u32()?,
+                target: r.u32()?,
+                red_handed: r.bool()?,
+                points: r.u16()? as i16,
+            },
             _ => return None,
         };
         Some(msg)

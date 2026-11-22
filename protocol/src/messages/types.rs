@@ -202,7 +202,7 @@ pub struct SndRound {
 }
 
 /*
-    smoke break round as one player sees it, 13 bytes
+    smoke break round as one player sees it, 18 bytes
     sent to each player on its own cause side is theirs, on change and every second
 */
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -212,17 +212,23 @@ pub struct SmokeRound {
     pub phase_timer: f32, // seconds left in this phase
     pub coins_left: u16,
     pub side: u8, // SMOKE_SIDE_*
-    // vote phase only, zeros otherwise
-    pub votes_stay: u8,
-    pub voters: u8,
+    // how many rounds this match plays
+    pub max_rounds: u8,
     // a hider who hasn't gone golden yet this round and still can
     pub golden_ready: bool,
+    // the side that won the round once it's over (SMOKE_SIDE_*), SMOKE_NO_WINNER till then
+    pub winner: u8,
+    // you were found this round: you hunt but can't gain points
+    pub found: bool,
+    // seconds your gun stays locked, 0 = ready
+    pub gun_lock: f32,
 }
 
 impl SmokeRound {
     pub(super) fn write(&self, w: &mut Writer) {
         w.u16(self.round).u8(self.phase).f32(self.phase_timer).u16(self.coins_left);
-        w.u8(self.side).u8(self.votes_stay).u8(self.voters).bool(self.golden_ready);
+        w.u8(self.side).u8(self.max_rounds).bool(self.golden_ready).u8(self.winner);
+        w.bool(self.found).f32(self.gun_lock);
     }
 
     pub(super) fn read(r: &mut Reader) -> Option<Self> {
@@ -232,28 +238,40 @@ impl SmokeRound {
             phase_timer: r.f32()?,
             coins_left: r.u16()?,
             side: r.u8()?,
-            votes_stay: r.u8()?,
-            voters: r.u8()?,
+            max_rounds: r.u8()?,
             golden_ready: r.bool()?,
+            winner: r.u8()?,
+            found: r.bool()?,
+            gun_lock: r.f32()?,
         })
     }
 }
 
-// one row of the smoke break scoreboard, 9 bytes, points can go below zero from shooting decoys
+// one row of the smoke break scoreboard, 12 bytes
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SmokeScore {
     pub id: u32,
     pub points: i32,
     pub side: u8,
+    // what this round has added so far, for the vote board
+    pub round_points: i16,
+    // the hunter multiplier in tenths, 10 is x1.0, 3 is x0.3
+    pub mult_tenths: u8,
 }
 
 impl SmokeScore {
     pub(super) fn write(&self, w: &mut Writer) {
-        w.u32(self.id).u32(self.points as u32).u8(self.side);
+        w.u32(self.id).u32(self.points as u32).u8(self.side).u16(self.round_points as u16).u8(self.mult_tenths);
     }
 
     pub(super) fn read(r: &mut Reader) -> Option<Self> {
-        Some(SmokeScore { id: r.u32()?, points: r.u32()? as i32, side: r.u8()? })
+        Some(SmokeScore {
+            id: r.u32()?,
+            points: r.u32()? as i32,
+            side: r.u8()?,
+            round_points: r.u16()? as i16,
+            mult_tenths: r.u8()?,
+        })
     }
 }
 
