@@ -198,6 +198,10 @@ impl PlayingState {
         let now = get_time();
         self.cardboard.broken.retain(|(_, at)| now - at < BROKEN_MEMORY);
         boxes.retain(|b| !self.cardboard.broken.iter().any(|(id, _)| *id == b.id));
+        // a list for another world can beat the world change itself, so the old world's box life goes here too
+        if world != self.cardboard.world {
+            self.box_world_changed(world);
+        }
         if world == self.cardboard.world {
             let gone: Vec<Vec3> = self
                 .cardboard
