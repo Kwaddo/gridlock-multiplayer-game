@@ -19,10 +19,13 @@ use crate::server::Server;
 const BOX_SPEED: f32 = 1.8;
 /// how much faster than that the budget fills (lag, frame hitches)
 const SPEED_SLACK: f32 = 1.5;
-/// most the budget holds, so packets that bunch up still get through but a long pause buys no teleport
-const MAX_BUDGET: f32 = 1.0;
+/// most the budget holds: a game that stalled for about a second still catches up in one step,
+/// a longer pause buys no more than that
+const MAX_BUDGET: f32 = 2.5;
 /// a step this long is no walk at all (a teleport, or a packet from before the round moved them): the box stays put
-const JUMP_PAST: f32 = 3.0;
+const JUMP_PAST: f32 = 5.0;
+/// a step is checked for floor this often along its line, so it can't hop a wall between two rooms
+const PATH_STEP: f32 = 0.25;
 /// the game is this far from where the server keeps the box: it gets told
 const CORRECT_PAST: f32 = 1.0;
 /// at most one correction this often, the packets already on their way are from before it
@@ -59,7 +62,7 @@ impl SmokeState {
         let k = if step > budget.metres { budget.metres / step } else { 1.0 };
         let mut at = (from.0 + dx * k, to.1, from.2 + dz * k);
         // off the map, into a wall or no walk at all: the box stays where it was
-        if step > JUMP_PAST || area_of(at.0, at.2).is_none() {
+        if step > JUMP_PAST || !on_floor_along(from, at) {
             at = from;
         }
         let (ox, oz) = (to.0 - at.0, to.2 - at.2);
@@ -73,6 +76,16 @@ impl SmokeState {
         }
         (at, fix)
     }
+}
+
+/// every point along from -> to (sampled every PATH_STEP) is on the arena floor
+fn on_floor_along(from: (f32, f32, f32), to: (f32, f32, f32)) -> bool {
+    let (dx, dz) = (to.0 - from.0, to.2 - from.2);
+    let n = ((dx * dx + dz * dz).sqrt() / PATH_STEP).ceil().max(1.0) as usize;
+    (1..=n).all(|i| {
+        let t = i as f32 / n as f32;
+        area_of(from.0 + dx * t, from.2 + dz * t).is_some()
+    })
 }
 
 impl Server {
@@ -122,7 +135,7 @@ mod tests {
     fn a_teleport_gets_cut_short_and_the_game_told() {
         let mut s = SmokeState::new();
         let (peer, now) = (PeerId(1), Instant::now());
-        let to = (MID.0 + 2.5, 0.0, MID.2);
+        let to = (MID.0 + 4.0, 0.0, MID.2);
         let (got, fix) = s.trusted_move(peer, MID, to, now + Duration::from_millis(33));
         assert!((got.0 - MID.0 - MAX_BUDGET).abs() < 1e-3, "only as far as the budget");
         assert!(fix);
@@ -139,7 +152,7 @@ mod tests {
     fn a_long_pause_buys_no_teleport() {
         let mut s = SmokeState::new();
         let (peer, now) = (PeerId(1), Instant::now());
-        let to = (MID.0 + 2.5, 0.0, MID.2);
+        let to = (MID.0 + 4.0, 0.0, MID.2);
         let (got, _) = s.trusted_move(peer, MID, to, now + Duration::from_secs(10));
         assert!(got.0 - MID.0 <= MAX_BUDGET + 1e-3);
     }
@@ -154,5 +167,27 @@ mod tests {
         let inside = (x as f32 * c + 0.2, 0.0, (y as f32 + h as f32 / 2.0) * c);
         let (got, _) = s.trusted_move(peer, inside, (inside.0 - 0.4, 0.0, inside.2), now);
         assert_eq!(got, inside);
+    }
+
+    #[test]
+    fn a_short_stall_catches_up_without_a_correction() {
+        let mut s = SmokeState::new();
+        let (peer, now) = (PeerId(1), Instant::now());
+        // the game froze for 1.2 s while the box kept going at box speed
+        let to = (MID.0 + BOX_SPEED * 1.2, 0.0, MID.2);
+        let (got, fix) = s.trusted_move(peer, MID, to, now + Duration::from_millis(1200));
+        assert_eq!((got, fix), (to, false));
+    }
+
+    #[test]
+    fn a_line_between_two_rooms_past_the_hallway_is_not_on_floor() {
+        let c = crate::server::game::MAZE_CELL_SIZE;
+        // the first two rooms at the same depth, outside the hallway's band: both ends are floor, the wall between isn't
+        let (a, b) = ((8.5 * c, 0.0, 2.0 * c), (13.5 * c, 0.0, 2.0 * c));
+        assert!(area_of(a.0, a.2).is_some() && area_of(b.0, b.2).is_some());
+        assert!(!on_floor_along(a, b));
+        // through the hallway is fine
+        let (a, b) = ((8.5 * c, 0.0, 5.0 * c), (13.5 * c, 0.0, 5.0 * c));
+        assert!(on_floor_along(a, b));
     }
 }
