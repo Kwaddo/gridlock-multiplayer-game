@@ -106,7 +106,13 @@ impl PlayingState {
     pub(super) fn process_box_key(&mut self) {
         if is_key_pressed(KeyCode::F6) {
             self.cardboard.look = self.cardboard.look.next();
-            self.lobby_console_message = Some(format!("Box look: {}", self.cardboard.look.name()));
+            // name what gets drawn, a model that isn't loaded falls back to the code-built box
+            let look = self.cardboard.look;
+            let label = match look.model_key() {
+                Some(k) if !self.models.contains_key(k) => format!("code-built ({} not loaded)", look.name()),
+                _ => look.name().to_string(),
+            };
+            self.lobby_console_message = Some(format!("Box look: {label}"));
             self.lobby_console_message_timer = 2.0;
         }
         if !is_key_pressed(KeyCode::E) || self.cardboard.world != self.current_world {
