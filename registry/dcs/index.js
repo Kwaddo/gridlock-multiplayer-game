@@ -181,30 +181,34 @@ function listedState(store) {
 
 // Apply a change to state.json and make sure it stuck: a write made at the
 // same moment can overwrite ours, so read back after a moment and apply the
-// change again on top of what is there if it is missing. `apply` must be
-// safe to repeat; `applied` tells whether a state has the change (then
-// nothing is written). Options: `state`, the state the caller just read, for
-// the first attempt; `ctx`, to make that check after the response is sent
-// (in ctx.waitUntil); `check: false` to write once and not check at all, for
-// a change that heals itself (a heartbeat: the next one comes long before
-// the listing would expire).
-async function commit(store, apply, applied, { state, ctx, check = true } = {}) {
-  state ??= await loadState(store);
-  if (applied(state)) return;
-  apply(state);
+// change again on top of what is there if it is missing. The state is read
+// here, right before the write, never earlier: anything a caller awaited in
+// between (its request body, say) would widen the window in which another
+// write is read and then overwritten with what was there before it.
+// `apply(state)` makes the change, or returns false to refuse it (nothing is
+// written then): checks that need the state, such as authorization, go in
+// it. It must be safe to repeat. `applied` tells whether a state has the
+// change (then a check writes nothing). Options: `ctx`, to make that check
+// after the response is sent (in ctx.waitUntil); `check: false` to write
+// once and not check at all, for a change that heals itself (a heartbeat:
+// the next one comes long before the listing would expire).
+// Returns false when `apply` refused the change.
+async function commit(store, apply, applied, { ctx, check = true } = {}) {
+  const state = await loadState(store);
+  if (apply(state) === false) return false;
   await putState(store, state);
-  if (!check) return;
+  if (!check) return true;
   const settle = async () => {
     for (let attempt = 1; attempt < 4; attempt++) {
       await delay(100 + Math.random() * 200);
       const now = await loadState(store);
-      if (applied(now)) return;
-      apply(now);
+      if (applied(now) || apply(now) === false) return;
       await putState(store, now);
     }
   };
   if (ctx) ctx.waitUntil(settle().catch((e) => console.error("gridlock-registry: commit:", e && e.stack ? e.stack : e)));
   else await settle();
+  return true;
 }
 
 async function putState(store, state) {
@@ -255,69 +259,87 @@ async function createListing(request, store, ctx) {
   // One listing per game: a host registering again (its old listing lost a
   // heartbeat) replaces what it had, so the game is never listed twice.
   // Only the machine that listed a room may replace that listing: anyone else
-  // could otherwise take over (or rename) another host's game.
-  const state = await loadState(store);
-  const { listings } = state;
-  for (const [other, l] of Object.entries(listings)) {
-    if (room ? l.entry.room !== room : l.entry.addr !== entry.addr) continue;
-    if (l.ip !== ip) return json({ error: "room already listed" }, 409);
-    delete listings[other];
-  }
-  const fromIp = Object.values(listings).filter((l) => l.ip === ip).length;
-  if (fromIp >= MAX_PER_IP || Object.keys(listings).length >= MAX_LISTINGS) {
-    return json({ error: "too many listings" }, 429);
-  }
-
+  // could otherwise take over (or rename) another host's game. (Checked in
+  // commit, on the state it writes over.)
   const id = crypto.randomUUID();
   const token = crypto.randomUUID();
   const listing = { tokenHash: await sha256Hex(token), ip, expires: Date.now() + TTL_SECONDS * 1000, entry };
-  const replaced = (l) => (room ? l.entry.room === room : l.entry.addr === entry.addr) && l.ip === ip;
-  await commit(
+  const same = (l) => (room ? l.entry.room === room : l.entry.addr === entry.addr);
+  let refusal = null; // the first attempt's: the answer
+  const listed = await commit(
     store,
     (s) => {
-      for (const [other, l] of Object.entries(s.listings)) if (replaced(l)) delete s.listings[other];
+      for (const [other, l] of Object.entries(s.listings)) {
+        if (!same(l) || other === id) continue;
+        if (l.ip !== ip) {
+          refusal ??= json({ error: "room already listed" }, 409);
+          return false;
+        }
+        delete s.listings[other];
+      }
+      const fromIp = Object.values(s.listings).filter((l) => l.ip === ip).length;
+      if (!s.listings[id] && (fromIp >= MAX_PER_IP || Object.keys(s.listings).length >= MAX_LISTINGS)) {
+        refusal ??= json({ error: "too many listings" }, 429);
+        return false;
+      }
       s.listings[id] = listing;
     },
     (s) => Boolean(s.listings[id]),
-    { state, ctx },
+    { ctx },
   );
+  if (!listed) return refusal;
   // Echo the address back so a host can tell whether it is reachable as listed.
   return json({ id, token, ttl: TTL_SECONDS, ...(entry.addr ? { addr: entry.addr } : {}) }, 201);
 }
 
 async function heartbeat(request, store, id) {
-  const state = await loadState(store);
-  const { listings } = state;
-  if (!(await authorized(request, listings, id))) return json({ error: "unknown listing" }, 404);
+  const tokenHash = await sha256Hex(bearer(request));
   const players = int((await readJson(request))?.players, 0, 255);
   const expires = Date.now() + TTL_SECONDS * 1000;
-  await commit(
+  // Authorized on the state commit reads once the body is in, and only the
+  // listing itself changed: a listing created, renewed or removed by
+  // another request meanwhile stays as that request left it. One another
+  // write took out is 404, and the host lists itself again.
+  const beat = await commit(
     store,
     (s) => {
-      const l = (s.listings[id] ??= listings[id]);
+      const l = s.listings[id];
+      if (l?.tokenHash !== tokenHash) return false;
       if (players !== null) l.entry.players = Math.min(players, l.entry.max_players);
       l.expires = expires;
     },
     (s) => s.listings[id]?.expires >= expires,
     // A heartbeat lost to a write at the same moment heals with the next
     // one (HEARTBEAT_SECS 20 against TTL_SECONDS 60), so it is not checked.
-    { state, check: false },
+    { check: false },
   );
+  if (!beat) return json({ error: "unknown listing" }, 404);
   return new Response(null, { status: 204 });
 }
 
 async function removeListing(request, store, ctx, id) {
-  const state = await loadState(store);
-  if (!(await authorized(request, state.listings, id))) return json({ error: "unknown listing" }, 404);
-  await commit(store, (s) => delete s.listings[id], (s) => !s.listings[id], { state, ctx });
+  const tokenHash = await sha256Hex(bearer(request));
+  let known = false;
+  await commit(
+    store,
+    (s) => {
+      const l = s.listings[id];
+      // Gone already: refused if it was never ours to remove; on the check
+      // after a moment, nothing left to do.
+      if (!l) return known ? undefined : false;
+      if (l.tokenHash !== tokenHash) return false;
+      known = true;
+      delete s.listings[id];
+    },
+    (s) => !s.listings[id],
+    { ctx },
+  );
+  if (!known) return json({ error: "unknown listing" }, 404);
   return new Response(null, { status: 204 });
 }
 
-async function authorized(request, listings, id) {
-  const listing = listings[id];
-  if (!listing) return null;
-  const token = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
-  return listing.tokenHash === (await sha256Hex(token)) ? listing : null;
+function bearer(request) {
+  return (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
 }
 
 // ---------------------------------------------------------------- ICE / TURN

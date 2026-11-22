@@ -1,0 +1,185 @@
+// Tests for the DCS registry (index.js), against an in-memory S3 bucket that
+// stands in for STATE_BUCKET behind a stubbed fetch().
+//
+//   node --test registry/dcs/index.test.mjs
+//
+// REGISTRY_UNDER_TEST=<path> runs them against another copy of index.js
+// (an older one, to see a test fail without its fix).
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { pathToFileURL } from "node:url";
+
+const modulePath = process.env.REGISTRY_UNDER_TEST
+  ? pathToFileURL(process.env.REGISTRY_UNDER_TEST).href
+  : new URL("./index.js", import.meta.url).href;
+const { default: registry } = await import(modulePath);
+
+const ENDPOINT = "https://s3.test";
+const BUCKET = "state";
+const env = {
+  S3_ENDPOINT: ENDPOINT,
+  S3_ACCESS_KEY_ID: "key",
+  S3_SECRET_ACCESS_KEY: "secret",
+  STATE_BUCKET: BUCKET,
+  SIGNAL_SECRET: "signal-secret",
+};
+
+// ---------------------------------------------------------------- the bucket
+
+// key -> { body, modified }
+const objects = new Map();
+// Counts of S3 requests by method ("LIST" for a listing).
+const calls = {};
+const realFetch = globalThis.fetch;
+
+globalThis.fetch = async (input, init = {}) => {
+  const url = new URL(String(input));
+  if (url.origin !== ENDPOINT) return realFetch(input, init);
+  const method = init.method || "GET";
+  const key = decodeURIComponent(url.pathname.slice(`/${BUCKET}/`.length));
+  if (method === "GET" && key === "") return listObjects(url.searchParams);
+  calls[method] = (calls[method] || 0) + 1;
+  if (method === "PUT") {
+    objects.set(key, { body: String(init.body), modified: new Date().toISOString() });
+    return new Response(null, { status: 200 });
+  }
+  if (method === "DELETE") {
+    objects.delete(key);
+    return new Response(null, { status: 204 });
+  }
+  const object = objects.get(key);
+  if (!object) return new Response("<Error/>", { status: 404 });
+  return new Response(object.body, { status: 200 });
+};
+
+// ListObjectsV2: prefix, max-keys, start-after and continuation-token.
+function listObjects(params) {
+  calls.LIST = (calls.LIST || 0) + 1;
+  const prefix = params.get("prefix") || "";
+  const max = Number(params.get("max-keys") || 1000);
+  const after = params.get("continuation-token") || params.get("start-after") || "";
+  const keys = [...objects.keys()].filter((k) => k.startsWith(prefix) && k > after).sort();
+  const page = keys.slice(0, max);
+  const truncated = keys.length > max;
+  const contents = page
+    .map((k) => `<Contents><Key>${k}</Key><LastModified>${objects.get(k).modified}</LastModified></Contents>`)
+    .join("");
+  const next = truncated ? `<NextContinuationToken>${page.at(-1)}</NextContinuationToken>` : "";
+  return new Response(`<ListBucketResult><IsTruncated>${truncated}</IsTruncated>${next}${contents}</ListBucketResult>`);
+}
+
+function readObject(key) {
+  const object = objects.get(key);
+  return object && JSON.parse(object.body);
+}
+
+function putObject(key, value) {
+  objects.set(key, { body: JSON.stringify(value), modified: new Date().toISOString() });
+}
+
+// ---------------------------------------------------------------- requests
+
+// Work a request left for after its response (ctx.waitUntil).
+const background = [];
+const ctx = { waitUntil: (p) => background.push(p) };
+
+async function settled() {
+  while (background.length) await Promise.allSettled(background.splice(0));
+}
+
+async function call(method, path, { body, headers = {}, ip = "203.0.113.7" } = {}) {
+  const request = new Request(`https://registry.test${path}`, {
+    method,
+    headers: { "CF-Connecting-IP": ip, ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return registry.fetch(request, env, ctx);
+}
+
+// A request whose body arrives only when `release` is called: the request
+// is held there, as by a slow client.
+function heldRequest(method, path, headers, body) {
+  let release;
+  const arrived = new Promise((r) => (release = r));
+  const request = {
+    method,
+    url: `https://registry.test${path}`,
+    headers: new Headers({ "CF-Connecting-IP": "203.0.113.7", ...headers }),
+    json: async () => {
+      await arrived;
+      return body;
+    },
+  };
+  return { request, release };
+}
+
+async function list(name, ip) {
+  const resp = await call("POST", "/servers", { body: { name, room: name, players: 1, max_players: 16 }, ip });
+  assert.equal(resp.status, 201);
+  return resp.json();
+}
+
+function listings() {
+  return readObject("state.json")?.listings || {};
+}
+
+// ---------------------------------------------------------------- tests
+
+test("a heartbeat does not write back the host list it read before its body came in", async () => {
+  objects.clear();
+  const a = await list("ROOMAA", "203.0.113.1");
+  await settled();
+
+  const { request, release } = heldRequest("PUT", `/servers/${a.id}`, { Authorization: `Bearer ${a.token}` }, { players: 3 });
+  const beating = registry.fetch(request, env, ctx);
+  // Let the heartbeat get as far as it can without its body.
+  await new Promise((r) => setTimeout(r, 50));
+
+  // Another host lists itself meanwhile, and its check after a moment is done.
+  const b = await list("ROOMBB", "203.0.113.2");
+  await settled();
+  assert.ok(listings()[b.id]);
+
+  release();
+  assert.equal((await beating).status, 204);
+  await settled();
+  const after = listings();
+  assert.ok(after[b.id], "the other host's listing survives the heartbeat");
+  assert.equal(after[a.id].entry.players, 3);
+});
+
+test("a heartbeat with the wrong token, or for an unknown listing, is 404", async () => {
+  objects.clear();
+  const a = await list("ROOMCC", "203.0.113.3");
+  await settled();
+  const wrong = await call("PUT", `/servers/${a.id}`, { body: { players: 2 }, headers: { Authorization: "Bearer nope" } });
+  assert.equal(wrong.status, 404);
+  const unknown = await call("PUT", `/servers/${crypto.randomUUID()}`, {
+    body: { players: 2 },
+    headers: { Authorization: `Bearer ${a.token}` },
+  });
+  assert.equal(unknown.status, 404);
+  assert.equal(listings()[a.id].entry.players, 1);
+});
+
+test("a listing is removed only with its token", async () => {
+  objects.clear();
+  const a = await list("ROOMDD", "203.0.113.4");
+  await settled();
+  assert.equal((await call("DELETE", `/servers/${a.id}`, { headers: { Authorization: "Bearer nope" } })).status, 404);
+  assert.ok(listings()[a.id]);
+  assert.equal((await call("DELETE", `/servers/${a.id}`, { headers: { Authorization: `Bearer ${a.token}` } })).status, 204);
+  await settled();
+  assert.equal(listings()[a.id], undefined);
+});
+
+test("a room listed from another address is refused", async () => {
+  objects.clear();
+  await list("ROOMEE", "203.0.113.5");
+  await settled();
+  const resp = await call("POST", "/servers", {
+    body: { name: "x", room: "ROOMEE", players: 1, max_players: 16 },
+    ip: "198.51.100.9",
+  });
+  assert.equal(resp.status, 409);
+});
