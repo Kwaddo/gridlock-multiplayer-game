@@ -59,6 +59,7 @@ impl PlayingState {
         }
 
         self.update_box_feel(delta);
+        self.update_smoke_break(delta);
 
         // update kill feed timers and drop expired entries in a single pass
         self.kill_feed.retain_mut(|entry| {

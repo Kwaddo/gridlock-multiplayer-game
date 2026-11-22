@@ -52,9 +52,12 @@ impl PlayingState {
                 }
                 let model = self.cardboard.look.model_key().and_then(|k| self.models.get(k)).map(|m| m.as_slice());
                 crate::world::render::cardboard_box::draw_cardboard_box(at, yaw, roll, model);
+                if b.carrier != 0 && self.smoke_gold(b.carrier) { self.draw_gold_glow(at, yaw); }
                 crate::world::render::cardboard_box::draw_box_shadow(floor, yaw, at.y - floor.y);
             }
         }
+
+        self.draw_smoke_coins();
 
         self.draw_box_bursts();
 

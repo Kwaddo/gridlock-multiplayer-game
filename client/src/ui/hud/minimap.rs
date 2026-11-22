@@ -51,6 +51,7 @@ pub fn draw_minimap(
     current_world: WorldId,
     local_team: u8,
     config: &GameConfig,
+    smoke_minimap: Option<(Vec<u32>, Vec<(Vec3, Color)>)>,
 ) {
     let diameter = minimap_diameter(config);
     let half = diameter / 2.0;
@@ -97,7 +98,17 @@ pub fn draw_minimap(
         circular,
         ppwu,
         local_team,
+        smoke_minimap.as_ref().map(|(ids, _)| ids.as_slice()),
     );
+
+    if let Some((_, markers)) = &smoke_minimap {
+        for (at, color) in markers {
+            let sx = center_x + (at.x - local_pos.x) * ppwu;
+            let sy = center_y + (at.z - local_pos.z) * ppwu;
+            let alpha = fade_alpha(sx, sy, center_x, center_y, half, circular);
+            if alpha > 0.0 { draw_circle(sx, sy, 4.5, Color::new(color.r, color.g, color.b, color.a * alpha)); }
+        }
+    }
 
     // Local player arrow (rotates to show facing direction)
     draw_player_arrow(center_x, center_y, local_yaw, ppwu);
@@ -320,6 +331,7 @@ fn draw_other_players(
     circular: bool,
     ppwu: f32,
     local_team: u8,
+    smoke_hunters: Option<&[u32]>,
 ) {
     for p in other_players {
         if p.world != current_world || !p.is_alive() {
@@ -333,6 +345,7 @@ fn draw_other_players(
                 continue;
             }
         }
+        if let Some(hunters) = smoke_hunters { if !hunters.contains(&p.id) { continue; } }
 
         let sx = center_x + (p.render_x - local_pos.x) * ppwu;
         let sy = center_y + (p.render_z - local_pos.z) * ppwu;

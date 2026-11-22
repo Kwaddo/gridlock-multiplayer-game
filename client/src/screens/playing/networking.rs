@@ -2,6 +2,7 @@ use crate::net::protocols::{
     ClientMsg, EVT_JUMP_START, EVT_LANDED, EVT_SLIDE_END, EVT_SLIDE_START, FLAG_ADS,
     FLAG_AIRBORNE, FLAG_CROUCHING, FLAG_PRONE, FLAG_SLIDING, FLAG_SPRINTING, LobbySettings,
     MODE_GUN_GAME,
+    MODE_SMOKE_BREAK,
 };
 use transport::Link;
 
@@ -31,6 +32,7 @@ impl PlayingState {
             if std::mem::take(&mut self.pending_end_match) {
                 s.send(&ClientMsg::EndMatch.encode());
             }
+            if std::mem::take(&mut self.smoke.pending_golden) { s.send(&ClientMsg::SmokeGoGolden.encode()); }
 
             if let Some(id) = self.cardboard.pending_enter.take() {
                 s.send(&ClientMsg::BoxEnter { id }.encode());
@@ -52,7 +54,7 @@ impl PlayingState {
                 let settings = self.lobby_settings_now(config);
                 // auto-fill: Red/Blue bot counts in team modes, a total in
                 // Gun Game (0 = no bots); always sent so the server parses easily
-                let blue_bots = (settings.mode != MODE_GUN_GAME).then_some(settings.blue_bots);
+                let blue_bots = (settings.mode != MODE_GUN_GAME && settings.mode != MODE_SMOKE_BREAK).then_some(settings.blue_bots);
                 let msg = ClientMsg::StartGame {
                     mode: Some(settings.mode),
                     duration: Some(settings.duration),
@@ -255,7 +257,10 @@ impl PlayingState {
     pub(super) fn lobby_settings_now(&self, config: &crate::core::GameConfig) -> LobbySettings {
         let mode = self.pending_start_gamemode;
         // duration code: 0 = mode default, 1..=65534 = seconds, 65535 = unlimited
-        let duration = if config.hide_match_timer {
+        // smoke break has no clock, its code is the round count the host picked
+        let duration = if mode == MODE_SMOKE_BREAK {
+            self.smoke_rounds as u16
+        } else if config.hide_match_timer {
             u16::MAX
         } else {
             config.match_time_override_secs.map_or(0, |secs| secs.min(u16::MAX as u32) as u16)

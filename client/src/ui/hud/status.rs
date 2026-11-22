@@ -39,6 +39,7 @@ pub(super) fn draw_status_panels(
     max_hp: f32,
     match_time_left: f32,
     config: &crate::core::GameConfig,
+    hider: bool,
 ) {
     // Match timer (top-center) — only display when not hidden by user and
     // when the server has sent a time.  infinite matches show as “∞”.
@@ -63,6 +64,11 @@ pub(super) fn draw_status_panels(
                 text_params(20, Color::from_rgba(220, 220, 220, 220)),
             );
         });
+    }
+
+    // a smoke break hider can't be hurt (one shot finds them) and can't sprint in a box
+    if hider {
+        return;
     }
 
     let hp_bar_x = 20.0;

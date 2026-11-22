@@ -241,6 +241,14 @@ pub fn sync_world(
         if let Some(settings) = updates.lobby_settings {
             playing_state.host_settings = Some(settings);
         }
+        if let Some(round) = updates.smoke_round { playing_state.take_smoke_round(round); }
+        if let Some(coins) = updates.smoke_coins { playing_state.take_smoke_coins(coins); }
+        if let Some(scores) = updates.smoke_scores { playing_state.take_smoke_scores(scores); }
+        if let Some(at) = updates.smoke_coin_taken { playing_state.smoke_coin_taken(at); }
+        if let Some(coin) = updates.smoke_gold_coin { playing_state.take_smoke_gold_coin(coin); }
+        if let Some(ids) = updates.smoke_golden { playing_state.take_smoke_golden(ids, player_id); }
+        if let Some(dots) = updates.smoke_dots { playing_state.take_smoke_dots(dots); }
+        if !updates.smoke_feed.is_empty() { playing_state.take_smoke_feed(updates.smoke_feed, player_id); }
         if let Some(leader_id) = updates.lobby_leader_id {
             playing_state.lobby_leader_id = if leader_id == 0 { None } else { Some(leader_id) };
         }

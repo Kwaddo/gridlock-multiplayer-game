@@ -21,3 +21,11 @@ pub const fn cue(key: &'static str, volume: f32, pitch_jitter: f32) -> Cue {
 
 // every sound was removed on 2026-11-19 (they were generated tones and one shared pew),
 // each one comes back on purpose, one at a time
+
+/// smoke break: a hider taunting (Q), on repeat for the whole 5 s, everyone hears it from where they are
+pub const TAUNT: Cue = cue("taunt", 0.9, 0.04);
+/// how long taunt.mp3 is, so the repeats line up
+pub const TAUNT_LENGTH: f32 = 0.65;
+/// smoke break: any coin grabbed (the golden one too for now), everyone hears it from where it was,
+/// that's how a hunter knows someone just took one
+pub const COIN_PICKUP: Cue = cue("coin_pickup", 0.8, 0.05);

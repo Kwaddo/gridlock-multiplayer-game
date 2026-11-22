@@ -4,6 +4,7 @@ mod characters;
 pub mod chat;
 mod movement;
 mod rendering;
+mod smoke_break;
 mod teleporter;
 
 mod input_processing;

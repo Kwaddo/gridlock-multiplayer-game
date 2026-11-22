@@ -1,6 +1,6 @@
 use crate::net::protocols::{
     MATCH_MAX_PLAYERS, MAX_BOTS_PER_TEAM, MAX_FFA_BOTS, MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY,
-    MODE_TEAM_DEATHMATCH,
+    MODE_TEAM_DEATHMATCH, MODE_SMOKE_BREAK,
 };
 use macroquad::prelude::*;
 
@@ -40,10 +40,11 @@ impl PlayingState {
         // ── mode selector (tab-style, matching login tabs) ────────────────────
         let tab_y = mode_label_y + 6.0;
         let tab_h = 42.0;
-        let modes: [(&str, u8); 3] = [
-            ("GUN GAME", MODE_GUN_GAME),
-            ("TEAM DEATHMATCH", MODE_TEAM_DEATHMATCH),
-            ("SEARCH & DESTROY", MODE_SEARCH_AND_DESTROY),
+        let modes: [(&str, u8); 4] = [
+            ("GUN", MODE_GUN_GAME),
+            ("TDM", MODE_TEAM_DEATHMATCH),
+            ("S&D", MODE_SEARCH_AND_DESTROY),
+            ("SMOKE", MODE_SMOKE_BREAK),
         ];
         let tab_total_w = panel_w - 48.0;
         let tab_w = tab_total_w / modes.len() as f32;
@@ -112,6 +113,7 @@ impl PlayingState {
         // ── team roster (TDM / S&D only) ──────────────────────────────────────
         let roster_top = desc_y + 44.0;
         let gun_game = self.pending_start_gamemode == MODE_GUN_GAME;
+        let smoke_break = self.pending_start_gamemode == MODE_SMOKE_BREAK;
         let (red_humans, blue_humans) = self.lobby_humans();
         let humans = red_humans + blue_humans;
         // With company, bots fill the smaller team so teams stay even (the
@@ -123,7 +125,7 @@ impl PlayingState {
         }
         let (red_bots, blue_bots) =
             bot_split(self.autofill_red_bots, self.autofill_blue_bots, red_humans, blue_humans);
-        if !gun_game {
+        if !gun_game && !smoke_break {
             self.draw_rosters(
                 panel_x + 24.0,
                 panel_w - 48.0,
@@ -200,6 +202,46 @@ impl PlayingState {
             draw_rectangle(section_x, btn_y + btn_h, section_w, 1.0, SEP);
         }
 
+        // ── rounds (Smoke Break) ──────────────────────────────────────────────
+        if smoke_break {
+            let tl_top = desc_y + 44.0;
+            draw_text_ex("ROUNDS", section_x, tl_top, text_params(12, TEXT_DIM));
+            let btn_y = tl_top + 8.0;
+            let btn_h = 38.0;
+            let choices: [u8; 3] = [3, 5, 10];
+            let btn_w = section_w / choices.len() as f32;
+            for (i, rounds) in choices.into_iter().enumerate() {
+                let bx = section_x + i as f32 * btn_w;
+                let selected = self.smoke_rounds == rounds;
+                let hovered = mouse.0 >= bx && mouse.0 <= bx + btn_w && mouse.1 >= btn_y && mouse.1 <= btn_y + btn_h;
+                let bg = if selected {
+                    ACCENT_DIM
+                } else if hovered {
+                    Color::new(0.12, 0.14, 0.24, 1.0)
+                } else {
+                    Color::new(0.0, 0.0, 0.0, 0.0)
+                };
+                draw_rectangle(bx, btn_y, btn_w, btn_h, bg);
+                if selected {
+                    draw_rectangle(bx, btn_y + btn_h - 2.0, btn_w, 2.0, ACCENT);
+                }
+                let lc = if selected {
+                    WHITE
+                } else if hovered {
+                    TEXT_LABEL
+                } else {
+                    Color::new(0.42, 0.44, 0.56, 1.0)
+                };
+                let label = format!("{rounds} ROUNDS");
+                let lw = measure_game_text(&label, 15);
+                draw_text_ex(&label, bx + (btn_w - lw) / 2.0, btn_y + 26.0, text_params(15, lc));
+                if hovered && clicked {
+                    self.smoke_rounds = rounds;
+                }
+            }
+            draw_rectangle(section_x, btn_y + btn_h, section_w, 1.0, SEP);
+        }
+
         // ── bots ──────────────────────────────────────────────────────────────
         // Team modes: a bot count per team, under that team's roster. Gun Game:
         // one total, as it has no teams. Zero means no bots.
@@ -208,6 +250,21 @@ impl PlayingState {
         } else {
             roster_top + ROSTER_H + 24.0
         };
+        if smoke_break {
+            // no bots in smoke break, the decoys are the crowd. it needs a hider and a hunter
+            self.autofill_red_bots = 0;
+            self.autofill_blue_bots = 0;
+            draw_text_ex("PLAYERS", section_x, bots_top, text_params(12, TEXT_DIM));
+            let (note, color) = if humans >= 2 {
+                (format!("{} PLAYERS", humans), TEXT_LABEL)
+            } else {
+                ("NEEDS AT LEAST 2 PLAYERS".to_string(), Color::new(1.0, 0.45, 0.4, 1.0))
+            };
+            let w = measure_game_text(&note, 12);
+            draw_text_ex(&note, section_x + section_w - w, bots_top, text_params(12, color));
+            return;
+        }
+
         let bots_label = if !gun_game && !solo { "BOTS PER TEAM" } else { "BOTS" };
         draw_text_ex(bots_label, section_x, bots_top, text_params(12, TEXT_DIM));
 

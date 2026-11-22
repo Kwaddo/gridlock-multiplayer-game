@@ -45,7 +45,13 @@ pub fn draw_hud(
     current_world: WorldId,
     local_team: u8,
     config: &GameConfig,
+    smoke_minimap: Option<(Vec<u32>, Vec<(Vec3, Color)>)>,
+    // smoke break hider: no gun crosshair, hp, stamina or weapon slots
+    hider: bool,
+    // smoke break locked gun: no crosshair or weapon slots right now
+    no_gun: bool,
 ) {
+    let no_gun = hider || no_gun;
     let cy = screen_height() / 2.0;
 
     let sprint_sway = if movement_state.is_sprinting {
@@ -67,32 +73,34 @@ pub fn draw_hud(
             screen_height(),
             Color::from_rgba(255, 40, 40, alpha),
         );
-        if let Some(att) = last_damage_attacker {
-            draw_text_ex(
-                &format!("Hit by {}", att),
-                12.0,
-                36.0,
-                crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
-            );
-        } else {
-            draw_text_ex(
-                "Hit!",
-                12.0,
-                36.0,
-                crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
-            );
-        }
+        // just above the crosshair where you're already looking, the kill feed keeps the top left
+        let hit_text = match last_damage_attacker {
+            Some(att) => format!("Hit by {}", att),
+            None => "Hit!".to_string(),
+        };
+        let w = crate::ui::fonts::measure_game_text(&hit_text, 18);
+        draw_text_ex(
+            &hit_text,
+            screen_width() / 2.0 - w / 2.0,
+            cy - 70.0,
+            crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
+        );
     }
 
-    crosshair::draw_crosshair_and_combat_feedback(
-        cx,
-        cy,
-        weapons,
-        hit_marker_timer,
-        hit_marker_headshot,
-        damage_numbers,
-        hit_marker_pellet_mask,
-    );
+    if !no_gun {
+        crosshair::draw_crosshair_and_combat_feedback(
+            cx,
+            cy,
+            weapons,
+            hit_marker_timer,
+            hit_marker_headshot,
+            damage_numbers,
+            hit_marker_pellet_mask,
+        );
+    } else if hider && config.smoke_hider_dot {
+        // the setting for a tiny centre dot, off by default
+        draw_circle(screen_width() / 2.0, cy, 2.0, Color::new(1.0, 1.0, 1.0, 0.6));
+    }
 
     status::draw_status_panels(
         movement_state,
@@ -100,6 +108,7 @@ pub fn draw_hud(
         max_hp,
         match_time_left,
         config,
+        hider,
     );
 
     // nametags are now drawn by draw_player_overhead (camera-based projection)
@@ -113,6 +122,7 @@ pub fn draw_hud(
         username,
         local_team,
         config,
+        no_gun,
     );
 
     minimap::draw_minimap(
@@ -123,5 +133,6 @@ pub fn draw_hud(
         current_world,
         local_team,
         config,
+        smoke_minimap,
     );
 }

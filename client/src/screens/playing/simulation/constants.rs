@@ -8,6 +8,8 @@ pub(super) const SOUND_EAR_HEIGHT: f32 = 0.8;
 pub(super) const SOUND_OCCLUDED_VOLUME: f32 = 0.45;
 /// Strongest stereo pan for world sounds (1 = fully one-sided).
 pub(super) const SOUND_MAX_PAN: f32 = 0.8;
+/// The quietest a sound everyone hears gets, however far away it is.
+pub(super) const SOUND_FAR_VOLUME: f32 = 0.2;
 
 pub(super) const WORLD_PLAYER_RENDER_SCALE: f32 = 0.90;
 pub(super) const PLAYER_MODEL_YAW_OFFSET: f32 = std::f32::consts::FRAC_PI_2;

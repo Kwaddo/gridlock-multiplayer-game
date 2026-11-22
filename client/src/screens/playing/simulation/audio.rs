@@ -3,11 +3,34 @@ use crate::types::world::WorldId;
 
 use macroquad::prelude::*;
 
-use super::constants::{SOUND_EAR_HEIGHT, SOUND_MAX_DIST, SOUND_MAX_PAN, SOUND_OCCLUDED_VOLUME};
+use super::constants::{SOUND_EAR_HEIGHT, SOUND_FAR_VOLUME, SOUND_MAX_DIST, SOUND_MAX_PAN, SOUND_OCCLUDED_VOLUME};
 use super::PlayingState;
+use crate::audio::Cue;
 
 // ── Spatial audio helpers ──
 impl PlayingState {
+    /// A sound everyone hears wherever they are: it pans toward where it came from and gets
+    /// quieter with distance, but never under SOUND_FAR_VOLUME, so you can always tell where it was.
+    pub fn play_heard_everywhere(&self, cue: Cue, source_pos: Vec3) {
+        let diff = source_pos - self.position;
+        let flat = vec3(diff.x, 0.0, diff.z);
+        let dist = flat.length();
+        let near = (1.0 - dist / (SOUND_MAX_DIST * 2.0)).clamp(0.0, 1.0);
+        let volume = cue.volume * (SOUND_FAR_VOLUME + (1.0 - SOUND_FAR_VOLUME) * near * near);
+        let pan = if dist > 0.1 {
+            let right = vec3(-self.yaw.sin(), 0.0, self.yaw.cos());
+            (flat / dist).dot(right) * SOUND_MAX_PAN
+        } else {
+            0.0
+        };
+        let pitch = if cue.pitch_jitter > 0.0 {
+            macroquad::rand::gen_range(1.0 - cue.pitch_jitter, 1.0 + cue.pitch_jitter)
+        } else {
+            1.0
+        };
+        self.audio.play_panned(cue.key, pitch, volume, pan);
+    }
+
     /// Play a sound placed in the world: distance falloff, stereo pan from
     /// where it is around the listener, muffled when a maze wall stands
     /// between them, and a doppler pitch shift.

@@ -131,6 +131,7 @@ pub(super) fn apply_kill_feed(
                 victim_team,
                 weapon,
                 timer: 5.0,
+                tag: None,
             });
 
         // kill confirmation effect for local player

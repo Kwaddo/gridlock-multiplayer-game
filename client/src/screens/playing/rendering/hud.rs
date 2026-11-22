@@ -125,7 +125,8 @@ impl PlayingState {
             //   - teammates: always visible (no wall occlusion), shown in green
             //   - enemies:   occluded by walls, shown in orange/red
             // In non-team modes keep existing per-player color with wall occlusion.
-            let is_teammate = is_team_mode && local_team != 0 && p.team == local_team;
+            let is_teammate = (is_team_mode && local_team != 0 && p.team == local_team)
+                || self.smoke_mates(player_id, p.id);
             if boxed && !is_teammate {
                 continue;
             }
