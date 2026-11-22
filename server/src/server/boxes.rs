@@ -197,8 +197,10 @@ impl Boxes {
         let Some(maze) = maze.filter(|_| b.world == WorldId::Maze) else {
             return true;
         };
-        let side = if dist > 1e-3 { (-dz / dist * BOX_HALF, dx / dist * BOX_HALF) } else { (0.0, 0.0) };
-        [(0.0, 0.0), side, (-side.0, -side.1)]
+        // the middle, either side, and the two near corners: a box peeking past a corner still counts
+        let (ux, uz) = if dist > 1e-3 { (dx / dist * BOX_HALF, dz / dist * BOX_HALF) } else { (0.0, 0.0) };
+        let side = (-uz, ux);
+        [(0.0, 0.0), side, (-side.0, -side.1), (side.0 - ux, side.1 - uz), (-side.0 - ux, -side.1 - uz)]
             .iter()
             .any(|(ox, oz)| sight::clear_between(maze, from, (to.0 + ox, to.1 + oz)))
     }
