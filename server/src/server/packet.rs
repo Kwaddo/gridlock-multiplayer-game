@@ -53,6 +53,8 @@ impl Server {
                 handlers::handle_disconnect(&self.outbox, &mut self.players, src_addr)
             }
             ClientMsg::Position { position, yaw, state_flags, event_flags, pitch } => {
+                // a boxed hider's box only goes where a box could have gone
+                let position = self.smoke_trusted_position(src_addr, position).unwrap_or(position);
                 handlers::handle_position(
                     &self.outbox,
                     &mut self.players,
@@ -105,6 +107,8 @@ impl Server {
                 }
             }
             ClientMsg::Discover => handlers::handle_discover(&self.outbox, &self.players, &self.name, src_addr),
+            // nobody gets hurt in smoke break, finds are box shots
+            ClientMsg::Hit { .. } if self.smoke_on() => {}
             ClientMsg::Hit { victim_id, damage, weapon, backstab, headshot } => handlers::handle_hit(
                 &self.outbox,
                 &mut self.players,
@@ -215,6 +219,8 @@ impl Server {
                         is_silent: false,
                         auto_respawn: false,
                         regen_resume_at: None,
+                        in_box: false,
+                        smoke_alias: None,
 
                     };
 
@@ -291,6 +297,20 @@ impl Server {
                 &text,
             ),
             ClientMsg::EndMatch => self.handle_end_match(src_addr),
+
+            // smoke break: nobody gets in or out of a box by hand, the round does that
+            // smoke_on, not smoke_active: during the winner countdown these must not fall through to the generic rules
+            ClientMsg::BoxEnter { .. } | ClientMsg::BoxExit if self.smoke_on() => self.boxes.resend_to(src_addr),
+            ClientMsg::BoxShot { id } if self.smoke_on() => self.smoke_box_shot(src_addr, id),
+            ClientMsg::BoxEnter { id } => self.handle_box_enter(src_addr, id),
+            ClientMsg::BoxExit => self.boxes.exit(&self.players, src_addr),
+            ClientMsg::BoxShot { id } => {
+                // refused: their game already broke it, it gets the list back
+                if !self.boxes.shot(&self.players, self.maze.as_ref(), src_addr, id) {
+                    self.boxes.resend_to(src_addr);
+                }
+            }
+            ClientMsg::SmokeGoGolden => self.smoke_go_golden(src_addr),
 
         }
     }

@@ -102,6 +102,10 @@ pub fn handle_hit(
         if !victim_ref.is_alive {
             return;
         }
+        // boxes stop bullets, a hit claimed on someone inside one does nothing
+        if victim_ref.in_box {
+            return;
+        }
     }
 
     apply_damage(

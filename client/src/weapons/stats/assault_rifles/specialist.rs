@@ -42,7 +42,6 @@ pub const FAMAS: WeaponStats = WeaponStats {
     fsa_time: Some(0.25), // fast FSA between bursts
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "ar_shot",
     icon_asset_key: "ar_icon",
 
     viewmodel_model: Some("famas_model"),
@@ -125,7 +124,6 @@ pub const SCAR: WeaponStats = WeaponStats {
 
     fsa_time: Some(0.35),
 
-    fire_sound_asset_key: "ar_shot",
     icon_asset_key: "ar_icon",
 
     viewmodel_model: Some("scar_model"),
@@ -209,7 +207,6 @@ pub const AS_VAL: WeaponStats = WeaponStats {
 
     fsa_time: Some(0.25),
 
-    fire_sound_asset_key: "ar_shot",
     icon_asset_key: "ar_icon",
 
     viewmodel_model: Some("as_val_model"),

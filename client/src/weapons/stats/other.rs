@@ -49,7 +49,6 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     fsa_time: None,          // minigun never reaches FSA
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "ar_shot", // placeholder until we get a proper minigun sound
     icon_asset_key: "ar_icon",       // placeholder
     icon_width: 110.0,
     icon_height: 50.0,

@@ -78,7 +78,9 @@ impl PlayingState {
             return;
         }
 
-        let speed = if self.movement_state.is_prone {
+        let speed = if self.cardboard.in_box.is_some() {
+            super::cardboard::BOX_SPEED
+        } else if self.movement_state.is_prone {
             self.movement_config.prone_speed
         } else if self.movement_state.is_sprinting {
             self.movement_config.sprint_speed

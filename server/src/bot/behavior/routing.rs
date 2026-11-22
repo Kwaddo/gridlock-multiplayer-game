@@ -9,7 +9,7 @@ use crate::server::game::MAZE_CELL_SIZE;
 
 /// `p` is someone `bot` fights: alive, in the maze, on the other team.
 pub(super) fn is_enemy(bot: &Player, p: &Player) -> bool {
-    p.is_alive && p.world == WorldId::Maze && bot.is_hostile_to(p)
+    p.is_alive && !p.in_box && p.world == WorldId::Maze && bot.is_hostile_to(p)
 }
 
 pub(super) fn find_enemy<'a>(players: &'a HashMap<PeerId, Player>, bot: &Player, id: u32) -> Option<&'a Player> {

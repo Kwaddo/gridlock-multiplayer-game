@@ -4,6 +4,7 @@ use platform::Instant;
 
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
+use crate::server::smoke_break;
 
 /// Send one packet to every human player.
 pub fn to_humans(socket: &Outbox, players: &HashMap<PeerId, Player>, msg: &[u8]) {
@@ -26,8 +27,9 @@ pub fn send_player_list(
 
 fn player_list_msg(players: &HashMap<PeerId, Player>) -> Vec<u8> {
     let entries = players
-        .values()
-        .map(|p| PlayerListEntry {
+        .iter()
+        .filter(|(peer, _)| !smoke_break::is_decoy(**peer))
+        .map(|(_, p)| PlayerListEntry {
             id: p.id,
             name: p.username.clone(),
             kills: p.kills,
@@ -143,38 +145,49 @@ pub fn broadcast_state_with_events(socket: &Outbox, players: &HashMap<PeerId, Pl
 
 fn send_state(socket: &Outbox, players: &HashMap<PeerId, Player>, include_events: bool) {
     let now = Instant::now();
-    // The message only depends on the receiver's world: encode it once per
-    // world (at most a couple) and send the same bytes to everyone in it.
-    let mut by_world: Vec<(WorldId, Vec<u8>)> = Vec::with_capacity(2);
+    // The message depends on the receiver's world and, in Smoke Break, on whether
+    // the receiver is in a box itself (it gets its own entry under its real id,
+    // everyone else's box under an alias). Everyone else shares one copy per world.
+    let mut shared: Vec<(WorldId, Option<PeerId>, Vec<u8>)> = Vec::with_capacity(2);
 
     for (recv_addr, receiver) in players.iter() {
         if receiver.is_bot {
             continue;
         }
-        let at = match by_world.iter().position(|(w, _)| *w == receiver.world) {
+        let me = receiver.smoke_alias.map(|_| *recv_addr);
+        let at = match shared.iter().position(|(w, m, _)| *w == receiver.world && *m == me) {
             Some(at) => at,
             None => {
-                by_world.push((receiver.world, state_msg(players, receiver.world, include_events, now)));
-                by_world.len() - 1
+                let msg = state_msg(players, receiver.world, me, include_events, now);
+                shared.push((receiver.world, me, msg));
+                shared.len() - 1
             }
         };
-        let _ = socket.send_to(&by_world[at].1, *recv_addr);
+        let _ = socket.send_to(&shared[at].2, *recv_addr);
     }
 }
 
 /// The encoded `MSG_STATE` for a receiver in `world`: every player in that
-/// world, in the map's iteration order.
+/// world, in the map's iteration order. A Smoke Break box other than the
+/// receiver's own (`me`) goes last, under its alias, in alias order.
 pub(crate) fn state_msg(
     players: &HashMap<PeerId, Player>,
     world: WorldId,
+    me: Option<PeerId>,
     include_events: bool,
     now: Instant,
 ) -> Vec<u8> {
-    let entries = players
-        .values()
-        .filter(|p| p.world == world)
-        .map(|p| player_state(p, include_events, now))
-        .collect();
+    let mut entries = Vec::new();
+    let mut masked = Vec::new();
+    for (peer, p) in players.iter().filter(|(_, p)| p.world == world) {
+        match smoke_break::alias_for(*peer, p, me) {
+            Some(alias) => masked.push(smoke_break::masked_state(p, alias)),
+            None => entries.push(player_state(p, include_events, now)),
+        }
+    }
+    // where an entry sits in the list must not say whose it is either
+    masked.sort_by_key(|e| e.id);
+    entries.append(&mut masked);
     ServerMsg::State { world: world.as_u8(), players: entries }.encode()
 }
 

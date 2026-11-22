@@ -156,7 +156,7 @@ pub fn recover(weapon: &mut WeaponState, delta: f32, is_moving: bool) {
     }
 }
 
-// how much tighter shots are while slow walking (ahmed: dead accurate), 0.2 = a fifth of the normal spread
+// how much tighter shots are while slow walking, i want it dead accurate, 0.2 = a fifth of the normal spread
 pub const SLOW_WALK_SPREAD_MULT: f32 = 0.2;
 
 // calculate spread angle (radians) for the current frame.

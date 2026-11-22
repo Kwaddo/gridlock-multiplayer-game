@@ -236,6 +236,7 @@ pub fn execute_scheduled_match_end(
 
     // Despawn all bots before moving players back
     bot_manager.despawn_all(players);
+    crate::server::smoke_break::remove_smoke_entities(players);
 
     // Move all players back to Lobby, reset match state and clear maze
     broadcast::move_all_players_to_lobby(socket, players, true);

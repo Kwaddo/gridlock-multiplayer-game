@@ -24,7 +24,7 @@ const MUZZLE_REACH: f32 = 0.5;
 impl PlayingState {
     #[inline(always)]
     pub(crate) fn draw_other_players(&self) {
-        for p in &self.other_players {
+        for p in self.other_players.iter().filter(|p| !self.is_boxed(p.id)) {
             self.draw_player_model(p);
         }
 

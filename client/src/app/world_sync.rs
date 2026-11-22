@@ -98,6 +98,7 @@ pub fn sync_world(
         let mut world_change_applied = false;
         if let Some((world_id, spawn, freeze_secs, timer_secs)) = updates.world_change {
             playing_state.current_world = world_id;
+            playing_state.box_world_changed(world_id);
             playing_state.mirrors = client::world::mirror::mirrors_for_world(world_id);
             playing_state.position = spawn;
             playing_state.movement_state.velocity = Vec3::ZERO;
@@ -144,7 +145,7 @@ pub fn sync_world(
             apply_damage(playing_state, damage, attacker_id, is_stun);
         }
         if let Some(bot_shots) = updates.bot_shots {
-            spawn_bot_shots(playing_state, bot_shots, maze.as_ref());
+            spawn_bot_shots(playing_state, bot_shots);
         }
         if let Some(kills) = updates.kill_feed {
             apply_kill_feed(playing_state, kills, player_id, username);
@@ -234,9 +235,21 @@ pub fn sync_world(
         if let Some(score) = updates.team_score {
             playing_state.team_score = Some(score);
         }
+        // the server always sends the full list, so just swap ours out
+        if let Some((world, boxes)) = updates.boxes {
+            playing_state.take_box_list(world, boxes, player_id);
+        }
         if let Some(settings) = updates.lobby_settings {
             playing_state.host_settings = Some(settings);
         }
+        if let Some(round) = updates.smoke_round { playing_state.take_smoke_round(round); }
+        if let Some(coins) = updates.smoke_coins { playing_state.take_smoke_coins(coins); }
+        if let Some(scores) = updates.smoke_scores { playing_state.take_smoke_scores(scores); }
+        if let Some(at) = updates.smoke_coin_taken { playing_state.smoke_coin_taken(at); }
+        if let Some(coin) = updates.smoke_gold_coin { playing_state.take_smoke_gold_coin(coin); }
+        if let Some(ids) = updates.smoke_golden { playing_state.take_smoke_golden(ids, player_id); }
+        if let Some(dots) = updates.smoke_dots { playing_state.take_smoke_dots(dots); }
+        if !updates.smoke_feed.is_empty() { playing_state.take_smoke_feed(updates.smoke_feed, player_id); }
         if let Some(leader_id) = updates.lobby_leader_id {
             playing_state.lobby_leader_id = if leader_id == 0 { None } else { Some(leader_id) };
         }

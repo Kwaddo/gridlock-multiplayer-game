@@ -113,7 +113,8 @@ impl PlayingState {
         // Other players
         for p in &self.other_players {
             let player_pos = p.render_position();
-            let tag_pos = player_pos + vec3(0.0, 1.7, 0.0);
+            let boxed = self.is_boxed(p.id);
+            let tag_pos = player_pos + vec3(0.0, if boxed { 1.0 } else { 1.7 }, 0.0);
 
             // Off-screen tags are skipped before the occlusion raycast.
             let Some((sx, sy)) = project(tag_pos) else {
@@ -124,7 +125,11 @@ impl PlayingState {
             //   - teammates: always visible (no wall occlusion), shown in green
             //   - enemies:   occluded by walls, shown in orange/red
             // In non-team modes keep existing per-player color with wall occlusion.
-            let is_teammate = is_team_mode && local_team != 0 && p.team == local_team;
+            let is_teammate = (is_team_mode && local_team != 0 && p.team == local_team)
+                || self.smoke_mates(player_id, p.id);
+            if boxed && !is_teammate {
+                continue;
+            }
 
             if !is_teammate && is_occluded(player_pos + vec3(0.0, 0.8, 0.0)) {
                 continue;

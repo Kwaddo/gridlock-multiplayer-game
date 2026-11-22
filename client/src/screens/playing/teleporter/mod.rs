@@ -6,7 +6,7 @@ mod roster;
 
 use crate::net::protocols::{
     MATCH_STATUS_ENDING, MATCH_STATUS_RUNNING, MATCH_STATUS_STARTING, MODE_GUN_GAME,
-    MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH,
+    MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH, MODE_SMOKE_BREAK,
 };
 use crate::types::world::WorldId;
 use macroquad::prelude::*;
@@ -120,6 +120,7 @@ impl PlayingState {
             MODE_GUN_GAME => "START  GUN GAME",
             MODE_TEAM_DEATHMATCH => "START  TEAM DEATHMATCH",
             MODE_SEARCH_AND_DESTROY => "START  SEARCH & DESTROY",
+            MODE_SMOKE_BREAK => "START SMOKE BREAK",
             _ => "START MATCH",
         };
         let (action_label, action_enabled) = match self.match_status {

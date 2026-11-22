@@ -1,16 +1,13 @@
 {
   "global": {
+    "cardboard_box_lowpoly": "assets/models/props/cardboard_box_lowpoly.glb",
+    "cardboard_box_old": "assets/models/props/cardboard_box_old.glb",
     "fp_hands": "assets/models/hand/fps_animated_carbine.glb",
     "fp_hands_pistol": "assets/models/hand/fps_pistol_animated.glb",
     "fp_hands_smg": "assets/models/hand/fps_animated_smg.glb",
     "fp_hands_sniper": "assets/models/hand/sniper_animated.glb",
     "fp_hands_minigun": "assets/models/hand/minigun_animated.glb",
     "fp_hands_sawnoff": "assets/models/hand/sawnoff_animated.glb",
-    "pistol_shot": "assets/sounds/pew.ogg",
-    "smg_shot": "assets/sounds/pew.ogg",
-    "shotgun_shot": "assets/sounds/pew.ogg",
-    "ar_shot": "assets/sounds/pew.ogg",
-    "sniper_shot": "assets/sounds/pew.ogg",
     "pistol_icon": "assets/images/weapons/pistol.png",
     "pistol_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
     "smg_icon": "assets/images/weapons/smg.png",
@@ -44,9 +41,6 @@
     "grenade_launcher_model": "assets/models/weapons/Other/grenade_launcher.glb",
     "minigun_model": "assets/models/weapons/Other/minigun.glb",
     "rpg_model": "assets/models/weapons/Other/rpg.glb",
-    "deagle_shot": "assets/sounds/deagle.ogg",
-    "footstep": "assets/sounds/footstep.ogg",
-    "slide": "assets/sounds/slide.ogg",
     "character_ch15_humanoid": "assets/models/characters/Ch15_humanoid.glb",
     "character_pete_humanoid": "assets/models/characters/Pete_humanoid.glb",
     "character_vecna_humanoid": "assets/models/characters/Vecna_humanoid.glb",
@@ -100,7 +94,9 @@
     "anim_emote_moonwalk": "assets/models/animations/Emote_Moonwalk.glb",
     "punch1": "assets/images/weapons/FPS Weapon Sprites/frames/punch1.png",
     "punch2": "assets/images/weapons/FPS Weapon Sprites/frames/punch2.png",
-    "punch3": "assets/images/weapons/FPS Weapon Sprites/frames/punch3.png"
+    "punch3": "assets/images/weapons/FPS Weapon Sprites/frames/punch3.png",
+    "taunt": "assets/sounds/taunt.mp3",
+    "coin_pickup": "assets/sounds/coin_pickup.mp3"
   },
   "lobby": {
     "floor_texture": "assets/images/textures/rocks.png"

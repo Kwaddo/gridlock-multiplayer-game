@@ -72,7 +72,6 @@ pub struct PlayingState {
     pub bob_timer: f32,
     pub audio: crate::audio::Audio,
     /// Last frame's state, for sounds played on state changes.
-    pub event_sounds: super::simulation::EventSoundState,
     pub assets: HashMap<String, Texture2D>,
     // static meshes keyed by logical asset name; some glTF files contain multiple
     // primitives with different textures, so we now store a vector of meshes
@@ -88,6 +87,8 @@ pub struct PlayingState {
     pub pending_world_change: Option<WorldId>,
     pub pending_start_request: bool,
     pub pending_start_gamemode: u8,
+    /// smoke break rounds the host picked in the lobby (3, 5 or 10)
+    pub smoke_rounds: u8,
     pub pending_set_team: Option<u8>,
     pub pending_range_start: bool,
     pub lobby_console_open: bool,
@@ -233,10 +234,12 @@ pub struct PlayingState {
     pub snd_last_pickup_sent: Option<platform::Instant>,
 
     // local player footstep timer
-    pub local_footstep_timer: f32,
 
     // ceiling lights that have been shot out (cell coords)
     pub destroyed_lights: HashSet<(u8, u8)>,
+
+    pub cardboard: super::cardboard::BoxState,
+    pub smoke: super::smoke_break::SmokeView,
 
     // cached strings used by render to avoid reallocating each frame
     pub(crate) match_start_cached_secs: i32,
@@ -291,6 +294,8 @@ pub struct KillFeedEntry {
     pub victim_team: u8,
     pub weapon: String,
     pub timer: f32,
+    // smoke break: "RED-HANDED" or what a decoy cost, drawn after the victim
+    pub tag: Option<(String, Color)>,
 }
 
 impl PlayingState {
@@ -308,7 +313,6 @@ impl PlayingState {
             movement_config: MovementConfig::new(),
             bob_timer: 0.0,
             audio: crate::audio::Audio::new(),
-            event_sounds: Default::default(),
             assets: HashMap::new(),
             models: HashMap::new(),
             animated_models: HashMap::new(),
@@ -321,6 +325,7 @@ impl PlayingState {
             pending_world_change: None,
             pending_start_request: false,
             pending_start_gamemode: MODE_TEAM_DEATHMATCH,
+            smoke_rounds: 3,
             pending_set_team: None,
             pending_range_start: false,
             lobby_console_open: false,
@@ -430,8 +435,9 @@ impl PlayingState {
             local_team: 0,
             snd_last_pickup_sent: None,
 
-            local_footstep_timer: 0.0,
             destroyed_lights: HashSet::new(),
+            cardboard: Default::default(),
+            smoke: Default::default(),
 
             match_start_cached_secs: -1,
             match_start_cached_text: String::new(),

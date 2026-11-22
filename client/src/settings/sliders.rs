@@ -10,6 +10,8 @@ const MINIMAP_SHAPE_OPTIONS: &[(&str, u8)] = &[("Circle", 0), ("Square", 1)];
 /// Master volume in percent; "Off" mutes.
 const VOLUME_OPTIONS: &[(&str, u8)] =
     &[("Off", 0), ("25%", 25), ("50%", 50), ("75%", 75), ("100%", 100)];
+/// smoke break: a tiny centre dot for hiders
+const HIDER_DOT_OPTIONS: &[(&str, u8)] = &[("Off", 0), ("On", 1)];
 
 /// The volume button that is lit for the current settings.
 fn volume_choice(config: &GameConfig) -> u8 {
@@ -123,6 +125,21 @@ pub fn update_sliders(
                 if value > 0 {
                     config.master_volume = value as f32 / 100.0;
                 }
+            }
+        }
+    }
+
+    // Hider dot row
+    let dot_row_y = volume_row_y + gui_btn_h + 12.0 * s;
+    if clicked {
+        for (i, &(_, value)) in HIDER_DOT_OPTIONS.iter().enumerate() {
+            let bx = gui_start_x + (gui_btn_w + gui_btn_gap) * (i as f32);
+            if mouse.0 >= bx
+                && mouse.0 <= bx + gui_btn_w
+                && mouse.1 >= dot_row_y
+                && mouse.1 <= dot_row_y + gui_btn_h
+            {
+                config.smoke_hider_dot = value == 1;
             }
         }
     }
@@ -248,6 +265,25 @@ pub fn draw_sliders(
         volume_choice(config),
         slider_x,
         volume_row_y,
+        gui_btn_w,
+        gui_btn_h,
+        gui_btn_gap,
+        btn_fs,
+    );
+
+    // Hider dot row (draw)
+    let dot_row_y = volume_row_y + gui_btn_h + 12.0 * s;
+    draw_text_ex(
+        "Hider Dot",
+        label_x,
+        dot_row_y + 20.0 * s,
+        text_params(label_fs, WHITE),
+    );
+    draw_button_row(
+        HIDER_DOT_OPTIONS,
+        config.smoke_hider_dot as u8,
+        slider_x,
+        dot_row_y,
         gui_btn_w,
         gui_btn_h,
         gui_btn_gap,

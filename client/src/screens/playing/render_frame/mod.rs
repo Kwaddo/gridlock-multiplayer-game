@@ -19,7 +19,7 @@ impl PlayingState {
         maze: Option<&Maze>,
     ) {
         self.update_head_bob(get_frame_time());
-        let camera = self.build_camera(config);
+        let camera = self.build_camera(config, maze);
         // update cached shapes first, so every camera below only reads
         self.bake_bullet_holes();
         // your body's colour, your player colour alive, white as a corpse, same as before
@@ -82,14 +82,20 @@ impl PlayingState {
 
         self.draw_player_overhead(&camera, maze, player_id);
         self.draw_lobby_console_prompt();
+        if !self.is_dead && !self.lobby_console_open && !self.smoke_mode() {
+            self.draw_box_prompt();
+        }
         self.draw_shooting_range_prompt();
 
         // Lobby console (Start Game) overlay
         self.draw_lobby_console(config, player_id);
 
-        // Don't draw viewmodel while dead or when lobby console is open
-        if !self.is_dead && !self.lobby_console_open {
+        // Don't draw viewmodel while dead or when lobby console is open, and smoke break hiders get no gun
+        if !self.is_dead && !self.lobby_console_open && self.cardboard.in_box.is_none() && !self.smoke_hiding() && !self.smoke_gun_locked() {
             self.draw_viewmodel();
+        }
+        if self.box_eye_slot(config) {
+            super::cardboard::draw_box_slit();
         }
 
         // When lobby console is open, suppress regular HUD (crosshair, minimap, status panels, etc.)
@@ -120,6 +126,7 @@ impl PlayingState {
                 &self.kill_feed,
                 // S&D times rounds, and the TDM score bar has the clock in it
                 if self.match_mode == Some(crate::net::protocols::MODE_SEARCH_AND_DESTROY)
+                    || self.match_mode == Some(crate::net::protocols::MODE_SMOKE_BREAK)
                     || tdm_bar.is_some()
                 {
                     0.0
@@ -132,6 +139,9 @@ impl PlayingState {
                 self.current_world,
                 local_team,
                 config,
+                self.smoke_minimap(),
+                self.smoke_hiding(),
+                self.smoke_gun_locked(),
             );
 
             let dt = get_frame_time();
@@ -166,7 +176,7 @@ impl PlayingState {
                 .find(|(id, ..)| *id == player_id)
                 .map(|(_, _, _, _, _, team, _, _)| *team)
                 .unwrap_or(0);
-            let clock = (!config.hide_match_timer && self.match_time_left > 0.0)
+            let clock = (!config.hide_match_timer && self.match_time_left > 0.0 && self.match_mode != Some(crate::net::protocols::MODE_SMOKE_BREAK))
                 .then_some(self.match_time_left);
             crate::ui::hud::draw_team_score_bar(score, local_team, clock);
         }
@@ -179,6 +189,9 @@ impl PlayingState {
                 &self.match_player_ids,
                 self.team_score,
             );
+        } else if is_key_down(KeyCode::Tab) && self.smoke_on() {
+            self.draw_smoke_tab(player_id);
+            self.draw_fps_counter();
         } else if is_key_down(KeyCode::Tab) {
             crate::ui::hud::draw_player_list(
                 &self.connected_players,
@@ -325,6 +338,21 @@ impl PlayingState {
             self.draw_snd_hud(player_id);
         }
 
-        self.chat.draw();
+        // smoke break goes last so the blind screen covers everything under it
+        if self.smoke_on() {
+            if !self.lobby_console_open {
+                self.draw_smoke_hud(player_id);
+            }
+            if self.smoke_hunting() {
+                // a clear gap above the hp and stamina bars
+                self.chat.draw_at(150.0, 460.0);
+            } else {
+                // hiders have no bars, chat drops down and keeps clear of the bottom pill
+                let room = (screen_width() - super::rendering::BOTTOM_PILL_W) / 2.0 - 40.0;
+                self.chat.draw_at(22.0, room.min(460.0));
+            }
+        } else {
+            self.chat.draw();
+        }
     }
 }

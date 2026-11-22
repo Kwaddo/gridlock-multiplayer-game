@@ -10,7 +10,7 @@ pub use messages::*;
 /// `ServerMsg::Welcome`). Builds from before the check have no version on
 /// the wire and count as 1.
 // 3: pitch added to MSG_STATE (one byte) and MSG_POSITION, so a 2 cant read a 3's state packets
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 5; // 4 added cardboard shit, 5 added smoke break
 
 /// What the server tells a client of another version once it has let it in
 /// far enough to be heard: a chat notice is all an old build can show.
@@ -64,6 +64,7 @@ pub const MATCH_STATUS_ENDING: u8 = 3; // winner shown, everyone returns to the 
 pub const START_DENIED_NOT_HOST: u8 = 1;
 pub const START_DENIED_STARTING: u8 = 2;
 pub const START_DENIED_ENDING: u8 = 3;
+pub const START_DENIED_TOO_FEW: u8 = 4; // smoke break needs 2 humans
 
 // MSG_PLAYER_LEFT reasons
 pub const LEAVE_QUIT: u8 = 0;
@@ -87,6 +88,7 @@ pub const MSG_START_GAME: u8 = 19; // client -> server: request to start a match
 pub const MODE_GUN_GAME: u8 = 1;
 pub const MODE_TEAM_DEATHMATCH: u8 = 2;
 pub const MODE_SEARCH_AND_DESTROY: u8 = 3;
+pub const MODE_SMOKE_BREAK: u8 = 4;
 
 // Auto-fill bot limits for MSG_START_GAME, shared so the host's lobby console
 // offers exactly what the server accepts
@@ -124,6 +126,34 @@ pub const MSG_SND_PLANT_START: u8 = 29; // client -> server: start planting bomb
 pub const MSG_SND_PLANT_STOP: u8 = 30; // client -> server: stop planting bomb
 pub const MSG_SND_DEFUSE_START: u8 = 31; // client -> server: start defusing bomb
 pub const MSG_SND_DEFUSE_STOP: u8 = 32; // client -> server: stop defusing bomb
+
+// carboard yeet
+pub const MSG_BOXES: u8 = 43; // server -> client, every box in one world
+pub const MSG_BOX_ENTER: u8 = 44; // client -> server, let me in the box 
+pub const MSG_BOX_EXIT: u8 = 45; // client -> server, let me out of the box and leave it here
+pub const MSG_BOX_SHOT: u8 = 46; // client -> server, I shot this box (mine from inside, or anyone's), its gone
+
+pub const BOX_ENTER_RANGE: f32 = 2.0; // flat metres, server checks it, client picks a box with it
+
+// smoke break
+pub const MSG_SMOKE_ROUND: u8 = 47; // server -> each player, the round as they see it, see 'SmokeRound'
+pub const MSG_SMOKE_COINS: u8 = 48; // server -> hiders only, every coin still out, hunters never get this
+pub const MSG_SMOKE_SCORES: u8 = 49; // server -> all, everyones points so far
+pub const MSG_SMOKE_COIN_TAKEN: u8 = 54; // server -> all, someone grabbed a coin here, play the sound
+pub const MSG_SMOKE_GOLD_COIN: u8 = 55; // server -> hiders only, where the golden coin is and how long it has left, or that it's gone
+pub const MSG_SMOKE_GOLDEN: u8 = 56; // server -> all, which players are gold right now so their box glows
+pub const MSG_SMOKE_DOTS: u8 = 57; // server -> hunters only, minimap dots on gold hiders and where they were last seen
+pub const MSG_SMOKE_GO_GOLDEN: u8 = 58; // client -> server, i'm going golden
+pub const MSG_SMOKE_FEED: u8 = 59; // server -> all, someone got found or someone shot a decoy, for the kill feed
+
+pub const SMOKE_PHASE_BLIND: u8 = 0; // hunters frozen and blind, hiders spread out
+pub const SMOKE_PHASE_RELEASED: u8 = 1; // hunters out, no coins yet
+pub const SMOKE_PHASE_COINS: u8 = 2; // coins out, the real round
+pub const SMOKE_PHASE_RESULTS: u8 = 3; // round over, scores up for a few seconds, then the next round or the end
+
+pub const SMOKE_SIDE_HIDER: u8 = 0;
+pub const SMOKE_SIDE_HUNTER: u8 = 1;
+pub const SMOKE_NO_WINNER: u8 = 255; // the round isn't over yet
 
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;

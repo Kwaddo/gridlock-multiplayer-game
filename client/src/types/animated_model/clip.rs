@@ -220,7 +220,7 @@ mod tests {
         })
     }
 
-    // these must work, the rest are proportion tests that are allowed to fail (Ahmed's priority)
+    // these must work, the rest are proportion tests that are allowed to fail
     const MUST_WORK: [&str; 3] = ["Ch15_humanoid", "Pete_humanoid", "Vecna_humanoid"];
 
     // the real converted files, skipped when theyre not there (client/assets is git ignored)

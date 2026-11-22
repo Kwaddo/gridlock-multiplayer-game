@@ -16,11 +16,12 @@ impl Server {
         if game::host_addr(&self.players) != Some(src_addr) {
             return;
         }
-        let valid_mode = [MODE_GUN_GAME, MODE_TEAM_DEATHMATCH, MODE_SEARCH_AND_DESTROY].contains(&settings.mode);
+        let valid_mode = [MODE_GUN_GAME, MODE_TEAM_DEATHMATCH, MODE_SEARCH_AND_DESTROY, MODE_SMOKE_BREAK].contains(&settings.mode);
         if !valid_mode {
             return;
         }
-        let (red_cap, blue_cap) = if settings.mode == MODE_GUN_GAME {
+        // gun game and smoke break have one bot count, no teams
+        let (red_cap, blue_cap) = if settings.mode == MODE_GUN_GAME || settings.mode == MODE_SMOKE_BREAK {
             (game::MAX_FFA_BOTS, 0)
         } else {
             (game::MAX_BOTS_PER_TEAM, game::MAX_BOTS_PER_TEAM)
@@ -60,13 +61,21 @@ impl Server {
                 if requested == MODE_GUN_GAME
                     || requested == MODE_TEAM_DEATHMATCH
                     || requested == MODE_SEARCH_AND_DESTROY
+                    || requested == MODE_SMOKE_BREAK
                 {
                     self.match_mode = requested;
                 }
             }
+            if self.match_mode == MODE_SMOKE_BREAK {
+                // smoke break has no clock, the lobby's "duration" is the round count
+                self.smoke_rounds = duration
+                    .and_then(|d| u8::try_from(d).ok())
+                    .filter(|n| super::smoke_break::SMOKE_ROUND_CHOICES.contains(n))
+                    .unwrap_or(super::smoke_break::SMOKE_DEFAULT_ROUNDS);
+            }
             // auto-fill settings: bot counts and difficulty mask
             if let Some((bots, diff_mask)) = autofill {
-                if self.match_mode == MODE_GUN_GAME {
+                if self.match_mode == MODE_GUN_GAME || self.match_mode == MODE_SMOKE_BREAK {
                     // no teams: one total
                     self.autofill_red_bots = bots.min(game::MAX_FFA_BOTS);
                     self.autofill_blue_bots = 0;
@@ -102,7 +111,7 @@ impl Server {
             } else {
                 match self.match_mode {
                     MODE_TEAM_DEATHMATCH => Some(Duration::from_secs(900)),
-                    MODE_SEARCH_AND_DESTROY => None,
+                    MODE_SEARCH_AND_DESTROY | MODE_SMOKE_BREAK => None,
                     _ => game::MATCH_DURATION,
                 }
             };
@@ -187,6 +196,11 @@ impl Server {
         }
         let host = self.players.get(&src_addr).map(|p| p.username.clone()).unwrap_or_default();
         log!("Match ended by host '{}'", host);
+        if self.smoke_active() {
+            // smoke break shows who won before everyone goes back
+            handlers::broadcast_notice(&self.outbox, &self.players, &format!("{} ended the match", host));
+            return self.end_smoke_break();
+        }
         self.end_match_now();
         handlers::broadcast_notice(&self.outbox, &self.players, &format!("{} ended the match", host));
     }

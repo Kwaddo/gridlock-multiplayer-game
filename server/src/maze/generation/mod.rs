@@ -16,6 +16,12 @@ use braid::braid_dead_ends;
 use lights::generate_ceiling_lights;
 use rooms::{carve_rooms, connect_rooms};
 
+
+// ceiling lights for a layout made somewhere else (as of now only the smoke break map)
+pub fn lights_for(width: u8, height: u8, cells: &[u8], rooms: &[Room]) -> Vec<MazeLight> {
+    generate_ceiling_lights(width, height, cells, rooms)
+}
+
 pub fn generate_maze(
     width: u8,
     height: u8,

@@ -3,8 +3,8 @@ use transport::Link;
 
 use crate::net::player_sync::{take_info, take_state, PlayerInfoCache, SelfState, StateSnapshot};
 use crate::net::protocols::{
-    ClientMsg, LobbySettings, ServerMsg, LEAVE_TIMED_OUT, START_DENIED_ENDING, START_DENIED_NOT_HOST,
-    START_DENIED_STARTING,
+    CardboardBox, ClientMsg, LobbySettings, ServerMsg, SmokeRound, SmokeScore, LEAVE_TIMED_OUT, START_DENIED_ENDING, START_DENIED_NOT_HOST,
+    START_DENIED_STARTING, START_DENIED_TOO_FEW,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::world::WorldId;
@@ -40,7 +40,9 @@ pub struct NetUpdate {
     pub self_max_hp: Option<f32>,
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
-    pub bot_shots: Option<Vec<(u32, Vec3, Vec3)>>, // (shooter, start, end), before this the shooter was dropped
+    pub bot_shots: Option<Vec<(u32, Vec3, Vec3)>>,
+    // every box in one world, the whole list each time
+    pub boxes: Option<(WorldId, Vec<CardboardBox>)>, // (shooter, start, end), before this the shooter was dropped
     pub lobby_leader_id: Option<u32>,         // host player ID (0 = none)
     pub lobby_settings: Option<LobbySettings>, // the host's lobby console choices
     pub match_status: Option<u8>,             // MATCH_STATUS_*
@@ -51,6 +53,15 @@ pub struct NetUpdate {
 
     // S&D round state
     pub snd_round_state: Option<SndRoundState>,
+    pub smoke_round: Option<SmokeRound>,
+    pub smoke_coins: Option<Vec<(f32, f32, f32)>>,
+    pub smoke_scores: Option<Vec<SmokeScore>>,
+    pub smoke_coin_taken: Option<(f32, f32, f32)>,
+    pub smoke_gold_coin: Option<Option<((f32, f32, f32), f32)>>,
+    pub smoke_golden: Option<Vec<u32>>,
+    pub smoke_dots: Option<Vec<((f32, f32, f32), bool)>>,
+    // (shooter, found or 0 for a decoy, red handed, points it cost), oldest first
+    pub smoke_feed: Vec<(u32, u32, bool, i16)>,
 
     // chat lines and join/leave notices, oldest first
     pub chat: Vec<ChatEvent>,
@@ -136,9 +147,18 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
         death_killer_id: None,
         death_weapon: None,
         snd_round_state: None,
+        smoke_round: None,
+        smoke_coins: None,
+        smoke_scores: None,
+        smoke_coin_taken: None,
+        smoke_gold_coin: None,
+        smoke_golden: None,
+        smoke_dots: None,
+        smoke_feed: Vec::new(),
         received_any: false,
         self_freeze_secs: None,
         bot_shots: None,
+        boxes: None,
         lobby_leader_id: None,
         lobby_settings: None,
         match_status: None,
@@ -211,6 +231,7 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
                     Some(START_DENIED_NOT_HOST) => "Only the host can start the game",
                     Some(START_DENIED_STARTING) => "Match is starting: you will join it",
                     Some(START_DENIED_ENDING) => "Match is ending: wait for the next one",
+                    Some(START_DENIED_TOO_FEW) => "Smoke Break needs at least 2 players",
                     _ => "Match already running and full",
                 };
                 update.lobby_console_message = Some(msg.to_string());
@@ -332,6 +353,19 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
                 shots.extend(fired.iter().map(|s| {
                     (s.shooter_id, vec3(s.start.0, s.start.1, s.start.2), vec3(s.end.0, s.end.1, s.end.2))
                 }));
+            }
+            ServerMsg::Boxes { world, boxes } => {
+                update.boxes = Some((WorldId::from_u8(world).unwrap_or(WorldId::Lobby), boxes));
+            }
+            ServerMsg::SmokeRound(round) => update.smoke_round = Some(round),
+            ServerMsg::SmokeCoins(coins) => update.smoke_coins = Some(coins),
+            ServerMsg::SmokeScores(scores) => update.smoke_scores = Some(scores),
+            ServerMsg::SmokeCoinTaken { at } => update.smoke_coin_taken = Some(at),
+            ServerMsg::SmokeGoldCoin(coin) => update.smoke_gold_coin = Some(coin),
+            ServerMsg::SmokeGolden(ids) => update.smoke_golden = Some(ids),
+            ServerMsg::SmokeDots(dots) => update.smoke_dots = Some(dots),
+            ServerMsg::SmokeFeed { shooter, target, red_handed, points } => {
+                update.smoke_feed.push((shooter, target, red_handed, points))
             }
             _ => {}
         }

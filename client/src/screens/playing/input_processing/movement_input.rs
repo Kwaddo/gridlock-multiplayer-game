@@ -53,10 +53,11 @@ impl PlayingState {
             self.movement_state.is_prone,
             self.movement_state.is_sliding,
         );
-        // slow walk: forward only, s a and d do nothing (ahmed's rule), like prone but no backing up either
+        // slow walk: forward or back and the mouse steers, before this it was forward only, i want proper diagonal walking here later
         if self.movement_state.is_slow_walking {
             let forward = vec3(self.yaw.cos(), 0.0, self.yaw.sin());
-            self.move_dir = if self.move_dir.dot(forward) > 1e-4 { forward } else { Vec3::ZERO };
+            let along = self.move_dir.dot(forward);
+            self.move_dir = if along.abs() > 1e-4 { forward * along.signum() } else { Vec3::ZERO };
         }
         let crouch_just_pressed = config.bind_crouch.is_pressed();
         if crouch_just_pressed

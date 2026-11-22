@@ -3,6 +3,8 @@ use std::time::Duration;
 use platform::Instant;
 
 pub mod broadcast;
+pub mod smoke_break;
+mod boxes;
 pub mod game;
 pub mod handlers;
 pub mod snd;
@@ -56,6 +58,11 @@ pub struct Server {
     match_total_maze_entries: usize,
     // Search & Destroy state (only Some when S&D mode is active)
     snd_state: Option<snd::SndState>,
+    /// smoke break's round, only Some while a smoke break match is on
+    smoke_state: Option<smoke_break::SmokeState>,
+    smoke_last_send: Option<Instant>,
+    /// rounds the host picked for the next smoke break match
+    smoke_rounds: u8,
     // Auto-fill bot settings (set by the client that starts the match)
     // auto-fill bot counts: Red/Blue in team modes; Gun Game uses only
     // `autofill_red_bots`, as the total (0 = no bots)
@@ -85,6 +92,8 @@ pub struct Server {
     info_sync: player_info::InfoSync,
     /// Clients of another protocol version, turned away at the door.
     rejected: HashMap<PeerId, version::Rejected>,
+    /// every cardboard box
+    boxes: boxes::Boxes,
 }
 
 impl Server {
@@ -107,6 +116,9 @@ impl Server {
             match_mode: MODE_TEAM_DEATHMATCH,
             match_total_maze_entries: 0,
             snd_state: None,
+            smoke_state: None,
+            smoke_last_send: None,
+            smoke_rounds: smoke_break::SMOKE_DEFAULT_ROUNDS,
             autofill_red_bots: 0,
             autofill_blue_bots: 0,
             autofill_diff_mask: 0b11111,
@@ -128,6 +140,7 @@ impl Server {
             last_team_score_sent: None,
             info_sync: player_info::InfoSync::default(),
             rejected: HashMap::new(),
+            boxes: boxes::Boxes::new(),
         }
     }
 

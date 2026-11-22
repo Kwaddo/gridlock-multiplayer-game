@@ -45,6 +45,13 @@ unless noted. Models were converted and resized for the game.
 | Snipers | ["sniper animated"](https://sketchfab.com/3d-models/sniper-animated-b48999a250b2433da59f705c371a49b2) |
 | Minigun | ["Minigun animated"](https://sketchfab.com/3d-models/minigun-animated-e5dbbb2d2e594ebfac33d82d65a97380) |
 
+## Prop models (Sketchfab)
+
+| In game | Model | Author |
+|---|---|---|
+| Cardboard box, "LowPoly" look (F6) | ["LowPoly Cardboard Box"](https://sketchfab.com/3d-models/lowpoly-cardboard-box-f2b1e7d7d4cc4a699a969a3e0fe8d211) | PolyProps3D |
+| Cardboard box, "Old" look (F6) | ["Old Cardboard Box"](https://sketchfab.com/3d-models/old-cardboard-box-a60d4d56b93e4a52975d051a00eb4bd8) | Matrix Rex |
+
 ## Still to identify
 
 <!-- These files have no source info embedded; fill in or remove. -->

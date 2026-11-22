@@ -32,6 +32,38 @@ impl PlayingState {
         self.movement_state.is_sliding = false;
     }
 
+    /// Not in a box any more as far as we know: no hop, no ghost and nothing unsent.
+    /// The box list stays, the server resends it every couple of seconds anyway.
+    pub fn forget_box_life(&mut self) {
+        let c = &mut self.cardboard;
+        c.in_box = None;
+        c.pending_enter = None;
+        c.pending_exit = false;
+        c.tween = None;
+        c.ghost = None;
+        c.cam_blend = 0.0;
+        c.pending_shots.clear();
+    }
+
+    /// A world change: box state from the world we left goes, a list the server
+    /// already sent for the new world (packets can come in either order) stays.
+    pub fn box_world_changed(&mut self, world: WorldId) {
+        if self.cardboard.world != world {
+            self.forget_box_life();
+            self.cardboard.bursts.clear();
+        }
+    }
+
+    /// A new server: nothing from the old one carries over (chat, player info,
+    /// boxes, the smoke break round), only the box look you picked with F6.
+    pub fn forget_server(&mut self) {
+        self.chat.clear();
+        // ids belong to the server that handed them out
+        self.player_info.clear();
+        self.cardboard = super::cardboard::BoxState { look: self.cardboard.look, ..Default::default() };
+        self.smoke = Default::default();
+    }
+
     pub fn take_damage(&mut self, damage: f32, attacker_id: Option<u32>) {
         if self.dev_mode.god_mode || self.is_dead || self.invulnerability_timer > 0.0 {
             return;
@@ -57,6 +89,9 @@ impl PlayingState {
         self.is_dead = true;
         self.hp = 0.0;
         self.death_timer = 3.0;
+        // dying loses the box on the server too, and a taunt not sent yet stays unsent
+        self.forget_box_life();
+        self.smoke.pending_golden = false;
 
         // Start third-person death camera pullback
         self.death_camera_phase = super::state::DeathCameraPhase::ZoomOut {
