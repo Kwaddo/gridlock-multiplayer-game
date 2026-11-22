@@ -17,6 +17,9 @@ use super::PlayingState;
 pub const BOX_SPEED: f32 = 1.8;
 const CAM_DIST: f32 = 2.6;
 const CAM_PIVOT: f32 = 1.1;
+// the third-person eye stays this far above your feet and this far under the maze wall tops
+const CAM_FLOOR: f32 = 0.3;
+const CAM_UNDER_TOP: f32 = 0.15;
 const SLIT_EYE: f32 = 0.5;
 const LIFT: f32 = 0.06;
 const TWEEN_TIME: f32 = 0.25;
@@ -355,9 +358,9 @@ impl PlayingState {
             (eye, eye + forward)
         } else {
             let pivot = self.position + vec3(0.0, CAM_PIVOT, 0.0);
-            let mut eye = pivot - forward * self.camera_room(pivot, -forward, maze);
-            eye.y = eye.y.max(self.position.y + 0.3);
-            // swing out from where your head was
+            let eye = pivot - forward * self.camera_room(pivot, -forward, maze);
+            // swing out from where your head was, the head sits over the same spot as the
+            // pivot and the walls are full height, so the swing never crosses one either
             let head = self.position + vec3(0.0, self.movement_state.height, 0.0);
             let t = ease_out(self.cardboard.cam_blend);
             (head.lerp(eye, t), (head + forward).lerp(pivot + forward, t))
@@ -376,16 +379,25 @@ impl PlayingState {
         })
     }
 
-    // stop short of walls so the camera never ends up inside one
+    // stop short of walls so the camera never ends up inside one, and keep it under the wall
+    // tops (and over your feet) first, so the ray tests exactly the line the eye ends up on
     fn camera_room(&self, from: Vec3, dir: Vec3, maze: Option<&Maze>) -> f32 {
-        let hit = match (self.current_world, maze) {
-            (WorldId::Maze, Some(m)) => [m.ray_test_walls(from, dir, CAM_DIST).map(|(_, d)| d), m.ray_test_props(from, dir, CAM_DIST)]
-                .into_iter()
-                .flatten()
-                .reduce(f32::min),
-            _ => ray_test_lobby(from, dir, CAM_DIST),
+        let low = self.position.y + CAM_FLOOR;
+        let (max, hit) = match (self.current_world, maze) {
+            // no maze yet, nothing to test against, stay on top of the box
+            (WorldId::Maze, None) => return 0.0,
+            (WorldId::Maze, Some(m)) => {
+                let max = cam_dist_in_height(from.y, dir.y, low, m.wall_height - CAM_UNDER_TOP, CAM_DIST);
+                let hits = [m.ray_test_walls(from, dir, max).map(|(_, d)| d), m.ray_test_props(from, dir, max)];
+                (max, hits.into_iter().flatten().reduce(f32::min))
+            }
+            // no ceiling in the lobby, the ground is in its ray test
+            (WorldId::Lobby, _) => {
+                let max = cam_dist_in_height(from.y, dir.y, low, f32::INFINITY, CAM_DIST);
+                (max, ray_test_lobby(from, dir, max))
+            }
         };
-        hit.map_or(CAM_DIST, |d| (d - 0.2).max(0.1))
+        hit.map_or(max, |d| (d - 0.2).max(0.0))
     }
 
     pub(super) fn lock_box_movement(&mut self) {
@@ -406,6 +418,19 @@ impl PlayingState {
         self.movement_state.is_sliding = false;
         self.jump_requested = false;
     }
+}
+
+/// How far back from the pivot the eye can go along a direction whose up part is 'dir_y'
+/// before its height leaves low..high, capped at 'max'. The pivot sits between the two.
+fn cam_dist_in_height(pivot_y: f32, dir_y: f32, low: f32, high: f32, max: f32) -> f32 {
+    let room = if dir_y < 0.0 {
+        (pivot_y - low) / -dir_y
+    } else if dir_y > 0.0 {
+        (high - pivot_y) / dir_y
+    } else {
+        max
+    };
+    room.clamp(0.0, max)
 }
 
 pub(super) fn draw_box_slit() {
@@ -438,3 +463,6 @@ impl PlayingState {
         draw_text_ex(text, sx, sy, text_params(18, Color::new(1.0, 0.42, 0.21, 1.0)));
     }
 }
+
+#[cfg(test)]
+mod tests;
