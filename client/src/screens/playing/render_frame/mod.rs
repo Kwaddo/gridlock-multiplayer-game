@@ -90,8 +90,8 @@ impl PlayingState {
         // Lobby console (Start Game) overlay
         self.draw_lobby_console(config, player_id);
 
-        // Don't draw viewmodel while dead or when lobby console is open
-        if !self.is_dead && !self.lobby_console_open && self.cardboard.in_box.is_none() && !self.smoke_gun_locked() {
+        // Don't draw viewmodel while dead or when lobby console is open, and smoke break hiders get no gun
+        if !self.is_dead && !self.lobby_console_open && self.cardboard.in_box.is_none() && !self.smoke_hiding() && !self.smoke_gun_locked() {
             self.draw_viewmodel();
         }
         if self.box_eye_slot(config) {
@@ -140,7 +140,7 @@ impl PlayingState {
                 local_team,
                 config,
                 self.smoke_minimap(),
-                self.smoke_on() && !self.smoke_hunting(),
+                self.smoke_hiding(),
                 self.smoke_gun_locked(),
             );
 
