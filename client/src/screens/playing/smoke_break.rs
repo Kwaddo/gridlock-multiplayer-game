@@ -10,7 +10,7 @@ use macroquad::prelude::*;
 
 use crate::audio::catalog::{COIN_PICKUP, TAUNT, TAUNT_LENGTH};
 use crate::net::networking::ChatEvent;
-use crate::net::protocols::{SmokeRound, SmokeScore, MODE_SMOKE_BREAK, SMOKE_SIDE_HUNTER};
+use crate::net::protocols::{SmokeRound, SmokeScore, MODE_SMOKE_BREAK, SMOKE_PHASE_BLIND, SMOKE_SIDE_HIDER, SMOKE_SIDE_HUNTER};
 use crate::types::world::WorldId;
 use crate::weapons::stats::WeaponId;
 use crate::world::render::cardboard_box::{BOX_D, BOX_H, BOX_W};
@@ -70,6 +70,21 @@ impl PlayingState {
     /// a found hider whose gun is locked right now, no firing and no gun on screen
     pub(super) fn smoke_gun_locked(&self) -> bool {
         self.smoke_on() && self.smoke.round.is_some_and(|r| r.found) && self.smoke.gun_lock > 0.0
+    }
+
+    /// a hider not found yet, no gun and no shooting
+    pub(super) fn smoke_hiding(&self) -> bool {
+        self.smoke_on() && self.smoke.round.is_some_and(|r| r.side == SMOKE_SIDE_HIDER)
+    }
+
+    /// a hunter still blind at the start of the round
+    pub(super) fn smoke_blind(&self) -> bool {
+        self.smoke_on() && self.smoke.round.is_some_and(|r| r.side == SMOKE_SIDE_HUNTER && r.phase == SMOKE_PHASE_BLIND)
+    }
+
+    /// no firing at all right now: hiding, blind, or a found hider's gun locked
+    pub(super) fn smoke_cant_fire(&self) -> bool {
+        self.smoke_hiding() || self.smoke_blind() || self.smoke_gun_locked()
     }
 
     pub fn take_smoke_round(&mut self, round: SmokeRound) {

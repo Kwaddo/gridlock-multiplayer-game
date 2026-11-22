@@ -116,7 +116,8 @@ impl PlayingState {
                 self.break_box(id);
             }
         }
-        if self.cardboard.in_box.is_some() || self.cardboard.tween.is_some() || self.smoke_gun_locked() {
+        // nothing fires (so no hit or box shot gets queued) from a box, mid hop, or while smoke break says no
+        if self.cardboard.in_box.is_some() || self.cardboard.tween.is_some() || self.smoke_cant_fire() {
             weapon_input_locked = true;
         }
         self.process_look_and_movement(config, weapon_input_locked);
@@ -141,8 +142,10 @@ impl PlayingState {
 
 
         // Punch button: fire melee hit immediately, auto-return to gun when animation ends.
+        // Not in smoke break, hunters hold the deagle and nothing else and a punch would swing the knife.
         let mut punch_fire_this_frame = false;
         if (!weapon_input_locked)
+            && !self.smoke_on()
             && (self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze)
             && !self.weapons.knife_active
             && !self.knife_attack_locked
