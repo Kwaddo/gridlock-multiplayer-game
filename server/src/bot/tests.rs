@@ -248,6 +248,7 @@ fn bots_never_target_teammates() {
 
     players.insert(PeerId(2), in_front(2, Team::Blue, 6.0));
     let state = manager.bot_states_mut().get_mut(&addr).unwrap();
+    state.awareness.hurt_by(2, (6.0, 0.5, 0.0)); // noticed (bot::awareness)
     crate::bot::shooting::try_shoot(addr, &players, state, None, DT);
     assert_eq!(state.target_id, Some(2), "should look past the teammate to the enemy");
 }

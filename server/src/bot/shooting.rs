@@ -61,6 +61,10 @@ pub fn try_shoot(
     // the view cone depends only on the bot, so work it out once, not per candidate
     let half_fov_cos = (runtime_fov.clamp(1.0, 359.0).to_radians() * 0.5).cos();
     let forward = (bot.yaw.cos(), bot.yaw.sin());
+    // a match bot only fights enemies it has noticed (bot::awareness);
+    // shooting-range bots shoot whoever they see
+    let awareness = &bot_state.awareness;
+    let noticed = |p: &Player| bot_state.personality_id.is_none() || awareness.is_engaged(p.id);
     // everything but the sight line, cheapest first: teammates never get a raycast
     let can_engage = |p: &Player| {
         p.id != bot.id
@@ -74,6 +78,7 @@ pub fn try_shoot(
             })
             && distance(bot.position, p.position) <= range
             && is_in_fov(bot, p, forward, half_fov_cos)
+            && noticed(p)
     };
     // the current target's sight line, worked out once for both lookups
     let mut current_seen: Option<(u32, bool)> = None;

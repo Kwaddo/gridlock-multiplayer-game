@@ -6,6 +6,7 @@ use crate::{ bot::ai::{ self, BotState, BotBehavior }, physics::PhysicsConfig };
 use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
+use crate::bot::awareness::{self, Noise};
 use crate::bot::personality::{ self, BotPersonalityId };
 use crate::protocols::Shot;
 use crate::server::broadcast;
@@ -25,6 +26,8 @@ pub struct BotManager {
     cadence: crate::cadence::Cadence,
     next_bot_idx: u16,
     range_challenge_deadline: Option<Instant>,
+    /// Shots fired since the last bot tick, for the bots to hear.
+    noises: Vec<Noise>,
 }
 
 impl BotManager {
@@ -36,6 +39,7 @@ impl BotManager {
             cadence: crate::cadence::Cadence::new(crate::cadence::HZ30),
             next_bot_idx: 0,
             range_challenge_deadline: None,
+            noises: Vec::new(),
         }
     }
     pub fn virtual_addr(index: u16) -> PeerId {
@@ -183,11 +187,21 @@ impl BotManager {
             current_pitch: 0.0,
             // a stance from the first decision on, not always a push
             tactics: ai::BotTactics { stance_roll: rand::random(), ..Default::default() },
+            awareness: awareness::Awareness::new(rand::random()),
         };
 
         let addr = self.spawn_bot(players, bot_player, bot_state);
         log!("Spawned bot '{}' ({:?}) on {:?} with {}", pers.name, diff, team, weapon_override);
         addr
+    }
+
+    /// `shooter` fired `weapon` (what they hold, if `None`): match bots near
+    /// enough hear it at the next bot tick. One shot per shooter per tick.
+    pub fn hear_shot(&mut self, players: &HashMap<PeerId, Player>, shooter: PeerId, weapon: Option<&str>) {
+        let Some(p) = players.get(&shooter).filter(|p| p.is_alive && p.world == WorldId::Maze) else { return };
+        if !self.noises.iter().any(|n| n.shooter == shooter) {
+            self.noises.push(Noise::gunfire(shooter, p, weapon.unwrap_or(&p.current_weapon)));
+        }
     }
 
     pub fn set_range_challenge_deadline(&mut self, deadline: Option<Instant>) {
@@ -228,6 +242,11 @@ impl BotManager {
         // less often than the gate allows (an idle native host waits up to
         // 100 ms for a packet). Capped so a stall doesn't make bots jump.
         let dt = elapsed.as_secs_f32().min(MAX_BOT_DT);
+
+        // ── Senses: what each match bot sees and hears of its enemies ──
+        let noises = std::mem::take(&mut self.noises);
+        let frozen = |p: &Player| is_frozen(p, now, round_frozen);
+        awareness::sense::sense_bots(&mut self.bot_states, players, maze, &noises, dt, frozen);
 
         // ── Brain: run decide_behavior for maze-world bots ──
         // A few times a second rather than every tick: decisions with random
@@ -300,7 +319,9 @@ impl BotManager {
                     // remember last known enemy position for investigation behavior
                     state.last_known_enemy_pos = Some(target_pos);
                 }
-                aim_at(bot, state, target_pos.or(alert_pos), dt);
+                // suspicious of something: turn to look at it
+                let look = state.awareness.look_at(bot.position);
+                aim_at(bot, state, target_pos.or(alert_pos).or(look), dt);
 
                 // the alert fades, and ends once we see someone
                 if let Some((_, _, left)) = &mut state.tactics.alert {
@@ -335,6 +356,9 @@ impl BotManager {
             }
         }
 
+        for (addr, _, _, weapon) in &pending_shots {
+            self.hear_shot(players, *addr, Some(weapon));
+        }
         // every tracer of this tick goes out ahead of the damage it deals
         send_bot_shot_iter(socket, players, pending_shots.iter().map(|(a, v, _, _)| (*a, *v)));
 

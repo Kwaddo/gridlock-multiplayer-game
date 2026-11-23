@@ -1,5 +1,6 @@
 use crate::physics::{ BotMovementState, PhysicsConfig, simulate_bot_physics };
 use crate::bot::shooting::{ BotShootingConfig, BotShootingState };
+use crate::bot::awareness::Awareness;
 use crate::player::Player;
 use crate::bot::personality::{ BotArchetype, BotDifficulty, BotPersonality, BotPersonalityId };
 use crate::maze::pathfinding::{ cell_to_world, world_to_cell };
@@ -28,6 +29,8 @@ pub struct BotState {
     pub current_yaw: f32, // current facing direction in radians
     pub current_pitch: f32, // current pitch angle for looking up/down
     pub tactics: BotTactics,
+    /// What the bot has seen and heard of each enemy (see `bot::awareness`).
+    pub awareness: Awareness,
 }
 
 /// Short-lived combat state: who shot us, which way we strafe, whom we just lost sight of.
@@ -57,6 +60,7 @@ const STANCE_SECS: std::ops::Range<f32> = 3.0..6.0;
 impl BotState {
     /// We were shot by `attacker_id` standing at `pos`.
     pub fn alert(&mut self, attacker_id: u32, pos: (f32, f32, f32)) {
+        self.awareness.hurt_by(attacker_id, pos);
         if self.target_id == Some(attacker_id) {
             return; // already fighting them
         }
@@ -282,12 +286,13 @@ pub fn tick_bot(
         }
 
         (_, behavior) => {
+            // going to check something it noticed: walk, warily
+            let wary = matches!(behavior, BotBehavior::Investigate { .. }) && state.awareness.is_wary();
             if let Some(step) = behavior.path_mut().and_then(|(path, idx)| follow_path(path, idx, pos)) {
                 desired_dir = step.dir;
                 // travelling with nobody in sight: run, easing off for corners
-                speed = physics
-                    .sprint_speed
-                    .min(cornering_speed(step.to_turn, physics.acceleration));
+                let top = if wary { physics.walk_speed } else { physics.sprint_speed };
+                speed = top.min(cornering_speed(step.to_turn, physics.acceleration));
                 sprinting = speed > physics.walk_speed;
             }
         }

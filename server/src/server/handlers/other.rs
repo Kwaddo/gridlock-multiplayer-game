@@ -272,7 +272,16 @@ pub fn apply_damage(
         }
     }
 
-    let backstab_verified = if is_backstab && (weapon_name.eq_ignore_ascii_case("knife") || weapon_name.eq_ignore_ascii_case("punch")) {
+    let melee = weapon_name.eq_ignore_ascii_case("knife") || weapon_name.eq_ignore_ascii_case("punch");
+    // a match bot that never noticed the attacker: any melee hit is a backstab
+    let attacker_id = players.get(&attacker_addr).map_or(0, |a| a.id);
+    let caught_unaware = melee
+        && bot_states
+            .get(&victim_addr)
+            .is_some_and(|s| s.personality_id.is_some() && s.awareness.unaware_of(attacker_id));
+    let backstab_verified = if caught_unaware {
+        true
+    } else if is_backstab && melee {
         let atk_pos = players.get(&attacker_addr).map(|a| a.position).unwrap_or((0.0, 0.0, 0.0));
         let vic_pos = players.get(&victim_addr).map(|v| v.position).unwrap_or((0.0, 0.0, 0.0));
         let vic_yaw = players.get(&victim_addr).map(|v| v.yaw).unwrap_or(0.0);
