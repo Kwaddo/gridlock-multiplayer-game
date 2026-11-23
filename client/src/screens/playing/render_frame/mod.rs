@@ -154,6 +154,8 @@ impl PlayingState {
             if !self.smoke_hiding() && !self.smoke_gun_locked() {
                 self.draw_hit_fx_hud();
             }
+            // bots that just noticed us: over their heads, or on the screen's edge
+            self.draw_bot_alerts(&camera);
 
             let dt = get_frame_time();
             if self.movement_state.is_stamina_depleted {

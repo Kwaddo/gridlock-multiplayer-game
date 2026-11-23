@@ -11,6 +11,7 @@ impl PlayingState {
         }
 
         self.tick_damage_indicators(delta);
+        self.tick_bot_alerts(delta);
 
         // Damage flash timer (short red vignette + optional attacker name)
         if self.damage_flash_timer > 0.0 {

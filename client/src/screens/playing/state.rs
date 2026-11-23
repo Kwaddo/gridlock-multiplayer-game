@@ -138,6 +138,7 @@ pub struct PlayingState {
     pub last_damage_attacker: Option<String>,
     /// Where recent hits came from (the red arcs around the crosshair).
     pub(crate) damage_indicators: Vec<super::rendering::DamageIndicator>,
+    pub(crate) bot_alerts: Vec<super::rendering::BotAlert>, // "?" / "!" over bots that noticed us
     pub stamina_depleted_vignette_alpha: f32,
     /// Impact puffs, kill/headshot markers, camera punch (purely visual).
     pub(crate) hit_fx: super::hit_fx::HitFx,
@@ -380,6 +381,7 @@ impl PlayingState {
             // damage / hit feedback (client-side)
             damage_flash_timer: 0.0,
             damage_indicators: Vec::new(),
+            bot_alerts: Vec::new(),
             last_damage_attacker: None,
             stamina_depleted_vignette_alpha: 0.0,
             hit_fx: Default::default(),

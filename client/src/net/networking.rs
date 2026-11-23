@@ -42,6 +42,7 @@ pub struct NetUpdate {
     pub self_freeze_secs: Option<u8>,
     /// (shooter, start, end) of each shot a bot or another player fired (`MSG_SHOTS`)
     pub shots: Option<Vec<(u32, Vec3, Vec3)>>,
+    pub bot_alerts: Vec<(u32, u8)>, // (bot id, BOT_ALERT_*): bots that just noticed us
     // every box in one world, the whole list each time
     pub boxes: Option<(WorldId, Vec<CardboardBox>)>, // (shooter, start, end), before this the shooter was dropped
     pub lobby_leader_id: Option<u32>,         // host player ID (0 = none)
@@ -159,6 +160,7 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
         received_any: false,
         self_freeze_secs: None,
         shots: None,
+        bot_alerts: Vec::new(),
         boxes: None,
         lobby_leader_id: None,
         lobby_settings: None,
@@ -350,6 +352,7 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
                     (s.shooter_id, vec3(s.start.0, s.start.1, s.start.2), vec3(s.end.0, s.end.1, s.end.2))
                 }));
             }
+            ServerMsg::BotAlert { bot_id, level } => update.bot_alerts.push((bot_id, level)),
             ServerMsg::Boxes { world, boxes } => {
                 update.boxes = Some((WorldId::from_u8(world).unwrap_or(WorldId::Lobby), boxes));
             }

@@ -91,6 +91,7 @@ impl PlayingState {
     pub fn die(&mut self, _killer_id: Option<u32>) {
         self.is_dead = true;
         self.clear_damage_indicators();
+        self.clear_bot_alerts();
         self.hp = 0.0;
         self.death_timer = 3.0;
         // dying loses the box on the server too, and a taunt not sent yet stays unsent

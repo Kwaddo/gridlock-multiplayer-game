@@ -147,6 +147,9 @@ pub fn sync_world(
         if let Some(shots) = updates.shots {
             spawn_shots(playing_state, shots, player_id);
         }
+        for (bot_id, level) in updates.bot_alerts {
+            playing_state.note_bot_alert(bot_id, level);
+        }
         if let Some(kills) = updates.kill_feed {
             apply_kill_feed(playing_state, kills, player_id, username);
         }

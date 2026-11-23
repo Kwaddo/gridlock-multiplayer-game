@@ -95,21 +95,27 @@ impl PlayingState {
         let radius = w.min(h) * 0.16;
         let thickness = radius * 0.14;
 
-        // the player's forward and right on the ground plane (as audio panning uses them)
-        let forward = vec2(self.yaw.cos(), self.yaw.sin());
-        let right = vec2(-self.yaw.sin(), self.yaw.cos());
-
+        let me = vec2(self.position.x, self.position.z);
         for d in &self.damage_indicators {
-            let to_source = vec2(d.source.x - self.position.x, d.source.z - self.position.z);
-            if to_source.length_squared() < 1e-4 {
+            let source = vec2(d.source.x, d.source.z);
+            if (source - me).length_squared() < 1e-4 {
                 continue;
             }
-            // clockwise from straight ahead (the top of the screen)
-            let angle = to_source.dot(right).atan2(to_source.dot(forward));
+            let angle = screen_angle(self.yaw, me, source);
             let alpha = (d.timer / FADE_SECS).min(1.0);
             draw_indicator(center, radius, thickness, angle, alpha);
         }
     }
+}
+
+/// Which way `source` (x/z on the ground) lies from `me` for a player facing
+/// `yaw`, as a screen angle: 0 straight ahead (the top of the screen),
+/// clockwise, in -PI..=PI. Forward and right are as audio panning uses them.
+pub(super) fn screen_angle(yaw: f32, me: Vec2, source: Vec2) -> f32 {
+    let forward = vec2(yaw.cos(), yaw.sin());
+    let right = vec2(-yaw.sin(), yaw.cos());
+    let to = source - me;
+    to.dot(right).atan2(to.dot(forward))
 }
 
 /// A curved band from `radius` to `radius + thickness`, centred on `angle`
@@ -159,14 +165,6 @@ fn draw_indicator(center: Vec2, radius: f32, thickness: f32, angle: f32, alpha: 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Same maths as draw_damage_indicators: angle clockwise from ahead.
-    fn screen_angle(yaw: f32, me: Vec2, source: Vec2) -> f32 {
-        let forward = vec2(yaw.cos(), yaw.sin());
-        let right = vec2(-yaw.sin(), yaw.cos());
-        let to = source - me;
-        to.dot(right).atan2(to.dot(forward))
-    }
 
     #[test]
     fn points_ahead_right_behind_left() {
