@@ -70,14 +70,19 @@ pub(super) async fn finish_frame(
     login_screen: &mut LoginScreen
 ) {
     // In a game: keep loading the rest of the assets, one per frame at
-    // most, whatever the player needs next first.
+    // most, whatever the player needs next first. Paced in the world (each
+    // load is a main-thread hitch); the loadout screen draws no world.
     if
         session.is_some() &&
         !asset_queue.is_done() &&
         !matches!(*state, GameState::Login | GameState::Loading | GameState::Exit)
     {
         asset_queue.prioritize(wanted_assets(playing_state, loadout));
-        asset_queue.pump(playing_state).await;
+        if matches!(*state, GameState::LobbyInventory) {
+            asset_queue.pump(playing_state).await;
+        } else {
+            asset_queue.pump_paced(playing_state, get_frame_time()).await;
+        }
         let (loaded, total) = asset_queue.progress();
         client::ui::hud::draw_background_loading(loaded, total);
     }
