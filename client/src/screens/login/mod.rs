@@ -10,6 +10,7 @@ use std::cell::RefCell;
 mod background;
 mod browse_tab;
 mod controls;
+mod credits;
 mod direct_tab;
 mod host_tab;
 mod update;
@@ -85,6 +86,8 @@ pub struct LoginScreen {
     connector: Option<Connector>,
     /// Set by the SETTINGS / CONTROLS buttons; taken by the game loop.
     request: Option<MenuRequest>,
+    /// The credits screen, while it is open over the menu (CREDITS button).
+    credits: Option<credits::CreditsView>,
 }
 
 impl LoginScreen {
@@ -108,6 +111,7 @@ impl LoginScreen {
             anim_time: 0.0,
             connector: None,
             request: None,
+            credits: None,
         }
     }
 
@@ -127,9 +131,20 @@ impl LoginScreen {
         self.connector.is_some()
     }
 
+    /// The credits screen is open (it takes Esc, so the game loop must not).
+    pub fn credits_open(&self) -> bool {
+        self.credits.is_some()
+    }
+
     pub fn draw(&mut self) {
         self.draw_background();
         self.draw_title();
+        if let Some(credits) = &mut self.credits {
+            if text_batch::batched(|| credits.draw()) {
+                self.credits = None;
+            }
+            return;
+        }
         // panel text is queued and drawn after the shapes it does not overlap
         text_batch::batched(|| self.draw_panel());
     }
@@ -167,17 +182,21 @@ impl LoginScreen {
             text_batch::text(&self.error_msg, panel_x + (panel_w - ew) / 2.0, ey, 15, ERROR);
         }
 
-        // Settings and the controls reference, reachable before joining
-        let bw = 150.0;
+        // Settings, the controls reference and the credits, reachable before joining
+        let gap = 12.0;
+        let bw = 150.0_f32.min((panel_w - gap * 2.0) / 3.0);
         let bh = 34.0;
         let by = panel_y + panel_h + 14.0;
         let cx = panel_x + panel_w / 2.0;
         if self.connector.is_none() {
-            if widgets::outline_button("SETTINGS", 15, cx - bw - 6.0, by, bw, bh) {
+            if widgets::outline_button("SETTINGS", 15, cx - bw * 1.5 - gap, by, bw, bh) {
                 self.request = Some(MenuRequest::Settings);
             }
-            if widgets::outline_button("CONTROLS", 15, cx + 6.0, by, bw, bh) {
+            if widgets::outline_button("CONTROLS", 15, cx - bw / 2.0, by, bw, bh) {
                 self.request = Some(MenuRequest::Controls);
+            }
+            if widgets::outline_button("CREDITS", 15, cx + bw / 2.0 + gap, by, bw, bh) {
+                self.credits = Some(credits::CreditsView::new());
             }
         }
 

@@ -16,6 +16,12 @@ impl LoginScreen {
         self.update_background();
         self.browser.poll();
 
+        // the credits screen is over the menu: nothing typed reaches its fields
+        if self.credits.is_some() {
+            while get_char_pressed().is_some() {}
+            return None;
+        }
+
         if let Some(connector) = self.connector.take() {
             match connector.poll() {
                 ConnectPoll::Pending(connector) => self.connector = Some(connector),

@@ -120,8 +120,8 @@ pub async fn run() {
 
         match state {
             GameState::Login => {
-                // (Esc on the controls overlay closes the overlay instead)
-                if !controls_open
+                // (Esc on the controls overlay or the credits closes that instead)
+                if !controls_open && !login_screen.credits_open()
                     && macroquad::input::is_key_pressed(macroquad::input::KeyCode::Escape)
                 {
                     state = GameState::Exit;
