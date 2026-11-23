@@ -39,17 +39,17 @@ impl PlayingState {
             frustum.may_see(c - PLAYER_CULL_BELOW, c + PLAYER_CULL_ABOVE)
         };
 
-        for p in &self.other_players {
-            if may_see(p) {
+        // and skip bodies the frame's camera test (simulation/body_view.rs) found hidden behind walls,
+        // that test is a little wider than this frustum and counts every body when there's a mirror
+        let mut drawn = 0;
+        let bodies = self.other_players.iter().chain(self.practice_bots.iter().map(|bot| &bot.player));
+        for p in bodies {
+            if p.anim.view.seen() && may_see(p) {
                 self.draw_player_model(p);
+                drawn += 1;
             }
         }
-
-        for bot in &self.practice_bots {
-            if may_see(&bot.player) {
-                self.draw_player_model(&bot.player);
-            }
-        }
+        super::super::simulation::count_bodies(|s| s.drawn += drawn);
     }
 
     // draws the body and its gun, returns where the gun's muzzle is (for the muzzle flash), none if no gun

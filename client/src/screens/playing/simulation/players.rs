@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::types::animated_model::AnimatedModel;
 use crate::types::player::OtherPlayer;
-use crate::types::player_anim::AnimInput;
+use crate::types::player_anim::{AnimInput, PoseDetail};
 use crate::core::GameConfig;
 use crate::types::maze::Maze;
 use crate::weapons::combat::CombatEntity;
@@ -90,6 +90,7 @@ impl PlayingState {
             // move this body's own clock and work out its own pose, before this every body read the shared clip's clock
             tick_body(p, delta, animated_models);
             // here we refresh the hitbox positions every frame based on the current animation pose of the player so hit detection is accurate if they crouch, prone, slide, etc.
+            // every body, seen or not: the hitbox bones are worked out the same either way (see tick_body)
             refresh_player_hitboxes(animated_models, p);
         }
         for bot in &mut self.practice_bots {
@@ -103,6 +104,8 @@ impl PlayingState {
 
 // one body's animation tick, players and bots alike, the shot flag is taken so one shot is one kick
 // before this the input was built in 4 places and the bot copies read fired without clearing it
+// the full pose only if the camera saw the body last frame (and, far off, it's due), else just the hitbox bones,
+// whose joints come out the same; prepare_bodies fills in the full pose once this frame's camera turns out to see it
 pub(super) fn tick_body(p: &mut OtherPlayer, dt: f32, models: &HashMap<String, AnimatedModel>) {
     let input = AnimInput {
         skin: p.skin_type,
@@ -113,5 +116,14 @@ pub(super) fn tick_body(p: &mut OtherPlayer, dt: f32, models: &HashMap<String, A
         crouching: p.is_crouching,
         fired: std::mem::take(&mut p.fired),
     };
-    p.anim.tick(&input, dt, models);
+    p.anim.advance(&input, dt, models);
+    let detail = if p.anim.view.wants_full() { PoseDetail::Full } else { PoseDetail::Hitboxes };
+    p.anim.evaluate(models, detail);
+    super::body_view::count(|s| {
+        s.ticked += 1;
+        match detail {
+            PoseDetail::Full => s.posed_full += 1,
+            PoseDetail::Hitboxes => s.posed_hitboxes += 1,
+        }
+    });
 }

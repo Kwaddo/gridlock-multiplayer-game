@@ -1,4 +1,5 @@
 mod audio;
+mod body_view;
 mod constants;
 mod event_sounds;
 mod hands;
@@ -17,6 +18,7 @@ use macroquad::prelude::*;
 use super::PlayingState;
 
 pub use event_sounds::EventSoundState;
+pub(super) use body_view::count as count_bodies;
 
 // player_anims_in_use is gone, it picked which shared clip clocks to tick each frame
 // now every body ticks its own clock (PlayerAnim), so nothing has to pick
@@ -24,6 +26,13 @@ pub use event_sounds::EventSoundState;
 impl PlayingState {
     #[inline(always)]
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
+        body_view::reset_stats();
+        self.simulate_step(config, maze);
+        // after all movement, every path (dead, or a skipped long frame) included
+        self.prepare_bodies(config, maze);
+    }
+
+    fn simulate_step(&mut self, config: &GameConfig, maze: Option<&Maze>) {
         self.audio.set_levels(config.master_volume, config.mute_audio);
         let raw_delta = get_frame_time();
         if raw_delta > 0.20 {
