@@ -170,6 +170,21 @@
             return 1;
         };
 
+        // ---- platform::open_url: a link the player clicked (credits), in a new tab.
+        // The game reads clicks on its next frame, still within the click's
+        // user activation, so the browser does not block it as a popup.
+
+        env.gridlock_open_url = function (urlPtr, urlLen) {
+            try {
+                const url = new URL(readString(urlPtr, urlLen), location.href);
+                if (url.protocol !== "https:" && url.protocol !== "http:") return 0;
+                window.open(url.href, "_blank", "noopener");
+                return 1;
+            } catch {
+                return 0;
+            }
+        };
+
         // ---- pointer lock (replaces miniquad's version)
         // The game re-asserts the grab often. Browsers grant pointer lock only from
         // a user gesture and reject rapid repeats, so remember what the game wants,

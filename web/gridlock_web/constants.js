@@ -5,7 +5,7 @@
 "use strict";
 
 (function (gridlockWeb) {
-    const PLUGIN_VERSION = 5;
+    const PLUGIN_VERSION = 6;
 
     // Event kinds shared with transport/src/web.rs.
     const EV_PEER_JOINED = 1;

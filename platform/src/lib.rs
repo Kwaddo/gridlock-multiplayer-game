@@ -1,5 +1,5 @@
-//! What the game needs from the platform beyond `std`: clocks, randomness and
-//! small persistent storage that also work in the browser.
+//! What the game needs from the platform beyond `std`: clocks, randomness,
+//! small persistent storage and opening web pages, that also work in the browser.
 //!
 //! Native builds use `std` directly. Browser builds are loaded by miniquad's JS
 //! loader, which cannot satisfy wasm-bindgen imports, so `std::time::Instant`
@@ -58,6 +58,56 @@ pub fn page_setting(name: &str) -> Option<String> {
     }
 }
 
+/// Opens a web page for the player: a new browser tab in the browser build
+/// (allowed because it follows the click that asked for it), the system's
+/// default browser natively. Only http(s) URLs, so a stray string can never
+/// run anything. Returns false if nothing could be opened.
+pub fn open_url(url: &str) -> bool {
+    if !is_web_url(url) {
+        return false;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    return unsafe { web::gridlock_open_url(url.as_ptr(), url.len() as u32) } != 0;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::process::{Command, Stdio};
+        #[cfg(target_os = "macos")]
+        let mut command = Command::new("open");
+        // rundll32 takes the URL as one argument; `cmd /c start` would read & and ^ in it
+        #[cfg(target_os = "windows")]
+        let mut command = {
+            let mut c = Command::new("rundll32");
+            c.arg("url.dll,FileProtocolHandler");
+            c
+        };
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let mut command = Command::new("xdg-open");
+        command
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .is_ok()
+    }
+}
+
+/// An absolute http(s) URL, or (in the browser) a page next to the game's, like
+/// `credits.html`. Nothing with a scheme other than http(s).
+fn is_web_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("https://") || lower.starts_with("http://") {
+        return !url.chars().any(|c| c.is_whitespace() || c.is_control());
+    }
+    cfg!(target_arch = "wasm32")
+        && !url.is_empty()
+        && !url.contains(':')
+        && !url.starts_with('/')
+        && url.chars().all(|c| c.is_ascii_alphanumeric() || "._-/#?=&".contains(c))
+}
+
 /// Small text values kept between runs (settings, crosshair presets).
 ///
 /// Native builds keep a file named `key` in the working directory, which the
@@ -97,7 +147,7 @@ pub mod storage {
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn gridlock_web_crate_version() -> u32 {
-    5
+    6
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -118,6 +168,8 @@ mod web {
         /// 1 if `window.GRIDLOCK_<name>` is a string; its UTF-8 length goes to
         /// `len_out`, bytes via `gridlock_storage_take`.
         pub(crate) fn gridlock_page_setting(name: *const u8, name_len: u32, len_out: *mut u32) -> u32;
+        /// Opens `url` (UTF-8) in a new tab; 1 if the browser took it.
+        pub(crate) fn gridlock_open_url(url: *const u8, url_len: u32) -> u32;
     }
 
     /// Monotonic instant with the same API surface as `std::time::Instant`.
@@ -193,4 +245,21 @@ mod web {
     }
 
     getrandom::register_custom_getrandom!(random_fill);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_web_url;
+
+    #[test]
+    fn only_web_urls_open() {
+        assert!(is_web_url("https://sketchfab.com/TastyTony"));
+        assert!(is_web_url("http://creativecommons.org/licenses/by/4.0/"));
+        assert!(!is_web_url("file:///etc/passwd"));
+        assert!(!is_web_url("javascript:alert(1)"));
+        assert!(!is_web_url("https://a.example/ --flag"));
+        assert!(!is_web_url(""));
+        // relative pages only make sense next to the browser build's page
+        assert_eq!(is_web_url("credits.html"), cfg!(target_arch = "wasm32"));
+    }
 }
