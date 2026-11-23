@@ -7,7 +7,7 @@
     const {
         EV_PEER_JOINED, EV_PEER_LEFT, EV_PACKET, EV_CLOSED, FORCE_RELAY, NO_DIRECT, SPARE_GATHER_MS,
         DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, UNRELIABLE_MAX_BUFFERED,
-        CHANNEL, RELIABLE_CHANNEL,
+        CHANNEL, RELIABLE_CHANNEL, HOST_SILENT_PEERS_MAX,
         gathered, isStunOnly, RtcSpares,
     } = gridlockWeb;
 
@@ -159,6 +159,7 @@
             channel.binaryType = "arraybuffer";
             channel.onmessage = (e) => {
                 if (e.data instanceof ArrayBuffer && this.peers.get(id) === peer) {
+                    peer.heard = true;
                     this.events.push({ kind: EV_PACKET, peer: id, data: new Uint8Array(e.data) });
                 }
             };
@@ -175,7 +176,9 @@
             channel.onopen = () => {
                 if (this.peers.get(id) !== peer) return;
                 peer.open = true;
+                peer.openedAt = performance.now();
                 this.events.push({ kind: EV_PEER_JOINED, peer: id, data: null });
+                if (this.isHost) this.capSilentPeers();
                 const how = peer.spare !== undefined ? "spare" : peer.offerer ? "our offer" : "its offer";
                 if (this.isHost) {
                     const ms = Math.round(performance.now() - peer.t0);
@@ -217,6 +220,15 @@
             }
         }
 
+        // Host: players connected ahead (see preconnect) send nothing until
+        // they join; past HOST_SILENT_PEERS_MAX of those, the oldest are let
+        // go, so visitors browsing the list can't pile up connections.
+        capSilentPeers() {
+            const silent = [...this.peers].filter(([, p]) => p.open && !p.heard);
+            silent.sort(([, a], [, b]) => a.openedAt - b.openedAt);
+            for (const [id] of silent.slice(0, Math.max(0, silent.length - HOST_SILENT_PEERS_MAX))) this.drop(id);
+        }
+
         drop(id) {
             const peer = this.peers.get(id);
             if (!peer) return;
@@ -226,6 +238,11 @@
                 peer.pc.close();
             } catch {}
             if (peer.open) this.events.push({ kind: EV_PEER_LEFT, peer: id, data: null });
+            // A player that lost its host has nothing left to do: the game
+            // closes its link on that, and a socket opened ahead is not
+            // taken over once its host left. Signalling again would only
+            // connect anew to a host that may just have let it go.
+            if (peer.open && !this.isHost && !this.closed) this.shutdown();
         }
 
         shutdown() {

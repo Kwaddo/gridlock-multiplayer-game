@@ -80,12 +80,15 @@
     // A player fetches a room's spare when it points at the room (before it
     // clicks join), and uses what it fetched for this long.
     const PREWARM_MS = 15000;
-    // Listed games (every LAN one, the first few online, the one pointed at)
-    // are connected to ahead (see preconnect), so joining one only waits for
-    // the game's own Join and Welcome. A connection nobody asked for in this
-    // long is closed.
+    // Listed LAN games and the one pointed at are connected to ahead (see
+    // preconnect), so joining one only waits for the game's own Join and
+    // Welcome; the first few online ones are only prewarmed. A connection
+    // nobody asked for in this long is closed.
     const PRECONNECT_IDLE_MS = 10000;
     const PRECONNECT_MAX = 8;
+    // A host keeps at most this many connections open that have sent nothing
+    // yet (players connected ahead, not joined); the oldest go first.
+    const HOST_SILENT_PEERS_MAX = 6;
     // A connection ahead that failed (the host just left, still listed) is
     // tried again after this, not on every frame; twice as long after each
     // failure in a row, up to PRECONNECT_RETRY_MAX_MS.
@@ -123,7 +126,7 @@
         PLUGIN_VERSION, EV_PEER_JOINED, EV_PEER_LEFT, EV_PACKET, EV_CLOSED, FORCE_RELAY, NO_DIRECT, STUN_FALLBACK,
         POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, POLL_FULL_MS, ROOM_MAX_PLAYERS, HELLO_MS, HELLO_MAX_MS, PLAYER_GIVE_UP_MS,
         LONG_POLL_HEADER, LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, GATHER_MS, SPARE_COUNT, SPARE_ROTATE_MS,
-        SPARE_GRACE_MS, SPARE_TICK_MS, SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, PRECONNECT_RETRY_MS,
+        SPARE_GRACE_MS, SPARE_TICK_MS, SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, HOST_SILENT_PEERS_MAX, PRECONNECT_RETRY_MS,
         PRECONNECT_RETRY_MAX_MS, SEND_BATCH_MS,
         DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, ICE_CACHE_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, UNRELIABLE_MAX_BUFFERED,
         SEEN_KEEP, CHANNEL, RELIABLE_CHANNEL,

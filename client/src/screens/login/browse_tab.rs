@@ -10,8 +10,9 @@ use super::{in_rect, LoginScreen, ACCENT, INPUT_BG, INPUT_BORDER, ROW_BG, ROW_HO
 
 const LAN_BADGE: Color = Color::new(0.30, 0.90, 0.45, 1.0);
 const ONLINE_BADGE: Color = Color::new(0.35, 0.65, 1.0, 1.0);
-/// Online games connected to while listed (the first ones in the list), on
-/// top of every LAN game and whichever game the player points at.
+/// Online games prewarmed while listed (the first ones in the list): their
+/// ICE servers and spare offer are fetched ahead, which costs their hosts
+/// nothing. Only LAN games and the one the player points at are connected to.
 const ONLINE_AHEAD: usize = 4;
 
 impl LoginScreen {
@@ -87,19 +88,19 @@ impl LoginScreen {
             text_batch::text(&pc, lx + lw - pcw - col_pad, ry + 30.0, 15, pc_color);
 
             // Games are connected to while listed, so joining one is instant
-            // (see transport::preconnect): every LAN game, the first
-            // ONLINE_AHEAD online ones, and the one the player points at.
+            // (see transport::preconnect): every LAN game and the one the
+            // player points at. The first ONLINE_AHEAD online ones are only
+            // prewarmed (transport::prewarm): a connection to each from
+            // every visitor would land on the same few hosts, mid-match.
             // (Not while a join is under way: that one has the connection.)
             if !full && self.connector.is_none() {
-                let ahead = match server.origin {
-                    Origin::Lan => true,
-                    Origin::Online => {
-                        online_ahead += 1;
-                        online_ahead <= ONLINE_AHEAD
-                    }
-                };
-                if ahead || hover {
+                if hover || server.origin == Origin::Lan {
                     transport::preconnect(&server.target);
+                } else {
+                    online_ahead += 1;
+                    if online_ahead <= ONLINE_AHEAD {
+                        transport::prewarm(&server.target);
+                    }
                 }
             }
             if hover && clicked && !full {
