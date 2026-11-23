@@ -175,11 +175,31 @@ fn old_clients_read_a_versioned_welcome_and_discover_reply() {
     let welcome = ServerMsg::Welcome { id: 4, username: "alice".into(), version: Some(PROTOCOL_VERSION) }.encode();
     let mut r = Reader::new(&welcome[1..]);
     assert_eq!((r.u32(), r.str8()), (Some(4), Some("alice".to_string())));
-    let discover =
-        ServerMsg::Discover { players: 3, max_players: 16, name: "g".into(), version: Some(PROTOCOL_VERSION) }
-            .encode();
+    let discover = ServerMsg::Discover {
+        players: 3,
+        max_players: 16,
+        name: "g".into(),
+        version: Some(PROTOCOL_VERSION),
+        bots: Some(2),
+    }
+    .encode();
     let mut r = Reader::new(&discover[1..]);
     assert_eq!((r.u8(), r.u8(), r.str8()), (Some(3), Some(16), Some("g".to_string())));
+    // builds from before the bot count read the version and stop there
+    assert_eq!(r.u16(), Some(PROTOCOL_VERSION));
+    // and a host from before it sends no bot count
+    let mut old_discover = Writer::new(MSG_DISCOVER);
+    old_discover.u8(3).u8(16).str8("g").u16(PROTOCOL_VERSION);
+    assert_eq!(
+        ServerMsg::decode(&old_discover.finish()),
+        Some(ServerMsg::Discover {
+            players: 3,
+            max_players: 16,
+            name: "g".into(),
+            version: Some(PROTOCOL_VERSION),
+            bots: None
+        })
+    );
     // and what they send back has no version
     let mut old_welcome = Writer::new(MSG_WELCOME);
     old_welcome.u32(4).str8("alice");

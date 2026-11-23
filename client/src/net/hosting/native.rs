@@ -94,6 +94,7 @@ impl Online {
                 max_players: MAX_PLAYERS.min(255) as u8,
                 endpoint,
                 players: handle.players(),
+                bots: handle.bots(),
             },
         );
         Online { listing, mapping, started: Instant::now(), notified: false }

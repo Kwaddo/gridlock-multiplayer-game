@@ -1,4 +1,3 @@
-use std::sync::atomic::Ordering;
 
 use platform::{Duration, Instant};
 use transport::web::HttpRequest;
@@ -54,13 +53,12 @@ impl Listing {
     }
 
     pub fn tick(&mut self) {
-        let players = self.announce.players.load(Ordering::Relaxed);
         let now = Instant::now();
         let retry = State::Idle { at: now + Duration::from_secs(RETRY_SECS) };
         let beat_at = now + Duration::from_secs(HEARTBEAT_SECS);
 
         self.state = match std::mem::replace(&mut self.state, State::Idle { at: now }) {
-            State::Idle { at } if now >= at => match create_body(&self.announce, players) {
+            State::Idle { at } if now >= at => match create_body(&self.announce) {
                 Some(body) => State::Creating(HttpRequest::start(
                     "POST",
                     &format!("{}/servers", self.base),
@@ -84,7 +82,7 @@ impl Listing {
                 let request = HttpRequest::start(
                     "PUT",
                     &format!("{}/servers/{id}", self.base),
-                    heartbeat_body(players).to_string().as_bytes(),
+                    heartbeat_body(&self.announce).to_string().as_bytes(),
                     Some(&format!("Bearer {token}")),
                 );
                 State::Beating { id, token, request }

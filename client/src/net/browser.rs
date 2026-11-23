@@ -15,12 +15,23 @@ pub struct ServerEntry {
     pub target: String,
     /// What to show under the name.
     pub detail: String,
+    /// Everyone in the game, bots included (what the list shows).
     pub players: u8,
     pub max_players: u8,
+    /// How many of `players` are bots; 0 when the host or registry predates the count.
+    pub bots: u8,
     pub origin: Origin,
     /// False when the host is known to run another protocol version (LAN
     /// replies say; the online list cannot, so those count as compatible).
     pub compatible: bool,
+}
+
+impl ServerEntry {
+    /// No room for one more person. A joiner takes a bot's place, so only
+    /// people fill a game.
+    pub fn is_full(&self) -> bool {
+        self.players.saturating_sub(self.bots) >= self.max_players
+    }
 }
 
 pub struct ServerBrowser {
@@ -113,7 +124,7 @@ impl ServerBrowser {
 /// Native builds join UDP hosts; the browser build joins WebRTC rooms. The two
 /// cannot reach each other, so each keeps only the listings it can join.
 fn online_entry(listed: Listed) -> Option<ServerEntry> {
-    let Listed { name, addr, room, players, max_players, lan } = listed;
+    let Listed { name, addr, room, players, max_players, bots, lan } = listed;
     // Native builds find their LAN games with the broadcast scan (by LAN
     // address); a listing's public address is the online way in.
     #[cfg(not(target_arch = "wasm32"))]
@@ -131,7 +142,8 @@ fn online_entry(listed: Listed) -> Option<ServerEntry> {
         let origin = if lan { Origin::Lan } else { Origin::Online };
         (registry::room_url(&registry::registry_url()?, &room), format!("room {room}"), origin)
     };
-    Some(ServerEntry { name, target, detail, players, max_players, origin, compatible: true })
+    let bots = bots.min(players);
+    Some(ServerEntry { name, target, detail, players, max_players, bots, origin, compatible: true })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -172,7 +184,7 @@ mod lan {
             let mut found = Vec::new();
             let mut buf = [0u8; 512];
             while let Ok((n, from)) = self.socket.recv_from(&mut buf) {
-                if let Some(ServerMsg::Discover { players, max_players, name, version }) =
+                if let Some(ServerMsg::Discover { players, max_players, name, version, bots }) =
                     ServerMsg::decode(&buf[..n])
                 {
                     let addr = from.to_string();
@@ -185,6 +197,7 @@ mod lan {
                         detail,
                         players,
                         max_players,
+                        bots: bots.unwrap_or(0).min(players),
                         origin: Origin::Lan,
                         compatible,
                     });
@@ -212,5 +225,42 @@ mod lan {
             }
             std::net::IpAddr::V6(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(players: u8, max_players: u8, bots: u8) -> ServerEntry {
+        let (name, target, detail) = (String::new(), String::new(), String::new());
+        ServerEntry { name, target, detail, players, max_players, bots, origin: Origin::Online, compatible: true }
+    }
+
+    #[test]
+    fn a_game_full_only_of_bots_is_joinable() {
+        assert!(!entry(8, 8, 5).is_full());
+        assert!(!entry(8, 8, 1).is_full());
+        assert!(entry(8, 8, 0).is_full());
+        assert!(!entry(3, 8, 0).is_full());
+        // more people than seats (lobby and match together): still full
+        assert!(entry(10, 8, 2).is_full());
+        assert!(!entry(10, 8, 3).is_full());
+    }
+
+    #[test]
+    fn a_listing_without_a_bot_count_counts_everyone_as_people() {
+        // what a registry from before the count sends
+        let old: Listed =
+            serde_json::from_str(r#"{"name":"g","addr":"1.2.3.4:5","players":8,"max_players":8}"#).unwrap();
+        assert_eq!(old.bots, 0);
+        #[cfg(not(target_arch = "wasm32"))]
+        assert!(online_entry(old).unwrap().is_full());
+        let new: Listed =
+            serde_json::from_str(r#"{"name":"g","addr":"1.2.3.4:5","players":8,"bots":3,"max_players":8}"#)
+                .unwrap();
+        assert_eq!(new.bots, 3);
+        #[cfg(not(target_arch = "wasm32"))]
+        assert!(!online_entry(new).unwrap().is_full());
     }
 }

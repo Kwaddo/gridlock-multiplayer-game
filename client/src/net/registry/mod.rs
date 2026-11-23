@@ -4,7 +4,7 @@
 //! [`Listing`] for a host's heartbeat. Native builds use background threads;
 //! the browser build uses fetch() and is advanced by [`Listing::tick`].
 
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -62,6 +62,10 @@ pub struct Listed {
     pub room: Option<String>,
     pub players: u8,
     pub max_players: u8,
+    /// How many of `players` are bots. A registry from before the count
+    /// leaves it out: then every player counts as a person, as before.
+    #[serde(default)]
+    pub bots: u8,
     /// The registry saw this game come from the asker's own network (same
     /// public address), so the WebRTC connection stays inside that network.
     #[serde(default)]
@@ -82,6 +86,16 @@ pub struct Announce {
     pub max_players: u8,
     pub endpoint: Endpoint,
     pub players: Arc<AtomicUsize>,
+    /// How many of `players` are bots (a joiner takes a bot's place).
+    pub bots: Arc<AtomicUsize>,
+}
+
+impl Announce {
+    /// `(players, bots)` as listed: both capped at 255, never more bots than players.
+    fn counts(&self) -> (usize, usize) {
+        let players = self.players.load(Ordering::Relaxed).min(255);
+        (players, self.bots.load(Ordering::Relaxed).min(players))
+    }
 }
 
 #[derive(Deserialize)]
@@ -93,14 +107,16 @@ struct Created {
 }
 
 /// The POST body announcing a game, once its endpoint is known.
-fn create_body(announce: &Announce, players: usize) -> Option<Value> {
+fn create_body(announce: &Announce) -> Option<Value> {
+    let (players, bots) = announce.counts();
     let endpoint = match &announce.endpoint {
         Endpoint::Room(room) => json!({ "room": room }),
         Endpoint::Udp(port) => json!({ "port": port()? }),
     };
     let mut body = json!({
         "name": announce.name,
-        "players": players.min(255),
+        "players": players,
+        "bots": bots,
         "max_players": announce.max_players,
     });
     if let (Value::Object(body), Value::Object(endpoint)) = (&mut body, endpoint) {
@@ -109,6 +125,7 @@ fn create_body(announce: &Announce, players: usize) -> Option<Value> {
     Some(body)
 }
 
-fn heartbeat_body(players: usize) -> Value {
-    json!({ "players": players.min(255) })
+fn heartbeat_body(announce: &Announce) -> Value {
+    let (players, bots) = announce.counts();
+    json!({ "players": players, "bots": bots })
 }

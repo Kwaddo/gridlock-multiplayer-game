@@ -173,6 +173,7 @@ impl UdpHost {
 pub struct HostHandle {
     port: u16,
     players: Arc<AtomicUsize>,
+    bots: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -183,9 +184,10 @@ impl HostHandle {
         let mut host = UdpHost::bind(port, server)?;
         let port = host.port();
         let players = Arc::new(AtomicUsize::new(0));
+        let bots = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
-            let (players, stop) = (players.clone(), stop.clone());
+            let (players, bots, stop) = (players.clone(), bots.clone(), stop.clone());
             thread::Builder::new().name("gridlock-host".into()).spawn(move || {
                 let mut buffer = [0u8; 8192];
                 while !stop.load(Ordering::Relaxed) {
@@ -194,10 +196,11 @@ impl HostHandle {
                         break;
                     }
                     players.store(host.server().player_count(), Ordering::Relaxed);
+                    bots.store(host.server().bot_count(), Ordering::Relaxed);
                 }
             })?
         };
-        Ok(HostHandle { port, players, stop, thread: Some(thread) })
+        Ok(HostHandle { port, players, bots, stop, thread: Some(thread) })
     }
 
     pub fn port(&self) -> u16 {
@@ -207,6 +210,11 @@ impl HostHandle {
     /// Live player count, shareable with e.g. an online listing heartbeat.
     pub fn players(&self) -> Arc<AtomicUsize> {
         self.players.clone()
+    }
+
+    /// Live count of the bots among [`players`](Self::players).
+    pub fn bots(&self) -> Arc<AtomicUsize> {
+        self.bots.clone()
     }
 }
 

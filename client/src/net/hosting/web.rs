@@ -75,6 +75,7 @@ struct Core {
     server: Server,
     local: Rc<RefCell<Loopback>>,
     players: Arc<AtomicUsize>,
+    bots: Arc<AtomicUsize>,
     notice: Option<String>,
     clock: TickClock,
     /// Packets taken from the server for sending; kept so its capacity is reused.
@@ -104,6 +105,7 @@ impl LocalHost {
             .collect();
 
         let players = Arc::new(AtomicUsize::new(0));
+        let bots = Arc::new(AtomicUsize::new(0));
         let base = registry::registry_url();
         let room = base.as_ref().map(|base| RtcSocket::host(&registry::room_url(base, &code)));
         let listing = match (list_online, &base) {
@@ -114,6 +116,7 @@ impl LocalHost {
                     max_players: MAX_PLAYERS.min(255) as u8,
                     endpoint: Endpoint::Room(code.clone()),
                     players: players.clone(),
+                    bots: bots.clone(),
                 },
             )),
             _ => None,
@@ -129,6 +132,7 @@ impl LocalHost {
             server,
             local: Default::default(),
             players,
+            bots,
             notice,
             clock: TickClock::new(Instant::now()),
             sending: Vec::new(),
@@ -228,6 +232,7 @@ impl Core {
         drop(local);
 
         self.players.store(self.server.player_count(), Ordering::Relaxed);
+        self.bots.store(self.server.bot_count(), Ordering::Relaxed);
         if let Some(listing) = &mut self.listing {
             listing.tick();
         }

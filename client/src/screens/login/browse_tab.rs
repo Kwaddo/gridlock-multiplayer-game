@@ -80,12 +80,19 @@ impl LoginScreen {
             text_batch::text(&server.name, tx + bw + 8.0, ry + 22.0, 16, name_color);
             text_batch::text(&server.detail, tx, ry + 41.0, 12, TEXT_DIM);
 
-            let full = server.players >= server.max_players;
+            // bots give their place to a joiner, so only people fill a game
+            let full = server.is_full();
             pc.clear();
             let _ = write!(pc, "{}/{}", server.players, server.max_players);
             let pcw = measure_game_text(&pc, 15);
             let pc_color = if full { Color::new(1.0, 0.35, 0.35, 1.0) } else { TEXT_LABEL };
             text_batch::text(&pc, lx + lw - pcw - col_pad, ry + 30.0, 15, pc_color);
+            if server.bots > 0 {
+                pc.clear();
+                let _ = write!(pc, "{} bot{}", server.bots, if server.bots == 1 { "" } else { "s" });
+                let botw = measure_game_text(&pc, 11);
+                text_batch::text(&pc, lx + lw - botw - col_pad, ry + 44.0, 11, TEXT_DIM);
+            }
 
             // Games are connected to while listed, so joining one is instant
             // (see transport::preconnect): every LAN game and the one the

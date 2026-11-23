@@ -166,6 +166,12 @@ impl Server {
         self.players.len()
     }
 
+    /// How many of [`player_count`](Self::player_count) are bots: a late
+    /// joiner takes a bot's place, so a game full of bots is still joinable.
+    pub fn bot_count(&self) -> usize {
+        self.players.values().filter(|p| p.is_bot).count()
+    }
+
     /// Packets queued since the last call, as `(destination, bytes)`.
     pub fn drain_outbox(&mut self) -> Vec<(PeerId, Packet)> {
         self.outbox.drain()

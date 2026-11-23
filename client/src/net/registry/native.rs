@@ -113,14 +113,13 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
     // The registry lists the address our requests come from, and game hosts
     // only serve IPv4, so announce over IPv4.
     let agent = agent(IpFamily::Ipv4Only);
-    let players = || announce.players.load(Ordering::Relaxed);
 
     let mut listed: Option<Created> = None;
     while !stop.load(Ordering::Relaxed) {
         listed = match listed.take() {
             None => {
                 // Wait for the endpoint (e.g. the router's port) before announcing.
-                let Some(body) = create_body(announce, players()) else {
+                let Some(body) = create_body(announce) else {
                     thread::sleep(Duration::from_millis(100));
                     continue;
                 };
@@ -139,7 +138,7 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
                     agent
                         .put(&format!("{base}/servers/{}", created.id))
                         .header("Authorization", &format!("Bearer {}", created.token))
-                        .send_json(heartbeat_body(players()))
+                        .send_json(heartbeat_body(announce))
                 });
                 // Only a 404 means the listing is gone (it expired, or the
                 // registry lost it): register again. Other failures keep it and

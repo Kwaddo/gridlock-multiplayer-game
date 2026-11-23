@@ -42,8 +42,10 @@ fn server_messages_round_trip() {
         rt_server(ServerMsg::WorldChange { world: 1, spawn: (1.0, 0.0, 2.0), mode, freeze_secs, match_timer });
     }
     rt_server(ServerMsg::Assets { world: 255, entries: vec![("k".into(), "a/b.glb".into())] });
-    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "Gridlock".into(), version: None });
-    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "G".into(), version: Some(PROTOCOL_VERSION) });
+    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "Gridlock".into(), version: None, bots: None });
+    let version = Some(PROTOCOL_VERSION);
+    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "G".into(), version, bots: None });
+    rt_server(ServerMsg::Discover { players: 9, max_players: 16, name: "G".into(), version, bots: Some(7) });
     rt_server(ServerMsg::Respawn { position: (1.0, 2.0, 3.0), kind: Some(1) });
     rt_server(ServerMsg::Damage { amount: 12.5, attacker_id: 4, stun: true });
     rt_server(ServerMsg::KillFeed { killer_id: 3, victim_id: 9, weapon: "AK".into(), headshot: false });

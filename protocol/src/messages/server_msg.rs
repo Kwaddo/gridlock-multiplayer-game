@@ -20,8 +20,10 @@ pub enum ServerMsg {
         match_timer: Option<u16>,
     },
     Assets { world: u8, entries: Vec<(String, String)> },
-    /// LAN discovery reply; `version` trails it as in `Welcome`.
-    Discover { players: u8, max_players: u8, name: String, version: Option<u16> },
+    /// LAN discovery reply; `version` trails it as in `Welcome`, and `bots`
+    /// (how many of `players` are bots) trails `version`. Older hosts send
+    /// neither; older clients stop reading after `version`.
+    Discover { players: u8, max_players: u8, name: String, version: Option<u16>, bots: Option<u8> },
     WallBroken { x: u8, y: u8 },
     Death { killer_id: u32, weapon: String },
     Respawn { position: Vec3, kind: Option<u8> }, // kind: 0=random, 1=teleporter fallback
@@ -125,11 +127,15 @@ impl ServerMsg {
                 }
                 w.finish()
             }
-            ServerMsg::Discover { players, max_players, name, version } => {
+            ServerMsg::Discover { players, max_players, name, version, bots } => {
                 let mut w = Writer::new(MSG_DISCOVER);
                 w.u8(*players).u8(*max_players).str8(name);
                 if let Some(v) = version {
                     w.u16(*v);
+                    // positional: only after a version
+                    if let Some(b) = bots {
+                        w.u8(*b);
+                    }
                 }
                 w.finish()
             }
@@ -349,12 +355,12 @@ impl ServerMsg {
                 }
                 ServerMsg::Assets { world, entries }
             }
-            MSG_DISCOVER => ServerMsg::Discover {
-                players: r.u8()?,
-                max_players: r.u8()?,
-                name: r.str8()?,
-                version: r.u16(),
-            },
+            MSG_DISCOVER => {
+                let (players, max_players, name) = (r.u8()?, r.u8()?, r.str8()?);
+                let version = r.u16();
+                let bots = version.and_then(|_| r.u8());
+                ServerMsg::Discover { players, max_players, name, version, bots }
+            }
             MSG_WALL_BROKEN => ServerMsg::WallBroken { x: r.u8()?, y: r.u8()? },
             MSG_DEATH => ServerMsg::Death { killer_id: r.u32()?, weapon: r.str8()? },
             MSG_RESPAWN => ServerMsg::Respawn { position: r.vec3()?, kind: r.u8() },
