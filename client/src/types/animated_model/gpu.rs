@@ -25,9 +25,23 @@ pub(super) enum GpuGeometry {
     Untried,
     /// The parts merged into as few vertex/index buffers as fit u16 indices,
     /// uploaded once.
-    Ready(Vec<GpuBatch>),
-    /// Rigid parts, too many joints, or no shader: skinned on the CPU instead.
+    Ready(GpuMesh),
+    /// Too many joints (skin joints plus rigid nodes), or no shader: skinned
+    /// on the CPU instead.
     Unavailable,
+}
+
+/// A model's GPU buffers, and where its rigid parts' nodes go in the joint
+/// table: rigid (unskinned) primitives, like the gun in the sawn-off and
+/// minigun first-person rigs, are drawn as vertices bound with weight 1 to
+/// one extra joint slot each, filled with their node's matrix, which is the
+/// matrix the CPU fallback moves them by (`Pose::global_of`).
+pub(super) struct GpuMesh {
+    batches: Vec<GpuBatch>,
+    /// First joint slot past every joint a skinned vertex names.
+    rigid_base: usize,
+    /// Node of each rigid slot, from `rigid_base` on.
+    rigid_nodes: Vec<usize>,
 }
 
 /// One vertex and index buffer holding several parts back to back, drawn as
@@ -160,59 +174,101 @@ fn gpu_skinning_setup(ctx: &mut dyn miniquad::RenderingBackend) -> Option<GpuSki
 /// Vertices one u16-indexed batch can hold.
 const BATCH_MAX_VERTICES: usize = u16::MAX as usize + 1;
 
-fn gpu_parts(ctx: &mut dyn miniquad::RenderingBackend, parts: &[AnimatedPart]) -> Option<Vec<GpuBatch>> {
-    use miniquad::*;
+/// One batch's content before upload.
+struct BatchData {
+    vertices: Vec<GpuSkinVertex>,
+    indices: Vec<u16>,
+    draws: Vec<GpuDraw>,
+}
+
+/// The parts laid out for the GPU: batches, the first rigid slot and the
+/// node of each. `None` when they do not fit the shader's joint table.
+fn gpu_layout(parts: &[AnimatedPart]) -> Option<(Vec<BatchData>, usize, Vec<usize>)> {
     for part in parts {
-        if !part.rigid_vertices.is_empty() || part.skin_vertices.len() != part.mesh.vertices.len() {
-            return None;
-        }
-        if part.skin_vertices.iter().any(|v| v.joints.iter().any(|&j| j as usize >= MAX_GPU_JOINTS)) {
+        let skinned = part.skinned_vertex_count;
+        if part.skin_vertices.len() != skinned || skinned + part.rigid_vertices.len() != part.mesh.vertices.len() {
             return None;
         }
         if part.mesh.vertices.len() > BATCH_MAX_VERTICES {
             return None;
         }
     }
+    let skin_joints = parts.iter().flat_map(|p| &p.skin_vertices).flat_map(|v| v.joints);
+    let rigid_base = skin_joints.map(|j| j as usize + 1).max().unwrap_or(0);
+    let mut rigid_nodes: Vec<usize> = Vec::new();
+    for v in parts.iter().flat_map(|p| &p.rigid_vertices) {
+        if !rigid_nodes.contains(&v.node_idx) {
+            rigid_nodes.push(v.node_idx);
+        }
+    }
+    if rigid_base + rigid_nodes.len() > MAX_GPU_JOINTS {
+        return None;
+    }
 
     let mut out = Vec::new();
-    let mut vertices: Vec<GpuSkinVertex> = Vec::new();
-    let mut indices: Vec<u16> = Vec::new();
-    let mut draws: Vec<GpuDraw> = Vec::new();
-    let mut flush = |vertices: &mut Vec<GpuSkinVertex>, indices: &mut Vec<u16>, draws: &mut Vec<GpuDraw>, ctx: &mut dyn RenderingBackend| {
-        if draws.is_empty() {
-            return;
-        }
-        out.push(GpuBatch {
-            vertices: ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Immutable, BufferSource::slice(vertices)),
-            indices: ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Immutable, BufferSource::slice(indices)),
-            draws: std::mem::take(draws),
-        });
-        vertices.clear();
-        indices.clear();
-    };
-
+    let mut batch = BatchData { vertices: Vec::new(), indices: Vec::new(), draws: Vec::new() };
     for part in parts {
-        if vertices.len() + part.mesh.vertices.len() > BATCH_MAX_VERTICES {
-            flush(&mut vertices, &mut indices, &mut draws, ctx);
+        if batch.vertices.len() + part.mesh.vertices.len() > BATCH_MAX_VERTICES && !batch.draws.is_empty() {
+            let empty = BatchData { vertices: Vec::new(), indices: Vec::new(), draws: Vec::new() };
+            out.push(std::mem::replace(&mut batch, empty));
         }
-        let base = vertices.len() as u16;
-        let first_index = indices.len() as i32;
-        vertices.extend(part.mesh.vertices.iter().zip(&part.skin_vertices).map(|(v, s)| GpuSkinVertex {
+        let base = batch.vertices.len() as u16;
+        let first_index = batch.indices.len() as i32;
+        let (skinned_uvs, rigid_uvs) = part.mesh.vertices.split_at(part.skinned_vertex_count);
+        batch.vertices.extend(skinned_uvs.iter().zip(&part.skin_vertices).map(|(v, s)| GpuSkinVertex {
             position: s.bind_position.to_array(),
             uv: v.uv.to_array(),
             joints: s.joints.map(|j| j as f32),
             weights: s.weights,
         }));
-        indices.extend(part.mesh.indices.iter().map(|&i| base + i));
+        batch.vertices.extend(rigid_uvs.iter().zip(&part.rigid_vertices).map(|(v, r)| {
+            let slot = rigid_base + rigid_nodes.iter().position(|&n| n == r.node_idx).unwrap_or(0);
+            GpuSkinVertex {
+                position: r.bind_position.to_array(),
+                uv: v.uv.to_array(),
+                joints: [slot as f32, 0.0, 0.0, 0.0],
+                weights: [1.0, 0.0, 0.0, 0.0],
+            }
+        }));
+        batch.indices.extend(part.mesh.indices.iter().map(|&i| base + i));
         let index_count = part.mesh.indices.len() as i32;
         let color = part.mesh.vertices.first().map_or([255; 4], |v| v.color).map(|c| c as f32 / 255.0);
-        match draws.last_mut() {
+        match batch.draws.last_mut() {
             Some(last) if last.same_material(&part.mesh.texture, color) => last.index_count += index_count,
-            _ => draws.push(GpuDraw { first_index, index_count, texture: part.mesh.texture.clone(), color }),
+            _ => batch.draws.push(GpuDraw { first_index, index_count, texture: part.mesh.texture.clone(), color }),
         }
     }
-    flush(&mut vertices, &mut indices, &mut draws, ctx);
-    Some(out)
+    if !batch.draws.is_empty() {
+        out.push(batch);
+    }
+    Some((out, rigid_base, rigid_nodes))
+}
+
+fn gpu_parts(ctx: &mut dyn miniquad::RenderingBackend, parts: &[AnimatedPart]) -> Option<GpuMesh> {
+    use miniquad::*;
+    let (layout, rigid_base, rigid_nodes) = gpu_layout(parts)?;
+    let batches = layout
+        .into_iter()
+        .map(|b| GpuBatch {
+            vertices: ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Immutable, BufferSource::slice(&b.vertices)),
+            indices: ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Immutable, BufferSource::slice(&b.indices)),
+            draws: b.draws,
+        })
+        .collect();
+    Some(GpuMesh { batches, rigid_base, rigid_nodes })
+}
+
+/// The shader's joint table for `pose`: its skin matrices, then the matrix
+/// of each rigid part's node (as the CPU fallback moves rigid vertices).
+fn joint_table(pose: &Pose, rigid_base: usize, rigid_nodes: &[usize]) -> [Mat4; MAX_GPU_JOINTS] {
+    let mut joints = [Mat4::IDENTITY; MAX_GPU_JOINTS];
+    joints[..pose.skin_mats.len()].copy_from_slice(&pose.skin_mats);
+    for (slot, &node) in joints[rigid_base..].iter_mut().zip(rigid_nodes) {
+        if node < pose.local.len() {
+            *slot = pose.global_of(node);
+        }
+    }
+    joints
 }
 
 impl AnimatedModel {
@@ -247,7 +303,7 @@ impl AnimatedModel {
 
     /// Draw the model skinned by the GPU at `model` (its world transform),
     /// multiplied by `tint`, from buffers uploaded once. Returns false when
-    /// this model or GPU cannot (rigid parts, too many joints, no shader);
+    /// this model or GPU cannot (too many joints, no shader);
     /// draw `meshes()` then, which `update` keeps skinned on the CPU.
     // did the gpu draw this clip last time, if not the cpu has to bend the mesh
     // before this only the clip itself checked, inside update()
@@ -279,10 +335,11 @@ impl AnimatedModel {
             return false;
         };
         let gpu = self.geometry.gpu.borrow();
-        let GpuGeometry::Ready(batches) = &*gpu else {
+        let GpuGeometry::Ready(mesh) = &*gpu else {
             self.gpu_drawn.set(false);
             return false;
         };
+        let batches = &mesh.batches;
         // From now on `update` only poses this clip, every frame.
         self.gpu_drawn.set(true);
 
@@ -290,9 +347,9 @@ impl AnimatedModel {
             mvp: gl.quad_gl.get_projection_matrix() * model,
             color: [1.0; 4],
             tint: [tint.r, tint.g, tint.b, tint.a],
-            joints: [Mat4::IDENTITY; MAX_GPU_JOINTS],
+            // this pose's joints (and rigid parts' nodes) go to the gpu
+            joints: joint_table(pose, mesh.rigid_base, &mesh.rigid_nodes),
         };
-        uniforms.joints[..pose.skin_mats.len()].copy_from_slice(&pose.skin_mats); // this pose's joints go to the gpu
 
         // Draw in macroquad's current pass, after what it has batched so far.
         gl.flush();
@@ -324,3 +381,6 @@ impl AnimatedModel {
         true
     }
 }
+
+#[cfg(test)]
+mod tests;

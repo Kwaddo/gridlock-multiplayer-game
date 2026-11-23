@@ -89,31 +89,12 @@ impl PlayingState {
             // camera and model matrix, so a weapon made of many meshes (the
             // SPAS-12 has 38) batches into a few draw calls instead of
             // flushing the batch several times per mesh.
-            if let Some(meshes) = self.models.get(model_key) {
-                self.draw_3d_viewmodel(
-                    Some((model_key, meshes.as_slice())),
-                    meshes.iter(),
-                    1.0,
-                    0.0,
-                    hands_anim,
-                    hands_static,
-                    weapon,
-                    stats,
-                    draw_hands,
-                );
-                return;
-            } else if let Some(animated_model) = self.animated_models.get(model_key) {
-                self.draw_3d_viewmodel(
-                    None,
-                    animated_model.meshes(),
-                    animated_model.normalize_scale,
-                    animated_model.y_offset,
-                    hands_anim,
-                    hands_static,
-                    weapon,
-                    stats,
-                    draw_hands,
-                );
+            let weapon_model = match self.models.get(model_key) {
+                Some(meshes) => Some(ViewmodelWeapon::Static(model_key, meshes)),
+                None => self.animated_models.get(model_key).map(ViewmodelWeapon::Animated),
+            };
+            if let Some(weapon_model) = weapon_model {
+                self.draw_3d_viewmodel(weapon_model, hands_anim, hands_static, weapon, stats, draw_hands);
                 return;
             }
             // Not loaded yet (it arrives in the background after joining) or
@@ -137,15 +118,12 @@ impl PlayingState {
         }
     }
 
-    /// Draw the weapon's `meshes`, then the hands and muzzle flash once.
-    /// `static_model` (model key and its meshes) lets a static weapon draw
-    /// from GPU-resident buffers instead of re-batching `meshes` every frame.
-    fn draw_3d_viewmodel<'m>(
+    /// Draw the weapon model, then the hands and muzzle flash once. Both
+    /// kinds of weapon model draw from GPU-resident buffers where they can,
+    /// instead of re-batching their meshes every frame.
+    fn draw_3d_viewmodel(
         &self,
-        static_model: Option<(&str, &[Mesh])>,
-        meshes: impl IntoIterator<Item = &'m Mesh>,
-        mesh_normalize_scale: f32,
-        mesh_y_offset: f32,
+        weapon_model: ViewmodelWeapon<'_>,
         hands_anim: Option<&crate::types::animated_model::AnimatedModel>,
         hands_static: Option<&Mesh>,
         weapon: &crate::weapons::WeaponState,
@@ -243,6 +221,10 @@ impl PlayingState {
             Normalize and transform weapon mesh to world position. We apply normalization first so that
             the viewmodel_scale stat can be used to tune overall weapon size without affecting the mesh's position offset.
         */
+        let (mesh_normalize_scale, mesh_y_offset) = match weapon_model {
+            ViewmodelWeapon::Static(..) => (1.0, 0.0),
+            ViewmodelWeapon::Animated(m) => (m.normalize_scale, m.y_offset),
+        };
         let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
             * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
         let scale_mat = Mat4::from_scale(vec3(
@@ -263,13 +245,20 @@ impl PlayingState {
         let gl = unsafe { get_internal_gl() }; // unsafe is required to access internal GL for custom shader uniforms
         gl.quad_gl.depth_test(true);
 
-        let on_gpu = static_model
-            .is_some_and(|(key, ms)| crate::types::static_gpu::draw_static_meshes(key, ms, transform));
+        // The minigun and sawn-off rigs (arms and gun in one animated model)
+        // skin on the GPU like the hands, untinted and with their materials'
+        // own alpha, as `draw_mesh` drew them; after a GPU draw, update()
+        // stops re-skinning them on the CPU.
+        let on_gpu = match weapon_model {
+            ViewmodelWeapon::Static(key, ms) => crate::types::static_gpu::draw_static_meshes(key, ms, transform),
+            ViewmodelWeapon::Animated(m) => m.draw_gpu(transform, WHITE),
+        };
         if !on_gpu {
             // avoid allocating a transformed mesh every frame by using the GL model matrix
             gl.quad_gl.push_model_matrix(transform);
-            for mesh in meshes {
-                draw_mesh(mesh);
+            match weapon_model {
+                ViewmodelWeapon::Static(_, ms) => ms.iter().for_each(draw_mesh),
+                ViewmodelWeapon::Animated(m) => m.meshes().for_each(draw_mesh),
             }
             gl.quad_gl.pop_model_matrix();
         }
@@ -435,6 +424,14 @@ impl PlayingState {
             );
         }
     }
+}
+
+/// The first-person weapon model: a static model (its key and meshes), or an
+/// animated rig that holds the arms and gun together (minigun, sawn-off).
+#[derive(Clone, Copy)]
+enum ViewmodelWeapon<'m> {
+    Static(&'m str, &'m [Mesh]),
+    Animated(&'m crate::types::animated_model::AnimatedModel),
 }
 
 /// Opacity checks kept at most; one per hands mesh drawn.
