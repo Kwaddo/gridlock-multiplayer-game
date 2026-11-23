@@ -82,6 +82,7 @@ pub struct PlayerAnim {
     stride: f32, 
     mix_pose: Option<Pose>, // scratch pose for the blend space, kept so it isnt remade every tick
     still: Option<Pose>, // scratch pose for the blend space's last pose, kept so it isnt remade every tick
+    still_partial: bool, // still was last written hidden, so only its hitbox nodes are right (see evaluate)
 
     // how long theyve been walking forward slowly, see SLOW_WALK_AFTER
     slow_for: f32,
@@ -121,6 +122,7 @@ impl PlayerAnim {
             stride: 0.0,
             mix_pose: None,
             still: None,
+            still_partial: false,
             slow_for: 0.0,
             upper_clip: None,
             upper_time: 0.0,

@@ -96,7 +96,8 @@ fn hidden_body_hitbox_joints_match_the_full_pose() {
 }
 
 // a body that was hidden and is seen again draws the same pose as one that was drawn all along
-// (the fade from the blend space's still is the one exception, its fingers and toes can be older)
+// (the fade from the blend space's still is the one exception: if the still was last written hidden,
+// its fingers and toes come straight from the new clip instead of fading, see the test below)
 #[test]
 fn seen_again_draws_the_same_pose() {
     let models = models();
@@ -115,3 +116,65 @@ fn seen_again_draws_the_same_pose() {
     }
 }
 
+
+// a body hidden in the blend space and seen again on the frame it leaves (or during the fade) fades
+// no stale fingers or toes from an old still: what it draws doesn't depend on when it was last drawn,
+// and its hitbox joints, and the bones they hang from, match a body drawn all along, bit for bit
+#[test]
+fn seen_leaving_the_blend_space_fades_no_stale_bones() {
+    use super::clips::in_space;
+    use super::FadeFrom;
+    let models = models();
+    let rig = &models["anim_rifle_idle"];
+    let mut hit = Vec::new();
+    rig.hit_nodes(&mut hit);
+    // the frames the made up play leaves the blend space on
+    let mut probe = PlayerAnim::new();
+    let mut exits = Vec::new();
+    for frame in 0..900 {
+        let was = in_space(probe.clip);
+        probe.tick(&input_at(frame), 1.0 / 60.0, &models);
+        if was && matches!(probe.prev, Some(FadeFrom::Still)) && probe.fade <= 1.0 / 60.0 {
+            exits.push(frame);
+        }
+    }
+    assert!(!exits.is_empty(), "the made up play never leaves the blend space");
+    // hidden for this many frames before each exit, and posed twice a frame (hitboxes, then full once seen) or not
+    let runs = [(1, false), (5, false), (30, false), (5, true), (30, true)];
+    let mut full = PlayerAnim::new();
+    let mut bodies: Vec<PlayerAnim> = runs.iter().map(|_| PlayerAnim::new()).collect();
+    let mut checked = 0;
+    for frame in 0..900 {
+        let input = input_at(frame);
+        full.tick(&input, 1.0 / 60.0, &models);
+        for (body, &(lead, twice)) in bodies.iter_mut().zip(&runs) {
+            body.advance(&input, 1.0 / 60.0, &models);
+            let hidden = exits.iter().any(|&e| frame < e && frame + lead >= e);
+            if hidden || twice {
+                body.evaluate(&models, PoseDetail::Hitboxes);
+            }
+            if !hidden {
+                body.evaluate(&models, PoseDetail::Full);
+            }
+            for role in JointRole::ALL {
+                let want = bits(rig.joint_role_position_in(full.hit_pose().unwrap(), role));
+                assert_eq!(bits(rig.joint_role_position_in(body.hit_pose().unwrap(), role)), want, "frame {frame}, {role:?}");
+            }
+        }
+        if !matches!(full.prev, Some(FadeFrom::Still)) || !exits.iter().any(|&e| frame >= e) {
+            continue;
+        }
+        checked += 1;
+        // the test rig's joints are its nodes, so joint j is node j
+        let (drawn, always) = (bodies[0].pose().unwrap().skin_mats_for_tests(), full.pose().unwrap().skin_mats_for_tests());
+        for (i, body) in bodies.iter().enumerate() {
+            for (j, mat) in body.pose().unwrap().skin_mats_for_tests().iter().enumerate() {
+                assert_eq!(mat, &drawn[j], "frame {frame}, body {i}, joint {j}");
+                if hit.contains(&j) {
+                    assert_eq!(mat, &always[j], "frame {frame}, body {i}, hitbox joint {j}");
+                }
+            }
+        }
+    }
+    assert!(checked > 0);
+}

@@ -22,12 +22,13 @@ impl PlayerAnim {
         }
         let Some(model) = find(models, self.clip) else { return };
         let mut list = std::mem::take(&mut self.hit_nodes);
+        // the hitbox nodes, for a hidden body, or for a full pose fading from a still only they are right in
+        if detail == PoseDetail::Hitboxes || (self.still_partial && matches!(self.prev, Some(FadeFrom::Still))) {
+            model.hit_nodes(&mut list);
+        }
         let nodes = match detail {
             PoseDetail::Full => Nodes::All,
-            PoseDetail::Hitboxes => {
-                model.hit_nodes(&mut list);
-                Nodes::Only(&list)
-            }
+            PoseDetail::Hitboxes => Nodes::Only(&list),
         };
         let slot = match detail {
             PoseDetail::Full => &mut self.pose,
@@ -38,7 +39,7 @@ impl PlayerAnim {
         if !model.pose_fits(&owned) {
             owned = model.new_pose(); // the character changed to one with a different skeleton
         }
-        self.pose_locals(model, models, &mut owned, nodes);
+        self.pose_locals(model, models, &mut owned, nodes, &list);
         match detail {
             PoseDetail::Full => {
                 model.finish_pose(&mut owned);
@@ -62,8 +63,8 @@ impl PlayerAnim {
         self.hit_nodes = list;
     }
 
-    // every step before finishing, each on the picked nodes only
-    fn pose_locals(&mut self, model: &AnimatedModel, models: &HashMap<String, AnimatedModel>, pose: &mut Pose, nodes: Nodes) {
+    // every step before finishing, each on the picked nodes only (`hit` is the hitbox nodes when the fade needs them)
+    fn pose_locals(&mut self, model: &AnimatedModel, models: &HashMap<String, AnimatedModel>, pose: &mut Pose, nodes: Nodes, hit: &[usize]) {
         let now_space = in_space(self.clip);
         if now_space {
             self.sample_space(models, pose, nodes);
@@ -78,7 +79,11 @@ impl PlayerAnim {
             match from {
                 FadeFrom::Still => {
                     if let Some(still) = self.still.as_ref().filter(|still| model.pose_fits(still)) {
-                        pose.blend_from_nodes(still, w, nodes);
+                        // a still last written hidden is only right in the hitbox nodes, its fingers, toes and head end
+                        // are from whenever it was last drawn: those come straight from the new clip, not faded from it
+                        // (the hitbox nodes fade with the same sums either way, so hitboxes don't change)
+                        let fade = if self.still_partial { Nodes::Only(hit) } else { nodes };
+                        pose.blend_from_nodes(still, w, fade);
                     }
                 }
                 FadeFrom::Clip(prev_skin, prev_time) => {
@@ -102,6 +107,7 @@ impl PlayerAnim {
                 *still = model.new_pose();
             }
             still.copy_from_nodes(pose, nodes);
+            self.still_partial = matches!(nodes, Nodes::Only(_));
         }
 
         // the upper layer at the clock and weight advance gave it
