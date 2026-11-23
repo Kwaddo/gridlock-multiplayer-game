@@ -29,6 +29,8 @@ const ALWAYS_SEEN_WITHIN: f32 = 2.5;
 const BODY_REACH: f32 = 1.2;
 // the sight lines aim this high above render_position(), anywhere under the walls' top does
 const SIGHT_HEIGHT: f32 = 1.0;
+// sight lines to a body are at most this far apart where it stands, metres
+const SIGHT_STEP: f32 = 0.25;
 
 /// Bodies this frame, for the dev overlay: animation clocks moved, poses
 /// worked out in full and for hitboxes only, bodies drawn (main view and mirror).
@@ -111,19 +113,23 @@ fn sees_from_inside(m: &Maze, eye: Vec3) -> bool {
     eye.y < m.wall_height && m.is_open(cx, cy)
 }
 
-// whether walls block every sight line from the eye to the body: its middle and points out to
-// BODY_REACH either side, no further apart than a cell, so no gap a cell wide fits between two of them
+// whether walls block every sight line from the eye to the body: its middle and points either side
+// out to where sight lines graze a disc of BODY_REACH around it, no more than SIGHT_STEP apart
+// (an opening seen at an angle shows a strip much narrower than a cell, so a cell's spacing misses it)
 // walls are full height boxes and the eye is under their top, so this is a top down question
 fn hidden_by_walls(m: &Maze, eye: Vec3, at: Vec3) -> bool {
     let flat = vec2(at.x - eye.x, at.z - eye.z);
-    if flat.length() < ALWAYS_SEEN_WITHIN {
+    let d = flat.length();
+    if d < ALWAYS_SEEN_WITHIN {
         return false;
     }
-    let side = vec2(-flat.y, flat.x).normalize();
-    let steps = (BODY_REACH / (m.cell_size * 0.9).max(0.1)).ceil().max(1.0) as i32;
+    let side = vec2(-flat.y, flat.x) / d;
+    // the tangent to the disc meets the body's side line this far out (d > ALWAYS_SEEN_WITHIN > BODY_REACH)
+    let reach = BODY_REACH * d / (d * d - BODY_REACH * BODY_REACH).sqrt();
+    let steps = (reach / SIGHT_STEP).ceil() as i32;
     let middle = at + vec3(0.0, SIGHT_HEIGHT, 0.0);
     (-steps..=steps).all(|k| {
-        let off = side * (BODY_REACH * k as f32 / steps as f32);
+        let off = side * (reach * k as f32 / steps as f32);
         let target = middle + vec3(off.x, 0.0, off.y);
         let to = target - eye;
         let dist = to.length();
@@ -181,6 +187,40 @@ mod tests {
         assert!(!hidden_by_walls(&m, eye, body));
         // well behind the wall, nothing shows
         assert!(hidden_by_walls(&m, eye, cell(5.0, 5.0)));
+    }
+
+    // seen at an angle through a one-cell opening, a body shows only a narrow strip, off its middle:
+    // any strip 0.3 m wide must count as seen (checked against sight lines 1 cm apart)
+    #[test]
+    fn a_strip_seen_through_an_opening_at_an_angle_is_seen() {
+        let m = maze(&[(3, 0), (3, 1), (3, 2), (3, 4), (3, 5), (3, 6)]);
+        let eye = cell(1.0, 1.0) + vec3(0.0, 1.6, 0.0);
+        let blocked = |target: Vec3| {
+            let to = target - eye;
+            let dist = to.length();
+            m.ray_hits_wall_before(eye, to / dist, dist, dist - 0.1)
+        };
+        let mut old_misses = 0;
+        for i in 0..60 {
+            for j in 0..120 {
+                let at = vec3(3.0 * 1.8 + 1.0 + i as f32 * 0.04, 0.0, j as f32 * 0.105);
+                let flat = vec2(at.x - eye.x, at.z - eye.z);
+                let side = vec2(-flat.y, flat.x).normalize();
+                let point = |o: f32| at + vec3(side.x * o, SIGHT_HEIGHT, side.y * o);
+                let (mut run, mut widest) = (0, 0);
+                for k in -120..=120 {
+                    run = if blocked(point(k as f32 * 0.01)) { 0 } else { run + 1 };
+                    widest = widest.max(run);
+                }
+                if widest >= 30 {
+                    assert!(!hidden_by_walls(&m, eye, at), "body at {at:?} shows {widest} cm");
+                    if [-BODY_REACH, 0.0, BODY_REACH].iter().all(|&o| blocked(point(o))) {
+                        old_misses += 1;
+                    }
+                }
+            }
+        }
+        assert!(old_misses > 0, "the sweep should cover strips three sight lines miss");
     }
 
     #[test]
