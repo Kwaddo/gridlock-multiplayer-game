@@ -70,11 +70,13 @@ impl Server {
         }
         // what rarely changes goes out ahead of the state that may first show it
         self.sync_player_info();
-        let due = self
-            .last_state_broadcast
-            .map_or(true, |t| t.elapsed() >= game::STATE_BROADCAST_INTERVAL);
+        let due = self.state_cadence.due(now_tick);
         if due || self.players.len() != self.last_broadcast_players {
-            self.last_state_broadcast = Some(Instant::now());
+            if !due {
+                // a join or leave went out early: the next one is a full
+                // interval after it
+                self.state_cadence.restart(now_tick);
+            }
             self.last_broadcast_players = self.players.len();
             broadcast::broadcast_state_with_events(&self.outbox, &self.players);
             // One-shot movement events have now gone out; they stay set until

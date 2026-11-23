@@ -20,7 +20,8 @@ pub struct BotManager {
     bot_addrs: Vec<PeerId>,
     bot_states: HashMap<PeerId, BotState>,
     last_tick: Instant,
-    tick_interval: Duration,
+    /// Paces bot ticks to an even 30 a second.
+    cadence: crate::cadence::Cadence,
     next_bot_idx: u16,
     range_challenge_deadline: Option<Instant>,
 }
@@ -31,7 +32,7 @@ impl BotManager {
             bot_addrs: Vec::new(),
             bot_states: HashMap::new(),
             last_tick: Instant::now(),
-            tick_interval: Duration::from_millis(33), // 33 ticks per second
+            cadence: crate::cadence::Cadence::new(crate::cadence::HZ30),
             next_bot_idx: 0,
             range_challenge_deadline: None,
         }
@@ -211,12 +212,11 @@ impl BotManager {
     ) {
         // one clock read for the whole bot tick (on the web host each is a JS call)
         let now = Instant::now();
-        let elapsed = now.saturating_duration_since(self.last_tick);
-        if elapsed < self.tick_interval {
+        if !self.cadence.due(now) {
             return;
-        } else {
-            self.last_tick = now;
         }
+        let elapsed = now.saturating_duration_since(self.last_tick);
+        self.last_tick = now;
         // Step by the real time since the last bot tick: the host may tick
         // less often than the gate allows (an idle native host waits up to
         // 100 ms for a packet). Capped so a stall doesn't make bots jump.

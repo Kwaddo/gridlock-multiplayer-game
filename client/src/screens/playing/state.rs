@@ -119,8 +119,8 @@ pub struct PlayingState {
 
     // remember last weapon name sent to server so we only transmit changes.
     pub last_sent_weapon: String,
-    /// When the last position update went out, and the state flags it carried.
-    pub last_position_sent: Option<platform::Instant>,
+    /// Paces position updates; and the state flags the last one carried.
+    pub position_cadence: gridlock_server::cadence::Cadence,
     pub last_state_flags_sent: u8,
 
     // countdown timers (server-synchronized)
@@ -343,7 +343,7 @@ impl PlayingState {
             pending_hits: Vec::new(),
             weapons: WeaponInventory::new(),
             last_sent_weapon: String::new(),
-            last_position_sent: None,
+            position_cadence: gridlock_server::cadence::Cadence::new(gridlock_server::cadence::HZ30),
             last_state_flags_sent: 0,
             target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
             hit_marker_timer: 0.0,

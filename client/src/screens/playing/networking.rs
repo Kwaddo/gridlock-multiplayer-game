@@ -7,7 +7,6 @@ use transport::Link;
 
 use super::PlayingState;
 
-const POSITION_SEND_INTERVAL: platform::Duration = platform::Duration::from_millis(33);
 /// How often to repeat a bomb pickup request while standing on the dropped bomb.
 const BOMB_PICKUP_INTERVAL: platform::Duration = platform::Duration::from_millis(200);
 
@@ -214,12 +213,11 @@ impl PlayingState {
                 self.last_sent_weapon = current_weapon_name.to_string();
             }
 
-            // Position goes out at most 30 times a second (the server sends
+            // Position goes out an even 30 times a second (the server sends
             // the world back at that rate too), but at once for a movement
             // event or a change of stance, so those are never delayed.
-            let due = self
-                .last_position_sent
-                .map_or(true, |t| t.elapsed() >= POSITION_SEND_INTERVAL);
+            let now = platform::Instant::now();
+            let due = self.position_cadence.due(now);
             if due || event_flags != 0 || state_flags != self.last_state_flags_sent {
                 let msg = ClientMsg::Position {
                     position: (self.position.x, self.position.y, self.position.z),
@@ -231,7 +229,10 @@ impl PlayingState {
                 }
                 .encode();
                 s.send(&msg);
-                self.last_position_sent = Some(platform::Instant::now());
+                if !due {
+                    // sent early: the next regular one is a full interval on
+                    self.position_cadence.restart(now);
+                }
                 self.last_state_flags_sent = state_flags;
             }
             self.prev_was_sliding = self.movement_state.is_sliding;

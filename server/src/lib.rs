@@ -7,6 +7,7 @@
 #[macro_use]
 mod log;
 mod bot;
+pub mod cadence;
 mod math;
 mod maze;
 mod net;

@@ -71,7 +71,8 @@ pub struct Server {
     last_tick: Instant,
     // Regen fires at most once per second to avoid per-packet health spikes
     last_regen_tick: Instant,
-    last_state_broadcast: Option<Instant>,
+    /// Paces the world state broadcast.
+    state_cadence: crate::cadence::Cadence,
     /// Last run of the tick's rate-limited bookkeeping (inactivity timeouts).
     last_bookkeeping: Option<Instant>,
     /// Player count at the last state broadcast: a join or leave sends at once.
@@ -122,7 +123,7 @@ impl Server {
             },
             last_tick: Instant::now(),
             last_regen_tick: Instant::now(),
-            last_state_broadcast: None,
+            state_cadence: crate::cadence::Cadence::new(game::STATE_BROADCAST_INTERVAL),
             last_bookkeeping: None,
             last_broadcast_players: 0,
             last_chat: HashMap::new(),
