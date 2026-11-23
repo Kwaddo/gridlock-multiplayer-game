@@ -180,7 +180,9 @@ impl PlayingState {
                         self.knife_attack_lock_timer = KNIFE_LIGHT_ANIM_DURATION;
                     }
 
+                    let first_tracer = self.tracers.len();
                     self.fire_hitscan(&mut maze);
+                    self.queue_shot_relay(first_tracer);
                 }
                 // `fire_hitscan` borrowed all of `self`; take the active weapon again
                 let weapon = self.weapons.active_mut();

@@ -153,7 +153,7 @@ fn bot_shots_of_one_tick_share_a_packet() {
     assert_eq!(out.len(), 2, "one packet per human, none for bots");
     for peer in [human, other_human] {
         let msgs = to(&out, peer);
-        let [ServerMsg::BotShots(shots)] = msgs.as_slice() else { panic!("not one bot-shot batch: {msgs:?}") };
+        let [ServerMsg::Shots(shots)] = msgs.as_slice() else { panic!("not one bot-shot batch: {msgs:?}") };
         assert_eq!(shots.len(), 3);
         assert_eq!(shots[2].shooter_id, 9002);
         assert_eq!(shots[2].start, (12.0, round_to_grid(1.2), 70.0));

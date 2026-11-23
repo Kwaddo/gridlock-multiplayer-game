@@ -131,7 +131,7 @@ fn state_entries_are_19_bytes() {
 fn truncated_new_messages_are_rejected() {
     let packets = [
         ServerMsg::State { world: 0, players: vec![state(1, (1.0, 2.0, 3.0), 1.0)] }.encode(),
-        ServerMsg::BotShots(vec![BotShot { shooter_id: 1, victim_id: 2, start: (0.0, 0.0, 0.0), end: (1.0, 1.0, 1.0) }])
+        ServerMsg::Shots(vec![Shot { shooter_id: 1, victim_id: 2, start: (0.0, 0.0, 0.0), end: (1.0, 1.0, 1.0) }])
             .encode(),
         ServerMsg::PlayerInfo(vec![PlayerInfo { id: 3, name: "a".into(), ..Default::default() }]).encode(),
     ];

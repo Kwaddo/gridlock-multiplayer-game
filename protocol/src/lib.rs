@@ -24,7 +24,7 @@ pub const MSG_JOIN: u8 = 1; // client -> server: username
 pub const MSG_WELCOME: u8 = 2; // server -> client: player id, username
 pub const MSG_POSITION: u8 = 3; // client -> server: x, y, yaw
 pub const MSG_STATE: u8 = 4; // server -> client: all player positions
-pub const MSG_SHOOT: u8 = 5; // client -> server: reserved (not handled by server)
+pub const MSG_SHOOT: u8 = 5; // client -> server: I fired, tracer end point (relayed to others as `MSG_SHOTS`)
 pub const MSG_HIT: u8 = 6; // server -> client: you got hit
 pub const MSG_DISCONNECT: u8 = 7; // client -> server: leaving
 pub const MSG_MAZE: u8 = 8; // server -> client: maze layout
@@ -167,7 +167,7 @@ pub const SMOKE_NO_WINNER: u8 = 255; // the round isn't over yet
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;
 pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
-pub const MSG_BOT_SHOT: u8 = 52; // server -> client: every shot bots fired in one bot tick, see `BotShot`
+pub const MSG_SHOTS: u8 = 52; // server -> client: shots fired by bots (one bot tick) or another player, see `Shot`
 
 pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
 pub const FLAG_SILENT: u8 = 1 << 7; // no footstep sounds

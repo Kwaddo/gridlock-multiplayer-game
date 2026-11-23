@@ -5,6 +5,7 @@ pub mod world_change;
 pub mod game_flow;
 pub mod other;
 pub mod chat;
+pub mod shoot;
 
 pub use join::handle_join;
 pub use disconnect::handle_disconnect;
@@ -18,6 +19,7 @@ pub use game_flow::{
     execute_scheduled_match_end,
 };
 pub use chat::{announce_joined, announce_left, broadcast_notice, handle_chat};
+pub use shoot::handle_shoot;
 pub use other::{
     handle_wall_broken,
     handle_discover,

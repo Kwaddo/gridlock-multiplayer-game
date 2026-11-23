@@ -39,8 +39,8 @@ pub enum ServerMsg {
     MatchTimer { secs: u16 },
     SndRoundState(SndRound),
     LobbyLeader { id: u32 }, // 0 = no leader
-    /// Every shot bots fired in one bot tick.
-    BotShots(Vec<BotShot>),
+    /// Every shot bots fired in one bot tick, or one shot another player fired.
+    Shots(Vec<Shot>),
     /// What rarely changes about players, see `PlayerInfo`.
     PlayerInfo(Vec<PlayerInfo>),
     Chat { from_id: u32, name: String, text: String }, // from_id 0 = server notice
@@ -210,8 +210,8 @@ impl ServerMsg {
                 w.finish()
             }
             ServerMsg::LobbyLeader { id } => Writer::new(MSG_LOBBY_LEADER).u32(*id).finish(),
-            ServerMsg::BotShots(shots) => {
-                let mut w = Writer::new(MSG_BOT_SHOT);
+            ServerMsg::Shots(shots) => {
+                let mut w = Writer::new(MSG_SHOTS);
                 w.u8(shots.len().min(255) as u8);
                 for shot in shots.iter().take(255) {
                     shot.write(&mut w);
@@ -418,12 +418,12 @@ impl ServerMsg {
                 bomb_dropped: r.bool().unwrap_or(false), // older packets have no bomb_dropped byte
             }),
             MSG_LOBBY_LEADER => ServerMsg::LobbyLeader { id: r.u32()? },
-            MSG_BOT_SHOT => {
+            MSG_SHOTS => {
                 let mut shots = Vec::new();
                 for _ in 0..r.u8()? {
-                    shots.push(BotShot::read(&mut r)?);
+                    shots.push(Shot::read(&mut r)?);
                 }
-                ServerMsg::BotShots(shots)
+                ServerMsg::Shots(shots)
             }
             MSG_PLAYER_INFO => {
                 let mut entries = Vec::new();

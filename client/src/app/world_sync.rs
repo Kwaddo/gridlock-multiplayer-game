@@ -13,7 +13,7 @@ mod merge;
 mod players;
 mod world_change;
 
-use combat::{apply_damage, apply_death, apply_kill_feed, spawn_bot_shots};
+use combat::{apply_damage, apply_death, apply_kill_feed, spawn_shots};
 use gun_game::apply_gun_level;
 use merge::{apply_player_info, merge_players};
 use players::{apply_player_list, apply_team_colors};
@@ -144,8 +144,8 @@ pub fn sync_world(
         if let Some((damage, attacker_id, is_stun)) = updates.damage_taken {
             apply_damage(playing_state, damage, attacker_id, is_stun);
         }
-        if let Some(bot_shots) = updates.bot_shots {
-            spawn_bot_shots(playing_state, bot_shots);
+        if let Some(shots) = updates.shots {
+            spawn_shots(playing_state, shots, player_id);
         }
         if let Some(kills) = updates.kill_feed {
             apply_kill_feed(playing_state, kills, player_id, username);

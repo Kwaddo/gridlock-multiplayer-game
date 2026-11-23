@@ -16,6 +16,28 @@ pub fn to_humans(socket: &Outbox, players: &HashMap<PeerId, Player>, msg: &[u8])
     }
 }
 
+/// Height above a shooter's feet that a relayed tracer starts at (about the
+/// gun), for bots' and players' shots alike.
+pub const SHOT_START_HEIGHT: f32 = 1.2;
+
+/// Send `shots` as one `MSG_SHOTS` to every human in `world` except `skip`
+/// (a player who fired drew their own shot already). Bots' and players'
+/// shots both go out through here, so they look the same.
+pub fn shots_to_world(
+    socket: &Outbox,
+    players: &HashMap<PeerId, Player>,
+    world: WorldId,
+    shots: Vec<Shot>,
+    skip: Option<PeerId>,
+) {
+    let msg = Packet::from(ServerMsg::Shots(shots).encode());
+    for (addr, p) in players.iter() {
+        if !p.is_bot && p.world == world && Some(*addr) != skip {
+            socket.send_shared(&msg, *addr);
+        }
+    }
+}
+
 /// Send the full connected player list to a single destination
 #[allow(dead_code)]
 pub fn send_player_list(

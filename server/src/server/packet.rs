@@ -127,6 +127,11 @@ impl Server {
                 self.bot_manager.bot_states_mut(),
                 &mut self.team_score,
             ),
+            // smoke break: only a hunter who may fire is seen firing, a hider's shot would give their box away
+            ClientMsg::Shoot { .. } if self.smoke_on() && !self.smoke_state.as_ref().is_some_and(|s| s.may_fire(src_addr)) => {}
+            ClientMsg::Shoot { end } => {
+                handlers::handle_shoot(&self.outbox, &mut self.players, src_addr, end, Instant::now())
+            }
             ClientMsg::RespawnRequest => {
                 handlers::handle_respawn_request(
                     &self.outbox,
@@ -221,6 +226,7 @@ impl Server {
                         regen_resume_at: None,
                         in_box: false,
                         smoke_alias: None,
+                        last_shot_at: None,
 
                     };
 

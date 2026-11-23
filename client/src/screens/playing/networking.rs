@@ -10,6 +10,8 @@ use super::PlayingState;
 
 /// How often to repeat a bomb pickup request while standing on the dropped bomb.
 const BOMB_PICKUP_INTERVAL: platform::Duration = platform::Duration::from_millis(200);
+/// Most shots kept for the next send (a frame fires one at most).
+const MAX_PENDING_SHOTS: usize = 8;
 
 impl PlayingState {
     pub fn send_network(
@@ -225,6 +227,12 @@ impl PlayingState {
                 self.last_sent_weapon = current_weapon_name.to_string();
             }
 
+            // after the weapon change, so the server rate-limits a shot by the
+            // gun that fired it
+            for end in self.pending_shots.drain(..) {
+                s.send(&ClientMsg::Shoot { end: (end.x, end.y, end.z) }.encode());
+            }
+
             // Position goes out an even 30 times a second (the server sends
             // the world back at that rate too), but at once for a movement
             // event or a change of stance, so those are never delayed.
@@ -248,11 +256,28 @@ impl PlayingState {
                 self.last_state_flags_sent = state_flags;
             }
             self.prev_was_sliding = self.movement_state.is_sliding;
+        } else {
+            // offline nobody sees them, and they must not go out late on a later link
+            self.pending_shots.clear();
         }
     }
 }
 
 impl PlayingState {
+    /// Queue a `ClientMsg::Shoot` for the shot that just pushed the tracers
+    /// from `first_tracer` on, so the others see it. The knife and punch send
+    /// none. A shotgun sends one shot, its pellets' tracer ends averaged.
+    pub(super) fn queue_shot_relay(&mut self, first_tracer: usize) {
+        if self.weapons.active().id == crate::weapons::stats::WeaponId::Knife {
+            return;
+        }
+        let Some(end) = self.tracers.get(first_tracer..).and_then(shot_relay_end) else { return };
+        // a send drains them every frame; this only bounds a stall
+        if self.pending_shots.len() < MAX_PENDING_SHOTS {
+            self.pending_shots.push(end);
+        }
+    }
+
     /// The match this client's lobby console is set up for, as sent with
     /// `StartGame` and shared with the other players as `LobbySettings`.
     pub(super) fn lobby_settings_now(&self, config: &crate::core::GameConfig) -> LobbySettings {
@@ -283,5 +308,40 @@ impl PlayingState {
             (self.autofill_red_bots, self.autofill_blue_bots)
         };
         LobbySettings { mode, duration, red_bots, blue_bots, diff_mask }
+    }
+}
+
+/// Where one shot's tracers end on average: a shotgun's pellets around the
+/// middle of the spread. `None` for no tracers.
+fn shot_relay_end(tracers: &[crate::weapons::effects::BulletTracer]) -> Option<macroquad::prelude::Vec3> {
+    let sum = tracers.iter().map(|t| t.end).sum::<macroquad::prelude::Vec3>();
+    (!tracers.is_empty()).then(|| sum / tracers.len() as f32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shot_relay_end;
+    use crate::weapons::effects::BulletTracer;
+    use macroquad::prelude::{vec3, Vec3};
+
+    fn tracer(end: Vec3) -> BulletTracer {
+        BulletTracer {
+            start: Vec3::ZERO,
+            end,
+            lifetime: 0.1,
+            speed: 1.0,
+            progress: 0.0,
+            tracer_length: 0.5,
+            tracer_color: [255; 4],
+            tracer_thickness: 0.03,
+        }
+    }
+
+    #[test]
+    fn a_shot_relays_where_its_tracers_end_on_average() {
+        assert_eq!(shot_relay_end(&[]), None);
+        assert_eq!(shot_relay_end(&[tracer(vec3(1.0, 2.0, 3.0))]), Some(vec3(1.0, 2.0, 3.0)));
+        let pellets = [tracer(vec3(-1.0, 1.0, 10.0)), tracer(vec3(1.0, 1.0, 10.0)), tracer(vec3(0.0, 4.0, 10.0))];
+        assert_eq!(shot_relay_end(&pellets), Some(vec3(0.0, 2.0, 10.0)));
     }
 }

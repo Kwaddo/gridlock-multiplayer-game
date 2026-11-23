@@ -7,11 +7,12 @@ use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
 use crate::bot::personality::{ self, BotPersonalityId };
-use crate::protocols::{BotShot, ServerMsg};
+use crate::protocols::Shot;
+use crate::server::broadcast;
 use crate::server::handlers::other;
 /// Seconds between a match bot's decisions (plus up to 0.1 s jitter).
 const DECISION_INTERVAL: f32 = 0.2;
-/// Bot shots per `MSG_BOT_SHOT` packet: 20 bytes each, so one stays under 1100 bytes.
+/// Bot shots per `MSG_SHOTS` packet: 20 bytes each, so one stays under 1100 bytes.
 const MAX_SHOTS_PER_PACKET: usize = 50;
 /// Longest step (seconds) one bot tick simulates, however long it has been.
 const MAX_BOT_DT: f32 = 0.1;
@@ -145,6 +146,7 @@ impl BotManager {
             regen_resume_at: None,
             in_box: false,
             smoke_alias: None,
+            last_shot_at: None,
         };
 
         let bot_state = BotState {
@@ -412,7 +414,7 @@ pub(crate) fn send_bot_shots(socket: &Outbox, players: &HashMap<PeerId, Player>,
 }
 
 /// Tell the humans in each shooter's world about `shots` (shooter, victim id)
-/// at once: one `MSG_BOT_SHOT` per player per bot tick, not one per shot.
+/// at once: one `MSG_SHOTS` per player per bot tick, not one per shot.
 /// Damage moves nobody, so the tracer ends are where a shot-by-shot send
 /// found them too. Each packet's shots are built straight into the message,
 /// with no copies. A shot whose shooter or victim is gone is not sent (it
@@ -425,24 +427,19 @@ fn send_bot_shot_iter(
     shots: impl Iterator<Item = (PeerId, u32)>,
 ) {
     let position_of_id = |id: u32| players.values().find(|p| p.id == id).map(|p| p.position);
-    let send = |world: WorldId, batch: Vec<BotShot>| {
-        let msg = crate::net::Packet::from(ServerMsg::BotShots(batch).encode());
-        for (addr, p) in players.iter() {
-            if !p.is_bot && p.world == world {
-                socket.send_shared(&msg, *addr);
-            }
-        }
+    let send = |world: WorldId, batch: Vec<Shot>| {
+        broadcast::shots_to_world(socket, players, world, batch, None);
     };
     // bots are almost always all in one world, so this holds one batch
-    let mut batches: Vec<(WorldId, Vec<BotShot>)> = Vec::new();
+    let mut batches: Vec<(WorldId, Vec<Shot>)> = Vec::new();
     for (attacker_addr, victim_id) in shots {
         let Some(shooter) = players.get(&attacker_addr) else { continue };
         let Some(to) = position_of_id(victim_id) else { continue };
         let from = shooter.position;
-        let shot = BotShot {
+        let shot = Shot {
             shooter_id: shooter.id,
             victim_id,
-            start: (from.0, from.1 + 1.2, from.2),
+            start: (from.0, from.1 + broadcast::SHOT_START_HEIGHT, from.2),
             end: (to.0, to.1 + 1.0, to.2),
         };
         let slot = match batches.iter().position(|(w, _)| *w == shooter.world) {

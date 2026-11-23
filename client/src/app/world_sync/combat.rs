@@ -35,10 +35,15 @@ pub(super) fn apply_damage(
     playing_state.announcements.push((ann, 2.0));
 }
 
-/// Spawns tracers and muzzle flashes for shots fired by bots.
-pub(super) fn spawn_bot_shots(
+/// Spawns tracers and muzzle flashes for shots fired by bots and by the
+/// other players (`MSG_SHOTS`), the same for both. Our own shots were drawn
+/// when we fired, so one that comes back (`player_id`) is not drawn again.
+/// Every shot someone else fired goes through the loop below once, so that
+/// is where its gunfire sound belongs too.
+pub(super) fn spawn_shots(
     playing_state: &mut PlayingState,
-    bot_shots: Vec<(u32, Vec3, Vec3)>,
+    shots: Vec<(u32, Vec3, Vec3)>,
+    player_id: u32,
 ) {
     // The server sends every bot shot to every human, wherever they are: a
     // shot from a bot in another world (the maze, seen from the lobby) would
@@ -46,14 +51,15 @@ pub(super) fn spawn_bot_shots(
     // a bot's shots only to its world; this also covers older hosts.) A
     // shooter we do not know yet still shows, as before.
     let world = playing_state.current_world;
-    let mut bot_shots = bot_shots;
-    bot_shots.retain(|&(shooter, ..)| {
-        playing_state.other_players.iter().find(|p| p.id == shooter).is_none_or(|p| p.world == world)
+    let mut shots = shots;
+    shots.retain(|&(shooter, ..)| {
+        shooter != player_id
+            && playing_state.other_players.iter().find(|p| p.id == shooter).is_none_or(|p| p.world == world)
     });
-    for (shooter, start, end) in bot_shots {
-        // the bot's body kicks too, before this only the tracer and flash showed
-        if let Some(bot) = playing_state.other_players.iter_mut().find(|p| p.id == shooter) {
-            bot.fired = true;
+    for (shooter, start, end) in shots {
+        // the shooter's body kicks too (a bot's or a player's), before this only the tracer and flash showed
+        if let Some(body) = playing_state.other_players.iter_mut().find(|p| p.id == shooter) {
+            body.fired = true;
         }
         playing_state
             .tracers

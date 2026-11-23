@@ -40,7 +40,8 @@ pub struct NetUpdate {
     pub self_max_hp: Option<f32>,
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
-    pub bot_shots: Option<Vec<(u32, Vec3, Vec3)>>,
+    /// (shooter, start, end) of each shot a bot or another player fired (`MSG_SHOTS`)
+    pub shots: Option<Vec<(u32, Vec3, Vec3)>>,
     // every box in one world, the whole list each time
     pub boxes: Option<(WorldId, Vec<CardboardBox>)>, // (shooter, start, end), before this the shooter was dropped
     pub lobby_leader_id: Option<u32>,         // host player ID (0 = none)
@@ -157,7 +158,7 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
         smoke_feed: Vec::new(),
         received_any: false,
         self_freeze_secs: None,
-        bot_shots: None,
+        shots: None,
         boxes: None,
         lobby_leader_id: None,
         lobby_settings: None,
@@ -343,8 +344,8 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
                 let how = if reason == LEAVE_TIMED_OUT { "timed out" } else { "left the game" };
                 update.chat.push(ChatEvent::Notice(format!("{} {}", name, how)));
             }
-            ServerMsg::BotShots(fired) => {
-                let shots = update.bot_shots.get_or_insert_with(Vec::new);
+            ServerMsg::Shots(fired) => {
+                let shots = update.shots.get_or_insert_with(Vec::new);
                 shots.extend(fired.iter().map(|s| {
                     (s.shooter_id, vec3(s.start.0, s.start.1, s.start.2), vec3(s.end.0, s.end.1, s.end.2))
                 }));

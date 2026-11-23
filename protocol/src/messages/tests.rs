@@ -66,9 +66,9 @@ fn server_messages_round_trip() {
         is_bot: true,
     }]));
     rt_server(ServerMsg::MatchTimer { secs: 65535 });
-    let shot = BotShot { shooter_id: 1, victim_id: 2, start: (0.0, 1.25, 0.0), end: (1.0, 1.0, 76.5) };
-    rt_server(ServerMsg::BotShots(vec![shot, BotShot { shooter_id: 3, ..shot }]));
-    rt_server(ServerMsg::BotShots(Vec::new()));
+    let shot = Shot { shooter_id: 1, victim_id: 2, start: (0.0, 1.25, 0.0), end: (1.0, 1.0, 76.5) };
+    rt_server(ServerMsg::Shots(vec![shot, Shot { shooter_id: 3, ..shot }]));
+    rt_server(ServerMsg::Shots(Vec::new()));
     // on the fixed-point grid again (1/64 m, quarter turn) so it comes back exact
     let cbox = CardboardBox { id: 7, position: (2.0, 0.0, -9.5), yaw: std::f32::consts::FRAC_PI_2, carrier: 0 };
     rt_server(ServerMsg::Boxes { world: 0, boxes: vec![cbox, CardboardBox { id: 65535, carrier: 42, ..cbox }] });
@@ -165,6 +165,19 @@ fn client_messages_round_trip() {
 fn boxes_message_size() {
     let b = CardboardBox { id: 1, position: (0.0, 0.0, 0.0), yaw: 0.0, carrier: 0 };
     assert_eq!(ServerMsg::Boxes { world: 0, boxes: vec![b; 3] }.encode().len(), 3 + 3 * 14);
+}
+
+#[test]
+fn shoot_round_trips_with_its_wire_layout() {
+    let end = (12.5, -1.25, 300.75);
+    let m = ClientMsg::Shoot { end };
+    let bytes = m.encode();
+    // [MSG_SHOOT][end: 3 x f32]
+    assert_eq!(bytes.len(), 13);
+    assert_eq!(bytes[0], MSG_SHOOT);
+    rt_client(m);
+    // a truncated end point is malformed, not a shot at the origin
+    assert_eq!(ClientMsg::decode(&bytes[..12]), None);
 }
 
 // a kill feed from before the headshot byte still reads, as not a headshot

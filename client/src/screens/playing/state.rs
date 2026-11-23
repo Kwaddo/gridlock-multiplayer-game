@@ -109,6 +109,8 @@ pub struct PlayingState {
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
     pub pending_hits: Vec<(u32, f32, bool, bool)>, // victim_id, damage, backstab attempt?, headshot (any pellet hit the head)
+    /// Where each gun shot fired since the last send ended, for `ClientMsg::Shoot`.
+    pub pending_shots: Vec<Vec3>,
 
     pub weapons: WeaponInventory,
 
@@ -337,6 +339,7 @@ impl PlayingState {
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
             pending_hits: Vec::new(),
+            pending_shots: Vec::new(),
             weapons: WeaponInventory::new(),
             last_sent_weapon: String::new(),
             position_cadence: gridlock_server::cadence::Cadence::new(gridlock_server::cadence::HZ30),
