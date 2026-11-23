@@ -5,7 +5,7 @@
 "use strict";
 
 (function (gridlockWeb) {
-    const PLUGIN_VERSION = 4;
+    const PLUGIN_VERSION = 5;
 
     // Event kinds shared with transport/src/web.rs.
     const EV_PEER_JOINED = 1;
@@ -38,7 +38,7 @@
     const HELLO_MAX_MS = 12000;
     // A player whose channel has not opened this long after it started (or
     // after it lost its host) gives up: the socket closes, which the game
-    // reads as a failed connect (its own timeout, LINK_TIMEOUT, is 25 s).
+    // reads as a failed connect (the game's own LINK_TIMEOUT matches it at 20 s).
     const PLAYER_GIVE_UP_MS = 20000;
     // A registry that holds polls until something arrives (both registries
     // do) marks its replies with this header; the page then polls again at

@@ -97,7 +97,7 @@ pub mod storage {
 #[cfg(target_arch = "wasm32")]
 #[no_mangle]
 pub extern "C" fn gridlock_web_crate_version() -> u32 {
-    4
+    5
 }
 
 #[cfg(target_arch = "wasm32")]
