@@ -200,6 +200,9 @@ function listedState(store) {
 // Returns false when `apply` refused the change.
 async function commit(store, apply, applied, { ctx, check = true } = {}) {
   const state = await loadState(store);
+  // Nothing to change (a leave for a room that was never listed, say):
+  // write nothing, so a listing or heartbeat written meanwhile stays.
+  if (applied(state)) return true;
   if (apply(state) === false) return false;
   await putState(store, state);
   if (!check) return true;
