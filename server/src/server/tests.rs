@@ -417,7 +417,9 @@ fn a_join_sends_the_list_at_once_with_any_owed_scores() {
     kill(&mut server, a, b);
     server.tick();
     server.drain_outbox();
-    kill(&mut server, c, a);
+    // an opponent of a (friendly fire is off in team modes)
+    let foe = *[b, c].iter().find(|p| server.players[*p].team != server.players[&a].team).unwrap();
+    kill(&mut server, foe, a);
     server.tick();
     assert!(player_lists(&server.drain_outbox(), c).is_empty(), "within the gap");
 

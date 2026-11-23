@@ -38,6 +38,15 @@ fn the_first_tick_starts_round_1_and_moves_everyone() {
     }
 }
 
+// the server list counts people and bots, never the decoy crowd
+#[test]
+fn decoys_are_not_counted_as_players_or_bots() {
+    let (mut server, _, _) = match_of_two();
+    server.tick();
+    assert!(server.players.keys().any(|p| is_decoy(*p)), "the crowd is out");
+    assert_eq!((server.player_count(), server.bot_count()), (2, 0));
+}
+
 #[test]
 fn coins_only_ever_reach_hiders() {
     let (mut server, a, b) = match_of_two();

@@ -165,14 +165,15 @@ impl Server {
     }
 
     /// Connected players, bots included (the same count discovery reports).
+    /// Smoke Break's decoys are scenery, not players: not counted.
     pub fn player_count(&self) -> usize {
-        self.players.len()
+        self.players.keys().filter(|p| !smoke_break::is_decoy(**p)).count()
     }
 
     /// How many of [`player_count`](Self::player_count) are bots: a late
     /// joiner takes a bot's place, so a game full of bots is still joinable.
     pub fn bot_count(&self) -> usize {
-        self.players.values().filter(|p| p.is_bot).count()
+        self.players.iter().filter(|(peer, p)| p.is_bot && !smoke_break::is_decoy(**peer)).count()
     }
 
     /// Packets queued since the last call, as `(destination, bytes)`.
