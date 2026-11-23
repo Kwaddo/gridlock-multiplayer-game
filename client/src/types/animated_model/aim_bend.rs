@@ -52,7 +52,27 @@ impl AnimatedModel {
             let tilt = Quat::from_axis_angle(axis, -pitch * share);
             pose.local[node].rotation = (tilt * pose.local[node].rotation).normalize();
         }
-        pose.global_valid.iter_mut().for_each(|v| *v = false); // the chain and every bone above it moved
+        // the chain and every bone above it moved, their saved places are stale
+        // the rest (hips and the armature, worked out above) didn't move, so they keep theirs and finish_pose
+        // doesn't work them out again, before this every saved place was dropped
+        for node in 0..pose.global_valid.len() {
+            if pose.global_valid[node] && self.moved_by_bend(node) {
+                pose.global_valid[node] = false;
+            }
+        }
+    }
+
+    // whether this node is a chain bone or hangs off one (its place follows the tilt)
+    fn moved_by_bend(&self, mut node: usize) -> bool {
+        loop {
+            if self.spine_chain.iter().any(|&(chain, _)| chain == node) {
+                return true;
+            }
+            match self.node_parents.get(node).copied().flatten() {
+                Some(parent) => node = parent,
+                None => return false,
+            }
+        }
     }
 }
 
@@ -89,9 +109,8 @@ mod tests {
 
     // a twisted spine (hips, 4 chain bones, head) so every parent has its own turn
     fn twisted_spine() -> AnimatedModel {
-        use super::super::gpu::GpuGeometry;
         use super::super::{LocalTransform, SharedGeometry};
-        use std::cell::{Cell, RefCell};
+        use std::cell::Cell;
         use std::rc::Rc;
         let turns = [
             Quat::from_euler(EulerRot::YXZ, 0.6, 0.1, 0.2),
@@ -106,7 +125,7 @@ mod tests {
             .map(|&rotation| LocalTransform { translation: vec3(0.0, 0.3, 0.05), rotation, scale: Vec3::splat(1.2) })
             .collect();
         AnimatedModel {
-            geometry: Rc::new(SharedGeometry { parts: Vec::new(), gpu: RefCell::new(GpuGeometry::Untried) }),
+            geometry: Rc::new(SharedGeometry::new(Vec::new())),
             gpu_drawn: Cell::new(false),
             pose: Pose::new(&node_rest, 6),
             node_rest,
@@ -150,6 +169,26 @@ mod tests {
             for (a, b) in fast.skin_mats.iter().zip(&slow.skin_mats) {
                 assert!(a.abs_diff_eq(*b, 1e-4), "{pitch}: {a:?} vs {b:?}");
             }
+        }
+    }
+
+    // keeping the hips' saved place gives the same pose, bit for bit, as dropping every saved place
+    #[test]
+    fn keeping_unmoved_places_changes_nothing() {
+        let model = twisted_spine();
+        for pitch in [-1.2, 0.3, 1.4] {
+            let (mut kept, mut dropped) = (model.new_pose(), model.new_pose());
+            model.sample_local(0.0, &mut kept);
+            model.sample_local(0.0, &mut dropped);
+            model.bend_upper_body(&mut kept, pitch);
+            model.bend_upper_body(&mut dropped, pitch);
+            assert!(kept.global_valid[0], "the hips' place should be kept");
+            assert!(!kept.global_valid[1..].iter().any(|&v| v), "chain places should be dropped");
+            dropped.global_valid.iter_mut().for_each(|v| *v = false);
+            model.finish_pose(&mut kept);
+            model.finish_pose(&mut dropped);
+            assert_eq!(kept.skin_mats, dropped.skin_mats);
+            assert_eq!(kept.joint_positions, dropped.joint_positions);
         }
     }
 

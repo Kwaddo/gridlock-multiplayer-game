@@ -150,6 +150,9 @@ struct SharedGeometry {
     parts: Vec<AnimatedPart>,
     /// GPU buffers for skinning in a shader, made on first use.
     gpu: RefCell<GpuGeometry>,
+    /// Some part has rigid (unskinned) vertices, which the CPU fallback
+    /// places by non-joint nodes (see `finish_pose`). Worked out once here.
+    has_rigid: bool,
 }
 
 thread_local! {
@@ -158,6 +161,11 @@ thread_local! {
 }
 
 impl SharedGeometry {
+    fn new(parts: Vec<AnimatedPart>) -> Self {
+        let has_rigid = parts.iter().any(|p| !p.rigid_vertices.is_empty());
+        Self { parts, gpu: RefCell::new(GpuGeometry::Untried), has_rigid }
+    }
+
     /// The geometry already loaded with the same content as `parts`, or
     /// `parts` as new shared geometry.
     fn shared(parts: Vec<AnimatedPart>) -> Rc<SharedGeometry> {
@@ -198,9 +206,9 @@ impl SharedGeometry {
                     return existing;
                 }
                 // a collision: keep this geometry unshared
-                return Rc::new(SharedGeometry { parts, gpu: RefCell::new(GpuGeometry::Untried) });
+                return Rc::new(SharedGeometry::new(parts));
             }
-            let geometry = Rc::new(SharedGeometry { parts, gpu: RefCell::new(GpuGeometry::Untried) });
+            let geometry = Rc::new(SharedGeometry::new(parts));
             cache.insert(key, Rc::downgrade(&geometry));
             geometry
         })

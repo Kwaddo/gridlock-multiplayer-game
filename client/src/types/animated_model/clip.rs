@@ -194,10 +194,7 @@ mod tests {
         }
         let normalize_scale = 1.5 / (hi - lo).max(0.0001);
         Ok(AnimatedModel {
-            geometry: Rc::new(super::super::SharedGeometry {
-                parts: Vec::new(),
-                gpu: std::cell::RefCell::new(super::super::gpu::GpuGeometry::Untried),
-            }),
+            geometry: Rc::new(super::super::SharedGeometry::new(Vec::new())),
             gpu_drawn: Cell::new(false),
             pose: super::super::Pose::new(&node_rest, joint_nodes.len()),
             joint_roles: super::super::joints::resolve_joint_roles(&joint_names),

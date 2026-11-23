@@ -61,10 +61,9 @@ impl Pose {
 /// different clip on the same skeleton.
 #[cfg(test)]
 pub(crate) fn test_rig(seed: u32, duration: f32) -> AnimatedModel {
-    use super::gpu::GpuGeometry;
     use super::{KeyframesQuat, KeyframesVec3, LocalTransform, NodeAnimationTrack, SharedGeometry};
     use macroquad::prelude::*;
-    use std::cell::{Cell, RefCell};
+    use std::cell::Cell;
     use std::rc::Rc;
 
     #[rustfmt::skip]
@@ -116,7 +115,7 @@ pub(crate) fn test_rig(seed: u32, duration: f32) -> AnimatedModel {
     let joint_nodes: Vec<usize> = (0..bones.len()).collect();
     let inverse_bind = (0..bones.len()).map(|i| Mat4::from_translation(vec3(0.0, -(i as f32) * 0.1, 0.0))).collect();
     AnimatedModel {
-        geometry: Rc::new(SharedGeometry { parts: Vec::new(), gpu: RefCell::new(GpuGeometry::Untried) }),
+        geometry: Rc::new(SharedGeometry::new(Vec::new())),
         gpu_drawn: Cell::new(true), // as if drawn on the gpu, so no cpu skinning in tests
         pose: Pose::new(&node_rest, bones.len()),
         joint_roles: super::joints::resolve_joint_roles(&names),

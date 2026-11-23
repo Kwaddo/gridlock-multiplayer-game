@@ -236,7 +236,7 @@ impl AnimatedModel {
         // work out every node now not just joints, so drawing can just read them later
         // before this the cpu fallback worked out the non joint ones while drawing
         // only the cpu fallback's rigid (unskinned) vertices read non joint nodes, so a mesh without any skips them
-        if self.geometry.parts.iter().any(|p| !p.rigid_vertices.is_empty()) {
+        if self.geometry.has_rigid {
             for node in 0..self.node_rest.len() {
                 out.global(&self.node_parents, node);
             }
@@ -257,10 +257,9 @@ impl AnimatedModel {
 */
 #[cfg(test)]
 mod tests {
-    use super::super::gpu::GpuGeometry;
     use super::super::{KeyframesQuat, KeyframesVec3, NodeAnimationTrack, SharedGeometry};
     use super::*;
-    use std::cell::{Cell, RefCell};
+    use std::cell::Cell;
     use std::rc::Rc;
 
     fn rest(translation: Vec3) -> LocalTransform {
@@ -285,7 +284,7 @@ mod tests {
         };
         let node_rest = vec![rest(Vec3::ZERO), rest(vec3(0.0, 1.0, 0.0))];
         AnimatedModel {
-            geometry: Rc::new(SharedGeometry { parts: Vec::new(), gpu: RefCell::new(GpuGeometry::Untried) }),
+            geometry: Rc::new(SharedGeometry::new(Vec::new())),
             gpu_drawn: Cell::new(false),
             pose: Pose::new(&node_rest, 2),
             node_rest,
@@ -333,7 +332,7 @@ mod tests {
             rigid_vertices: Vec::new(),
             skinned_vertex_count: verts,
         };
-        clip.geometry = Rc::new(SharedGeometry { parts: vec![part], gpu: RefCell::new(GpuGeometry::Untried) });
+        clip.geometry = Rc::new(SharedGeometry::new(vec![part]));
         clip
     }
 
