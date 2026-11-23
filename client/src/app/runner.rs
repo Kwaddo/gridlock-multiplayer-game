@@ -1,5 +1,4 @@
 use macroquad::prelude::*;
-use macroquad::window::gl_set_drawcall_buffer_capacity;
 use client::net::Session;
 use platform::Instant;
 
@@ -8,24 +7,19 @@ use client::screens::dev_mode::DevModeState;
 use client::screens::{
     ControlsAction, LobbyInventoryScreen, LoginScreen, MenuRequest, PauseMenu, PlayingState,
 };
-use client::settings::SettingsTab;
-use client::settings::SettingsScreen;
+use client::settings::{ SettingsScreen, SettingsTab };
 use client::types::maze::Maze;
 use client::ui::fonts;
 use client::weapons::crosshair_presets::CrosshairPresetManager;
 use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
-use super::asset_loader::{
-    load_manifest,
-    preload,
-    preload_status,
-    AssetQueue,
-};
+use super::asset_loader::{ load_manifest, preload, preload_status, AssetQueue };
 use super::world_sync::sync_world;
 
 mod assets;
 mod constants;
+mod draw_calls;
 mod frame;
 mod screens;
 
@@ -43,7 +37,7 @@ use screens::{ dev_overlay_frame, loading_frame, pause_menu_frame, settings_fram
 pub async fn run() {
     set_cwd_to_assets_root();
     set_default_filter_mode(FilterMode::Nearest);
-    gl_set_drawcall_buffer_capacity(200_000, 300_000);
+    draw_calls::set_capacity(); // per-call batcher limits, sized in draw_calls.rs
 
     fonts::init_font().await;
 
