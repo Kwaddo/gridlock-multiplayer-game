@@ -285,7 +285,8 @@ impl CreditsView {
     }
 }
 
-/// Mouse wheel steps to pixels: the browser reports pixels already, native
+/// Mouse wheel steps to pixels: the browser reports pixels already (Firefox's
+/// lines are turned into pixels by web/gridlock_web/wheel.js), native
 /// platforms report lines (fractions of one on trackpads).
 fn wheel_pixels(wheel: f32) -> f32 {
     if cfg!(target_arch = "wasm32") {
