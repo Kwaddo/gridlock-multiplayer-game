@@ -256,3 +256,33 @@ fn lobby_state_goes_out_at_half_rate_and_keeps_jump_events() {
         .count();
     assert_eq!(jumps, 1, "the jump goes out once, on the lobby's turn");
 }
+
+#[test]
+fn lobby_leader_goes_to_joiners_and_on_change_only() {
+    use protocol::ServerMsg;
+    let leaders = |out: &[(PeerId, Packet)], to: PeerId| -> Vec<u32> {
+        decoded(out, to)
+            .into_iter()
+            .filter_map(|m| match m {
+                ServerMsg::LobbyLeader { id } => Some(id),
+                _ => None,
+            })
+            .collect()
+    };
+    let (mut server, a, b) = joined_pair();
+    let out = server.drain_outbox();
+    // alice joined first and leads; both have heard so
+    assert!(leaders(&out, a).contains(&1));
+    assert!(leaders(&out, b).contains(&1));
+
+    // a change of teams sends the player list, but not the leader again
+    server.handle_packet(b, &protocol::ClientMsg::SetTeam { team: 1 }.encode());
+    server.tick();
+    let out = server.drain_outbox();
+    assert!(leaders(&out, b).is_empty(), "leader resent: {:?}", leaders(&out, b));
+
+    // the leader leaves: bob leads, and hears so
+    server.peer_disconnected(a);
+    server.tick();
+    assert_eq!(leaders(&server.drain_outbox(), b), vec![2]);
+}

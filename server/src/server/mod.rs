@@ -87,6 +87,8 @@ pub struct Server {
     team_score: game::TeamScore,
     /// Last `MSG_TEAM_SCORE` broadcast: value and time.
     last_team_score_sent: Option<(game::TeamScore, Instant)>,
+    /// The lobby leader everyone was last told of, and when.
+    last_leader_sent: Option<(u32, Instant)>,
     /// What `MSG_PLAYER_INFO` has told whom.
     info_sync: player_info::InfoSync,
     /// Clients of another protocol version, turned away at the door.
@@ -133,6 +135,7 @@ impl Server {
             last_status_sent: None,
             team_score: game::TeamScore::default(),
             last_team_score_sent: None,
+            last_leader_sent: None,
             info_sync: player_info::InfoSync::default(),
             rejected: HashMap::new(),
         }

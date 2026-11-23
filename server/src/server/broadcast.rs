@@ -45,10 +45,9 @@ fn player_list_msg(players: &HashMap<PeerId, Player>) -> Vec<u8> {
 }
 
 /// Broadcast updated player list to every connected client.
-/// Also broadcasts the host so clients can update the host indicator.
+/// The host indicator (`LobbyLeader`) goes out on its own when it changes
+/// (`Server::sync_lobby_leader`), not with every list.
 pub fn broadcast_player_list(socket: &Outbox, players: &HashMap<PeerId, Player>) {
-    broadcast_lobby_leader(socket, players);
-
     // Build the message once; the content is identical for every receiver.
     let msg = Packet::from(player_list_msg(players));
 
@@ -60,19 +59,17 @@ pub fn broadcast_player_list(socket: &Outbox, players: &HashMap<PeerId, Player>)
     }
 }
 
-/// Broadcast the host's player ID to every connected client.
-pub fn broadcast_lobby_leader(socket: &Outbox, players: &HashMap<PeerId, Player>) {
-    let leader_id: u32 = crate::server::game::host_addr(players)
+/// The host's player id, 0 for none.
+pub fn lobby_leader_id(players: &HashMap<PeerId, Player>) -> u32 {
+    crate::server::game::host_addr(players)
         .and_then(|addr| players.get(&addr))
         .map(|p| p.id)
-        .unwrap_or(0);
-    let msg = Packet::from(ServerMsg::LobbyLeader { id: leader_id }.encode());
-    for (addr, p) in players.iter() {
-        if p.is_bot {
-            continue;
-        }
-        socket.send_shared(&msg, *addr);
-    }
+        .unwrap_or(0)
+}
+
+/// Send the host's player id to one player (one who just joined).
+pub fn send_lobby_leader(socket: &Outbox, players: &HashMap<PeerId, Player>, to: PeerId) {
+    let _ = socket.send_to(&ServerMsg::LobbyLeader { id: lobby_leader_id(players) }.encode(), to);
 }
 
 /// Broadcast authoritative match-time remaining (seconds) to all connected clients

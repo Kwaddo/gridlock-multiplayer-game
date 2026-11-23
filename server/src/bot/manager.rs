@@ -414,10 +414,10 @@ fn send_bot_shot_iter(
 ) {
     let position_of_id = |id: u32| players.values().find(|p| p.id == id).map(|p| p.position);
     let send = |world: WorldId, batch: Vec<BotShot>| {
-        let msg = ServerMsg::BotShots(batch).encode();
+        let msg = crate::net::Packet::from(ServerMsg::BotShots(batch).encode());
         for (addr, p) in players.iter() {
             if !p.is_bot && p.world == world {
-                let _ = socket.send_to(&msg, *addr);
+                socket.send_shared(&msg, *addr);
             }
         }
     };

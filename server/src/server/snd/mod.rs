@@ -316,7 +316,9 @@ impl SndState {
 
         // Broadcast round state, when a client would see a change (or as a
         // heartbeat), not on every tick
-        let key = self.round_state_key(players.len());
+        // keyed on who is in the maze: one arriving from the lobby gets it at once
+        let in_maze = players.values().filter(|p| !p.is_bot && p.world == WorldId::Maze).count();
+        let key = self.round_state_key(in_maze);
         if self.round_state_gate.should_send(key, dt) {
             self.broadcast_round_state(socket, players);
         }
@@ -470,8 +472,12 @@ impl SndState {
         })
         .encode();
 
-        for (addr, _p) in players.iter() {
-            let _ = socket.send_to(&msg, *addr);
+        // only the maze shows it (lobby clients drop their match mode)
+        let msg = crate::net::Packet::from(msg);
+        for (addr, p) in players.iter() {
+            if !p.is_bot && p.world == WorldId::Maze {
+                socket.send_shared(&msg, *addr);
+            }
         }
     }
 

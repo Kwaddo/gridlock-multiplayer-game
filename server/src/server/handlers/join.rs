@@ -55,6 +55,9 @@ pub fn handle_join(
         game::auto_assign_lobby_teams(players);
         // broadcast updated connected-player list to everyone
         broadcast::broadcast_player_list(socket, players);
+        // everyone else hears of a new leader from the tick; this one has
+        // never heard of the current one
+        broadcast::send_lobby_leader(socket, players, src_addr);
         handlers::announce_joined(socket, players, src_addr);
     }
 }

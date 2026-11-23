@@ -386,12 +386,7 @@ pub fn apply_damage(
             }
             .encode();
 
-            for (addr, p) in players.iter() {
-                if p.is_bot {
-                    continue;
-                }
-                let _ = socket.send_to(&end_msg, *addr);
-            }
+            broadcast::to_humans(socket, players, &end_msg);
 
             *match_end_pending = Some((
                 Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
@@ -407,7 +402,9 @@ pub fn apply_damage(
             }
         }
 
-        broadcast::broadcast_state(socket, players);
+        // The death reaches everyone's state with the next periodic broadcast
+        // (within 33 ms); the kill feed below starts each client's death
+        // animation at once, and a dying body ignores state until it is done.
         broadcast::broadcast_player_list(socket, players);
 
         let feed = ServerMsg::KillFeed {
@@ -417,13 +414,7 @@ pub fn apply_damage(
             headshot: is_headshot,
         }
         .encode();
-
-        for (addr, p) in players.iter() {
-            if p.is_bot {
-                continue;
-            }
-            let _ = socket.send_to(&feed, *addr);
-        }
+        broadcast::to_humans(socket, players, &feed);
     } else {
         // apply non-lethal damage
         if let Some(vmut) = players.get_mut(&victim_addr) {

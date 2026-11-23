@@ -144,3 +144,18 @@ fn no_human_attackers_means_no_bomb() {
     assert!(!state.bomb_dropped, "no phantom bomb");
     assert!(!snd.try_pickup_bomb(bot, &players));
 }
+
+#[test]
+fn round_state_goes_to_the_maze_only() {
+    let mut players = HashMap::new();
+    let red = add(&mut players, 1, Team::Red, false);
+    let blue = add(&mut players, 2, Team::Blue, false);
+    add(&mut players, 3, Team::Blue, true);
+    let lobby = add(&mut players, 4, Team::Red, false);
+    players.get_mut(&lobby).unwrap().world = WorldId::Lobby;
+    let (snd, socket) = round_one(&mut players);
+    snd.broadcast_round_state(&socket, &players);
+    let mut to: Vec<PeerId> = socket.drain().into_iter().map(|(p, _)| p).collect();
+    to.sort();
+    assert_eq!(to, vec![red, blue]);
+}

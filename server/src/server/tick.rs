@@ -9,6 +9,8 @@ use crate::protocols::*;
 
 /// Cadence of the per-tick bookkeeping that has no need to run per packet.
 const BOOKKEEPING_INTERVAL: Duration = game::STATE_BROADCAST_INTERVAL;
+/// How often the lobby leader is repeated while it stays the same.
+const LEADER_REFRESH: Duration = Duration::from_secs(5);
 
 impl Server {
     /// Periodic simulation step; call after each packet and at least every 100ms.
@@ -70,6 +72,7 @@ impl Server {
             self.last_regen_tick = now_tick;
         }
         // what rarely changes goes out ahead of the state that may first show it
+        self.sync_lobby_leader(now_tick);
         self.sync_player_info();
         let due = self.state_cadence.due(now_tick);
         if due || self.players.len() != self.last_broadcast_players {
@@ -259,6 +262,22 @@ impl Server {
         }
         self.send_match_status(false);
         self.send_team_score();
+    }
+
+    /// Tell everyone who the lobby leader is when that changes, and every few
+    /// seconds anyway: it is a small packet that can be lost. It used to ride
+    /// along with every player list (every kill).
+    fn sync_lobby_leader(&mut self, now: Instant) {
+        let leader = broadcast::lobby_leader_id(&self.players);
+        let due = match self.last_leader_sent {
+            Some((sent, at)) => sent != leader || now.saturating_duration_since(at) >= LEADER_REFRESH,
+            None => true,
+        };
+        if due {
+            let msg = ServerMsg::LobbyLeader { id: leader }.encode();
+            broadcast::to_humans(&self.outbox, &self.players, &msg);
+            self.last_leader_sent = Some((leader, now));
+        }
     }
 
     /// Broadcast the team score during a Team Deathmatch: when it changes, and
