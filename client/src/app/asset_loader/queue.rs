@@ -162,20 +162,22 @@ impl AssetQueue {
             }
             // Needed now (a player's model, its hitboxes come from it): the
             // rest of it at once, as before steps, not over several frames.
-            if in_progress.wanted {
+            // Something needed now waiting behind a background model: that
+            // one at once too, then the needed one, all in this frame.
+            if in_progress.wanted || wanted_waiting {
                 while !self.step_job(playing_state) {}
             } else {
                 self.step_job(playing_state);
+            }
+            if let Some(i) = next.filter(|_| wanted_waiting) {
+                // (finishing a job leaves `pending` as it was, so `i` still holds)
+                self.begin_whole_if_wanted(i, playing_state).await;
             }
         } else {
             let Some(i) = next.filter(|&i| allowed || i < self.wanted) else {
                 return false;
             };
-            let wanted = i < self.wanted;
-            self.begin(i, playing_state).await;
-            if wanted {
-                while !self.step_job(playing_state) {}
-            }
+            self.begin_whole_if_wanted(i, playing_state).await;
         }
         self.pacer.loaded(started.elapsed().as_secs_f32() * 1000.0);
         true
@@ -207,6 +209,16 @@ impl AssetQueue {
     }
 
     /// Load `pending[i]`, or (a model) start loading it a step at a time.
+    /// [`begin`](Self::begin) `pending[i]`, and when it is needed now, finish
+    /// it in this call too (its hitboxes would otherwise wait on its steps).
+    async fn begin_whole_if_wanted(&mut self, i: usize, playing_state: &mut PlayingState) {
+        let wanted = i < self.wanted;
+        self.begin(i, playing_state).await;
+        if wanted {
+            while !self.step_job(playing_state) {}
+        }
+    }
+
     async fn begin(&mut self, i: usize, playing_state: &mut PlayingState) {
         let (key, path) = self.pending.remove(i).entry;
         let wanted = i < self.wanted;
