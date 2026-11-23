@@ -3,7 +3,7 @@ use super::super::{
 };
 use super::*;
 use macroquad::models::{Mesh, Vertex};
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Hips (joint 0) slide, the arm (joint 1) turns, and a gun node (not a
@@ -53,7 +53,7 @@ fn rig_with_rigid_gun() -> AnimatedModel {
         skinned_vertex_count: 0,
     };
     AnimatedModel {
-        geometry: Rc::new(SharedGeometry { parts: vec![skinned, rigid], gpu: RefCell::new(GpuGeometry::Untried) }),
+        geometry: Rc::new(SharedGeometry::new(vec![skinned, rigid])),
         gpu_drawn: Cell::new(false),
         pose: Pose::new(&node_rest, 2),
         node_rest,
