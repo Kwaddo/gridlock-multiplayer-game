@@ -55,7 +55,7 @@ unless noted. Models were converted and resized for the game.
 ## Still to identify
 
 <!-- These files have no source info embedded; fill in or remove. -->
-- Player character model and animations (`assets/models/player/*.glb`, exported from Blender; the animation names suggest Mixamo)
+- Player characters and animations (`assets/models/characters/*.glb`, `assets/models/animations/*.glb`, converted from Mixamo FBX with `scripts/mixamo_to_glb.py`)
 - Knife/punch sprite frames and pistol/shotgun sprites (`assets/images/weapons/FPS Weapon Sprites/`)
 - Crosshairs (`assets/images/weapons/kenney_crosshair-pack/`): Kenney packs are CC0, so credit is optional
 - Weapon icons (`assets/images/weapons/*.png`)

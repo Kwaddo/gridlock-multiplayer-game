@@ -25,10 +25,8 @@ mod screens;
 
 use assets::{
     missing_viewmodel_assets,
-    resolve_asset_entries_for_quality,
     set_cwd_to_assets_root,
     spawn_assets,
-    ModelQuality,
 };
 use constants::CONNECTING_FRAME_BUDGET;
 use frame::{ finish_frame, hidden_tab_frame, link_of };
@@ -57,10 +55,6 @@ pub async fn run() {
     let mut loadout = Loadout::default_loadout();
     let mut lobby_inventory = LobbyInventoryScreen::new();
 
-    // currently we always use high quality; eventually this could be
-    // user-configurable via the settings screen.
-    let model_quality = ModelQuality::default();
-
     // connection heartbeat / last seen from server
     let mut last_server_contact: Option<Instant> = None;
     // keepalive: periodically send a lightweight position update while connected so the
@@ -85,7 +79,7 @@ pub async fn run() {
     let game_assets = {
         let mut entries = load_manifest().await;
         entries.extend(missing_viewmodel_assets(&playing_state));
-        resolve_asset_entries_for_quality(&entries, model_quality)
+        entries
     };
     for (_, path) in &game_assets {
         preload(path);

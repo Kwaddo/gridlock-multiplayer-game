@@ -358,7 +358,7 @@ mod tests {
             .map(|entry| entry.path())
             .filter(|path| path.extension().is_some_and(|ext| ext == "glb"))
             .collect();
-        paths.push(format!("{models}/player/Compressed/Crouch.glb").into());
+        paths.push(format!("{models}/animations/Crouch.glb").into());
         for path in paths {
             let Ok(bytes) = std::fs::read(&path) else { continue };
             let name = path.display().to_string();
