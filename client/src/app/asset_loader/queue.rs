@@ -142,12 +142,12 @@ impl AssetQueue {
     /// (the previous frame's length, seconds) whether one may start; the
     /// downloads ahead keep going either way. What the player needs now
     /// (put at the front by `prioritize`: clips and models of the players in
-    /// the game, whose hitboxes come from them) is not held back: one load or
-    /// step a frame; its time still counts against the rest.
+    /// the game, whose hitboxes come from them) is not held back: one whole
+    /// load a frame; its time still counts against the rest.
     ///
-    /// A model (a GLB) loads a step a frame (see `GlbJob`): the first step
-    /// reads and checks the file, the next upload its textures and build it a
-    /// stage at a time, the last stores it. Each step is paced as a load.
+    /// Any other model (a GLB) loads a step a frame (see `GlbJob`): the first
+    /// step reads and checks the file, the next upload its textures and build
+    /// it a stage at a time, the last stores it. Each step is paced as a load.
     /// Returns whether it loaded an asset or did a step of one.
     pub async fn pump_paced(&mut self, playing_state: &mut PlayingState, prev_frame_s: f32) -> bool {
         // every frame, so the pacer counts all the time that passes
@@ -160,12 +160,22 @@ impl AssetQueue {
             if !may_step(allowed, in_progress.wanted, wanted_waiting) {
                 return false;
             }
-            self.step_job(playing_state);
+            // Needed now (a player's model, its hitboxes come from it): the
+            // rest of it at once, as before steps, not over several frames.
+            if in_progress.wanted {
+                while !self.step_job(playing_state) {}
+            } else {
+                self.step_job(playing_state);
+            }
         } else {
             let Some(i) = next.filter(|&i| allowed || i < self.wanted) else {
                 return false;
             };
+            let wanted = i < self.wanted;
             self.begin(i, playing_state).await;
+            if wanted {
+                while !self.step_job(playing_state) {}
+            }
         }
         self.pacer.loaded(started.elapsed().as_secs_f32() * 1000.0);
         true
