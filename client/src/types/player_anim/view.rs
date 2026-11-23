@@ -29,9 +29,14 @@ impl Default for BodyView {
 impl BodyView {
     /// What the camera test said this frame. `id` staggers far bodies.
     pub fn set(&mut self, seen: bool, far: bool, id: u32) {
-        if far && !self.far {
+        if seen && !self.seen {
+            // its pose is from before it was hidden: no good to draw, far or not
+            self.pose_due();
+        } else if far && !self.far {
             // just went far: start part way through the interval, by id, so far bodies take turns
-            self.since_full = (id % FAR_PHASES) as f32 / FAR_PHASES as f32 * FAR_POSE_INTERVAL;
+            // (never later than already due: a pose that old is drawn now, not after the stagger)
+            let phase = (id % FAR_PHASES) as f32 / FAR_PHASES as f32 * FAR_POSE_INTERVAL;
+            self.since_full = self.since_full.max(phase);
         }
         self.seen = seen;
         self.far = far;
@@ -49,6 +54,11 @@ impl BodyView {
 
     pub(super) fn aged(&mut self, dt: f32) {
         self.since_full += dt;
+    }
+
+    /// The next pose seen has to be the full one (it jumped, or comes back into view).
+    pub(super) fn pose_due(&mut self) {
+        self.since_full = self.since_full.max(FAR_POSE_INTERVAL);
     }
 
     pub(super) fn posed_full(&mut self) {
@@ -84,6 +94,22 @@ mod tests {
         }
         // 6 or 7 frames apart at 120 fps depending on float rounding, so 17 to 20 a second
         assert!((17..=20).contains(&full), "{full} full poses in a second");
+    }
+
+    // a body coming into view far away, or jumping there, is posed in full at once, not after its stagger
+    #[test]
+    fn a_far_body_coming_into_view_or_jumping_is_posed_at_once() {
+        let mut v = BodyView::default();
+        v.set(true, false, 3);
+        v.posed_full();
+        v.set(false, false, 3);
+        v.set(true, true, 3);
+        assert!(v.wants_full());
+        v.posed_full();
+        v.set(true, false, 3);
+        v.pose_due();
+        v.set(true, true, 3);
+        assert!(v.wants_full());
     }
 
     // four far bodies starting together don't all land on the same frame

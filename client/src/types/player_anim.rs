@@ -182,6 +182,9 @@ impl PlayerAnim {
             // a respawn or teleport jumps metres in one frame, skip it, before this it read as a huge speed for a moment
             if step.length() < 2.0 {
                 self.vel += (step / dt - self.vel) * (1.0 - (-12.0 * dt).exp());
+            } else {
+                // and the pose from before the jump (a corpse, say) is no good to draw, far or not
+                self.view.pose_due();
             }
         }
         self.last_pos = Some(pos);
