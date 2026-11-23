@@ -10,7 +10,7 @@ pub use messages::*;
 /// `ServerMsg::Welcome`). Builds from before the check have no version on
 /// the wire and count as 1.
 // 3: pitch added to MSG_STATE (one byte) and MSG_POSITION, so a 2 cant read a 3's state packets
-pub const PROTOCOL_VERSION: u16 = 6; // 4 added cardboard shit, 5 added smoke break, 6 added the S&D bomb_dropped byte
+pub const PROTOCOL_VERSION: u16 = 7; // 4 added cardboard shit, 5 added smoke break, 6 added the S&D bomb_dropped byte, 7 added Shoot (players see each other fire) and BotAlert
 
 /// What the server tells a client of another version once it has let it in
 /// far enough to be heard: a chat notice is all an old build can show.
