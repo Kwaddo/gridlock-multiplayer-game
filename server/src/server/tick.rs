@@ -67,6 +67,7 @@ impl Server {
             self.maze.as_ref(),
             &mut self.team_score,
             round_frozen,
+            &mut self.shot_queue,
         );
         if self.bot_manager.handle_range_challenge_timeout(&mut self.players) {
             broadcast::broadcast_state(&self.outbox, &self.players);

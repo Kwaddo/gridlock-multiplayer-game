@@ -1,6 +1,20 @@
 use super::*;
+use crate::net::Outbox;
 use crate::player::WorldId;
 use crate::protocols::{ClientMsg, ServerMsg};
+
+/// `handle_shoot` into a queue, flushed at once as the next bot tick would.
+fn shoot(outbox: &Outbox, players: &mut HashMap<PeerId, Player>, src: PeerId, end: (f32, f32, f32), now: Instant) {
+    let mut queue = ShotQueue::default();
+    handle_shoot(&mut queue, players, src, end, now);
+    queue.flush(outbox, players);
+}
+
+/// What the server's queued shots send, as its next bot tick would.
+fn flush(server: &mut crate::server::Server) -> Vec<(PeerId, crate::net::Packet)> {
+    server.shot_queue.flush(&server.outbox, &server.players);
+    server.drain_outbox()
+}
 
 fn shots_to(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<Shot> {
     out.iter()
@@ -29,11 +43,11 @@ fn three_players() -> (HashMap<PeerId, Player>, [PeerId; 4]) {
 }
 
 #[test]
-fn a_shot_reaches_the_others_in_the_shooters_world_only() {
+fn a_shot_reaches_the_humans_in_the_shooters_world_only() {
     let outbox = Outbox::default();
     let (mut players, [a, b, c, bot]) = three_players();
     // the client claims nothing about the start: it comes from A's position
-    handle_shoot(&outbox, &mut players, a, (10.0, 1.0, 40.0), Instant::now());
+    shoot(&outbox, &mut players, a, (10.0, 1.0, 40.0), Instant::now());
     let out = outbox.drain();
     let [shot] = shots_to(&out, b)[..] else { panic!("B got no single shot: {out:?}") };
     assert_eq!(shot.shooter_id, 1);
@@ -41,7 +55,9 @@ fn a_shot_reaches_the_others_in_the_shooters_world_only() {
     let gun = protocol::codec::dequantize_coord(protocol::codec::quantize_coord(SHOT_START_HEIGHT));
     assert_eq!(shot.start, (10.0, gun, 20.0));
     assert_eq!(shot.end, (10.0, 1.0, 40.0));
-    for peer in [a, c, bot] {
+    // A gets the same shared packet (its client drops its own shot)
+    assert_eq!(shots_to(&out, a), vec![shot]);
+    for peer in [c, bot] {
         assert!(out.iter().all(|(p, _)| *p != peer), "{peer:?} got the shot");
     }
 }
@@ -52,10 +68,10 @@ fn shots_are_dropped_faster_than_the_weapon_fires() {
     let (mut players, [a, b, ..]) = three_players();
     let t0 = Instant::now();
     let interval = min_shot_interval("M4A1");
-    handle_shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), t0);
-    handle_shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), t0 + interval / 2);
+    shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), t0);
+    shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), t0 + interval / 2);
     assert_eq!(shots_to(&outbox.drain(), b).len(), 1, "the second shot came too soon");
-    handle_shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), t0 + interval);
+    shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), t0 + interval);
     assert_eq!(shots_to(&outbox.drain(), b).len(), 1, "a shot at the fire rate is relayed");
 
     // a minigun may fire faster than a sniper rifle
@@ -68,14 +84,14 @@ fn the_dead_and_bad_end_points_shoot_nothing_and_far_ends_are_capped() {
     let outbox = Outbox::default();
     let (mut players, [a, b, ..]) = three_players();
     players.get_mut(&a).unwrap().is_alive = false;
-    handle_shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), Instant::now());
+    shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), Instant::now());
     assert!(outbox.drain().is_empty(), "a dead player fired");
 
     players.get_mut(&a).unwrap().is_alive = true;
-    handle_shoot(&outbox, &mut players, a, (f32::NAN, 1.0, 0.0), Instant::now());
+    shoot(&outbox, &mut players, a, (f32::NAN, 1.0, 0.0), Instant::now());
     assert!(outbox.drain().is_empty(), "a NaN end was relayed");
 
-    handle_shoot(&outbox, &mut players, a, (10.0, 1.2, 20.0 + 10_000.0), Instant::now());
+    shoot(&outbox, &mut players, a, (10.0, 1.2, 20.0 + 10_000.0), Instant::now());
     let [shot] = shots_to(&outbox.drain(), b)[..] else { panic!("no capped shot") };
     assert!((shot.end.2 - (20.0 + MAX_SHOT_DISTANCE)).abs() < 0.05, "{:?}", shot.end);
 }
@@ -88,9 +104,9 @@ fn a_shoot_packet_is_dispatched_to_the_relay() {
     server.handle_packet(b, &ClientMsg::join("bob").encode());
     server.drain_outbox();
     server.handle_packet(a, &ClientMsg::Shoot { end: (1.0, 1.0, 5.0) }.encode());
-    let out = server.drain_outbox();
+    assert!(shots_to(&server.drain_outbox(), b).is_empty(), "a shot went out before the bot tick");
+    let out = flush(&mut server);
     assert_eq!(shots_to(&out, b).len(), 1, "bob (same lobby) saw no shot");
-    assert!(shots_to(&out, a).is_empty(), "alice got her own shot back");
 }
 
 #[test]
@@ -98,7 +114,7 @@ fn a_box_under_a_smoke_alias_never_shows_its_shot() {
     let outbox = Outbox::default();
     let (mut players, [a, ..]) = three_players();
     players.get_mut(&a).unwrap().smoke_alias = Some(0x4000_0000);
-    handle_shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), Instant::now());
+    shoot(&outbox, &mut players, a, (0.0, 1.0, 0.0), Instant::now());
     assert!(outbox.drain().is_empty(), "an aliased box's real id went out with a shot");
 }
 
@@ -126,13 +142,67 @@ fn in_smoke_break_only_a_released_hunters_shot_is_relayed() {
     let shoot = ClientMsg::Shoot { end: (1.0, 1.0, 5.0) }.encode();
 
     server.handle_packet(hunter, &shoot);
-    assert!(shots_to(&server.drain_outbox(), hider).is_empty(), "a blind hunter was seen firing");
+    assert!(shots_to(&flush(&mut server), hider).is_empty(), "a blind hunter was seen firing");
 
     server.smoke_state.as_mut().unwrap().tick(SMOKE_BLIND_TIME);
     server.handle_packet(hider, &shoot);
-    let out = server.drain_outbox();
+    let out = flush(&mut server);
     assert!(shots_to(&out, hunter).is_empty(), "a hider's shot gave their box away");
 
     server.handle_packet(hunter, &shoot);
-    assert_eq!(shots_to(&server.drain_outbox(), hider).len(), 1, "the hider never saw the hunter fire");
+    assert_eq!(shots_to(&flush(&mut server), hider).len(), 1, "the hider never saw the hunter fire");
+}
+
+/// The `MSG_SHOTS` packets in `out` for `peer`, each as its shot count.
+fn shot_packets_to(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<usize> {
+    out.iter()
+        .filter(|(p, _)| *p == peer)
+        .filter_map(|(_, b)| match ServerMsg::decode(b) {
+            Some(ServerMsg::Shots(shots)) => Some(shots.len()),
+            _ => None,
+        })
+        .collect()
+}
+
+// players' shots wait for the bot tick and go out together: one packet per world per tick
+#[test]
+fn players_shots_go_out_once_per_tick_in_one_packet_per_world() {
+    let mut server = crate::server::Server::new();
+    let (a, b, c) = (PeerId(1), PeerId(2), PeerId(3));
+    for (peer, name) in [(a, "alice"), (b, "bob"), (c, "carol")] {
+        server.handle_packet(peer, &ClientMsg::join(name).encode());
+    }
+    for peer in [a, b] {
+        server.players.get_mut(&peer).unwrap().world = WorldId::Maze;
+    }
+    server.drain_outbox();
+    let shoot = ClientMsg::Shoot { end: (1.0, 1.0, 5.0) }.encode();
+    for peer in [a, b, c] {
+        server.handle_packet(peer, &shoot);
+    }
+    assert!(server.drain_outbox().is_empty(), "a shot went out before the tick");
+    // the first bot tick is always due
+    server.tick();
+    let out = server.drain_outbox();
+    assert_eq!(shot_packets_to(&out, a), vec![2], "the maze's two shots, in one packet");
+    assert_eq!(shot_packets_to(&out, b), vec![2]);
+    assert_eq!(shot_packets_to(&out, c), vec![1], "the lobby's own shot, apart");
+}
+
+#[test]
+fn a_full_queue_is_split_at_the_packet_limit() {
+    use crate::server::broadcast::MAX_SHOTS_PER_PACKET;
+    let outbox = Outbox::default();
+    let (players, [a, b, ..]) = three_players();
+    let mut queue = ShotQueue::default();
+    let shot = Shot { shooter_id: 1, victim_id: 0, start: (0.0, 1.2, 0.0), end: (0.0, 1.0, 5.0) };
+    for _ in 0..MAX_SHOTS_PER_PACKET + 3 {
+        queue.push(WorldId::Maze, shot);
+    }
+    queue.flush(&outbox, &players);
+    let out = outbox.drain();
+    assert_eq!(shot_packets_to(&out, b), vec![MAX_SHOTS_PER_PACKET, 3]);
+    assert_eq!(shot_packets_to(&out, a), vec![MAX_SHOTS_PER_PACKET, 3]);
+    queue.flush(&outbox, &players);
+    assert!(outbox.drain().is_empty(), "a flushed queue sent again");
 }

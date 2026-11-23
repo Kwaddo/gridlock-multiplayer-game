@@ -137,7 +137,7 @@ impl Server {
                 // a missed shot makes noise too (a hit's Hit is heard as well, for older clients)
                 let weapon = self.players.get(&src_addr).map(|p| p.current_weapon.clone());
                 self.bot_manager.hear_shot(&self.players, src_addr, weapon.as_deref());
-                handlers::handle_shoot(&self.outbox, &mut self.players, src_addr, end, Instant::now())
+                handlers::handle_shoot(&mut self.shot_queue, &mut self.players, src_addr, end, Instant::now())
             }
             ClientMsg::RespawnRequest => {
                 handlers::handle_respawn_request(

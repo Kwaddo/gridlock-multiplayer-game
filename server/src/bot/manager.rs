@@ -13,8 +13,6 @@ use crate::server::broadcast;
 use crate::server::handlers::other;
 /// Seconds between a match bot's decisions (plus up to 0.1 s jitter).
 const DECISION_INTERVAL: f32 = 0.2;
-/// Bot shots per `MSG_SHOTS` packet: 20 bytes each, so one stays under 1100 bytes.
-const MAX_SHOTS_PER_PACKET: usize = 50;
 /// Longest step (seconds) one bot tick simulates, however long it has been.
 const MAX_BOT_DT: f32 = 0.1;
 
@@ -230,6 +228,8 @@ impl BotManager {
         team_score: &mut crate::server::game::TeamScore,
         // S&D freeze time: every bot in the maze stands still
         round_frozen: bool,
+        // players' shots since the last bot tick: they go out with the bots'
+        shots: &mut broadcast::ShotQueue,
     ) {
         // one clock read for the whole bot tick (on the web host each is a JS call)
         let now = Instant::now();
@@ -360,8 +360,10 @@ impl BotManager {
         for (addr, _, _, weapon) in &pending_shots {
             self.hear_shot(players, *addr, Some(weapon));
         }
-        // every tracer of this tick goes out ahead of the damage it deals
-        send_bot_shot_iter(socket, players, pending_shots.iter().map(|(a, v, _, _)| (*a, *v)));
+        // every tracer of this tick, the players' queued since the last bot
+        // tick with them, goes out ahead of the damage it deals
+        queue_bot_shots(shots, players, pending_shots.iter().map(|(a, v, _, _)| (*a, *v)));
+        shots.flush(socket, players);
 
         for (attacker_addr, victim_id, damage_opt, weapon) in pending_shots {
             if let Some(damage) = damage_opt {
@@ -432,31 +434,27 @@ pub(crate) fn aim_at(bot: &mut Player, state: &mut BotState, look_pos: Option<(f
     bot.pitch = state.current_pitch;
 }
 
-/// [`send_bot_shot_iter`] over a slice.
+/// [`queue_bot_shots`] over a slice, sent at once.
 #[cfg(test)]
 pub(crate) fn send_bot_shots(socket: &Outbox, players: &HashMap<PeerId, Player>, shots: &[(PeerId, u32)]) {
-    send_bot_shot_iter(socket, players, shots.iter().copied());
+    let mut queue = broadcast::ShotQueue::default();
+    queue_bot_shots(&mut queue, players, shots.iter().copied());
+    queue.flush(socket, players);
 }
 
-/// Tell the humans in each shooter's world about `shots` (shooter, victim id)
-/// at once: one `MSG_SHOTS` per player per bot tick, not one per shot.
+/// Queue `shots` (shooter, victim id) for the humans in each shooter's world,
+/// to go out with the players' shots of this tick (`ShotQueue::flush`).
 /// Damage moves nobody, so the tracer ends are where a shot-by-shot send
-/// found them too. Each packet's shots are built straight into the message,
-/// with no copies. A shot whose shooter or victim is gone is not sent (it
+/// found them too. A shot whose shooter or victim is gone is not sent (it
 /// would draw a tracer from or to the world origin), and humans in another
 /// world never get it (they would hear it and see its tracer at that world's
 /// coordinates).
-fn send_bot_shot_iter(
-    socket: &Outbox,
+fn queue_bot_shots(
+    queue: &mut broadcast::ShotQueue,
     players: &HashMap<PeerId, Player>,
     shots: impl Iterator<Item = (PeerId, u32)>,
 ) {
     let position_of_id = |id: u32| players.values().find(|p| p.id == id).map(|p| p.position);
-    let send = |world: WorldId, batch: Vec<Shot>| {
-        broadcast::shots_to_world(socket, players, world, batch, None);
-    };
-    // bots are almost always all in one world, so this holds one batch
-    let mut batches: Vec<(WorldId, Vec<Shot>)> = Vec::new();
     for (attacker_addr, victim_id) in shots {
         let Some(shooter) = players.get(&attacker_addr) else { continue };
         let Some(to) = position_of_id(victim_id) else { continue };
@@ -467,22 +465,6 @@ fn send_bot_shot_iter(
             start: (from.0, from.1 + broadcast::SHOT_START_HEIGHT, from.2),
             end: (to.0, to.1 + 1.0, to.2),
         };
-        let slot = match batches.iter().position(|(w, _)| *w == shooter.world) {
-            Some(i) => i,
-            None => {
-                batches.push((shooter.world, Vec::new()));
-                batches.len() - 1
-            }
-        };
-        let (world, batch) = &mut batches[slot];
-        batch.push(shot);
-        if batch.len() == MAX_SHOTS_PER_PACKET {
-            send(*world, std::mem::take(batch));
-        }
-    }
-    for (world, batch) in batches {
-        if !batch.is_empty() {
-            send(world, batch);
-        }
+        queue.push(shooter.world, shot);
     }
 }

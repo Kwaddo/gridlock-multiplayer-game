@@ -1,15 +1,16 @@
 //! A player's shot (`ClientMsg::Shoot`), relayed so the others in their world
-//! see the muzzle flash and tracer, and hear it. Bots' shots go out the same
-//! way, see `broadcast::shots_to_world`.
+//! see the muzzle flash and tracer, and hear it. It waits in the server's
+//! `broadcast::ShotQueue` and goes out with the bots' shots at the next bot
+//! tick, in the same packet.
 
 use std::collections::HashMap;
 use std::time::Duration;
 use platform::Instant;
 
-use crate::net::{Outbox, PeerId};
+use crate::net::PeerId;
 use crate::player::Player;
 use crate::protocols::Shot;
-use crate::server::broadcast::{self, SHOT_START_HEIGHT};
+use crate::server::broadcast::{ShotQueue, SHOT_START_HEIGHT};
 use crate::weapons_stats::get_weapon_stats;
 
 /// Farthest a relayed tracer runs from the shooter (m), a little past the
@@ -29,13 +30,14 @@ pub fn min_shot_interval(weapon: &str) -> Duration {
     Duration::from_secs_f32(FIRE_INTERVAL_SLACK / shots_per_sec)
 }
 
-/// Relay `src`'s shot to every other human in its world. The tracer starts
+/// Queue `src`'s shot for the humans in its world (the shooter's own client
+/// drops it, it drew the shot when it fired). The tracer starts
 /// at the shooter's position as the server knows it (at gun height), never
 /// where the client says, and ends at most `MAX_SHOT_DISTANCE` away. Shots
 /// from the dead, from bots, from an aliased (Smoke Break) box and faster than
 /// the weapon fires are dropped.
 pub fn handle_shoot(
-    socket: &Outbox,
+    shots: &mut ShotQueue,
     players: &mut HashMap<PeerId, Player>,
     src: PeerId,
     end: (f32, f32, f32),
@@ -58,8 +60,7 @@ pub fn handle_shoot(
     let (x, y, z) = shooter.position;
     let start = (x, y + SHOT_START_HEIGHT, z);
     let shot = Shot { shooter_id: shooter.id, victim_id: 0, start, end: cap_end(start, end) };
-    let world = shooter.world;
-    broadcast::shots_to_world(socket, players, world, vec![shot], Some(src));
+    shots.push(shooter.world, shot);
 }
 
 /// `end`, pulled in along the shot to at most `MAX_SHOT_DISTANCE` from `start`.

@@ -106,6 +106,8 @@ pub struct Server {
     rejected: HashMap<PeerId, version::Rejected>,
     /// every cardboard box
     boxes: boxes::Boxes,
+    /// Players' shots waiting for the next bot tick, see `handlers::shoot`.
+    shot_queue: broadcast::ShotQueue,
 }
 
 impl Server {
@@ -156,6 +158,7 @@ impl Server {
             last_player_list: None,
             rejected: HashMap::new(),
             boxes: boxes::Boxes::new(),
+            shot_queue: broadcast::ShotQueue::default(),
         }
     }
 

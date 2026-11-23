@@ -20,20 +20,50 @@ pub fn to_humans(socket: &Outbox, players: &HashMap<PeerId, Player>, msg: &[u8])
 /// gun), for bots' and players' shots alike.
 pub const SHOT_START_HEIGHT: f32 = 1.2;
 
-/// Send `shots` as one `MSG_SHOTS` to every human in `world` except `skip`
-/// (a player who fired drew their own shot already). Bots' and players'
-/// shots both go out through here, so they look the same.
-pub fn shots_to_world(
-    socket: &Outbox,
-    players: &HashMap<PeerId, Player>,
-    world: WorldId,
-    shots: Vec<Shot>,
-    skip: Option<PeerId>,
-) {
+/// Shots per `MSG_SHOTS` packet: 20 bytes each, so one stays under 1100 bytes.
+pub const MAX_SHOTS_PER_PACKET: usize = 50;
+
+/// Send `shots` as one `MSG_SHOTS` to every human in `world`, encoded once.
+/// A player gets their own shots back too: their client drew them when it
+/// fired and drops its own id.
+pub fn shots_to_world(socket: &Outbox, players: &HashMap<PeerId, Player>, world: WorldId, shots: Vec<Shot>) {
     let msg = Packet::from(ServerMsg::Shots(shots).encode());
     for (addr, p) in players.iter() {
-        if !p.is_bot && p.world == world && Some(*addr) != skip {
+        if !p.is_bot && p.world == world {
             socket.send_shared(&msg, *addr);
+        }
+    }
+}
+
+/// Shots waiting to go out, by world. Players' shots wait here for the next
+/// bot tick and go out with the bots' shots of that tick: one `MSG_SHOTS` per
+/// world per bot tick (more only past `MAX_SHOTS_PER_PACKET`), not one send
+/// per shot. Bots' and players' shots look the same.
+#[derive(Default)]
+pub struct ShotQueue {
+    // nearly always one world (the maze), so a short list
+    batches: Vec<(WorldId, Vec<Shot>)>,
+}
+
+impl ShotQueue {
+    pub fn push(&mut self, world: WorldId, shot: Shot) {
+        match self.batches.iter_mut().find(|(w, _)| *w == world) {
+            Some((_, batch)) => batch.push(shot),
+            None => self.batches.push((world, vec![shot])),
+        }
+    }
+
+    /// Send every queued shot to the humans in its world, and empty the queue.
+    pub fn flush(&mut self, socket: &Outbox, players: &HashMap<PeerId, Player>) {
+        for (world, mut batch) in self.batches.drain(..) {
+            while batch.len() > MAX_SHOTS_PER_PACKET {
+                let rest = batch.split_off(MAX_SHOTS_PER_PACKET);
+                shots_to_world(socket, players, world, batch);
+                batch = rest;
+            }
+            if !batch.is_empty() {
+                shots_to_world(socket, players, world, batch);
+            }
         }
     }
 }

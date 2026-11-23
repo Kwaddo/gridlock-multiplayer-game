@@ -75,7 +75,7 @@ fn bots_stand_still_in_snd_freeze_time() {
         // past the manager's wall-clock tick gate
         std::thread::sleep(Duration::from_millis(40));
         let mut score = TeamScore::default();
-        manager.tick(&outbox, players, &mut None, 0, Some(&maze), &mut score, frozen);
+        manager.tick(&outbox, players, &mut None, 0, Some(&maze), &mut score, frozen, &mut Default::default());
     };
     for _ in 0..6 {
         tick(&mut manager, &mut players, true);
