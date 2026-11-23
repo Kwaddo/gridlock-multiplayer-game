@@ -10,6 +10,9 @@ mod udp;
 #[cfg(not(target_arch = "wasm32"))]
 pub use udp::UdpLink;
 
+// Used by the browser build; built everywhere so its tests run natively.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod rtc_event;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 #[cfg(target_arch = "wasm32")]

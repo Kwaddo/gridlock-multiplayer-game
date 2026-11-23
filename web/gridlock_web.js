@@ -22,6 +22,7 @@
     const {
         PLUGIN_VERSION, sockets, readString, readBytes, writeU32, writeBytes, heapFloats, roomHttpUrl, iceServersFor, prewarm,
         RtcSocket, preconnect, takePreconnected, registerModels, registerDecode, keepRunningWhenHidden, startHostTicker,
+        EV_PACKET, RELIABLE_MIN_BYTES,
     } = gridlockWeb;
 
     const requests = new Map(); // id -> { done, status, body }
@@ -42,6 +43,29 @@
         }
         return audioContext;
     }
+
+    // ------------------------------------------------------------ socket events
+
+    // A socket's events wait for the game to drain them (gridlock_rtc_drain).
+    // Should it stop (a hidden tab without workers, say), at most EVENTS_MAX
+    // stay: past that, the oldest small packet goes, as it came unreliably
+    // anyway. Big packets came over the reliable channel, and peer events
+    // are state: those are never dropped.
+    const EVENTS_MAX = 4096;
+    function capEvents(events) {
+        if (events.push !== Array.prototype.push) return; // capped already
+        events.push = function (ev) {
+            if (this.length >= EVENTS_MAX) {
+                const i = this.findIndex((e) => e.kind === EV_PACKET && e.data.length <= RELIABLE_MIN_BYTES);
+                if (i >= 0) this.splice(i, 1);
+            }
+            return Array.prototype.push.call(this, ev);
+        };
+    }
+
+    const EVENT_HEADER = 12;
+    const eventHeaderBytes = new Uint8Array(EVENT_HEADER);
+    const eventHeader = new DataView(eventHeaderBytes.buffer);
 
     // ------------------------------------------------------------ imports
 
@@ -303,7 +327,9 @@
             const handle = nextHandle++;
             const url = readString(urlPtr, urlLen);
             const ahead = isHost === 0 ? takePreconnected(url) : null;
-            sockets.set(handle, ahead || new RtcSocket(url, isHost !== 0));
+            const socket = ahead || new RtcSocket(url, isHost !== 0);
+            capEvents(socket.events);
+            sockets.set(handle, socket);
             keepRunningWhenHidden();
             return handle;
         };
@@ -327,22 +353,29 @@
             if (socket) socket.send(peer, new Uint8Array(wasm_memory.buffer, ptr, len));
         };
 
-        // Returns the next event kind (0 = none) and writes its peer and payload
-        // length; the payload is then copied out with gridlock_rtc_take.
-        env.gridlock_rtc_next = function (handle, peerOut, lenOut) {
-            const socket = sockets.get(handle);
-            const ev = socket && socket.events.shift();
-            if (!ev) return 0;
-            socket.taken = ev.data;
-            writeU32(peerOut, ev.peer);
-            writeU32(lenOut, ev.data ? ev.data.length : 0);
-            return ev.kind;
-        };
-
-        env.gridlock_rtc_take = function (handle, ptr) {
-            const socket = sockets.get(handle);
-            if (socket && socket.taken) writeBytes(ptr, socket.taken);
-            if (socket) socket.taken = null;
+        // Moves a socket's events into wasm memory at ptr (cap bytes), as many
+        // as fit, each as kind, peer and payload length (little-endian u32s)
+        // then the payload (transport/src/rtc_event.rs). Returns the bytes
+        // written, and writes to needOut the size of the first event left
+        // (0: none left).
+        env.gridlock_rtc_drain = function (handle, ptr, cap, needOut) {
+            const events = sockets.get(handle)?.events ?? [];
+            const size = (ev) => EVENT_HEADER + (ev.data ? ev.data.length : 0);
+            let at = 0;
+            let taken = 0;
+            for (const ev of events) {
+                if (at + size(ev) > cap) break;
+                eventHeader.setUint32(0, ev.kind, true);
+                eventHeader.setUint32(4, ev.peer, true);
+                eventHeader.setUint32(8, size(ev) - EVENT_HEADER, true);
+                writeBytes(ptr + at, eventHeaderBytes);
+                if (ev.data) writeBytes(ptr + at + EVENT_HEADER, ev.data);
+                at += size(ev);
+                taken++;
+            }
+            events.splice(0, taken);
+            writeU32(needOut, events.length ? size(events[0]) : 0);
+            return at;
         };
 
         env.gridlock_rtc_close = function (handle) {

@@ -166,16 +166,15 @@ impl Core {
     /// dedicated server, not at the next tick).
     fn step(&mut self) {
         if let Some(room) = &mut self.room {
-            for event in room.poll() {
-                match event {
-                    RtcEvent::Packet(peer, data) => self.server.handle_packet(PeerId(peer), &data),
-                    RtcEvent::PeerLeft(peer) => self.server.peer_disconnected(PeerId(peer)),
-                    RtcEvent::PeerJoined(_) => {} // they introduce themselves with Join
-                    RtcEvent::Closed => {
-                        self.notice = Some("Lost the signalling server: no one else can join.".into());
-                    }
+            let (server, notice) = (&mut self.server, &mut self.notice);
+            room.poll(|event| match event {
+                RtcEvent::Packet(peer, data) => server.handle_packet(PeerId(peer), data),
+                RtcEvent::PeerLeft(peer) => server.peer_disconnected(PeerId(peer)),
+                RtcEvent::PeerJoined(_) => {} // they introduce themselves with Join
+                RtcEvent::Closed => {
+                    *notice = Some("Lost the signalling server: no one else can join.".into());
                 }
-            }
+            });
         }
         let from_player = std::mem::take(&mut self.local.borrow_mut().to_server);
         for packet in from_player {
