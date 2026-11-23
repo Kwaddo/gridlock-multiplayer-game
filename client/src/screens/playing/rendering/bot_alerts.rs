@@ -124,7 +124,8 @@ impl PlayingState {
                 .and_then(|&i| self.other_players.get(i))
                 .filter(|p| p.id == a.bot_id)
                 .or_else(|| self.other_players.iter().find(|p| p.id == a.bot_id));
-            let Some(bot) = bot else { continue };
+            // a bot that just died (by your hand, say) no longer watches you
+            let Some(bot) = bot.filter(|p| p.is_alive && p.death_timer.is_none()) else { continue };
             let feet = bot.render_position();
             let (scale, alpha) = alert_look(a.age);
             let on_screen = project(feet + vec3(0.0, MARK_HEIGHT, 0.0))
