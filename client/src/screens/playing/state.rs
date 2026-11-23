@@ -139,6 +139,8 @@ pub struct PlayingState {
     /// Where recent hits came from (the red arcs around the crosshair).
     pub(crate) damage_indicators: Vec<super::rendering::DamageIndicator>,
     pub stamina_depleted_vignette_alpha: f32,
+    /// Impact puffs, kill/headshot markers, camera punch (purely visual).
+    pub(crate) hit_fx: super::hit_fx::HitFx,
 
     pub target_dummy: TargetDummy,
     pub hit_marker_timer: f32,
@@ -380,6 +382,7 @@ impl PlayingState {
             damage_indicators: Vec::new(),
             last_damage_attacker: None,
             stamina_depleted_vignette_alpha: 0.0,
+            hit_fx: Default::default(),
 
             spawn_feedback_message: None,
             spawn_feedback_timer: 0.0,

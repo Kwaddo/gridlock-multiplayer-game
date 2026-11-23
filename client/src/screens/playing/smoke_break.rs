@@ -139,6 +139,10 @@ impl PlayingState {
                 None
             };
             let victim_name = if target == 0 { "a decoy".to_string() } else { self.smoke_name(target) };
+            // our find: the kill marker (everyone's feed already says found or decoy)
+            if shooter == player_id && target != 0 {
+                self.note_local_kill(false);
+            }
             if target == player_id {
                 self.smoke.found = Some((shooter_name.clone(), points));
                 self.smoke.found_timer = FOUND_CARD_TIME;

@@ -159,6 +159,7 @@ pub(super) fn apply_kill_feed(
         // kill confirmation effect for local player
         if killer_id == player_id {
             playing_state.kill_confirm_timer = 0.3;
+            playing_state.note_local_kill(headshot);
             // TDM: resupply ammo on kill
             if playing_state.match_mode == Some(client::net::protocols::MODE_TEAM_DEATHMATCH) {
                 playing_state.weapons.resupply_active(15);

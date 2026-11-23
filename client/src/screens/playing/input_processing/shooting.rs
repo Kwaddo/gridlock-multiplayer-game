@@ -358,6 +358,9 @@ impl PlayingState {
                     }
                     EntityKind::Bot => {
                         self.practice_bots[idx].take_damage(dealt_dmg);
+                        if !self.practice_bots[idx].is_alive() {
+                            self.hit_fx.on_kill(zone == HitZone::Head);
+                        }
                     }
                     _ => {}
                 }
