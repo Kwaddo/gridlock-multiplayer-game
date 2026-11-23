@@ -6,7 +6,8 @@ use super::glb::GlbImages;
 use super::{AnimatedPart, RigidVertex, SkinVertex};
 
 /// Build one animated part per skinned and rigid primitive, plus every
-/// bind-pose vertex position (for the model's bounding box).
+/// bind-pose vertex position (for the model's bounding box). The parts are
+/// not cut to macroquad's draw limit yet: [`split_parts`] does that.
 pub(super) fn build_parts(
     path: &str,
     skinned_prims: Vec<(gltf::Mesh, gltf::Primitive)>,
@@ -70,7 +71,7 @@ pub(super) fn build_parts(
             .material()
             .pbr_metallic_roughness()
             .base_color_texture()
-            .and_then(|base_color| images.texture(base_color.texture().source().index()));
+            .and_then(|base_color| images.texture(buffers, base_color.texture().source().index()));
 
         let f = sp.material().pbr_metallic_roughness().base_color_factor();
         let mat_color = [
@@ -172,7 +173,7 @@ pub(super) fn build_parts(
             .material()
             .pbr_metallic_roughness()
             .base_color_texture()
-            .and_then(|base_color| images.texture(base_color.texture().source().index()));
+            .and_then(|base_color| images.texture(buffers, base_color.texture().source().index()));
 
         let f = rp.material().pbr_metallic_roughness().base_color_factor();
         let mat_color = [
@@ -240,9 +241,12 @@ pub(super) fn build_parts(
     if parts.is_empty() {
         return Err(format!("no renderable primitives found in '{}'", path));
     }
-    // cut big parts into pieces macroquad can draw whole, before this the hands' arms drew about 12%
-    let parts: Vec<AnimatedPart> = parts.into_iter().flat_map(split_part).collect();
     Ok((parts, all_positions))
+}
+
+/// Cut big parts into pieces macroquad can draw whole, before this the hands' arms drew about 12%.
+pub(super) fn split_parts(parts: Vec<AnimatedPart>) -> Vec<AnimatedPart> {
+    parts.into_iter().flat_map(split_part).collect()
 }
 
 // one part into pieces under the draw limit, each keeps its own skin data in the same order

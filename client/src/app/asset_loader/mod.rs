@@ -1,7 +1,9 @@
 mod cache;
 mod constants;
 mod entry;
+mod glb_job;
 mod manifest;
+mod pacer;
 mod paths;
 mod prefetch;
 mod preload;

@@ -4,10 +4,10 @@ use std::collections::HashMap;
 
 use super::clip_select::select_clip;
 use super::constants::SKIN_INTERVAL;
-use super::glb::import_glb;
+use super::glb::{import_glb, GlbImages};
 use super::nodes::load_nodes;
-use super::parts::build_parts;
-use super::{AnimatedModel, ClipSelectionMode, Pose, SharedGeometry};
+use super::parts::{build_parts, split_parts};
+use super::{AnimatedModel, AnimatedPart, ClipSelectionMode, Pose, SharedGeometry};
 
 pub fn load_gltf_animated_model(path: &str, bytes: &[u8]) -> Result<AnimatedModel, String> {
     load_gltf_animated_model_internal(path, bytes, ClipSelectionMode::LongestDuration, None, false)
@@ -57,20 +57,46 @@ fn load_gltf_animated_model_internal(
     include_unskinned_primitives: bool,
 ) -> Result<AnimatedModel, String> {
     let (doc, buffers, images) = import_glb(path, bytes)?;
+    let mut build =
+        AnimatedBuild::start(path, &doc, &buffers, mode, forced_clip_index, include_unskinned_primitives)?;
+    loop {
+        if let Some(model) = build.step(&doc, &buffers, &images)? {
+            return Ok(model);
+        }
+    }
+}
 
-    let mesh_count = doc.meshes().count();
-    let skin_count = doc.skins().count();
-    let anim_count = doc.animations().count();
-    println!(
-        "[anim] {} meshes={} skins={} animations={}",
-        path, mesh_count, skin_count, anim_count
-    );
+/// An animated model built from an imported glTF ([`import_glb`]) one stage
+/// at a time, so a big one need not be built within one frame: each
+/// [`step`](Self::step) does one stage. Run to the end it gives what the
+/// `load_gltf_animated_model*` functions give (they run it so).
+pub struct AnimatedBuild {
+    path: String,
+    include_unskinned_primitives: bool,
+    /// The clip [`select_clip`] chose, by index.
+    anim_index: usize,
+    stage: Stage,
+}
 
-    let skin = doc
-        .skins()
-        .next()
-        .ok_or_else(|| format!("no skin found in '{}'", path))?;
+enum Stage {
+    /// Read every primitive's vertices and textures.
+    Parts,
+    /// Cut the parts to macroquad's draw limit.
+    Split(Vec<AnimatedPart>, Vec<Vec3>),
+    /// Skeleton, clip, size and first pose: the model.
+    Finish(Vec<AnimatedPart>, Vec<Vec3>),
+    /// The model was handed out, or a stage failed.
+    Done,
+}
 
+/// Every skinned primitive, plus the rigid (unskinned) ones with the node
+/// each follows when `include_unskinned_primitives`.
+#[allow(clippy::type_complexity)]
+fn primitives<'a>(
+    doc: &'a gltf::Document,
+    buffers: &[gltf::buffer::Data],
+    include_unskinned_primitives: bool,
+) -> (Vec<(gltf::Mesh<'a>, gltf::Primitive<'a>)>, Vec<(gltf::Mesh<'a>, gltf::Primitive<'a>, usize)>) {
     let mut prim_nodes: HashMap<(usize, usize), usize> = HashMap::new();
     if include_unskinned_primitives {
         // Map mesh primitive -> node index so rigid primitives can follow node transforms.
@@ -102,32 +128,128 @@ fn load_gltf_animated_model_internal(
             }
         }
     }
-    if skinned_prims.is_empty() {
-        return Err(format!("no skinned primitive (POSITION+JOINTS_0+WEIGHTS_0) found in '{}'", path));
+    (skinned_prims, rigid_prims)
+}
+
+impl AnimatedBuild {
+    /// Check that `doc` can make an animated model (a skin, a skinned
+    /// primitive, a clip), before any of it is built.
+    pub fn start(
+        path: &str,
+        doc: &gltf::Document,
+        buffers: &[gltf::buffer::Data],
+        mode: ClipSelectionMode,
+        forced_clip_index: Option<usize>,
+        include_unskinned_primitives: bool,
+    ) -> Result<Self, String> {
+        let mesh_count = doc.meshes().count();
+        let skin_count = doc.skins().count();
+        let anim_count = doc.animations().count();
+        println!(
+            "[anim] {} meshes={} skins={} animations={}",
+            path, mesh_count, skin_count, anim_count
+        );
+
+        if doc.skins().next().is_none() {
+            return Err(format!("no skin found in '{}'", path));
+        }
+        let (skinned_prims, _) = primitives(doc, buffers, include_unskinned_primitives);
+        if skinned_prims.is_empty() {
+            return Err(format!("no skinned primitive (POSITION+JOINTS_0+WEIGHTS_0) found in '{}'", path));
+        }
+        let mesh = skinned_prims[0].0.clone();
+        let first_prim_index = skinned_prims[0].1.index();
+        let anim = select_clip(path, doc, buffers, mode, forced_clip_index)?;
+
+        println!(
+            "[anim] {} using mesh={} first_prim={} anim={}",
+            path,
+            mesh.index(),
+            first_prim_index,
+            anim.index()
+        );
+        Ok(AnimatedBuild {
+            path: path.to_string(),
+            include_unskinned_primitives,
+            anim_index: anim.index(),
+            stage: Stage::Parts,
+        })
     }
-    let mesh = skinned_prims[0].0.clone();
-    let first_prim_index = skinned_prims[0].1.index();
-    let anim = select_clip(path, &doc, &buffers, mode, forced_clip_index)?;
 
-    println!(
-        "[anim] {} using mesh={} first_prim={} anim={}",
-        path,
-        mesh.index(),
-        first_prim_index,
-        anim.index()
-    );
+    /// The images the build makes textures of, each once, in the order it
+    /// asks for them. [`GlbImages::texture`] keeps what it uploads, so
+    /// uploading these ahead (a frame each) leaves the build less to do.
+    pub fn texture_images(&self, doc: &gltf::Document, buffers: &[gltf::buffer::Data]) -> Vec<usize> {
+        let (skinned, rigid) = primitives(doc, buffers, self.include_unskinned_primitives);
+        let prims = skinned.iter().map(|(_, p)| p).chain(rigid.iter().map(|(_, p, _)| p));
+        let mut images = Vec::new();
+        for prim in prims {
+            if let Some(info) = prim.material().pbr_metallic_roughness().base_color_texture() {
+                let index = info.texture().source().index();
+                if !images.contains(&index) {
+                    images.push(index);
+                }
+            }
+        }
+        images
+    }
 
-    let (parts, all_positions) = build_parts(path, skinned_prims, rigid_prims, &buffers, &images)?;
-    let total_vertices: usize = parts.iter().map(|p| p.mesh.vertices.len()).sum();
-    let total_indices: usize = parts.iter().map(|p| p.mesh.indices.len()).sum();
-    println!(
-        "[anim] '{}' total vertices={} indices={} parts={}",
-        path,
-        total_vertices,
-        total_indices,
-        parts.len()
-    );
+    /// Do the next stage, with the `doc`, `buffers` and `images` given to
+    /// [`start`](Self::start): the model once the last one is done. A stage
+    /// that fails ends the build.
+    pub fn step(
+        &mut self,
+        doc: &gltf::Document,
+        buffers: &[gltf::buffer::Data],
+        images: &GlbImages,
+    ) -> Result<Option<AnimatedModel>, String> {
+        let path = self.path.as_str();
+        match std::mem::replace(&mut self.stage, Stage::Done) {
+            Stage::Parts => {
+                let (skinned, rigid) = primitives(doc, buffers, self.include_unskinned_primitives);
+                let (parts, all_positions) = build_parts(path, skinned, rigid, buffers, images)?;
+                self.stage = Stage::Split(parts, all_positions);
+                Ok(None)
+            }
+            Stage::Split(parts, all_positions) => {
+                let parts = split_parts(parts);
+                let total_vertices: usize = parts.iter().map(|p| p.mesh.vertices.len()).sum();
+                let total_indices: usize = parts.iter().map(|p| p.mesh.indices.len()).sum();
+                println!(
+                    "[anim] '{}' total vertices={} indices={} parts={}",
+                    path,
+                    total_vertices,
+                    total_indices,
+                    parts.len()
+                );
+                self.stage = Stage::Finish(parts, all_positions);
+                Ok(None)
+            }
+            Stage::Finish(parts, all_positions) => {
+                finish(path, doc, buffers, self.anim_index, parts, &all_positions).map(Some)
+            }
+            Stage::Done => Err(format!("'{}' is built already", path)),
+        }
+    }
+}
 
+/// The model from its parts: skeleton, clip, size and first pose.
+fn finish(
+    path: &str,
+    doc: &gltf::Document,
+    buffers: &[gltf::buffer::Data],
+    anim_index: usize,
+    parts: Vec<AnimatedPart>,
+    all_positions: &[Vec3],
+) -> Result<AnimatedModel, String> {
+    let skin = doc
+        .skins()
+        .next()
+        .ok_or_else(|| format!("no skin found in '{}'", path))?;
+    let anim = doc
+        .animations()
+        .nth(anim_index)
+        .ok_or_else(|| format!("no animation {} in '{}'", anim_index, path))?;
     let (_node_count, node_parents, node_rest, node_tracks, duration) =
         load_nodes(path, &doc, &buffers, &anim)?;
 
@@ -165,7 +287,7 @@ fn load_gltf_animated_model_internal(
     // Compute bounding box from bind pose to determine scale/offset
     let mut min_y = f32::INFINITY;
     let mut max_y = f32::NEG_INFINITY;
-    for p in &all_positions {
+    for p in all_positions {
         min_y = min_y.min(p.y);
         max_y = max_y.max(p.y);
     }
@@ -211,3 +333,7 @@ fn load_gltf_animated_model_internal(
 
     Ok(model)
 }
+
+#[cfg(test)]
+#[path = "loader_tests.rs"]
+mod tests;

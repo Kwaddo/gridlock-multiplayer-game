@@ -3,7 +3,9 @@ use platform::Instant;
 
 use super::cache::{asset_loaded, has_ext};
 use super::constants::PREFETCH_AHEAD;
-use super::entry::load_asset_entry;
+use super::entry::begin_asset_entry;
+use super::glb_job::GlbJob;
+use super::pacer::LoadPacer;
 use super::paths::resolve_runtime_asset_path;
 use super::prefetch::{release_decoded, Prefetcher, PREFETCHED};
 
@@ -31,6 +33,16 @@ pub struct AssetQueue {
     /// How many of `pending` the last [`prioritize`](Self::prioritize) put
     /// at the front: needed now, so not paced.
     wanted: usize,
+    /// A model taken off `pending` and loading a step at a time.
+    in_progress: Option<InProgress>,
+}
+
+/// A model loading a step at a time: its manifest entry and the job.
+struct InProgress {
+    entry: (String, String),
+    job: GlbJob,
+    /// Asked for by the last [`AssetQueue::prioritize`]: needed now.
+    wanted: bool,
 }
 
 impl AssetQueue {
@@ -66,6 +78,7 @@ impl AssetQueue {
             prefetcher: Prefetcher::default(),
             pacer: LoadPacer::default(),
             wanted: 0,
+            in_progress: None,
         }
     }
 
@@ -75,13 +88,18 @@ impl AssetQueue {
         // are the keys moved so far, in order; the rest keep their order.
         // A key already where it belongs moves nothing.
         let mut front = 0;
+        let mut job_wanted = false;
         for key in keys {
+            job_wanted |= self.in_progress.as_ref().is_some_and(|p| p.job.key() == key);
             if let Some(i) = self.pending[front..].iter().position(|p| p.key() == key) {
                 self.pending[front..=front + i].rotate_right(1);
                 front += 1;
             }
         }
         self.wanted = front;
+        if let Some(in_progress) = &mut self.in_progress {
+            in_progress.wanted = job_wanted;
+        }
     }
 
     /// Mark `keys` (those still pending) as needed before spawning too, and
@@ -89,7 +107,9 @@ impl AssetQueue {
     pub fn require<'a>(&mut self, keys: impl IntoIterator<Item = &'a str>) {
         let keys: Vec<&str> = keys.into_iter().collect();
         for key in &keys {
-            if !self.essential.contains(*key) && self.pending.iter().any(|p| p.key() == *key) {
+            let queued = self.pending.iter().any(|p| p.key() == *key)
+                || self.in_progress.as_ref().is_some_and(|p| p.job.key() == *key);
+            if !self.essential.contains(*key) && queued {
                 self.essential.insert(key.to_string());
                 self.essential_total += 1;
             }
@@ -100,12 +120,19 @@ impl AssetQueue {
     /// Load at most one asset whose bytes are already here (no frame waits on
     /// the network) and keep the next few downloading. Returns whether it
     /// loaded one. Takes the first of the next few that has arrived, so one
-    /// slow download does not hold up the ones behind it.
+    /// slow download does not hold up the ones behind it. A model
+    /// [`pump_paced`](Self::pump_paced) left half loaded is finished first.
+    /// Each asset is loaded whole, in one go.
     pub async fn pump(&mut self, playing_state: &mut PlayingState) -> bool {
+        if self.in_progress.is_some() {
+            while !self.step_job(playing_state) {}
+            return true;
+        }
         let Some(i) = self.next_arrived(playing_state) else {
             return false;
         };
-        self.load(i, playing_state).await;
+        self.begin(i, playing_state).await;
+        while !self.step_job(playing_state) {}
         true
     }
 
@@ -115,17 +142,31 @@ impl AssetQueue {
     /// (the previous frame's length, seconds) whether one may start; the
     /// downloads ahead keep going either way. What the player needs now
     /// (put at the front by `prioritize`: clips and models of the players in
-    /// the game, whose hitboxes come from them) is not held back: one a frame,
-    /// as before pacing; its time still counts against the rest.
+    /// the game, whose hitboxes come from them) is not held back: one load or
+    /// step a frame; its time still counts against the rest.
+    ///
+    /// A model (a GLB) loads a step a frame (see `GlbJob`): the first step
+    /// reads and checks the file, the next upload its textures and build it a
+    /// stage at a time, the last stores it. Each step is paced as a load.
+    /// Returns whether it loaded an asset or did a step of one.
     pub async fn pump_paced(&mut self, playing_state: &mut PlayingState, prev_frame_s: f32) -> bool {
         // every frame, so the pacer counts all the time that passes
         let allowed = self.pacer.ready(prev_frame_s * 1000.0);
         let next = self.next_arrived(playing_state);
-        let Some(i) = next.filter(|&i| allowed || i < self.wanted) else {
-            return false;
-        };
         let started = Instant::now();
-        self.load(i, playing_state).await;
+        if let Some(in_progress) = &self.in_progress {
+            // Something needed now waits behind the model: it goes unpaced too.
+            let wanted_waiting = next.is_some_and(|i| i < self.wanted);
+            if !may_step(allowed, in_progress.wanted, wanted_waiting) {
+                return false;
+            }
+            self.step_job(playing_state);
+        } else {
+            let Some(i) = next.filter(|&i| allowed || i < self.wanted) else {
+                return false;
+            };
+            self.begin(i, playing_state).await;
+        }
         self.pacer.loaded(started.elapsed().as_secs_f32() * 1000.0);
         true
     }
@@ -144,6 +185,10 @@ impl AssetQueue {
             keep
         });
         self.wanted -= gone_wanted;
+        if self.in_progress.as_ref().is_some_and(|p| asset_loaded(playing_state, &p.entry.0, &p.entry.1)) {
+            self.in_progress = None;
+            self.release_if_done();
+        }
         for p in self.pending.iter().take(PREFETCH_AHEAD) {
             self.prefetcher.start(&p.resolved);
         }
@@ -151,43 +196,82 @@ impl AssetQueue {
         (0..window).find(|&i| self.prefetcher.ready(&self.pending[i].resolved))
     }
 
-    async fn load(&mut self, i: usize, playing_state: &mut PlayingState) {
+    /// Load `pending[i]`, or (a model) start loading it a step at a time.
+    async fn begin(&mut self, i: usize, playing_state: &mut PlayingState) {
         let (key, path) = self.pending.remove(i).entry;
-        if i < self.wanted {
+        let wanted = i < self.wanted;
+        if wanted {
             self.wanted -= 1;
         }
         // A failed load is dropped too: retrying would stall the queue.
-        load_asset_entry(&key, &path, playing_state).await;
-        if self.pending.is_empty() {
+        match begin_asset_entry(&key, &path, playing_state).await {
+            Some(job) => self.in_progress = Some(InProgress { entry: (key, path), job, wanted }),
+            None => self.release_if_done(),
+        }
+    }
+
+    /// The next step of the model loading, if one is. True once none is
+    /// (it is done, or failed and dropped).
+    fn step_job(&mut self, playing_state: &mut PlayingState) -> bool {
+        let Some(in_progress) = &mut self.in_progress else {
+            return true;
+        };
+        if !in_progress.job.step(playing_state) {
+            return false;
+        }
+        self.in_progress = None;
+        self.release_if_done();
+        true
+    }
+
+    fn release_if_done(&mut self) {
+        if self.is_done() {
             // What was decoded ahead and not taken, no mesh used.
             release_decoded();
         }
     }
 
+    /// The model loading a step at a time, if it is essential: 1, else 0.
+    fn essential_in_progress(&self) -> usize {
+        usize::from(self.in_progress.as_ref().is_some_and(|p| self.essential.contains(&p.entry.0)))
+    }
+
     /// Every essential asset is loaded (or failed for good).
     pub fn ready_to_play(&self) -> bool {
-        !self.pending.iter().any(|p| self.essential.contains(p.key()))
+        self.essential_in_progress() == 0 && !self.pending.iter().any(|p| self.essential.contains(p.key()))
     }
 
     pub fn is_done(&self) -> bool {
-        self.pending.is_empty()
+        self.pending.is_empty() && self.in_progress.is_none()
     }
 
     /// (loaded, total) of the essential part, for the loading screen.
     pub fn essential_progress(&self) -> (usize, usize) {
-        let left = self.pending.iter().filter(|p| self.essential.contains(p.key())).count();
+        let left = self.pending.iter().filter(|p| self.essential.contains(p.key())).count()
+            + self.essential_in_progress();
         (self.essential_total.saturating_sub(left), self.essential_total)
     }
 
     /// (loaded, total) of everything queued for this game.
     pub fn progress(&self) -> (usize, usize) {
-        (self.total - self.pending.len(), self.total)
+        let left = self.pending.len() + usize::from(self.in_progress.is_some());
+        (self.total - left, self.total)
     }
 
     /// The asset being worked on now, as (key, path).
     pub fn current(&self) -> Option<&(String, String)> {
-        self.pending.first().map(|p| &p.entry)
+        match &self.in_progress {
+            Some(in_progress) => Some(&in_progress.entry),
+            None => self.pending.first().map(|p| &p.entry),
+        }
     }
+}
+
+/// May the model loading a step at a time take its next step this frame?
+/// When the pacer `allowed` one, or unpaced when it is `wanted` now, or when
+/// something wanted now has arrived and waits behind it.
+fn may_step(allowed: bool, wanted: bool, wanted_waiting: bool) -> bool {
+    allowed || wanted || wanted_waiting
 }
 
 /// A queued asset: its manifest entry (key, path), and the path resolved
@@ -204,50 +288,6 @@ impl Pending {
 
     fn path(&self) -> &str {
         &self.entry.1
-    }
-}
-
-/// Share of the time while playing that background loads may take.
-const LOAD_SHARE: f32 = 0.25;
-/// A frame this long (ms) is already over budget: no load starts after one.
-const SLOW_FRAME_MS: f32 = 20.0;
-/// However slow the frames, a load starts at least this often (ms), so the
-/// queue never stalls.
-const MAX_GAP_MS: f32 = 500.0;
-
-/// When the next background load may start while playing. A load of `x` ms
-/// leaves a debt of `x` that every frame pays back by [`LOAD_SHARE`] of its
-/// length, so loads take about that share of the time, spread out rather
-/// than back to back. None starts after a frame already over
-/// [`SLOW_FRAME_MS`] (which includes the frame a big load just made slow),
-/// and one always may once [`MAX_GAP_MS`] passed since the last.
-#[derive(Default)]
-struct LoadPacer {
-    debt_ms: f32,
-    since_load_ms: f32,
-    load_in_next_frame_ms: f32,
-}
-
-impl LoadPacer {
-    /// Called once per frame with the previous frame's length: may a load
-    /// start in this one?
-    fn ready(&mut self, prev_frame_ms: f32) -> bool {
-        let frame = prev_frame_ms.max(0.0);
-        self.since_load_ms += (frame - std::mem::take(&mut self.load_in_next_frame_ms)).max(0.0);
-        self.debt_ms = (self.debt_ms - frame * LOAD_SHARE).max(0.0);
-        self.since_load_ms >= MAX_GAP_MS || (self.debt_ms <= 0.0 && frame <= SLOW_FRAME_MS)
-    }
-
-    /// A load just took `took_ms`.
-    fn loaded(&mut self, took_ms: f32) {
-        self.debt_ms = took_ms.max(0.0);
-        // The gap counts from the load's end. The next frame's length
-        // includes a load done in one go, so that much of it is left out (or
-        // a long one would start the next right after); a load that awaited
-        // a download over several frames is over by then, and leaves out
-        // no more than that one frame.
-        self.since_load_ms = 0.0;
-        self.load_in_next_frame_ms = self.debt_ms;
     }
 }
 
@@ -286,74 +326,64 @@ mod tests {
         }
     }
 
-    /// Frames of `frame_ms` (plus the load's own time on the frame after a
-    /// load, as a real frame would measure it) where every load takes
-    /// `load_ms`: the frames on which a load started.
-    fn paced(frame_ms: f32, load_ms: f32, frames: usize) -> Vec<usize> {
-        let mut pacer = LoadPacer::default();
-        let mut prev = frame_ms;
-        let mut starts = Vec::new();
-        for f in 0..frames {
-            if pacer.ready(prev) {
-                pacer.loaded(load_ms);
-                starts.push(f);
-                prev = frame_ms + load_ms;
-            } else {
-                prev = frame_ms;
-            }
-        }
-        starts
+    /// A model loading in steps: its manifest entry, the job built from a
+    /// file the static loader takes (no step of it runs here).
+    fn in_progress(key: &str) -> InProgress {
+        let bytes = super::super::glb_job::test_glb(r#"{"asset":{"version":"2.0"}}"#);
+        let job = GlbJob::start(key, "p.glb", "p.glb", &bytes).unwrap();
+        InProgress { entry: (key.to_string(), "p.glb".to_string()), job, wanted: false }
+    }
+
+    /// A model half loaded is still queued: not done, not ready to play if
+    /// essential, not counted as loaded, and what is being worked on.
+    #[test]
+    fn a_model_loading_in_steps_is_still_queued() {
+        let mut q = queue(&[("b", "2.glb")]);
+        q.total = 2;
+        q.essential.insert("a".to_string());
+        q.essential_total = 1;
+        q.in_progress = Some(in_progress("a"));
+        assert!(!q.is_done());
+        assert!(!q.ready_to_play());
+        assert_eq!(q.progress(), (0, 2));
+        assert_eq!(q.essential_progress(), (0, 1));
+        assert_eq!(q.current().map(|e| e.0.as_str()), Some("a"));
+        // done with it
+        q.in_progress = None;
+        assert!(!q.is_done());
+        assert!(q.ready_to_play());
+        assert_eq!(q.progress(), (1, 2));
+        assert_eq!(q.essential_progress(), (1, 1));
+        assert_eq!(q.current().map(|e| e.0.as_str()), Some("b"));
+    }
+
+    /// `prioritize` tells the model in progress whether it is wanted now,
+    /// and `require` makes it essential like a pending one.
+    #[test]
+    fn a_model_in_progress_can_be_wanted_and_required() {
+        let mut q = queue(&[("b", "2.glb"), ("c", "3.glb")]);
+        q.in_progress = Some(in_progress("a"));
+        let wanted = |q: &AssetQueue| q.in_progress.as_ref().unwrap().wanted;
+        q.prioritize(["c", "a"]);
+        assert!(wanted(&q));
+        assert_eq!(q.wanted, 1, "only pending ones count at the front");
+        q.prioritize(["c"]);
+        assert!(!wanted(&q));
+        assert!(q.ready_to_play());
+        q.require(["a", "z"]);
+        assert!(wanted(&q));
+        assert!(!q.ready_to_play());
+        assert_eq!(q.essential_progress(), (0, 1));
+        q.require(["a"]);
+        assert_eq!(q.essential_progress(), (0, 1), "counted once");
     }
 
     #[test]
-    fn small_loads_go_every_frame() {
-        // a 1 ms sound: nothing to pay back by the next frame
-        assert_eq!(paced(16.7, 1.0, 10), (0..10).collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn big_loads_are_spread_to_their_share() {
-        for &(frame, load) in &[(16.7, 40.0), (16.7, 120.0), (8.3, 60.0)] {
-            let starts = paced(frame, load, 2000);
-            assert!(starts.windows(2).all(|w| w[1] - w[0] > 1), "back to back: {frame} {load}");
-            let wall = 2000.0 * frame + starts.len() as f32 * load;
-            let share = starts.len() as f32 * load / wall;
-            assert!(share <= LOAD_SHARE + 0.02 && share >= LOAD_SHARE - 0.08, "share {share}: {frame} {load}");
-        }
-    }
-
-    #[test]
-    fn slow_frames_wait_but_never_forever() {
-        // already over budget every frame (30 fps): only the guarantee loads
-        let starts = paced(33.3, 5.0, 300);
-        assert!(!starts.is_empty());
-        let max_gap_frames = (MAX_GAP_MS / 33.3).ceil() as usize;
-        assert!(starts.windows(2).all(|w| w[1] - w[0] <= max_gap_frames), "{starts:?}");
-        assert!(starts[0] <= max_gap_frames);
-        // a load so long its debt would outlast the guarantee
-        let starts = paced(16.7, 5000.0, 400);
-        assert!(starts.len() >= 2);
-        assert!(starts.windows(2).all(|w| w[1] - w[0] <= (MAX_GAP_MS / 16.7).ceil() as usize + 1));
-    }
-
-    // a load that waited on a download over several short frames: the next
-    // still comes within the guarantee of its end, not that plus the wait
-    #[test]
-    fn a_long_wait_on_the_network_does_not_push_the_next_load_back() {
-        let mut pacer = LoadPacer::default();
-        assert!(pacer.ready(16.7));
-        pacer.loaded(3000.0);
-        let frames = (1..100).position(|_| pacer.ready(16.7)).unwrap() + 1;
-        assert!(frames as f32 * 16.7 <= MAX_GAP_MS + 2.0 * 16.7, "{frames} frames");
-    }
-
-    #[test]
-    fn one_slow_frame_skips_one_load() {
-        let mut pacer = LoadPacer::default();
-        assert!(pacer.ready(16.7));
-        pacer.loaded(0.5);
-        assert!(!pacer.ready(25.0));
-        assert!(pacer.ready(16.7));
+    fn steps_wait_for_the_pacer_unless_needed_now() {
+        assert!(!may_step(false, false, false));
+        assert!(may_step(true, false, false));
+        assert!(may_step(false, true, false), "wanted itself");
+        assert!(may_step(false, false, true), "something wanted waits behind it");
     }
 
     #[test]

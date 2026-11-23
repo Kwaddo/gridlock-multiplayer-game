@@ -36,6 +36,7 @@ pub use glb::release_predecoded;
 pub use clip::{load_clip, Clip};
 pub use joints::JointRole;
 pub use loader::{
+    AnimatedBuild,
     load_gltf_animated_model, load_gltf_animated_model_with_clip_index,
     load_gltf_animated_model_with_mode, load_gltf_animated_model_with_unskinned,
 };
