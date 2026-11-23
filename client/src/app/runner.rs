@@ -242,6 +242,7 @@ pub async fn run() {
                 if sync.server_seen {
                     last_server_contact = Some(Instant::now());
                 }
+                playing_state.draws_no_world_this_frame();
                 playing_state.simulate(&config, maze.as_ref());
                 // the loadout screen covers the window with a 95%-opaque panel, so the
                 // 3D scene under it is not rendered; clear to the panel colour instead
