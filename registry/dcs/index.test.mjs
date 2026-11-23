@@ -230,3 +230,43 @@ test("a busy host's held poll, or an idle one a player writes to, answers at onc
   assert.ok(Date.now() - woke < 1500);
   await settled();
 });
+
+test("a poll finds a new message behind more than a page of older ones", async () => {
+  const host = await hostRoom("MANY1");
+  const now = Date.now();
+  // 250 messages from 50 s ago (not expired), all already handled.
+  for (let i = 0; i < 250; i++) {
+    const at = now - 50000 + i;
+    putObject(`rooms/MANY1/host/${String(at).padStart(15, "0")}-${i.toString(16).padStart(8, "0")}.json`, {
+      at,
+      sender: "old",
+      bodies: [{ NewPeer: "old" }],
+    });
+  }
+  const join = await call("POST", "/room/MANY1/join", { body: { signals: [] } });
+  const player = await join.json();
+  const after = now - 10000;
+  const resp = await call("GET", `/room/MANY1/poll?id=${host.id}&token=${host.token}&host&after=${after}&have=`);
+  const batch = await resp.json();
+  assert.deepEqual(
+    batch.map((m) => m.NewPeer),
+    [player.id],
+  );
+  await settled();
+});
+
+test("a poll lists a flood of new messages past the first page", async () => {
+  const host = await hostRoom("FLOOD1");
+  const now = Date.now();
+  for (let i = 0; i < 250; i++) {
+    const at = now - 5000 + i;
+    putObject(`rooms/FLOOD1/host/${String(at).padStart(15, "0")}-${i.toString(16).padStart(8, "0")}.json`, {
+      at,
+      sender: `p${i}`,
+      bodies: [{ NewPeer: `p${i}` }],
+    });
+  }
+  const resp = await call("GET", `/room/FLOOD1/poll?id=${host.id}&token=${host.token}&host&after=0&have=`);
+  assert.equal((await resp.json()).length, 250);
+  await settled();
+});

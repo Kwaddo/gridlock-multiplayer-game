@@ -99,6 +99,8 @@ const LONG_POLL_IDLE_CHECK_MS = 1000;
 const LONG_POLL_FAIL_MAX_MS = 1000;
 const LONG_POLL_MAX_FAILURES = 3;
 const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
+// A poll lists at most this many pages (of 200) of its mailbox per look.
+const UNSEEN_MAX_PAGES = 3;
 // How far apart two isolates' clocks may be, for a poll's `after`.
 const CLOCK_SKEW_MS = 2000;
 // How long a host claiming a room waits before checking its claim stuck.
@@ -607,13 +609,23 @@ async function deliver(store, box, sender, bodies) {
 // clocks of two isolates disagree by a moment, except the ids in `have`.
 // Without `have`, only messages newer than `after`.
 //
-// The whole mailbox is listed (it holds only a handful of messages): those
-// in `have` (the caller has them) and expired ones are deleted, in the
-// background and once each (`deleting`).
+// The mailbox is listed from `from` on (keys sort by time; S3 start-after),
+// so older messages, however many, can't hide new ones, and a flood is
+// listed a few pages deep (UNSEEN_MAX_PAGES). Those in `have` (the caller
+// has them) are deleted, in the background and once each (`deleting`);
+// expired ones are left to the sweep. (A store that ignored start-after
+// would list from the start, and expired ones are deleted then too.)
 async function unseen(store, ctx, prefix, after, have, deleting) {
   const now = Date.now();
   const from = Math.max(have ? after - CLOCK_SKEW_MS : after + 1, now - MESSAGE_TTL_MS, 0);
-  const { items } = await store.list(prefix);
+  const items = [];
+  let token = null;
+  for (let page = 0; page < UNSEEN_MAX_PAGES; page++) {
+    const listed = await store.list(prefix, { token, startAfter: prefix + String(from).padStart(15, "0") });
+    items.push(...listed.items);
+    token = listed.next;
+    if (!token) break;
+  }
   const fresh = [];
   const done = [];
   for (const { key } of items) {
@@ -819,9 +831,12 @@ class Store {
   // One page of the keys under `prefix`, in order (ListObjectsV2), as
   // { items: [{ key, modified }], next }: `next` is the token for the page
   // after, if there is one.
-  async list(prefix, { token, maxKeys = 200 } = {}) {
+  // `startAfter`: only keys after it (ignored with a token, which carries on
+  // from its own page).
+  async list(prefix, { token, maxKeys = 200, startAfter } = {}) {
     const query = { "list-type": "2", prefix, "max-keys": String(maxKeys) };
     if (token) query["continuation-token"] = token;
+    else if (startAfter) query["start-after"] = startAfter;
     const resp = await this.send("GET", "/", query);
     if (!resp.ok) throw new Error(`S3 LIST ${prefix}: ${resp.status}`);
     const xml = await resp.text();
