@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use platform::Instant;
 
+use crate::bot::awareness::model::is_suppressed;
 use crate::net::PeerId;
 use crate::player::Player;
 use crate::protocols::Shot;
@@ -35,7 +36,10 @@ pub fn min_shot_interval(weapon: &str) -> Duration {
 /// at the shooter's position as the server knows it (at gun height), never
 /// where the client says, and ends at most `MAX_SHOT_DISTANCE` away. Shots
 /// from the dead, from bots, from an aliased (Smoke Break) box, from someone
-/// in their spawn freeze and faster than the weapon fires are dropped.
+/// in their spawn freeze and faster than the weapon fires are dropped. So
+/// are a suppressed weapon's (judged by what the server knows they hold):
+/// it has no tracer or flash, its shooter's own client draws none either.
+/// Bots still hear those, barely (`BotManager::hear_shot`).
 pub fn handle_shoot(
     shots: &mut ShotQueue,
     players: &mut HashMap<PeerId, Player>,
@@ -51,8 +55,9 @@ pub fn handle_shoot(
     if shooter.is_bot || !shooter.is_alive || shooter.smoke_alias.is_some() {
         return;
     }
-    // frozen at a spawn: the shot can't hurt anyone, so nobody sees it either
-    if shooter.spawn_frozen(now) {
+    // frozen at a spawn the shot can't hurt anyone, so nobody sees it either;
+    // a suppressed shot shows nothing to see
+    if shooter.spawn_frozen(now) || is_suppressed(&shooter.current_weapon) {
         return;
     }
     let interval = min_shot_interval(&shooter.current_weapon);

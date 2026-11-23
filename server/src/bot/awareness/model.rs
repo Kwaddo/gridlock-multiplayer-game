@@ -77,11 +77,17 @@ pub fn light_level(lights: impl Iterator<Item = (f32, f32)>, at: (f32, f32)) -> 
     }
 }
 
+/// Whether `weapon` (a server weapon name) is suppressed: barely heard, and
+/// no tracer or muzzle flash.
+pub fn is_suppressed(weapon: &str) -> bool {
+    SUPPRESSED_WEAPONS.iter().any(|w| w.eq_ignore_ascii_case(weapon))
+}
+
 /// How far a shot from `weapon` (a server weapon name) is heard.
 pub fn gunfire_radius(weapon: &str) -> f32 {
     if weapon.eq_ignore_ascii_case("knife") || weapon.eq_ignore_ascii_case("punch") {
         MELEE_NOISE_RADIUS
-    } else if SUPPRESSED_WEAPONS.iter().any(|w| w.eq_ignore_ascii_case(weapon)) {
+    } else if is_suppressed(weapon) {
         SUPPRESSED_GUNFIRE_RADIUS
     } else {
         GUNFIRE_RADIUS

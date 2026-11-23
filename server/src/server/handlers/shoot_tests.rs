@@ -282,3 +282,27 @@ fn a_spawn_frozen_player_in_the_maze_fires_nothing() {
     assert_eq!(shots_to(&flush(&mut server), b).len(), 1);
     assert!(server.bot_manager.noise_radius(a).is_some());
 }
+
+// a suppressed weapon draws no tracer or flash for its shooter: none for the others either
+#[test]
+fn a_suppressed_shot_is_not_relayed_but_still_barely_heard() {
+    use crate::bot::awareness::tuning::SUPPRESSED_GUNFIRE_RADIUS;
+    let mut server = crate::server::Server::new();
+    let (a, b) = (PeerId(1), PeerId(2));
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
+    for p in server.players.values_mut() {
+        p.world = WorldId::Maze;
+    }
+    let shoot = ClientMsg::Shoot { end: (1.0, 1.0, 5.0) }.encode();
+    for weapon in ["Suppressed Pistol", "AS VAL"] {
+        server.players.get_mut(&a).unwrap().current_weapon = weapon.into();
+        server.handle_packet(a, &shoot);
+        assert!(shots_to(&flush(&mut server), b).is_empty(), "{weapon}'s shot was relayed");
+        assert_eq!(server.bot_manager.noise_radius(a), Some(SUPPRESSED_GUNFIRE_RADIUS), "{weapon}");
+    }
+    // judged by what the server knows they hold
+    server.players.get_mut(&a).unwrap().current_weapon = "M4A1".into();
+    server.handle_packet(a, &shoot);
+    assert_eq!(shots_to(&flush(&mut server), b).len(), 1);
+}
