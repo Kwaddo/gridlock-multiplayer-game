@@ -20,6 +20,18 @@ function int(value, min, max) {
   return Number.isInteger(value) && value >= min && value <= max ? value : null;
 }
 
+// The counts a listing shows: `players` (bots included) and, when the host
+// sent it, `bots`, how many of them are bots. A joiner takes a bot's place,
+// so the list counts a game full only when its people fill it: the seats cap
+// the people, and the bots are whatever is left of the capped players.
+// Hosts from before the bot count send none, and list none.
+function occupancy(players, bots, maxPlayers) {
+  const listed = Math.min(players, maxPlayers);
+  if (bots === null) return { players: listed };
+  const people = Math.min(players - Math.min(bots, players), maxPlayers);
+  return { players: listed, bots: listed - people };
+}
+
 function parseJson(text) {
   try {
     return JSON.parse(text);
@@ -44,4 +56,4 @@ function log(message) {
   console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
 }
 
-export { clientIp, cleanName, int, parseJson, sha256Hex, json, empty, log };
+export { clientIp, cleanName, int, occupancy, parseJson, sha256Hex, json, empty, log };

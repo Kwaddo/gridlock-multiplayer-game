@@ -162,6 +162,60 @@ test("a heartbeat with the wrong token, or for an unknown listing, is 404", asyn
   assert.equal(listings()[a.id].entry.players, 1);
 });
 
+test("a listing keeps the bot count a host sends, and a heartbeat updates it", async () => {
+  objects.clear();
+  const body = { name: "ROOMBT", room: "ROOMBT", players: 8, bots: 5, max_players: 8 };
+  const created = await call("POST", "/servers", { body, ip: "203.0.113.8" });
+  assert.equal(created.status, 201);
+  const a = await created.json();
+  await settled();
+  assert.deepEqual([listings()[a.id].entry.players, listings()[a.id].entry.bots], [8, 5]);
+
+  const auth = { Authorization: `Bearer ${a.token}` };
+  // A beat that renews nothing writes nothing: keep them a few ms apart.
+  const beat = async (body) => {
+    await new Promise((r) => setTimeout(r, 5));
+    return call("PUT", `/servers/${a.id}`, { body, headers: auth });
+  };
+  assert.equal((await beat({ players: 6, bots: 2 })).status, 204);
+  assert.deepEqual([listings()[a.id].entry.players, listings()[a.id].entry.bots], [6, 2]);
+  // never more bots than players
+  assert.equal((await beat({ players: 3, bots: 9 })).status, 204);
+  assert.deepEqual([listings()[a.id].entry.players, listings()[a.id].entry.bots], [3, 3]);
+  // more players than seats (a lobby beside a bot-filled match): the people
+  // are capped at the seats, the bots are what is left
+  assert.equal((await beat({ players: 10, bots: 7 })).status, 204);
+  assert.deepEqual([listings()[a.id].entry.players, listings()[a.id].entry.bots], [8, 5]);
+  assert.equal((await beat({ players: 13, bots: 4 })).status, 204);
+  assert.deepEqual([listings()[a.id].entry.players, listings()[a.id].entry.bots], [8, 0]);
+  // a heartbeat without a count (as from an older host) drops it
+  assert.equal((await beat({ players: 4 })).status, 204);
+  assert.equal(listings()[a.id].entry.players, 4);
+  assert.equal("bots" in listings()[a.id].entry, false);
+});
+
+test("a host from before the bot count lists none, and a bad count is ignored", async () => {
+  objects.clear();
+  const a = await list("ROOMOB", "203.0.113.9");
+  await settled();
+  assert.equal("bots" in listings()[a.id].entry, false);
+  const beat = await call("PUT", `/servers/${a.id}`, {
+    body: { players: 5 },
+    headers: { Authorization: `Bearer ${a.token}` },
+  });
+  assert.equal(beat.status, 204);
+  assert.equal(listings()[a.id].entry.players, 5);
+  assert.equal("bots" in listings()[a.id].entry, false);
+
+  const body = { name: "ROOMBD", room: "ROOMBD", players: 2, bots: -1, max_players: 8 };
+  const created = await call("POST", "/servers", { body, ip: "203.0.113.10" });
+  assert.equal(created.status, 201);
+  const b = await created.json();
+  await settled();
+  assert.equal(listings()[b.id].entry.players, 2);
+  assert.equal("bots" in listings()[b.id].entry, false);
+});
+
 test("a listing is removed only with its token", async () => {
   objects.clear();
   const a = await list("ROOMDD", "203.0.113.4");

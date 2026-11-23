@@ -23,10 +23,11 @@
 //   deletes whatever a crashed tab left behind.
 //
 // Host list. Game hosts announce themselves with a heartbeat; clients fetch the list.
-//   GET    /servers        -> [{ id, name, addr | room, players, max_players, lan? }]
+//   GET    /servers        -> [{ id, name, addr | room, players, bots?, max_players, lan? }]
 //   (lan: the listing came from the asker's own network; its address is never shown.)
-//   POST   /servers        { name, port | room, players, max_players } -> { id, token, ttl, addr? }
-//   PUT    /servers/:id    { players }   (Authorization: Bearer <token>)
+//   POST   /servers        { name, port | room, players, bots?, max_players } -> { id, token, ttl, addr? }
+//   PUT    /servers/:id    { players, bots? }   (Authorization: Bearer <token>)
+//   (bots: how many of players are bots, who give their place to a joiner.)
 //   DELETE /servers/:id                  (Authorization: Bearer <token>)
 //   A native host's address is the IP the request came from, never a
 //   client-supplied one, so a listing can only point at the machine that made it.
@@ -255,12 +256,13 @@ async function createListing(request, store, ctx) {
   const name = cleanName(body?.name);
   const maxPlayers = int(body?.max_players, 1, 255);
   const players = int(body?.players, 0, 255);
+  const bots = int(body?.bots, 0, 255);
   const port = int(body?.port, 1, 65535);
   const room = typeof body?.room === "string" && ROOM_CODE.test(body.room) ? body.room : null;
   if (!ip || !name || maxPlayers === null || players === null || (port === null) === (room === null)) {
     return json({ error: "invalid listing" }, 400);
   }
-  const entry = { name, players: Math.min(players, maxPlayers), max_players: maxPlayers };
+  const entry = { name, ...occupancy(players, bots, maxPlayers), max_players: maxPlayers };
   if (room) entry.room = room;
   else entry.addr = ip.includes(":") ? `[${ip}]:${port}` : `${ip}:${port}`;
 
@@ -302,7 +304,9 @@ async function createListing(request, store, ctx) {
 
 async function heartbeat(request, store, id) {
   const tokenHash = await sha256Hex(bearer(request));
-  const players = int((await readJson(request))?.players, 0, 255);
+  const body = await readJson(request);
+  const players = int(body?.players, 0, 255);
+  const bots = int(body?.bots, 0, 255);
   const expires = Date.now() + TTL_SECONDS * 1000;
   // Authorized on the state commit reads once the body is in, and only the
   // listing itself changed: a listing created, renewed or removed by
@@ -313,7 +317,10 @@ async function heartbeat(request, store, id) {
     (s) => {
       const l = s.listings[id];
       if (l?.tokenHash !== tokenHash) return false;
-      if (players !== null) l.entry.players = Math.min(players, l.entry.max_players);
+      if (players !== null) {
+        delete l.entry.bots;
+        Object.assign(l.entry, occupancy(players, bots, l.entry.max_players));
+      }
       l.expires = expires;
     },
     (s) => s.listings[id]?.expires >= expires,
@@ -966,6 +973,18 @@ function cleanName(value) {
 
 function int(value, min, max) {
   return Number.isInteger(value) && value >= min && value <= max ? value : null;
+}
+
+// The counts a listing shows: `players` (bots included) and, when the host
+// sent it, `bots`, how many of them are bots. A joiner takes a bot's place,
+// so the list counts a game full only when its people fill it: the seats cap
+// the people, and the bots are whatever is left of the capped players.
+// Hosts from before the bot count send none, and list none.
+function occupancy(players, bots, maxPlayers) {
+  const listed = Math.min(players, maxPlayers);
+  if (bots === null) return { players: listed };
+  const people = Math.min(players - Math.min(bots, players), maxPlayers);
+  return { players: listed, bots: listed - people };
 }
 
 async function readJson(request) {
