@@ -70,11 +70,21 @@
     // (Enough that players joining in quick succession rarely pick one
     // already taken, which costs them the slow way round.)
     const SPARE_COUNT = 4;
-    // Spares are made anew this often (a NAT forgets an idle mapping after a
-    // while); the ones they replace still take answers this much longer.
-    const SPARE_ROTATE_MS = 30000;
+    // Each spare is made anew after about this long (3/4 to 5/4 of it, at
+    // random, so they don't all go on one tick); the one it replaces still
+    // takes answers SPARE_GRACE_MS longer. A spare is direct only (STUN, no
+    // TURN credentials to expire), and its ICE credentials never do; what
+    // ages is its server reflexive candidate, the NAT mapping the browser
+    // keeps alive with STUN keepalives while the connection is open (Chrome
+    // stops those after 2 min on a metered network: hence not longer).
+    const SPARE_ROTATE_MS = 120000;
     const SPARE_GRACE_MS = 30000;
     const SPARE_TICK_MS = 5000;
+    // Changes to the spares within this long go to the registry as one
+    // request; the same spares are sent again after SPARE_REFRESH_MS, since
+    // the registry forgets them after 75 s (SPARE_TTL_MS there).
+    const SPARE_PUBLISH_DEBOUNCE_MS = 500;
+    const SPARE_REFRESH_MS = 50000;
     // Nobody waits on a spare, so it goes out with every candidate (up to this long).
     const SPARE_GATHER_MS = 3000;
     // A player fetches a room's spare when it points at the room (before it
@@ -126,7 +136,7 @@
         PLUGIN_VERSION, EV_PEER_JOINED, EV_PEER_LEFT, EV_PACKET, EV_CLOSED, FORCE_RELAY, NO_DIRECT, STUN_FALLBACK,
         POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, POLL_FULL_MS, ROOM_MAX_PLAYERS, HELLO_MS, HELLO_MAX_MS, PLAYER_GIVE_UP_MS,
         LONG_POLL_HEADER, LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, GATHER_MS, SPARE_COUNT, SPARE_ROTATE_MS,
-        SPARE_GRACE_MS, SPARE_TICK_MS, SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, HOST_SILENT_PEERS_MAX, PRECONNECT_RETRY_MS,
+        SPARE_GRACE_MS, SPARE_TICK_MS, SPARE_PUBLISH_DEBOUNCE_MS, SPARE_REFRESH_MS, SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, HOST_SILENT_PEERS_MAX, PRECONNECT_RETRY_MS,
         PRECONNECT_RETRY_MAX_MS, SEND_BATCH_MS,
         DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, ICE_CACHE_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, UNRELIABLE_MAX_BUFFERED,
         SEEN_KEEP, CHANNEL, RELIABLE_CHANNEL,

@@ -4,15 +4,17 @@
 
 (function (gridlockWeb) {
     const {
-        SPARE_COUNT, SPARE_ROTATE_MS, SPARE_GRACE_MS, SPARE_TICK_MS, sleep, randomHex, RtcSignalling,
+        SPARE_COUNT, SPARE_ROTATE_MS, SPARE_GRACE_MS, SPARE_TICK_MS, SPARE_PUBLISH_DEBOUNCE_MS, SPARE_REFRESH_MS, sleep,
+        randomHex, RtcSignalling,
     } = gridlockWeb;
 
     class RtcSpares extends RtcSignalling {
         // ---- spares (host): offers made ahead of any join, published on the
         // registry; a player fetches one, answers it and joins with the
         // answer (answerSpare), and the host claims it (claimSpare). SPARE_COUNT
-        // are kept live (published); each is replaced after SPARE_ROTATE_MS and
-        // still takes answers for SPARE_GRACE_MS after that.
+        // are kept live (published); each is replaced after its `life`
+        // (about SPARE_ROTATE_MS) and still takes answers for SPARE_GRACE_MS
+        // after that. A full room keeps none: nobody can join it.
         async keepSpares() {
             while (!this.closed && !this.noSpares) {
                 this.tendSpares();
@@ -22,22 +24,30 @@
         }
 
         tendSpares() {
+            if (this.roomFull()) {
+                if (this.spares.size) {
+                    this.dropSpares();
+                    this.publishSpares(true); // none: the registry deletes them
+                }
+                return;
+            }
             const now = Date.now();
             let changed = false;
             for (const [oid, spare] of this.spares) {
-                if (now - spare.at > SPARE_ROTATE_MS + SPARE_GRACE_MS) {
+                if (now - spare.at > spare.life + SPARE_GRACE_MS) {
                     this.spares.delete(oid);
                     try {
                         spare.peer.pc.close();
                     } catch {}
-                } else if (spare.live && now - spare.at > SPARE_ROTATE_MS) {
+                } else if (spare.live && now - spare.at > spare.life) {
                     spare.live = false;
                     changed = true;
                 }
             }
             const live = [...this.spares.values()].filter((s) => s.live).length + this.makingSpares;
             for (let i = live; i < SPARE_COUNT; i++) this.makeSpare();
-            if (changed) this.publishSpares();
+            const stale = this.publishedAt !== undefined && now - this.publishedAt > SPARE_REFRESH_MS;
+            if (changed || stale) this.publishSpares();
         }
 
         async makeSpare() {
@@ -54,19 +64,36 @@
                 return;
             }
             this.makingSpares--;
-            if (this.closed || this.noSpares) {
+            if (this.closed || this.noSpares || this.roomFull()) {
                 try {
                     peer.pc.close();
                 } catch {}
                 return;
             }
-            this.spares.set(oid, { id, peer, at: Date.now(), live: true });
+            const life = SPARE_ROTATE_MS * (0.75 + Math.random() * 0.5);
+            this.spares.set(oid, { id, peer, at: Date.now(), life, live: true });
             this.publishSpares();
         }
 
-        // Tell the registry which spares are live. One request at a time;
-        // changes meanwhile go out in one more after it.
-        async publishSpares() {
+        // Tell the registry which spares are live: SPARE_PUBLISH_DEBOUNCE_MS
+        // after a change, so changes close together (the first spares, made
+        // at once) go out as one request; `now` for one that can't wait (a
+        // spare just taken must be off the list before anyone else takes it).
+        publishSpares(now = false) {
+            if (!now) {
+                this.publishTimer ??= setTimeout(() => {
+                    this.publishTimer = null;
+                    this.sendSpares();
+                }, SPARE_PUBLISH_DEBOUNCE_MS);
+                return;
+            }
+            clearTimeout(this.publishTimer);
+            this.publishTimer = null;
+            this.sendSpares();
+        }
+
+        // One request at a time; changes meanwhile go out in one more after it.
+        async sendSpares() {
             if (!this.me || this.closed || this.noSpares) return;
             if (this.publishing) {
                 this.republish = true;
@@ -75,6 +102,7 @@
             this.publishing = true;
             do {
                 this.republish = false;
+                this.publishedAt = Date.now();
                 const offers = [...this.spares]
                     .filter(([, s]) => s.live)
                     .map(([oid, s]) => ({ oid, data: this.describe(s.peer) }));
@@ -102,7 +130,7 @@
             this.peers.set(id, peer);
             this.byRemote.set(sender, id);
             // Off the list before anyone else takes it, and a new one made.
-            if (spare.live) this.publishSpares();
+            if (spare.live) this.publishSpares(true);
             this.tendSpares();
             return id;
         }

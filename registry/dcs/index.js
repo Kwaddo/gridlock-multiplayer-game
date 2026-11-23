@@ -53,7 +53,7 @@
 //   GET    /room/:code/spare       -> { host, oid, data }   one of them, at random (404: none)
 //   A player answers a spare offer and sends the answer (tagged with its
 //   `oid`) with its join, so a join is one signalling trip; the host
-//   republishes its spares as they are taken and every 30 s or so.
+//   republishes its spares as they change, and at least every 50 s.
 //   A poll returns the caller's messages from the last MESSAGE_TTL_MS, newer
 //   than `after` (the newest seq it has) and not among `have` (ids it has
 //   from around then); with `wait` it is held until there is one, for up to
@@ -110,7 +110,7 @@ const SWEEP_EVERY_MS = 10 * 60 * 1000;
 const SWEEP_MARGIN_MS = 60 * 1000;
 const SWEEP_MAX_PAGES = 20;
 const DELETE_PARALLEL = 16;
-// A host rewrites its spares every 30 s; ones older than this are gone.
+// A host rewrites its spares at least every 50 s; ones older than this are gone.
 const SPARE_TTL_MS = 75000;
 const SPARE_MAX_OFFERS = 4;
 const SPARE_MAX_BYTES = 64 * 1024;
@@ -672,7 +672,7 @@ async function sweep(store) {
       if (message) {
         if (Number(message[1]) < now - MESSAGE_TTL_MS - SWEEP_MARGIN_MS) stale.push(key);
       } else if (/^rooms\/[^/]+\/spare\.json$/.test(key)) {
-        // A host rewrites its spares every 30 s or so.
+        // A host rewrites its spares at least every 50 s.
         if (now - Date.parse(modified || "") > SPARE_TTL_MS + SWEEP_MARGIN_MS) stale.push(key);
       } else if (/^rooms\/[^/]+\.json$/.test(key)) {
         const age = now - Date.parse(modified || "");

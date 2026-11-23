@@ -199,7 +199,7 @@
                         // A host whose claim was lost claims the room again;
                         // players already connected are not affected.
                         if (resp.status === 410 && this.isHost && (await this.reclaim())) {
-                            this.publishSpares(); // they name the host by its new id
+                            this.publishSpares(true); // they name the host by its new id
                             // A restarted local registry numbers messages from 1
                             // again; an old `after` would hide every new one.
                             lastSeq = 0;
