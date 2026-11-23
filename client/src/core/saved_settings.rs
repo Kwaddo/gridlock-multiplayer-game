@@ -32,6 +32,7 @@ struct Saved {
     slow_walk_toggle: Option<bool>,
     prone_toggle: Option<bool>,
     smoke_hider_dot: Option<bool>,
+    damage_numbers: Option<bool>,
     /// binding field name (e.g. "forward") -> "Key:W" or "Mouse:Right"
     binds: BTreeMap<String, String>,
 }
@@ -63,6 +64,7 @@ impl Saved {
             slow_walk_toggle: field(value, "slow_walk_toggle"),
             prone_toggle: field(value, "prone_toggle"),
             smoke_hider_dot: field(value, "smoke_hider_dot"),
+            damage_numbers: field(value, "damage_numbers"),
             binds,
         }
     }
@@ -156,6 +158,9 @@ impl GameConfig {
         if let Some(v) = saved.smoke_hider_dot {
             config.smoke_hider_dot = v;
         }
+        if let Some(v) = saved.damage_numbers {
+            config.damage_numbers = v;
+        }
         apply_binds(&mut config, &saved.binds);
         config
     }
@@ -174,6 +179,7 @@ impl GameConfig {
             slow_walk_toggle: Some(self.slow_walk_toggle),
             prone_toggle: Some(self.prone_toggle),
             smoke_hider_dot: Some(self.smoke_hider_dot),
+            damage_numbers: Some(self.damage_numbers),
             binds: binds_of(self),
         };
         if let Ok(json) = serde_json::to_string_pretty(&saved) {
@@ -360,6 +366,16 @@ mod tests {
         assert_eq!(saved.fov, None);
         assert_eq!(saved.binds.get("forward").map(String::as_str), Some("Key:Up"));
         assert!(!saved.binds.contains_key("jump"));
+    }
+
+    #[test]
+    fn damage_numbers_stay_off_for_older_files() {
+        // a file from before the setting existed: no key, so the default (off)
+        let old = Saved::lenient(&serde_json::json!({ "sensitivity": 2.0 }));
+        assert_eq!(old.damage_numbers, None);
+        assert!(!GameConfig::new().damage_numbers);
+        let on = Saved::lenient(&serde_json::json!({ "damage_numbers": true }));
+        assert_eq!(on.damage_numbers, Some(true));
     }
 
     #[test]
