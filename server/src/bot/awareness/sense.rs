@@ -13,6 +13,7 @@ use super::{flat_dist, Awareness};
 use crate::bot::ai::BotState;
 use crate::bot::personality::difficulty_mods;
 use crate::bot::sight::has_line_of_sight;
+use crate::maze::pathfinding::{cell_to_world, world_to_cell};
 use crate::maze::MazeData;
 use crate::net::{Outbox, PeerId};
 use crate::protocols::{ServerMsg, BOT_ALERT_ENGAGED, BOT_ALERT_SUSPICIOUS};
@@ -191,12 +192,20 @@ pub fn sense(
     }
     aw.known.retain(|k| k.fresh);
 
-    stall_hint(aw, bot, players, sensed_any || fighting, dt);
+    stall_hint(aw, bot, players, maze, sensed_any || fighting, dt);
 }
 
 /// Anti-stall: a bot that has sensed nobody for `STALL_HINT_SECS` gets a
-/// rough spot near the nearest enemy to head for.
-fn stall_hint(aw: &mut Awareness, bot: &Player, players: &HashMap<PeerId, Player>, sensed: bool, dt: f32) {
+/// rough spot near the nearest enemy to head for. Sensing anyone again ends
+/// the stall and drops the hint: it no longer leads anywhere that matters.
+fn stall_hint(
+    aw: &mut Awareness,
+    bot: &Player,
+    players: &HashMap<PeerId, Player>,
+    maze: Option<&MazeData>,
+    sensed: bool,
+    dt: f32,
+) {
     if let Some((_, left)) = &mut aw.hint {
         *left -= dt;
         if *left <= 0.0 {
@@ -206,6 +215,7 @@ fn stall_hint(aw: &mut Awareness, bot: &Player, players: &HashMap<PeerId, Player
     aw.stall = if sensed { 0.0 } else { aw.stall + dt };
     if sensed {
         aw.hints_given = 0;
+        aw.hint = None;
     }
     if aw.stall < STALL_HINT_SECS {
         return;
@@ -220,7 +230,8 @@ fn stall_hint(aw: &mut Awareness, bot: &Player, players: &HashMap<PeerId, Player
         let mut rng = rand::thread_rng();
         let angle = rng.gen::<f32>() * std::f32::consts::TAU;
         let spread = (HINT_SPREAD * HINT_NARROWING.powi(aw.hints_given)).max(HINT_MIN_SPREAD);
-        aw.hint = Some((rough_spot(pos, angle, rng.gen::<f32>().sqrt() * spread), HINT_SECS));
+        let spot = rough_spot(pos, angle, rng.gen::<f32>().sqrt() * spread);
+        aw.hint = Some((snap_to_open_cell(maze, spot), HINT_SECS));
         aw.hints_given = aw.hints_given.saturating_add(1);
     }
 }
@@ -228,6 +239,23 @@ fn stall_hint(aw: &mut Awareness, bot: &Player, players: &HashMap<PeerId, Player
 /// A spot `r` from `pos` in direction `angle` (radians).
 pub(crate) fn rough_spot(pos: (f32, f32, f32), angle: f32, r: f32) -> (f32, f32, f32) {
     (pos.0 + angle.cos() * r, pos.1, pos.2 + angle.sin() * r)
+}
+
+/// `pos` moved to the centre of the open cell it is in, or the nearest one
+/// (as routing resolves it, `world_to_cell`). A spot inside a wall routes to
+/// an open cell whose centre may be farther than `INVESTIGATED_DIST` from it:
+/// a bot standing there would never count it reached and would re-plan a
+/// one-cell walk there every decision. With no maze, or no open cell near,
+/// `pos` as it is.
+pub(crate) fn snap_to_open_cell(maze: Option<&MazeData>, pos: (f32, f32, f32)) -> (f32, f32, f32) {
+    let Some(m) = maze else { return pos };
+    match world_to_cell(pos.0, pos.2, MAZE_CELL_SIZE, &m.cells, m.width, m.height) {
+        Some((cx, cy)) => {
+            let (x, z) = cell_to_world(cx, cy, MAZE_CELL_SIZE);
+            (x, pos.1, z)
+        }
+        None => pos,
+    }
 }
 
 /// Half the bot's field of view (radians): its personality's or its

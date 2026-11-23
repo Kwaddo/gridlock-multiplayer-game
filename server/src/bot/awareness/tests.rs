@@ -437,3 +437,56 @@ fn the_spotted_player_alone_gets_each_alert_once() {
     s.state().alert(ENEMY_ID, (10.0, 0.5, 0.0));
     assert!(tick(&mut s, DT).is_empty(), "already told");
 }
+
+#[test]
+fn a_hint_is_dropped_once_the_bot_senses_someone_again() {
+    let mut s = scene(BotPersonalityId::Nexto, (-40.0, 0.5, 5.0));
+    s.run(STALL_HINT_SECS + 0.5, (0.0, 0.0), &[]);
+    assert!(s.state().awareness.hint((0.0, 0.5, 0.0)).is_some(), "no hint after a long stall");
+    // someone walks into plain view: the stall is over, and its hint with it
+    s.enemy().position = (6.0, 0.5, 0.0);
+    s.run(1.0, (0.0, 0.0), &[]);
+    assert_ne!(s.state().awareness.alert(ENEMY_ID), Alert::Unaware);
+    assert_eq!(s.state().awareness.hint((0.0, 0.5, 0.0)), None, "a stale hint outlived the stall");
+}
+
+// a hint inside a wall would route to an open cell too far from it to ever count as reached
+#[test]
+fn a_hint_lands_on_an_open_cell_centre_a_bot_there_has_reached() {
+    use super::sense::snap_to_open_cell;
+    use crate::maze::pathfinding::{cell_to_world, world_to_cell};
+    let maze = MazeData::new(MAZE_MIN_SIDE, MAZE_MIN_SIDE);
+    let cell_of = |p: (f32, f32, f32)| world_to_cell(p.0, p.2, MAZE_CELL_SIZE, &maze.cells, maze.width, maze.height);
+    let is_centre = |p: (f32, f32, f32)| {
+        cell_of(p).is_some_and(|(cx, cy)| cell_to_world(cx, cy, MAZE_CELL_SIZE) == (p.0, p.2))
+    };
+    // every wall cell's centre snaps to an open cell's centre
+    let w = maze.width as usize;
+    let walls: Vec<_> = (0..maze.cells.len()).filter(|i| maze.cells[*i] == 0).collect();
+    assert!(!walls.is_empty());
+    for i in walls {
+        let (x, z) = cell_to_world((i % w) as u8, (i / w) as u8, MAZE_CELL_SIZE);
+        let snapped = snap_to_open_cell(Some(&maze), (x, 0.5, z));
+        assert!(is_centre(snapped), "{snapped:?} from wall cell {i}");
+    }
+
+    // and a stall hint in the maze is one, and counts as reached from there
+    let mut s = scene(BotPersonalityId::Nexto, (0.0, 0.5, 0.0));
+    // the open cell nearest the middle: a hint near it never leaves the maze
+    let mid = (w / 2) as i32;
+    let open = (0..maze.cells.len())
+        .filter(|i| maze.cells[*i] == 1)
+        .min_by_key(|i| ((i % w) as i32 - mid).pow(2) + ((i / w) as i32 - mid).pow(2))
+        .unwrap();
+    let (ex, ez) = cell_to_world((open % w) as u8, (open / w) as u8, MAZE_CELL_SIZE);
+    s.enemy().position = (ex, 0.5, ez);
+    s.players.get_mut(&s.bot).unwrap().position = (-100.0, 0.5, -100.0);
+    for _ in 0..((STALL_HINT_SECS + 0.5) / DT) as usize {
+        let bot = &s.players[&s.bot];
+        let state = s.manager.bot_states_mut().get_mut(&s.bot).unwrap();
+        sense(bot, state, &s.players, Some(&maze), &[], DT);
+    }
+    let hint = s.state().awareness.hint((-100.0, 0.5, -100.0)).expect("no hint after a long stall");
+    assert!(is_centre(hint), "{hint:?} is no open cell centre");
+    assert_eq!(s.state().awareness.hint(hint), None, "a bot at the hint hasn't reached it");
+}
