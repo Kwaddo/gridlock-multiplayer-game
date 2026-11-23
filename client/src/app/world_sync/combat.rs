@@ -59,7 +59,7 @@ pub(super) fn spawn_shots(
     for (shooter, start, end) in shots {
         // the shooter's body kicks too (a bot's or a player's), before this only the tracer and flash showed
         if let Some(body) = playing_state.other_players.iter_mut().find(|p| p.id == shooter) {
-            body.fired = true;
+            body.anim.fired = true;
         }
         playing_state
             .tracers
@@ -191,10 +191,10 @@ pub(super) fn apply_kill_feed(
         if victim_id != player_id {
             if let Some(victim) = playing_state.other_players.iter_mut().find(|p| p.id == victim_id) {
                 // which way they fall, from stance + where the killer was + headshot, before this stance only
-                victim.skin_type = choose_death(
-                    stance(victim.is_prone, victim.is_crouching),
+                victim.anim.skin_type = choose_death(
+                    stance(victim.net.is_prone, victim.net.is_crouching),
                     victim.render_position(),
-                    victim.render_yaw,
+                    victim.smooth.yaw,
                     killer_pos,
                     headshot,
                     victim_id,

@@ -161,7 +161,7 @@ impl PlayingState {
         }
         if b.carrier != 0 {
             if let Some(p) = self.other_players.iter().find(|p| p.id == b.carrier) {
-                return (p.render_position(), p.render_yaw);
+                return (p.render_position(), p.smooth.yaw);
             }
         }
         (vec3(b.position.0, b.position.1, b.position.2), b.yaw)
@@ -183,14 +183,14 @@ impl PlayingState {
             return self.position.y;
         }
         let carrier = self.other_players.iter().find(|p| b.carrier != 0 && p.id == b.carrier);
-        carrier.map_or(b.position.1, |p| p.render_y)
+        carrier.map_or(b.position.1, |p| p.smooth.y)
     }
 
     fn box_moving(&self, b: &CardboardBox) -> bool {
         if self.cardboard.in_box == Some(b.id) {
             return vec2(self.movement_state.velocity.x, self.movement_state.velocity.z).length() > 0.3;
         }
-        b.carrier != 0 && self.other_players.iter().any(|p| p.id == b.carrier && p.last_move_dir != MoveDir::None)
+        b.carrier != 0 && self.other_players.iter().any(|p| p.id == b.carrier && p.anim.last_move_dir != MoveDir::None)
     }
 
     /// The server's new list: drop boxes we already broke, burst any that vanished, see if we're in one.

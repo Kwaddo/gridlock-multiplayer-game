@@ -17,7 +17,7 @@ pub(super) fn refresh_player_hitboxes(
     animated_models: &HashMap<String, AnimatedModel>,
     player: &mut OtherPlayer,
 ) {
-    let desired_key = player.skin_type.model_key();
+    let desired_key = player.anim.skin_type.model_key();
     let anim = desired_key
         .and_then(|k| animated_models.get(k))
         .or_else(|| animated_models.get("anim_rifle_idle"));
@@ -36,7 +36,7 @@ pub(super) fn refresh_player_hitboxes(
     let scale = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
     let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
     if let Some(hitboxes) =
-        build_standing_hitboxes_from_joints(anim, player.anim.hit_pose(), player.render_yaw, scale, y_offset)
+        build_standing_hitboxes_from_joints(anim, player.anim.body.hit_pose(), player.smooth.yaw, scale, y_offset)
     {
         // reuse the vec's allocation rather than building a new one every frame
         player.hitboxes.clear();

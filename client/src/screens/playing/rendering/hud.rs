@@ -165,7 +165,7 @@ impl PlayingState {
         // Practice bots
         for bot in &self.practice_bots {
             let p = &bot.player;
-            let bot_pos = vec3(p.x, p.y, p.z);
+            let bot_pos = vec3(p.net.x, p.net.y, p.net.z);
             let tag_pos = bot_pos + vec3(0.0, 1.7, 0.0);
 
             let Some((sx, sy)) = project(tag_pos) else {

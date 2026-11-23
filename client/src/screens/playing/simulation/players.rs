@@ -52,17 +52,17 @@ impl PlayingState {
 // whose joints come out the same; prepare_bodies fills in the full pose once this frame's camera turns out to see it
 pub(super) fn tick_body(p: &mut OtherPlayer, dt: f32, models: &HashMap<String, AnimatedModel>) {
     let input = AnimInput {
-        skin: p.skin_type,
+        skin: p.anim.skin_type,
         pos: p.render_position(),
-        pitch: p.render_pitch,
-        yaw: p.render_yaw,
-        aiming: p.is_ads,
-        crouching: p.is_crouching,
-        fired: std::mem::take(&mut p.fired),
+        pitch: p.smooth.pitch,
+        yaw: p.smooth.yaw,
+        aiming: p.net.is_ads,
+        crouching: p.net.is_crouching,
+        fired: std::mem::take(&mut p.anim.fired),
     };
-    p.anim.advance(&input, dt, models);
-    let detail = if p.anim.view.wants_full() { PoseDetail::Full } else { PoseDetail::Hitboxes };
-    p.anim.evaluate(models, detail);
+    p.anim.body.advance(&input, dt, models);
+    let detail = if p.anim.body.view.wants_full() { PoseDetail::Full } else { PoseDetail::Hitboxes };
+    p.anim.body.evaluate(models, detail);
     super::body_view::count(|s| {
         s.ticked += 1;
         match detail {

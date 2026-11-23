@@ -101,9 +101,9 @@ impl PlayingState {
             let at = p.render_position();
             let far = (at - eye).length() > FAR_POSE_DISTANCE;
             let seen = !nothing_drawn && !boxed(p.id) && seen_at(at);
-            p.anim.view.set(seen, far, p.id);
-            if p.anim.needs_full_pose() {
-                p.anim.evaluate(models, PoseDetail::Full);
+            p.anim.body.view.set(seen, far, p.id);
+            if p.anim.body.needs_full_pose() {
+                p.anim.body.evaluate(models, PoseDetail::Full);
                 count(|s| s.posed_full += 1);
             }
         }

@@ -44,7 +44,7 @@ impl PlayingState {
         // a smoke break box carrier is drawn as its box, not a body
         let mut drawn = 0;
         for p in self.other_players.iter().chain(self.practice_bots.iter().map(|bot| &bot.player)) {
-            if p.anim.view.seen() && may_see(p) && !self.is_boxed(p.id) {
+            if p.anim.body.view.seen() && may_see(p) && !self.is_boxed(p.id) {
                 self.draw_player_model(p);
                 drawn += 1;
             }
@@ -56,8 +56,8 @@ impl PlayingState {
     pub(super) fn draw_player_model(&self, p: &crate::types::player::OtherPlayer) -> Option<Vec3> {
         let mut muzzle: Option<Vec3> = None;
         let render_pos = p.render_position();
-        let render_yaw = p.render_yaw;
-        let desired_key = p.skin_type.model_key();
+        let render_yaw = p.smooth.yaw;
+        let desired_key = p.anim.skin_type.model_key();
         let desired_anim = desired_key.and_then(|k| self.animated_models.get(k));
         let anim_model = desired_anim.or_else(|| self.animated_models.get("anim_rifle_idle"));
         // only looked up when there is no animated model to draw
@@ -76,12 +76,12 @@ impl PlayingState {
         let mut anim_scale = WORLD_PLAYER_RENDER_SCALE;
         let mut _anim_y_offset = 0.0f32;
 
-        if p.skin_type.is_model_based() {
+        if p.anim.skin_type.is_model_based() {
             if let Some(anim) = anim_model {
                 drawn_body = true;
                 let s = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
                 // this body's own pose, before this every body was drawn in the clip's shared pose (the clones)
-                let pose = p.anim.pose().unwrap_or(anim.own_pose());
+                let pose = p.anim.body.pose().unwrap_or(anim.own_pose());
                 anim_scale = s;
                 let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
                 _anim_y_offset = y_offset;
@@ -200,10 +200,10 @@ impl PlayingState {
                     // is moving (walking/sprinting) or aiming down sights. idle
                     // players should not have the yaw adjustment applied.
                     let mut yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
-                    let is_moving = p.is_sprinting
-                        || p.is_crouching
+                    let is_moving = p.net.is_sprinting
+                        || p.net.is_crouching
                         || matches!(
-                            p.skin_type,
+                            p.anim.skin_type,
                             crate::types::player::PlayerSkin::RifleWalk
                                 | crate::types::player::PlayerSkin::WalkBack
                                 | crate::types::player::PlayerSkin::WalkLeft
@@ -216,12 +216,12 @@ impl PlayingState {
                                 | crate::types::player::PlayerSkin::CrouchLeft
                                 | crate::types::player::PlayerSkin::CrouchRight
                         );
-                    if is_moving || p.is_ads {
+                    if is_moving || p.net.is_ads {
                         let adjust = if self.dev_mode.is_unlocked() {
                             // allow tweaking movement vs ADS separately
                             if is_moving {
                                 self.dev_mode.weapon_yaw_adjust_move
-                            } else if p.is_ads {
+                            } else if p.net.is_ads {
                                 self.dev_mode.weapon_yaw_adjust_ads
                             } else {
                                 self.dev_mode.weapon_rot_offset.1 // fallback
@@ -247,7 +247,7 @@ impl PlayingState {
                     } else {
                         // when the player is walking/running/aiming, use the smaller
                         // default offset instead of whatever the sliders are set to.
-                        let (off_x, off_y, off_z) = if is_moving || p.is_ads {
+                        let (off_x, off_y, off_z) = if is_moving || p.net.is_ads {
                             (-0.03, -0.03, -0.01)
                         } else {
                             (
@@ -256,13 +256,13 @@ impl PlayingState {
                                 self.dev_mode.weapon_pos_offset.2,
                             )
                         };
-                        let zval = if is_moving || p.is_ads { off_z } else { -off_z };
+                        let zval = if is_moving || p.net.is_ads { off_z } else { -off_z };
                         let right_dir = vec3(-forward_dir.z, 0.0, forward_dir.x);
                         let pos = hand_world
                             + forward_dir * zval
                             + right_dir * off_x
                             + vec3(0.0, 1.0, 0.0) * off_y;
-                        let dyn_forward = if is_moving || p.is_ads {
+                        let dyn_forward = if is_moving || p.net.is_ads {
                             WORLD_WEAPON_FORWARD_OFFSET
                         } else {
                             -0.05
@@ -272,7 +272,7 @@ impl PlayingState {
                     // tilt the gun up/down with where they look, around the body's sideways axis
                     // before this the gun stayed level even when the body aimed up or down
                     let side = vec3(-forward_dir.z, 0.0, forward_dir.x);
-                    let aim_tilt = Mat4::from_axis_angle(side, p.render_pitch);
+                    let aim_tilt = Mat4::from_axis_angle(side, p.smooth.pitch);
                     let weapon_transform = if self.dev_mode.is_unlocked() {
                         let (rp, _, rr) = self.dev_mode.weapon_rot_offset;
                         Mat4::from_translation(weapon_pos)
@@ -303,7 +303,7 @@ impl PlayingState {
                         }
                     }
                     // the end of the barrel, a bit out from the gun along where they aim
-                    let aim_dir = forward_dir * p.render_pitch.cos() + Vec3::Y * p.render_pitch.sin();
+                    let aim_dir = forward_dir * p.smooth.pitch.cos() + Vec3::Y * p.smooth.pitch.sin();
                     muzzle = Some(weapon_pos + aim_dir * MUZZLE_REACH);
                 }
             }

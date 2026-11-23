@@ -289,8 +289,8 @@ fn draw_other_players(
         }
         if let Some(hunters) = smoke_hunters { if !hunters.contains(&p.id) { continue; } }
 
-        let sx = center_x + (p.render_x - local_pos.x) * ppwu;
-        let sy = center_y + (p.render_z - local_pos.z) * ppwu;
+        let sx = center_x + (p.smooth.x - local_pos.x) * ppwu;
+        let sy = center_y + (p.smooth.z - local_pos.z) * ppwu;
 
         let alpha = fade_alpha(sx, sy, center_x, center_y, half, circular);
         if alpha <= 0.0 {

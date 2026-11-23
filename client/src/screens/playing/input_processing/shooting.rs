@@ -344,11 +344,11 @@ impl PlayingState {
                             };
                             player_hits[slot].1 += dmg;
                             let victim_pos = Vec3::new(
-                                self.other_players[idx].x,
-                                self.other_players[idx].y,
-                                self.other_players[idx].z,
+                                self.other_players[idx].net.x,
+                                self.other_players[idx].net.y,
+                                self.other_players[idx].net.z,
                             );
-                            let victim_yaw = self.other_players[idx].yaw;
+                            let victim_yaw = self.other_players[idx].net.yaw;
                             let atk_dir = (self.position - victim_pos).normalize_or_zero();
                             let fwd = Vec3::new(victim_yaw.cos(), 0.0, victim_yaw.sin());
                             let is_backstab = atk_dir.dot(fwd) < -0.5;

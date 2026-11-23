@@ -10,7 +10,7 @@ pub fn draw_nametags(
     pitch: f32,
 ) {
     for p in others {
-        let head_pos = vec3(p.x, p.y + 1.8, p.z);
+        let head_pos = vec3(p.net.x, p.net.y + 1.8, p.net.z);
         let rel = head_pos - position;
         let dot = rel.dot(forward);
         if dot > 0.1 {

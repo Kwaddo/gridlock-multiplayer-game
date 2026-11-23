@@ -93,16 +93,16 @@ impl PlayingState {
         let pitch = if corpse.is_some() { 0.0 } else { self.pitch };
 
         let body = &mut self.self_body;
-        body.render_pitch = pitch; // the gun tilts with it too
-        body.render_x = pos.x;
-        body.render_y = pos.y;
-        body.render_z = pos.z;
-        body.render_yaw = yaw;
-        body.skin_type = skin;
-        body.is_sprinting = self.movement_state.is_sprinting;
-        body.is_crouching = self.movement_state.is_crouching;
-        body.is_prone = self.movement_state.is_prone;
-        body.is_ads = aiming;
+        body.smooth.pitch = pitch; // the gun tilts with it too
+        body.smooth.x = pos.x;
+        body.smooth.y = pos.y;
+        body.smooth.z = pos.z;
+        body.smooth.yaw = yaw;
+        body.anim.skin_type = skin;
+        body.net.is_sprinting = self.movement_state.is_sprinting;
+        body.net.is_crouching = self.movement_state.is_crouching;
+        body.net.is_prone = self.movement_state.is_prone;
+        body.net.is_ads = aiming;
         if body.current_weapon != weapon {
             body.current_weapon = weapon.to_string(); // only when weapon changes, not every frame
         }
@@ -115,6 +115,6 @@ impl PlayingState {
             crouching: self.movement_state.is_crouching,
             fired: corpse.is_none() && std::mem::take(&mut self.shot_fired),
         };
-        body.anim.tick(&input, delta, &self.animated_models);
+        body.anim.body.tick(&input, delta, &self.animated_models);
     }
 }

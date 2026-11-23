@@ -186,7 +186,7 @@ impl PlayingState {
             let at = if id == self.smoke.my_id {
                 Some(self.position)
             } else {
-                self.other_players.iter().find(|p| p.id == id).map(|p| vec3(p.render_x, p.render_y, p.render_z))
+                self.other_players.iter().find(|p| p.id == id).map(|p| vec3(p.smooth.x, p.smooth.y, p.smooth.z))
             };
             if let Some(at) = at {
                 self.play_heard_everywhere(TAUNT, at);
