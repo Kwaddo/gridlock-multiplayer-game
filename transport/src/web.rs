@@ -1,14 +1,22 @@
 //! Browser networking through the `gridlock_web` miniquad JS plugin
 //! (`web/gridlock_web.js`): WebRTC data channels and fetch, both polled.
 
-use crate::{Link, LinkStatus};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::thread::LocalKey;
+use std::time::Duration;
+
+use platform::Instant;
+
+use crate::rtc_event::for_each_event;
+pub use crate::rtc_event::RtcEvent;
+use crate::{Link, LinkStatus, Packet};
 
 mod ffi {
     extern "C" {
         pub fn gridlock_rtc_open(url: *const u8, url_len: u32, is_host: u32) -> u32;
-        pub fn gridlock_rtc_send(handle: u32, peer: u32, data: *const u8, len: u32);
-        pub fn gridlock_rtc_next(handle: u32, peer_out: *mut u32, len_out: *mut u32) -> u32;
-        pub fn gridlock_rtc_take(handle: u32, buf: *mut u8);
+        pub fn gridlock_rtc_send_many(handle: u32, peers: *const u32, n: u32, data: *const u8, len: u32);
+        pub fn gridlock_rtc_drain(handle: u32, buf: *mut u8, cap: u32, need_out: *mut u32) -> u32;
         pub fn gridlock_rtc_close(handle: u32);
         pub fn gridlock_rtc_prewarm(url: *const u8, url_len: u32);
         pub fn gridlock_rtc_preconnect(url: *const u8, url_len: u32);
@@ -29,21 +37,16 @@ mod ffi {
     }
 }
 
-/// Something that happened on an [`RtcSocket`] since the last poll.
-pub enum RtcEvent {
-    /// A data channel to `peer` opened. Peer ids are small, unique per socket
-    /// and never reused, so a host can use them as server peer ids directly.
-    PeerJoined(u32),
-    PeerLeft(u32),
-    Packet(u32, Vec<u8>),
-    /// Signalling closed (e.g. the host left, or the room was taken).
-    Closed,
-}
+/// What [`RtcSocket::poll`] drains into at first; it grows to fit an event
+/// bigger than that.
+const DRAIN_BUF: usize = 16 * 1024;
 
 /// A WebRTC endpoint in a signalling room: the host (many peers) or a player
 /// (one peer, the host).
 pub struct RtcSocket {
     handle: u32,
+    /// Where events are drained to; kept, so polling allocates nothing.
+    buf: Vec<u8>,
 }
 
 impl RtcSocket {
@@ -57,31 +60,38 @@ impl RtcSocket {
 
     fn open(room_url: &str, host: bool) -> Self {
         let handle = unsafe { ffi::gridlock_rtc_open(room_url.as_ptr(), room_url.len() as u32, host as u32) };
-        RtcSocket { handle }
+        RtcSocket { handle, buf: Vec::new() }
     }
 
     pub fn send(&mut self, peer: u32, packet: &[u8]) {
-        unsafe { ffi::gridlock_rtc_send(self.handle, peer, packet.as_ptr(), packet.len() as u32) }
+        self.send_many(&[peer], packet);
     }
 
-    pub fn poll(&mut self) -> Vec<RtcEvent> {
-        let mut events = Vec::new();
+    /// Send the same packet to each of `peers`, in one call into JS.
+    pub fn send_many(&mut self, peers: &[u32], packet: &[u8]) {
+        let (n, len) = (peers.len() as u32, packet.len() as u32);
+        unsafe { ffi::gridlock_rtc_send_many(self.handle, peers.as_ptr(), n, packet.as_ptr(), len) }
+    }
+
+    /// Hand every event since the last poll to `on`, in order. They come
+    /// over from JS in batches, as many as fit in one buffer per call,
+    /// rather than one call (and one allocation) per packet.
+    pub fn poll(&mut self, mut on: impl FnMut(RtcEvent<'_>)) {
+        if self.buf.is_empty() {
+            self.buf.resize(DRAIN_BUF, 0);
+        }
         loop {
-            let (mut peer, mut len) = (0u32, 0u32);
-            let kind = unsafe { ffi::gridlock_rtc_next(self.handle, &mut peer, &mut len) };
-            if kind == 0 {
+            let mut need = 0u32;
+            let cap = self.buf.len() as u32;
+            let used = unsafe { ffi::gridlock_rtc_drain(self.handle, self.buf.as_mut_ptr(), cap, &mut need) };
+            for_each_event(&self.buf[..(used as usize).min(self.buf.len())], &mut on);
+            if need == 0 {
                 break;
             }
-            let mut data = vec![0u8; len as usize];
-            unsafe { ffi::gridlock_rtc_take(self.handle, data.as_mut_ptr()) };
-            events.push(match kind {
-                1 => RtcEvent::PeerJoined(peer),
-                2 => RtcEvent::PeerLeft(peer),
-                3 => RtcEvent::Packet(peer, data),
-                _ => RtcEvent::Closed,
-            });
+            if need as usize > self.buf.len() {
+                self.buf.resize(need as usize, 0);
+            }
         }
-        events
     }
 }
 
@@ -91,11 +101,40 @@ impl Drop for RtcSocket {
     }
 }
 
+/// How long a URL handed to [`prewarm`] or [`preconnect`] is not handed over
+/// again. Callers repeat every frame; the JS side keeps what they started for
+/// 10-15 s, so passing on each repeat only re-parses the URL to find it.
+// short enough that a socket JS dropped is re-warmed well before a join
+const REPEAT_AFTER: Duration = Duration::from_millis(250);
+
+thread_local! {
+    static PREWARMED: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
+    static PRECONNECTED: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
+}
+
+/// Whether `url` was last handed over at least [`REPEAT_AFTER`] ago (or never);
+/// if so, it counts as handed over now.
+fn due(sent: &'static LocalKey<RefCell<HashMap<String, Instant>>>, url: &str) -> bool {
+    sent.with(|sent| {
+        let mut sent = sent.borrow_mut();
+        let now = Instant::now();
+        let fresh = |at: &Instant| now.saturating_duration_since(*at) < REPEAT_AFTER;
+        if sent.get(url).is_some_and(fresh) {
+            return false;
+        }
+        sent.retain(|_, at| fresh(at));
+        sent.insert(url.to_string(), now);
+        true
+    })
+}
+
 /// Get ready to join the room at `room_url` (the player points at it): its
 /// host's spare offer and the ICE servers are fetched ahead. Cheap to call
 /// every frame; repeats are ignored for a while.
 pub fn prewarm(room_url: &str) {
-    unsafe { ffi::gridlock_rtc_prewarm(room_url.as_ptr(), room_url.len() as u32) }
+    if due(&PREWARMED, room_url) {
+        unsafe { ffi::gridlock_rtc_prewarm(room_url.as_ptr(), room_url.len() as u32) }
+    }
 }
 
 /// Connect to the room at `room_url` now, ahead of a join: the next
@@ -104,7 +143,9 @@ pub fn prewarm(room_url: &str) {
 /// at); one not asked for in a few seconds is closed. The host learns the
 /// player's address from the connection, as it would from a join.
 pub fn preconnect(room_url: &str) {
-    unsafe { ffi::gridlock_rtc_preconnect(room_url.as_ptr(), room_url.len() as u32) }
+    if due(&PRECONNECTED, room_url) {
+        unsafe { ffi::gridlock_rtc_preconnect(room_url.as_ptr(), room_url.len() as u32) }
+    }
 }
 
 /// A player's link to the host of a signalling room.
@@ -113,7 +154,7 @@ pub struct RtcLink {
     host: Option<u32>,
     closed: bool,
     // packets polled but not yet handed out by recv()
-    inbox: Vec<Box<[u8]>>,
+    inbox: Vec<Packet>,
 }
 
 impl RtcLink {
@@ -122,16 +163,15 @@ impl RtcLink {
     }
 
     fn update(&mut self) {
-        for event in self.socket.poll() {
-            match event {
-                // The room only ever connects a player to its host.
-                RtcEvent::PeerJoined(peer) if self.host.is_none() => self.host = Some(peer),
-                RtcEvent::PeerLeft(peer) if self.host == Some(peer) => self.closed = true,
-                RtcEvent::Packet(peer, data) if self.host == Some(peer) => self.inbox.push(data.into()),
-                RtcEvent::Closed => self.closed = true,
-                _ => {}
-            }
-        }
+        let (host, closed, inbox) = (&mut self.host, &mut self.closed, &mut self.inbox);
+        self.socket.poll(|event| match event {
+            // The room only ever connects a player to its host.
+            RtcEvent::PeerJoined(peer) if host.is_none() => *host = Some(peer),
+            RtcEvent::PeerLeft(peer) if *host == Some(peer) => *closed = true,
+            RtcEvent::Packet(peer, data) if *host == Some(peer) => inbox.push(data.into()),
+            RtcEvent::Closed => *closed = true,
+            _ => {}
+        });
     }
 }
 
@@ -142,7 +182,7 @@ impl Link for RtcLink {
         }
     }
 
-    fn recv(&mut self) -> Vec<Box<[u8]>> {
+    fn recv(&mut self) -> Vec<Packet> {
         self.update();
         std::mem::take(&mut self.inbox)
     }

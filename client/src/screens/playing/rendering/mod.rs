@@ -1,4 +1,8 @@
 mod bullet_holes;
+mod damage_dir;
+pub(super) use damage_dir::DamageIndicator;
+mod bot_alerts;
+pub(super) use bot_alerts::BotAlert;
 pub(super) use bullet_holes::BakedBulletHole;
 mod hud;
 mod mirror_pass;

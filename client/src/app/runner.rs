@@ -1,5 +1,4 @@
 use macroquad::prelude::*;
-use macroquad::window::gl_set_drawcall_buffer_capacity;
 use client::net::Session;
 use platform::Instant;
 
@@ -8,33 +7,26 @@ use client::screens::dev_mode::DevModeState;
 use client::screens::{
     ControlsAction, LobbyInventoryScreen, LoginScreen, MenuRequest, PauseMenu, PlayingState,
 };
-use client::settings::SettingsTab;
-use client::settings::SettingsScreen;
+use client::settings::{ SettingsScreen, SettingsTab };
 use client::types::maze::Maze;
 use client::ui::fonts;
 use client::weapons::crosshair_presets::CrosshairPresetManager;
 use client::weapons::loadout::Loadout;
 use client::weapons::WeaponInventory;
 
-use super::asset_loader::{
-    load_manifest,
-    preload,
-    preload_status,
-    AssetQueue,
-};
+use super::asset_loader::{ load_manifest, preload, preload_status, AssetQueue };
 use super::world_sync::sync_world;
 
 mod assets;
 mod constants;
+mod draw_calls;
 mod frame;
 mod screens;
 
 use assets::{
     missing_viewmodel_assets,
-    resolve_asset_entries_for_quality,
     set_cwd_to_assets_root,
     spawn_assets,
-    ModelQuality,
 };
 use constants::CONNECTING_FRAME_BUDGET;
 use frame::{ finish_frame, hidden_tab_frame, link_of };
@@ -43,7 +35,7 @@ use screens::{ dev_overlay_frame, loading_frame, pause_menu_frame, settings_fram
 pub async fn run() {
     set_cwd_to_assets_root();
     set_default_filter_mode(FilterMode::Nearest);
-    gl_set_drawcall_buffer_capacity(200_000, 300_000);
+    draw_calls::set_capacity(); // per-call batcher limits, sized in draw_calls.rs
 
     fonts::init_font().await;
 
@@ -62,10 +54,6 @@ pub async fn run() {
     let mut is_fullscreen = true;
     let mut loadout = Loadout::default_loadout();
     let mut lobby_inventory = LobbyInventoryScreen::new();
-
-    // currently we always use high quality; eventually this could be
-    // user-configurable via the settings screen.
-    let model_quality = ModelQuality::default();
 
     // connection heartbeat / last seen from server
     let mut last_server_contact: Option<Instant> = None;
@@ -91,7 +79,7 @@ pub async fn run() {
     let game_assets = {
         let mut entries = load_manifest().await;
         entries.extend(missing_viewmodel_assets(&playing_state));
-        resolve_asset_entries_for_quality(&entries, model_quality)
+        entries
     };
     for (_, path) in &game_assets {
         preload(path);
@@ -132,8 +120,8 @@ pub async fn run() {
 
         match state {
             GameState::Login => {
-                // (Esc on the controls overlay closes the overlay instead)
-                if !controls_open
+                // (Esc on the controls overlay or the credits closes that instead)
+                if !controls_open && !login_screen.credits_open()
                     && macroquad::input::is_key_pressed(macroquad::input::KeyCode::Escape)
                 {
                     state = GameState::Exit;
@@ -246,16 +234,11 @@ pub async fn run() {
                 if sync.server_seen {
                     last_server_contact = Some(Instant::now());
                 }
+                playing_state.draws_no_world_this_frame();
                 playing_state.simulate(&config, maze.as_ref());
-                playing_state.render(&mut config, &username, player_id, maze.as_ref());
-
-                draw_rectangle(
-                    0.0,
-                    0.0,
-                    screen_width(),
-                    screen_height(),
-                    Color::from_rgba(0, 0, 0, 150)
-                );
+                // the loadout screen covers the window with a 95%-opaque panel, so the
+                // 3D scene under it is not rendered; clear to the panel colour instead
+                clear_background(Color::new(0.05, 0.06, 0.12, 1.0));
                 lobby_inventory.draw(&loadout);
                 if lobby_inventory.update(&mut loadout) {
                     playing_state.weapons = WeaponInventory::from_loadout(&loadout);
@@ -345,6 +328,9 @@ pub async fn run() {
                         playing_state.last_mouse_pos = mouse_position();
                     }
 
+                    // keepalives too: a hosted server keeps ticking under the prompt
+                    finish_frame(&mut session, &mut asset_queue, &mut state, &mut playing_state, &loadout,
+                        &mut last_keepalive, &config, &mut last_server_contact, &mut login_screen).await;
                     next_frame().await;
                     continue;
                 }

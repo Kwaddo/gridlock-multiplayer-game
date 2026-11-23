@@ -1,14 +1,15 @@
 //! Asks the home router to forward the game port, so players outside the LAN
 //! can reach a hosted game without manual port forwarding.
 //!
-//! Tries UPnP IGD first, then NAT-PMP (Apple and some other routers). Runs on
+//! Prefers UPnP IGD, then NAT-PMP (Apple and some other routers); both are
+//! looked for at once, so a router with neither costs one timeout. Runs on
 //! a background thread, renews the lease while hosting and removes the mapping
 //! when dropped. Neither helps behind carrier-grade NAT, which is detected and
 //! reported instead.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -35,6 +36,8 @@ pub enum PortStatus {
 pub struct PortMapping {
     status: Arc<Mutex<PortStatus>>,
     stop: Arc<AtomicBool>,
+    /// The worker, woken on drop: it sleeps until the next renewal otherwise.
+    worker: thread::Thread,
 }
 
 impl PortMapping {
@@ -42,8 +45,8 @@ impl PortMapping {
         let status = Arc::new(Mutex::new(PortStatus::Pending));
         let stop = Arc::new(AtomicBool::new(false));
         let (status_w, stop_w) = (status.clone(), stop.clone());
-        thread::spawn(move || run(local_port, &status_w, &stop_w));
-        PortMapping { status, stop }
+        let worker = thread::spawn(move || run(local_port, &status_w, &stop_w)).thread().clone();
+        PortMapping { status, stop, worker }
     }
 
     pub fn status(&self) -> PortStatus {
@@ -64,6 +67,8 @@ fn read(status: &Mutex<PortStatus>) -> PortStatus {
 impl Drop for PortMapping {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        // unpark synchronizes with the worker's park, so it sees the flag
+        self.worker.unpark();
     }
 }
 
@@ -74,11 +79,23 @@ fn run(local_port: u16, status: &Mutex<PortStatus>, stop: &AtomicBool) {
         }
     };
 
+    // Look for a NAT-PMP router alongside the UPnP search rather than after
+    // it, so a router with neither costs one discovery timeout, not two. Only
+    // the lookups overlap: a port is mapped one way at a time, UPnP first, so a
+    // router speaking both never sees two requests for the same port.
+    let (natpmp_tx, natpmp_rx) = mpsc::channel();
+    thread::spawn(move || {
+        // (nobody listening: UPnP worked, and the probe just ends)
+        let _ = natpmp_tx.send(find_natpmp());
+    });
     let mut router = match open_upnp(local_port) {
         Ok(router) => router,
-        Err(upnp_err) => match open_natpmp(local_port) {
-            Ok(router) => router,
-            Err(_) => return set(PortStatus::Unavailable(upnp_err)),
+        Err(upnp_err) => match natpmp_rx.recv() {
+            Ok(Ok(found)) => match open_natpmp(found, local_port) {
+                Ok(router) => router,
+                Err(_) => return set(PortStatus::Unavailable(upnp_err)),
+            },
+            _ => return set(PortStatus::Unavailable(upnp_err)),
         },
     };
 
@@ -95,7 +112,14 @@ fn run(local_port: u16, status: &Mutex<PortStatus>, stop: &AtomicBool) {
 
     let mut renewed = Instant::now();
     while !stop.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(200));
+        // Sleep until the renewal is due or the mapping is dropped (which
+        // unparks us); a spurious wake just goes round again.
+        let wait = if router.lease_secs() > 0 {
+            (renewed + LEASE / 2).saturating_duration_since(Instant::now())
+        } else {
+            LEASE / 2
+        };
+        thread::park_timeout(wait);
         if router.lease_secs() > 0 && renewed.elapsed() >= LEASE / 2 {
             renewed = Instant::now();
             if router.renew().is_err() {
@@ -183,13 +207,17 @@ fn open_upnp(local_port: u16) -> Result<Router, String> {
     Ok(Router::Upnp { gateway, external, local, lease })
 }
 
-fn open_natpmp(local_port: u16) -> Result<Router, String> {
+/// A NAT-PMP router that answered, with the public address it reported.
+fn find_natpmp() -> Result<(Natpmp, Ipv4Addr), String> {
     let mut client = Natpmp::new().map_err(|e| e.to_string())?;
     client.send_public_address_request().map_err(|e| e.to_string())?;
-    let external_ip = match natpmp_response(&mut client)? {
-        Response::Gateway(g) => *g.public_address(),
-        _ => return Err("unexpected NAT-PMP reply".into()),
-    };
+    match natpmp_response(&mut client)? {
+        Response::Gateway(g) => Ok((client, *g.public_address())),
+        _ => Err("unexpected NAT-PMP reply".into()),
+    }
+}
+
+fn open_natpmp((mut client, external_ip): (Natpmp, Ipv4Addr), local_port: u16) -> Result<Router, String> {
     let lease = LEASE.as_secs() as u32;
     let external_port = natpmp_map(&mut client, local_port, local_port, lease)?;
     let external = SocketAddrV4::new(external_ip, external_port);

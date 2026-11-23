@@ -12,7 +12,8 @@ use super::lighting::Lighting;
 use super::mesh::{MeshBuilder, MeshData};
 
 pub(super) fn bake_globals(m: &Maze, lighting: &Lighting, destroyed_lights: &HashSet<(u8, u8)>) -> Vec<MeshData> {
-    let mut out = MeshBuilder::new(false);
+    // roof, pipes and fixtures come to about 16k vertices
+    let mut out = MeshBuilder::with_capacity(false, 16_384, 1);
     let apply_light = |c: Color, p: Vec3| lighting.lit(c, p);
 
     let map_w = m.width as f32 * m.cell_size;

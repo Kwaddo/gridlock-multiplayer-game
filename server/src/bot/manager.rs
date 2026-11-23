@@ -6,13 +6,13 @@ use crate::{ bot::ai::{ self, BotState, BotBehavior }, physics::PhysicsConfig };
 use crate::player::{ Player, Team, WorldId };
 use crate::bot::shooting;
 use crate::bot::behavior;
+use crate::bot::awareness::{self, Noise};
 use crate::bot::personality::{ self, BotPersonalityId };
-use crate::protocols::{BotShot, ServerMsg};
+use crate::protocols::Shot;
+use crate::server::broadcast;
 use crate::server::handlers::other;
 /// Seconds between a match bot's decisions (plus up to 0.1 s jitter).
 const DECISION_INTERVAL: f32 = 0.2;
-/// Bot shots per `MSG_BOT_SHOT` packet: 20 bytes each, so one stays under 1100 bytes.
-const MAX_SHOTS_PER_PACKET: usize = 50;
 /// Longest step (seconds) one bot tick simulates, however long it has been.
 const MAX_BOT_DT: f32 = 0.1;
 
@@ -20,9 +20,12 @@ pub struct BotManager {
     bot_addrs: Vec<PeerId>,
     bot_states: HashMap<PeerId, BotState>,
     last_tick: Instant,
-    tick_interval: Duration,
+    /// Paces bot ticks to an even 30 a second.
+    cadence: crate::cadence::Cadence,
     next_bot_idx: u16,
     range_challenge_deadline: Option<Instant>,
+    /// Shots fired since the last bot tick, for the bots to hear.
+    noises: Vec<Noise>,
 }
 
 impl BotManager {
@@ -31,9 +34,10 @@ impl BotManager {
             bot_addrs: Vec::new(),
             bot_states: HashMap::new(),
             last_tick: Instant::now(),
-            tick_interval: Duration::from_millis(33), // 33 ticks per second
+            cadence: crate::cadence::Cadence::new(crate::cadence::HZ30),
             next_bot_idx: 0,
             range_challenge_deadline: None,
+            noises: Vec::new(),
         }
     }
     pub fn virtual_addr(index: u16) -> PeerId {
@@ -70,6 +74,16 @@ impl BotManager {
         self.bot_states.clear();
         self.bot_addrs.clear();
         self.range_challenge_deadline = None;
+    }
+    /// Despawn one bot (say, to make room for a player joining late).
+    /// Returns its player, or None if `addr` isn't one of ours.
+    pub fn despawn_bot(&mut self, players: &mut HashMap<PeerId, Player>, addr: PeerId) -> Option<Player> {
+        if !self.bot_addrs.contains(&addr) {
+            return None;
+        }
+        self.bot_addrs.retain(|a| *a != addr);
+        self.bot_states.remove(&addr);
+        players.remove(&addr)
     }
     /// Despawn only shooting-range bots (those without a personality_id).
     /// Game bots with personalities are left intact.
@@ -134,6 +148,7 @@ impl BotManager {
             regen_resume_at: None,
             in_box: false,
             smoke_alias: None,
+            last_shot_at: None,
         };
 
         let bot_state = BotState {
@@ -168,12 +183,36 @@ impl BotManager {
             idle_look_timer: 0.0,
             current_yaw: 0.0,
             current_pitch: 0.0,
-            tactics: Default::default(),
+            // a stance from the first decision on, not always a push
+            tactics: ai::BotTactics { stance_roll: rand::random(), ..Default::default() },
+            awareness: awareness::Awareness::new(rand::random()),
         };
 
         let addr = self.spawn_bot(players, bot_player, bot_state);
         log!("Spawned bot '{}' ({:?}) on {:?} with {}", pers.name, diff, team, weapon_override);
         addr
+    }
+
+    /// `shooter` fired what the server knows they hold (never a weapon name
+    /// the client sent): match bots near enough hear it at the next bot
+    /// tick. One shot per shooter per tick, the loudest, so a quiet one (a
+    /// knife hit) can't mask gunfire in the same tick. A shooter in their
+    /// spawn freeze fires nothing (`handle_shoot`, `apply_damage`): unheard.
+    pub fn hear_shot(&mut self, players: &HashMap<PeerId, Player>, shooter: PeerId) {
+        let heard = |p: &&Player| p.is_alive && p.world == WorldId::Maze && !p.spawn_frozen(Instant::now());
+        let Some(p) = players.get(&shooter).filter(heard) else { return };
+        let noise = Noise::gunfire(shooter, p, &p.current_weapon);
+        match self.noises.iter_mut().find(|n| n.shooter == shooter) {
+            Some(heard) if heard.radius >= noise.radius => {}
+            Some(heard) => *heard = noise,
+            None => self.noises.push(noise),
+        }
+    }
+
+    /// How far `shooter`'s shot of this tick will be heard, if they fired.
+    #[cfg(test)]
+    pub(crate) fn noise_radius(&self, shooter: PeerId) -> Option<f32> {
+        self.noises.iter().find(|n| n.shooter == shooter).map(|n| n.radius)
     }
 
     pub fn set_range_challenge_deadline(&mut self, deadline: Option<Instant>) {
@@ -200,17 +239,28 @@ impl BotManager {
         match_mode: u8,
         maze: Option<&crate::maze::MazeData>,
         team_score: &mut crate::server::game::TeamScore,
+        // S&D freeze time: every bot in the maze stands still
+        round_frozen: bool,
+        // players' shots since the last bot tick: they go out with the bots'
+        shots: &mut broadcast::ShotQueue,
     ) {
-        let elapsed = self.last_tick.elapsed();
-        if elapsed < self.tick_interval {
+        // one clock read for the whole bot tick (on the web host each is a JS call)
+        let now = Instant::now();
+        if !self.cadence.due(now) {
             return;
-        } else {
-            self.last_tick = Instant::now();
         }
+        let elapsed = now.saturating_duration_since(self.last_tick);
+        self.last_tick = now;
         // Step by the real time since the last bot tick: the host may tick
         // less often than the gate allows (an idle native host waits up to
         // 100 ms for a packet). Capped so a stall doesn't make bots jump.
         let dt = elapsed.as_secs_f32().min(MAX_BOT_DT);
+
+        // ── Senses: what each match bot sees and hears of its enemies ──
+        let noises = std::mem::take(&mut self.noises);
+        let frozen = |p: &Player| is_frozen(p, now, round_frozen);
+        awareness::sense::sense_bots(&mut self.bot_states, players, maze, &noises, dt, frozen);
+        awareness::sense::send_alerts(&mut self.bot_states, players, socket);
 
         // ── Brain: run decide_behavior for maze-world bots ──
         // A few times a second rather than every tick: decisions with random
@@ -224,8 +274,8 @@ impl BotManager {
                         continue;
                     }
                 };
-                // frozen like the humans at match start, in every mode
-                if bot.post_teleport_freeze_until.map_or(false, |t| t > Instant::now()) {
+                // frozen like the humans at match start and in S&D freeze time
+                if is_frozen(bot, now, round_frozen) {
                     continue;
                 }
                 let Some(state) = self.bot_states.get_mut(addr) else {
@@ -248,15 +298,10 @@ impl BotManager {
         }
 
         for addr in &self.bot_addrs {
-            if !players.get(addr).map_or(false, |p| p.is_alive) {
+            let Some(p) = players.get(addr).filter(|p| p.is_alive) else {
                 continue;
-            }
-            let is_frozen = players
-                .get(addr)
-                .map_or(false, |p| {
-                    p.world == WorldId::Maze &&
-                        p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
-                });
+            };
+            let is_frozen = is_frozen(p, now, round_frozen);
             let Some(state) = self.bot_states.get_mut(addr) else {
                 continue;
             };
@@ -288,41 +333,9 @@ impl BotManager {
                     // remember last known enemy position for investigation behavior
                     state.last_known_enemy_pos = Some(target_pos);
                 }
-                if let Some(look_pos) = target_pos.or(alert_pos) {
-                    let dx = look_pos.0 - bot.position.0;
-                    let dy = look_pos.1 - bot.position.1;
-                    let dz = look_pos.2 - bot.position.2;
-                    let horiz_dist = (dx * dx + dz * dz).sqrt(); // for FOV and yaw calculations
-                    if horiz_dist > 0.01 {
-                        let target_yaw = dz.atan2(dx); // atan2 is a method that returns the angle between the positive x-axis and the point (dx, dz)
-                        let target_pitch = -(dy / horiz_dist.max(0.001)).atan(); // negative because in most FPS coordinate systems, looking up is negative pitch
-
-                        // Smoothly rotate towards target based on personality turn_rate.
-                        // turn_rate_mult > 1 means slower (easier bots), so divide.
-                        let turn_rate = state.personality.base_turn_rate
-                            / personality::difficulty_mods(state.difficulty).turn_rate_mult.max(0.01);
-
-                        // lerp yaw
-                        let yaw_diff = {
-                            let d = target_yaw - state.current_yaw;
-                            ((d + PI).rem_euclid(2.0 * PI)) - PI // shortest angle difference
-                        };
-
-                        let max_turn = turn_rate * dt;
-                        state.current_yaw += yaw_diff.clamp(-max_turn, max_turn);
-
-                        let pitch_diff = target_pitch - state.current_pitch;
-                        state.current_pitch += pitch_diff.clamp(-max_turn * 0.6, max_turn * 0.6);
-
-                        bot.yaw = state.current_yaw;
-                        bot.pitch = state.current_pitch;
-                    }
-                } else {
-                    // nothing to aim at: the aim follows where the bot looks, so
-                    // spotting someone turns from here, not from a stale angle
-                    state.current_yaw = bot.yaw;
-                    state.current_pitch = bot.pitch;
-                }
+                // suspicious of something: turn to look at it
+                let look = state.awareness.look_at(bot.position);
+                aim_at(bot, state, target_pos.or(alert_pos).or(look), dt);
 
                 // the alert fades, and ends once we see someone
                 if let Some((_, _, left)) = &mut state.tactics.alert {
@@ -335,18 +348,12 @@ impl BotManager {
         }
 
         // Run shooting logic after movement updates; collect first to avoid borrow conflicts.
+        // The clock is read again here: movement and pathfinding for every bot
+        // ran since `now`, and a freeze ending in between must not hold a shot.
+        let now = Instant::now();
         let mut pending_shots: Vec<(PeerId, u32, Option<u32>, String)> = Vec::new();
         for addr in &self.bot_addrs {
-            if !players.get(addr).map_or(false, |p| p.is_alive) {
-                continue;
-            }
-            let is_frozen = players
-                .get(addr)
-                .map_or(false, |p| {
-                    p.world == WorldId::Maze &&
-                        p.post_teleport_freeze_until.map_or(false, |t| t > Instant::now())
-                });
-            if is_frozen {
+            if players.get(addr).filter(|p| p.is_alive).map_or(true, |p| is_frozen(p, now, round_frozen)) {
                 continue;
             }
             if let Some(state) = self.bot_states.get_mut(addr) {
@@ -363,9 +370,13 @@ impl BotManager {
             }
         }
 
-        // every tracer of this tick goes out ahead of the damage it deals
-        let fired: Vec<(PeerId, u32)> = pending_shots.iter().map(|(a, v, _, _)| (*a, *v)).collect();
-        send_bot_shots(socket, players, &fired);
+        for (addr, ..) in &pending_shots {
+            self.hear_shot(players, *addr);
+        }
+        // every tracer of this tick, the players' queued since the last bot
+        // tick with them, goes out ahead of the damage it deals
+        queue_bot_shots(shots, players, pending_shots.iter().map(|(a, v, _, _)| (*a, *v)));
+        shots.flush(socket, players);
 
         for (attacker_addr, victim_id, damage_opt, weapon) in pending_shots {
             if let Some(damage) = damage_opt {
@@ -389,34 +400,84 @@ impl BotManager {
     }
 }
 
-/// Tell every human about `shots` (shooter, victim id) at once: one
-/// `MSG_BOT_SHOT` per player per bot tick, not one per shot. Damage moves
-/// nobody, so the tracer ends are where a shot-by-shot send found them too.
-pub(crate) fn send_bot_shots(socket: &Outbox, players: &HashMap<PeerId, Player>, shots: &[(PeerId, u32)]) {
-    if shots.is_empty() {
+/// A bot that may not move, turn or shoot: in the maze during its
+/// post-teleport freeze, or during S&D freeze time (`round_frozen`).
+fn is_frozen(p: &Player, now: Instant, round_frozen: bool) -> bool {
+    p.world == WorldId::Maze && (round_frozen || p.post_teleport_freeze_until.is_some_and(|t| t > now))
+}
+
+/// Turn the bot's aim toward `look_pos` at its turn rate. Whenever it has
+/// something to aim at, the yaw/pitch everyone sees is the aim it shoots
+/// with, not the way it walks.
+pub(crate) fn aim_at(bot: &mut Player, state: &mut BotState, look_pos: Option<(f32, f32, f32)>, dt: f32) {
+    let Some(look_pos) = look_pos else {
+        // nothing to aim at: the aim follows where the bot looks, so
+        // spotting someone turns from here, not from a stale angle
+        state.current_yaw = bot.yaw;
+        state.current_pitch = bot.pitch;
         return;
+    };
+    let dx = look_pos.0 - bot.position.0;
+    let dy = look_pos.1 - bot.position.1;
+    let dz = look_pos.2 - bot.position.2;
+    let horiz_dist = (dx * dx + dz * dz).sqrt(); // for FOV and yaw calculations
+    if horiz_dist > 0.01 {
+        let target_yaw = dz.atan2(dx); // atan2 is a method that returns the angle between the positive x-axis and the point (dx, dz)
+        let target_pitch = -(dy / horiz_dist.max(0.001)).atan(); // negative because in most FPS coordinate systems, looking up is negative pitch
+
+        // Smoothly rotate towards target based on personality turn_rate.
+        // turn_rate_mult > 1 means slower (easier bots), so divide.
+        let turn_rate = state.personality.base_turn_rate
+            / personality::difficulty_mods(state.difficulty).turn_rate_mult.max(0.01);
+
+        // lerp yaw
+        let yaw_diff = {
+            let d = target_yaw - state.current_yaw;
+            ((d + PI).rem_euclid(2.0 * PI)) - PI // shortest angle difference
+        };
+
+        let max_turn = turn_rate * dt;
+        state.current_yaw += yaw_diff.clamp(-max_turn, max_turn);
+
+        let pitch_diff = target_pitch - state.current_pitch;
+        state.current_pitch += pitch_diff.clamp(-max_turn * 0.6, max_turn * 0.6);
     }
+    // standing on top of them too: tick_bot faced the way it walked
+    bot.yaw = state.current_yaw;
+    bot.pitch = state.current_pitch;
+}
+
+/// [`queue_bot_shots`] over a slice, sent at once.
+#[cfg(test)]
+pub(crate) fn send_bot_shots(socket: &Outbox, players: &HashMap<PeerId, Player>, shots: &[(PeerId, u32)]) {
+    let mut queue = broadcast::ShotQueue::default();
+    queue_bot_shots(&mut queue, players, shots.iter().copied());
+    queue.flush(socket, players);
+}
+
+/// Queue `shots` (shooter, victim id) for the humans in each shooter's world,
+/// to go out with the players' shots of this tick (`ShotQueue::flush`).
+/// Damage moves nobody, so the tracer ends are where a shot-by-shot send
+/// found them too. A shot whose shooter or victim is gone is not sent (it
+/// would draw a tracer from or to the world origin), and humans in another
+/// world never get it (they would hear it and see its tracer at that world's
+/// coordinates).
+fn queue_bot_shots(
+    queue: &mut broadcast::ShotQueue,
+    players: &HashMap<PeerId, Player>,
+    shots: impl Iterator<Item = (PeerId, u32)>,
+) {
     let position_of_id = |id: u32| players.values().find(|p| p.id == id).map(|p| p.position);
-    let shots: Vec<BotShot> = shots
-        .iter()
-        .map(|(attacker_addr, victim_id)| {
-            let shooter = players.get(attacker_addr);
-            let from = shooter.map(|p| p.position).unwrap_or((0.0, 0.0, 0.0));
-            let to = position_of_id(*victim_id).unwrap_or((0.0, 0.0, 0.0));
-            BotShot {
-                shooter_id: shooter.map(|p| p.id).unwrap_or(0),
-                victim_id: *victim_id,
-                start: (from.0, from.1 + 1.2, from.2),
-                end: (to.0, to.1 + 1.0, to.2),
-            }
-        })
-        .collect();
-    for batch in shots.chunks(MAX_SHOTS_PER_PACKET) {
-        let msg = ServerMsg::BotShots(batch.to_vec()).encode();
-        for (addr, p) in players.iter() {
-            if !p.is_bot {
-                let _ = socket.send_to(&msg, *addr);
-            }
-        }
+    for (attacker_addr, victim_id) in shots {
+        let Some(shooter) = players.get(&attacker_addr) else { continue };
+        let Some(to) = position_of_id(victim_id) else { continue };
+        let from = shooter.position;
+        let shot = Shot {
+            shooter_id: shooter.id,
+            victim_id,
+            start: (from.0, from.1 + broadcast::SHOT_START_HEIGHT, from.2),
+            end: (to.0, to.1 + 1.0, to.2),
+        };
+        queue.push(shooter.world, shot);
     }
 }

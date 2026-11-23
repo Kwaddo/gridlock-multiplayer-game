@@ -43,6 +43,7 @@ pub fn handle_discover(
         max_players: game::MATCH_MAX_PLAYERS as u8,
         name: name.to_string(),
         version: Some(PROTOCOL_VERSION),
+        bots: Some(players.values().filter(|p| p.is_bot).count().min(255) as u8),
     }
     .encode();
     let _ = socket.send_to(&resp, src_addr);
@@ -75,37 +76,11 @@ pub fn handle_hit(
     let weapon_name = weapon_name.unwrap_or_default();
     let is_backstab_claim = is_backstab_claim.unwrap_or(false);
 
-    let victim_addr_opt = players
-        .iter()
-        .find(|(_, p)| p.id == victim_id)
-        .map(|(addr, _)| *addr);
-
-    let Some(victim_addr) = victim_addr_opt else { return; };
-
-    // avoid holding multiple simultaneous mutable borrows of `players` by doing
-    // short-lived immutable checks, then separate mutable borrows for victim and
-    // killer. We'll record if the victim needs to be reset after killer handling.
-    // First, perform immutable checks on the victim
-    {
-        let victim_ref = match players.get(&victim_addr) {
-            Some(v) => v,
-            None => return,
-        };
-        // If the victim is in their per-player post-teleport freeze, ignore hits
-        if victim_ref
-            .post_teleport_freeze_until
-            .map_or(false, |t| t > Instant::now())
-            && victim_ref.world == WorldId::Maze
-        {
-            return;
-        }
-        if !victim_ref.is_alive {
-            return;
-        }
-        // boxes stop bullets, a hit claimed on someone inside one does nothing
-        if victim_ref.in_box {
-            return;
-        }
+    // apply_damage finds the victim and ignores hits on the dead and the
+    // frozen itself, so there is nothing to check here first
+    // boxes stop bullets, a hit claimed on someone inside one does nothing
+    if players.values().any(|p| p.id == victim_id && p.in_box) {
+        return;
     }
 
     apply_damage(
@@ -182,25 +157,12 @@ pub fn handle_respawn_request(
         let _ = socket.send_to(&resp, src_addr);
     }
 
-    // Determine and assign a weapon without holding overlapping borrows.
-    // In Gun Game, the weapon is determined by gun_level, not by team loadout.
-    let chosen = if let Some(pref) = players.get(&src_addr) {
-        let gl = pref.gun_level as usize;
-        if gl >= 1 && gl <= game::GUN_GAME_PROGRESSION.len() {
-            // Gun Game: assign weapon matching current progression level
-            game::GUN_GAME_PROGRESSION[gl - 1].to_string()
-        } else if gl > game::GUN_GAME_PROGRESSION.len() {
-            "Punch".to_string()
-        } else if pref.team != Team::Spectator {
-            game::choose_team_weapon_for_player(players, pref)
-        } else {
-            "Knife".to_string()
-        }
-    } else {
-        "Knife".to_string()
-    };
-
-    if let Some(player) = players.get_mut(&src_addr) {
+    // same rule as the timed auto-respawn: in a team mode the player keeps
+    // the weapon they hold, only Gun Game picks one from their level
+    let chosen = players
+        .get(&src_addr)
+        .map(|p| game::respawn_weapon_for(players, p, match_mode));
+    if let (Some(chosen), Some(player)) = (chosen, players.get_mut(&src_addr)) {
         player.current_weapon = chosen;
     }
 }
@@ -245,6 +207,19 @@ pub fn handle_set_team(
     broadcast::broadcast_player_list(socket, players);
 }
 
+/// Where `attacker` stands as `victim` faces, on the ground plane: 1 dead
+/// ahead, -1 right behind.
+fn facing_dot(players: &HashMap<PeerId, Player>, attacker: PeerId, victim: PeerId) -> f32 {
+    let atk_pos = players.get(&attacker).map(|a| a.position).unwrap_or((0.0, 0.0, 0.0));
+    let vic_pos = players.get(&victim).map(|v| v.position).unwrap_or((0.0, 0.0, 0.0));
+    let vic_yaw = players.get(&victim).map(|v| v.yaw).unwrap_or(0.0);
+    let vic_fwd = (vic_yaw.cos(), vic_yaw.sin());
+    let dx = atk_pos.0 - vic_pos.0;
+    let dz = atk_pos.2 - vic_pos.2;
+    let len = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
+    vic_fwd.0 * dx / len + vic_fwd.1 * dz / len
+}
+
 pub fn apply_damage(
     socket: &Outbox,
     players: &mut HashMap<PeerId, Player>,
@@ -261,7 +236,7 @@ pub fn apply_damage(
     _maze: Option<&MazeData>,
     team_score: &mut game::TeamScore,
 ) {
-    let (attacker, attacker_world, attacker_is_bot) = match players.get(&attacker_addr) {
+    let (attacker, attacker_world, attacker_is_bot, attacker_team) = match players.get(&attacker_addr) {
         Some(a) => {
             if a.post_teleport_freeze_until
                 .map_or(false, |t| t > Instant::now())
@@ -269,7 +244,7 @@ pub fn apply_damage(
             {
                 return;
             }
-            (attacker_addr, a.world, a.is_bot)
+            (attacker_addr, a.world, a.is_bot, a.team)
         }
         None => return,
     };
@@ -292,6 +267,12 @@ pub fn apply_damage(
         if attacker_world == WorldId::Lobby && !(attacker_is_bot || victim_ref.is_bot) {
             return;
         }
+        // friendly fire is off in the team modes, for bots too
+        if attacker_world == WorldId::Maze
+            && is_friendly_fire(match_mode, attacker_team.as_u8(), victim_ref.team.as_u8())
+        {
+            return;
+        }
         if victim_ref
             .post_teleport_freeze_until
             .map_or(false, |t| t > Instant::now())
@@ -304,20 +285,19 @@ pub fn apply_damage(
         }
     }
 
-    let backstab_verified = if is_backstab && (weapon_name.eq_ignore_ascii_case("knife") || weapon_name.eq_ignore_ascii_case("punch")) {
-        let atk_pos = players.get(&attacker_addr).map(|a| a.position).unwrap_or((0.0, 0.0, 0.0));
-        let vic_pos = players.get(&victim_addr).map(|v| v.position).unwrap_or((0.0, 0.0, 0.0));
-        let vic_yaw = players.get(&victim_addr).map(|v| v.yaw).unwrap_or(0.0);
-        let vic_fwd = (vic_yaw.cos(), vic_yaw.sin());
-        let dx = atk_pos.0 - vic_pos.0;
-        let dz = atk_pos.2 - vic_pos.2;
-        let len = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
-        let vic_to_atk = (dx / len, dz / len);
-        let dot = vic_fwd.0 * vic_to_atk.0 + vic_fwd.1 * vic_to_atk.1;
-        dot < -BACKSTAB_CONE_DOT
-    } else {
-        false
-    };
+    let melee = weapon_name.eq_ignore_ascii_case("knife") || weapon_name.eq_ignore_ascii_case("punch");
+    let facing = facing_dot(players, attacker_addr, victim_addr);
+    let behind = facing < -BACKSTAB_CONE_DOT;
+    // a match bot that never noticed the attacker: a melee hit from behind
+    // it or from outside its view cone is a backstab, one to its face is not
+    let attacker_id = players.get(&attacker_addr).map_or(0, |a| a.id);
+    let caught_unaware = melee
+        && bot_states.get(&victim_addr).is_some_and(|s| {
+            s.personality_id.is_some()
+                && s.awareness.unaware_of(attacker_id)
+                && (behind || facing.clamp(-1.0, 1.0).acos() > crate::bot::awareness::sense::half_fov(s))
+        });
+    let backstab_verified = caught_unaware || (is_backstab && melee && behind);
 
     let mut damage = if backstab_verified {
         players
@@ -352,29 +332,20 @@ pub fn apply_damage(
 
     if damage >= players.get(&victim_addr).map(|v| v.health).unwrap_or(0) {
 
-        let _chosen_weapon_for_victim = if let Some(vref) = players.get(&victim_addr) {
-            if vref.team != Team::Spectator {
-                game::choose_team_weapon_for_player(players, vref)
-            } else {
-                "Knife".to_string()
-            }
-        } else {
-            "Knife".to_string()
-        };
-
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.is_alive = false;
             vmut.deaths += 1;
             vmut.death_time = Some(Instant::now());
         }
 
-        let death_msg = ServerMsg::Death {
-            killer_id: players.get(&attacker).map_or(0, |att| att.id),
-            weapon: weapon_name.to_string(),
-        }
-        .encode();
         if let Some(victim) = players.get(&victim_addr) {
             if !victim.is_bot {
+                // encoded only for a human: bots get no packets
+                let death_msg = ServerMsg::Death {
+                    killer_id: players.get(&attacker).map_or(0, |att| att.id),
+                    weapon: weapon_name.to_string(),
+                }
+                .encode();
                 let _ = socket.send_to(&death_msg, victim_addr);
             }
         }
@@ -411,9 +382,9 @@ pub fn apply_damage(
                 }
             }
 
-            let kill_msg =
-                ServerMsg::Kill { victim_id, weapon: weapon_name.to_string() }.encode();
             if !killer.is_bot {
+                let kill_msg =
+                    ServerMsg::Kill { victim_id, weapon: weapon_name.to_string() }.encode();
                 let _ = socket.send_to(&kill_msg, attacker);
             }
         }
@@ -426,12 +397,7 @@ pub fn apply_damage(
             }
             .encode();
 
-            for (addr, p) in players.iter() {
-                if p.is_bot {
-                    continue;
-                }
-                let _ = socket.send_to(&end_msg, *addr);
-            }
+            broadcast::to_humans(socket, players, &end_msg);
 
             *match_end_pending = Some((
                 Instant::now() + Duration::from_secs(game::MATCH_END_COUNTDOWN_SECS as u64),
@@ -447,8 +413,11 @@ pub fn apply_damage(
             }
         }
 
-        broadcast::broadcast_state(socket, players);
-        broadcast::broadcast_player_list(socket, players);
+        // The death reaches everyone's state with the next periodic broadcast
+        // (within 33 ms); the kill feed below starts each client's death
+        // animation at once, and a dying body ignores state until it is done.
+        // The new scores go out with the next rate-limited player list.
+        broadcast::player_list_changed(socket);
 
         let feed = ServerMsg::KillFeed {
             killer_id: players.get(&attacker).map_or(0, |killer| killer.id),
@@ -457,35 +426,31 @@ pub fn apply_damage(
             headshot: is_headshot,
         }
         .encode();
-
-        for (addr, p) in players.iter() {
-            if p.is_bot {
-                continue;
-            }
-            let _ = socket.send_to(&feed, *addr);
-        }
+        broadcast::to_humans(socket, players, &feed);
     } else {
         // apply non-lethal damage
         if let Some(vmut) = players.get_mut(&victim_addr) {
             vmut.health -= damage;
-            if !vmut.is_bot {
-                vmut.regen_resume_at = Some(Instant::now() + Duration::from_secs(7));
-            }
+            // bots too: match bots regenerate like players (game::process_lobby_regen)
+            vmut.regen_resume_at = Some(Instant::now() + Duration::from_secs(7));
         }
 
         // stun when punched
         let is_punch = weapon_name.eq_ignore_ascii_case("punch") || weapon_name.eq_ignore_ascii_case("knife"); 
-        let dmg_msg = ServerMsg::Damage {
-            amount: damage as f32,
-            attacker_id: players.get(&attacker).map_or(0, |att| att.id),
-            stun: is_punch,
-        }
-        .encode();
-
         if let Some(victim) = players.get(&victim_addr) {
             if !victim.is_bot {
+                let dmg_msg = ServerMsg::Damage {
+                    amount: damage as f32,
+                    attacker_id: players.get(&attacker).map_or(0, |att| att.id),
+                    stun: is_punch,
+                }
+                .encode();
                 let _ = socket.send_to(&dmg_msg, victim_addr);
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "backstab_tests.rs"]
+mod backstab_tests;

@@ -139,6 +139,10 @@ impl PlayingState {
                 None
             };
             let victim_name = if target == 0 { "a decoy".to_string() } else { self.smoke_name(target) };
+            // our find: the kill marker (everyone's feed already says found or decoy)
+            if shooter == player_id && target != 0 {
+                self.note_local_kill(false);
+            }
             if target == player_id {
                 self.smoke.found = Some((shooter_name.clone(), points));
                 self.smoke.found_timer = FOUND_CARD_TIME;
@@ -186,7 +190,7 @@ impl PlayingState {
             let at = if id == self.smoke.my_id {
                 Some(self.position)
             } else {
-                self.other_players.iter().find(|p| p.id == id).map(|p| vec3(p.render_x, p.render_y, p.render_z))
+                self.other_players.iter().find(|p| p.id == id).map(|p| vec3(p.smooth.x, p.smooth.y, p.smooth.z))
             };
             if let Some(at) = at {
                 self.play_heard_everywhere(TAUNT, at);

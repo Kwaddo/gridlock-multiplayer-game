@@ -20,8 +20,9 @@
 
 (function (gridlockWeb) {
     const {
-        PLUGIN_VERSION, sockets, readString, readBytes, writeU32, writeBytes, roomHttpUrl, iceServersFor, prewarm,
-        RtcSocket, preconnect, takePreconnected, registerModels, registerDecode,
+        PLUGIN_VERSION, sockets, readString, readBytes, writeU32, writeBytes, heapFloats, roomHttpUrl, iceServersFor, prewarm,
+        RtcSocket, preconnect, takePreconnected, registerModels, registerDecode, keepRunningWhenHidden, startHostTicker,
+        EV_PACKET, RELIABLE_MIN_BYTES,
     } = gridlockWeb;
 
     const requests = new Map(); // id -> { done, status, body }
@@ -33,7 +34,9 @@
     function audio() {
         if (!audioContext) {
             audioContext = new AudioContext();
-            const resume = () => audioContext.resume();
+            // Kept for good (a context can be suspended again), but only asks
+            // while it is not running: every key and click comes through here.
+            const resume = () => audioContext.state !== "running" && audioContext.resume();
             for (const ev of ["pointerdown", "keydown", "touchstart"]) {
                 window.addEventListener(ev, resume, { capture: true });
             }
@@ -41,36 +44,46 @@
         return audioContext;
     }
 
-    // ------------------------------------------------------------ hidden tabs
+    // ------------------------------------------------------------ socket events
 
-    // The game advances once per animation frame, and browsers stop animation
-    // frames in hidden tabs, which would freeze a game hosted in one (players
-    // could connect but nobody would answer). While hidden with a game open,
-    // a worker's ticks run the frames instead: worker timers and the messages
-    // they post keep going in the background. Those frames only keep the game
-    // and its connections going, without drawing (see platform::page_hidden),
-    // so 20 a second is plenty.
-    const HIDDEN_FRAME_MS = 50;
-    let hiddenTicker = null;
-
-    function keepRunningWhenHidden() {
-        if (hiddenTicker || typeof Worker === "undefined") return;
-        const source = `setInterval(() => postMessage(0), ${HIDDEN_FRAME_MS});`;
-        try {
-            hiddenTicker = new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
-        } catch {
-            return; // no workers (e.g. a strict content policy): the game pauses when hidden
-        }
-        hiddenTicker.onmessage = () => {
-            const inGame = [...sockets.values()].some((s) => !s.closed);
-            if (document.hidden && inGame && wasm_exports) wasm_exports.frame();
+    // A socket's events wait for the game to drain them (gridlock_rtc_drain).
+    // Should it stop (a hidden tab without workers, say), at most EVENTS_MAX
+    // stay: past that, the oldest small packet goes, as it came unreliably
+    // anyway. Big packets came over the reliable channel, and peer events
+    // are state: those are never dropped.
+    const EVENTS_MAX = 4096;
+    function capEvents(events) {
+        if (events.push !== Array.prototype.push) return; // capped already
+        events.push = function (ev) {
+            if (this.length >= EVENTS_MAX) {
+                const i = this.findIndex((e) => e.kind === EV_PACKET && e.data.length <= RELIABLE_MIN_BYTES);
+                if (i >= 0) this.splice(i, 1);
+            }
+            return Array.prototype.push.call(this, ev);
         };
     }
+
+    const EVENT_HEADER = 12;
+    const eventHeaderBytes = new Uint8Array(EVENT_HEADER);
+    const eventHeader = new DataView(eventHeaderBytes.buffer);
 
     // ------------------------------------------------------------ imports
 
     function register(importObject) {
         const env = importObject.env;
+
+        // ---- WebGL context attributes. The loader asks for getContext("webgl")
+        // with none, so the browser multisamples (antialias), keeps an alpha
+        // channel and may pick the low-power GPU. The native build renders
+        // without MSAA; match it. `?aa` in the URL keeps antialiasing on.
+
+        const canvas = document.querySelector("#glcanvas");
+        if (canvas) {
+            const getContext = canvas.getContext.bind(canvas);
+            const antialias = new URLSearchParams(location.search).has("aa");
+            canvas.getContext = (type, attrs) =>
+                getContext(type, { antialias, alpha: false, powerPreference: "high-performance", ...attrs });
+        }
 
         // ---- models: file loading and download progress (gridlock_web/models.js)
 
@@ -88,9 +101,26 @@
         // miniquad's loader uploads only the first matrix of a uniform array
         // (it ignores `count`), which the GPU skinning shader's joint array
         // needs whole (client/src/types/animated_model.rs).
+        // WebGL2 reads the matrices straight out of the wasm memory (no new
+        // view per call); WebGL1 has no offset argument and gets a view.
+        let uniformGl = null;
+        let uniformWebgl2 = false;
         env.glUniformMatrix4fv = function (location, count, transpose, value) {
-            const data = new Float32Array(wasm_memory.buffer, value, 16 * count);
-            gl.uniformMatrix4fv(GL.uniforms[location], !!transpose, data);
+            if (uniformGl !== gl) {
+                uniformGl = gl;
+                uniformWebgl2 = typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext;
+            }
+            const floats = heapFloats();
+            const at = value >>> 2;
+            if (uniformWebgl2) gl.uniformMatrix4fv(GL.uniforms[location], !!transpose, floats, at, 16 * count);
+            else gl.uniformMatrix4fv(GL.uniforms[location], !!transpose, floats.subarray(at, at + 16 * count));
+        };
+        // miniquad's loader copies a loaded file into wasm memory one byte at a
+        // time, which for a model of several MB takes a frame or more.
+        env.fs_take_buffer = function (id, ptr, max) {
+            const file = FS.loaded_files[id];
+            if (file) new Uint8Array(wasm_memory.buffer, ptr, max).set(file.length > max ? file.subarray(0, max) : file);
+            delete FS.loaded_files[id];
         };
         env.gridlock_force_cpu_skinning = () => (new URLSearchParams(location.search).has("cpuskin") ? 1 : 0);
         env.gridlock_unix_ms = () => Date.now();
@@ -138,6 +168,21 @@
             storageTaken = encoder.encode(value);
             writeU32(lenOut, storageTaken.length);
             return 1;
+        };
+
+        // ---- platform::open_url: a link the player clicked (credits), in a new tab.
+        // The game reads clicks on its next frame, still within the click's
+        // user activation, so the browser does not block it as a popup.
+
+        env.gridlock_open_url = function (urlPtr, urlLen) {
+            try {
+                const url = new URL(readString(urlPtr, urlLen), location.href);
+                if (url.protocol !== "https:" && url.protocol !== "http:") return 0;
+                window.open(url.href, "_blank", "noopener");
+                return 1;
+            } catch {
+                return 0;
+            }
         };
 
         // ---- pointer lock (replaces miniquad's version)
@@ -290,11 +335,16 @@
 
         // ---- transport crate: WebRTC and fetch (transport/src/web.rs)
 
+        // A game hosted here steps on a timer of its own (gridlock_web/tickers.js).
+        env.gridlock_host_ticker_start = startHostTicker;
+
         env.gridlock_rtc_open = function (urlPtr, urlLen, isHost) {
             const handle = nextHandle++;
             const url = readString(urlPtr, urlLen);
             const ahead = isHost === 0 ? takePreconnected(url) : null;
-            sockets.set(handle, ahead || new RtcSocket(url, isHost !== 0));
+            const socket = ahead || new RtcSocket(url, isHost !== 0);
+            capEvents(socket.events);
+            sockets.set(handle, socket);
             keepRunningWhenHidden();
             return handle;
         };
@@ -311,27 +361,41 @@
             } catch {}
         };
 
-        env.gridlock_rtc_send = function (handle, peer, ptr, len) {
+        // One packet to each of n peers (u32s at peersPtr): a broadcast is one
+        // call, not one per player.
+        env.gridlock_rtc_send_many = function (handle, peersPtr, n, ptr, len) {
             const socket = sockets.get(handle);
-            if (socket) socket.send(peer, readBytes(ptr, len));
+            if (!socket) return;
+            // A view, not a copy: a data channel's send copies what it sends
+            // at once (RtcSocket.send keeps nothing).
+            const bytes = new Uint8Array(wasm_memory.buffer, ptr, len);
+            const peers = new Uint32Array(wasm_memory.buffer, peersPtr, n);
+            for (let i = 0; i < n; i++) socket.send(peers[i], bytes);
         };
 
-        // Returns the next event kind (0 = none) and writes its peer and payload
-        // length; the payload is then copied out with gridlock_rtc_take.
-        env.gridlock_rtc_next = function (handle, peerOut, lenOut) {
-            const socket = sockets.get(handle);
-            const ev = socket && socket.events.shift();
-            if (!ev) return 0;
-            socket.taken = ev.data;
-            writeU32(peerOut, ev.peer);
-            writeU32(lenOut, ev.data ? ev.data.length : 0);
-            return ev.kind;
-        };
-
-        env.gridlock_rtc_take = function (handle, ptr) {
-            const socket = sockets.get(handle);
-            if (socket && socket.taken) writeBytes(ptr, socket.taken);
-            if (socket) socket.taken = null;
+        // Moves a socket's events into wasm memory at ptr (cap bytes), as many
+        // as fit, each as kind, peer and payload length (little-endian u32s)
+        // then the payload (transport/src/rtc_event.rs). Returns the bytes
+        // written, and writes to needOut the size of the first event left
+        // (0: none left).
+        env.gridlock_rtc_drain = function (handle, ptr, cap, needOut) {
+            const events = sockets.get(handle)?.events ?? [];
+            const size = (ev) => EVENT_HEADER + (ev.data ? ev.data.length : 0);
+            let at = 0;
+            let taken = 0;
+            for (const ev of events) {
+                if (at + size(ev) > cap) break;
+                eventHeader.setUint32(0, ev.kind, true);
+                eventHeader.setUint32(4, ev.peer, true);
+                eventHeader.setUint32(8, size(ev) - EVENT_HEADER, true);
+                writeBytes(ptr + at, eventHeaderBytes);
+                if (ev.data) writeBytes(ptr + at + EVENT_HEADER, ev.data);
+                at += size(ev);
+                taken++;
+            }
+            events.splice(0, taken);
+            writeU32(needOut, events.length ? size(events[0]) : 0);
+            return at;
         };
 
         env.gridlock_rtc_close = function (handle) {
@@ -348,7 +412,10 @@
             if (/\/servers\/?$/.test(url)) iceServersFor(url);
             const req = { done: false, status: 0, body: new Uint8Array(0) };
             requests.set(id, req);
-            const headers = { "Content-Type": "application/json" };
+            // Content-Type only with a body: a GET without one is then a
+            // "simple" request, which a registry on another origin answers
+            // without a CORS preflight first.
+            const headers = bodyLen > 0 ? { "Content-Type": "application/json" } : {};
             if (authLen > 0) headers.Authorization = readString(authPtr, authLen);
             const method = readString(methodPtr, methodLen);
             fetch(url, {

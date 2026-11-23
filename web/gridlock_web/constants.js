@@ -5,7 +5,7 @@
 "use strict";
 
 (function (gridlockWeb) {
-    const PLUGIN_VERSION = 4;
+    const PLUGIN_VERSION = 6;
 
     // Event kinds shared with transport/src/web.rs.
     const EV_PEER_JOINED = 1;
@@ -24,10 +24,23 @@
     const POLL_CONNECTING_MS = 500;
     const POLL_CONNECTED_MS = 1000; // a connected player only checks whether to resume
     const HOST_KEEP_MS = 20000; // how often the host renews its claim on the room
-    // A player not connected yet re-announces itself this often, so a
+    // A host whose room is full (ROOM_MAX_PLAYERS in it, the protocol's
+    // MATCH_MAX_PLAYERS, counting only players that have sent something, not
+    // ones connected ahead) polls this often, plainly, instead of holding a
+    // long poll. The server still takes a join then; it is just slower.
+    const POLL_FULL_MS = 8000;
+    const ROOM_MAX_PLAYERS = 16;
+    // A player not connected yet re-announces itself after this long, so a
     // signalling message that went missing only costs a few seconds: the
     // host resends its answer (or offer), or offers anew if it has nothing.
+    // Each hello after that waits twice as long, up to HELLO_MAX_MS: every
+    // one is a registry write and a look for the host.
     const HELLO_MS = 3000;
+    const HELLO_MAX_MS = 12000;
+    // A player whose channel has not opened this long after it started (or
+    // after it lost its host) gives up: the socket closes, which the game
+    // reads as a failed connect (the game's own LINK_TIMEOUT matches it at 20 s).
+    const PLAYER_GIVE_UP_MS = 20000;
     // A registry that holds polls until something arrives (both registries
     // do) marks its replies with this header; the page then polls again at
     // once instead of waiting out an interval.
@@ -58,25 +71,41 @@
     // (Enough that players joining in quick succession rarely pick one
     // already taken, which costs them the slow way round.)
     const SPARE_COUNT = 4;
-    // Spares are made anew this often (a NAT forgets an idle mapping after a
-    // while); the ones they replace still take answers this much longer.
-    const SPARE_ROTATE_MS = 30000;
+    // Each spare is made anew after about this long (3/4 to 5/4 of it, at
+    // random, so they don't all go on one tick); the one it replaces still
+    // takes answers SPARE_GRACE_MS longer. A spare is direct only (STUN, no
+    // TURN credentials to expire), and its ICE credentials never do; what
+    // ages is its server reflexive candidate, the NAT mapping the browser
+    // keeps alive with STUN keepalives while the connection is open (Chrome
+    // stops those after 2 min on a metered network). So the oldest a spare
+    // can get, 5/4 of this plus the grace, stays within 2 min: 90 + 30 s.
+    const SPARE_ROTATE_MS = 72000;
     const SPARE_GRACE_MS = 30000;
     const SPARE_TICK_MS = 5000;
+    // Changes to the spares within this long go to the registry as one
+    // request; the same spares are sent again after SPARE_REFRESH_MS, since
+    // the registry forgets them after 75 s (SPARE_TTL_MS there).
+    const SPARE_PUBLISH_DEBOUNCE_MS = 500;
+    const SPARE_REFRESH_MS = 50000;
     // Nobody waits on a spare, so it goes out with every candidate (up to this long).
     const SPARE_GATHER_MS = 3000;
     // A player fetches a room's spare when it points at the room (before it
     // clicks join), and uses what it fetched for this long.
     const PREWARM_MS = 15000;
-    // Listed games (every LAN one, the first few online, the one pointed at)
-    // are connected to ahead (see preconnect), so joining one only waits for
-    // the game's own Join and Welcome. A connection nobody asked for in this
-    // long is closed.
+    // Listed LAN games and the one pointed at are connected to ahead (see
+    // preconnect), so joining one only waits for the game's own Join and
+    // Welcome; the first few online ones are only prewarmed. A connection
+    // nobody asked for in this long is closed.
     const PRECONNECT_IDLE_MS = 10000;
     const PRECONNECT_MAX = 8;
+    // A host keeps at most this many connections open that have sent nothing
+    // yet (players connected ahead, not joined); the oldest go first.
+    const HOST_SILENT_PEERS_MAX = 6;
     // A connection ahead that failed (the host just left, still listed) is
-    // tried again after this, not on every frame.
+    // tried again after this, not on every frame; twice as long after each
+    // failure in a row, up to PRECONNECT_RETRY_MAX_MS.
     const PRECONNECT_RETRY_MS = 5000;
+    const PRECONNECT_RETRY_MAX_MS = 60000;
     // ICE candidates come in bursts; signals queued within this long go out
     // as one request.
     const SEND_BATCH_MS = 20;
@@ -94,15 +123,24 @@
     const RELIABLE_MIN_BYTES = 1100;
     // ...unless that channel is backed up this far, when they take their chances.
     const RELIABLE_MAX_BUFFERED = 256 * 1024;
+    // The game channel backed up this far (a stalled link, about a second of
+    // snapshots): what is queued is stale already, so new packets are dropped,
+    // like UDP would, instead of arriving late in a burst.
+    const UNRELIABLE_MAX_BUFFERED = 32 * 1024;
+    // A message this much older than the newest one seen (in its seq, ms on
+    // the live registry) can not be handed out again: registries keep
+    // messages for 60 s. The page forgets having seen it.
+    const SEEN_KEEP = 70000;
     const CHANNEL = "gridlock";
     const RELIABLE_CHANNEL = "gridlock-r";
 
     Object.assign(gridlockWeb, {
         PLUGIN_VERSION, EV_PEER_JOINED, EV_PEER_LEFT, EV_PACKET, EV_CLOSED, FORCE_RELAY, NO_DIRECT, STUN_FALLBACK,
-        POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, LONG_POLL_HEADER, LONG_POLL_GAP_MS,
-        POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, GATHER_MS, SPARE_COUNT, SPARE_ROTATE_MS, SPARE_GRACE_MS, SPARE_TICK_MS,
-        SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, PRECONNECT_RETRY_MS, SEND_BATCH_MS,
-        DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, ICE_CACHE_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, CHANNEL,
-        RELIABLE_CHANNEL,
+        POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, POLL_FULL_MS, ROOM_MAX_PLAYERS, HELLO_MS, HELLO_MAX_MS, PLAYER_GIVE_UP_MS,
+        LONG_POLL_HEADER, LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, GATHER_MS, SPARE_COUNT, SPARE_ROTATE_MS,
+        SPARE_GRACE_MS, SPARE_TICK_MS, SPARE_PUBLISH_DEBOUNCE_MS, SPARE_REFRESH_MS, SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, HOST_SILENT_PEERS_MAX, PRECONNECT_RETRY_MS,
+        PRECONNECT_RETRY_MAX_MS, SEND_BATCH_MS,
+        DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, ICE_CACHE_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, UNRELIABLE_MAX_BUFFERED,
+        SEEN_KEEP, CHANNEL, RELIABLE_CHANNEL,
     });
 })((window.gridlockWeb = window.gridlockWeb || {}));

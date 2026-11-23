@@ -322,7 +322,7 @@ impl Server {
 mod tests {
     use super::*;
 
-    fn boxes_for(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Option<Vec<CardboardBox>> {
+    fn boxes_for(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Option<Vec<CardboardBox>> {
         out.iter()
             .filter(|(p, _)| *p == peer)
             .filter_map(|(_, b)| match ServerMsg::decode(b) {

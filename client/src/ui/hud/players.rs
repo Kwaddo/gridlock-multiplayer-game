@@ -1,4 +1,40 @@
 use macroquad::prelude::*;
+use std::cell::RefCell;
+use std::cmp::Ordering;
+use std::fmt::Write as _;
+
+thread_local! {
+    // row order of `draw_player_list`, as indices into `connected_players`
+    // (`connected_players.len()` stands for the synthetic "You" row)
+    static ROW_ORDER: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    // scratch for per-row labels and counters, reused across frames
+    static ROW_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+const BOT_PREFIX: &str = "[BOT] ";
+
+/// Case-insensitive order of two scoreboard names, as
+/// `a.to_lowercase().cmp(&b.to_lowercase())` on the shown names (bots
+/// carry `BOT_PREFIX`). ASCII names compare without allocating.
+fn cmp_names_lowercase(a: &str, a_bot: bool, b: &str, b_bot: bool) -> Ordering {
+    let prefix = |bot: bool| if bot { BOT_PREFIX } else { "" };
+    if a.is_ascii() && b.is_ascii() {
+        // ASCII lowercasing is byte-wise, and String's Ord compares bytes
+        fn lower<'a>(prefix: &'static str, name: &'a str) -> impl Iterator<Item = u8> + 'a {
+            prefix.bytes().chain(name.bytes()).map(|c| c.to_ascii_lowercase())
+        }
+        lower(prefix(a_bot), a).cmp(lower(prefix(b_bot), b))
+    } else {
+        // full Unicode lowercasing (context-sensitive, e.g. final sigma)
+        let lower = |name: &str, bot: bool| {
+            let mut shown = String::with_capacity(prefix(bot).len() + name.len());
+            shown.push_str(prefix(bot));
+            shown.push_str(name);
+            shown.to_lowercase()
+        };
+        lower(a, a_bot).cmp(&lower(b, b_bot))
+    }
+}
 
 /// Draws the in-world nametags (keeps existing behaviour) and the scoreboard/list is
 /// rendered only when the caller explicitly invokes `draw_player_list`.
@@ -14,45 +50,31 @@ pub fn draw_player_list(
 ) {
     use crate::ui::fonts::text_params;
 
-    // (name, kills, deaths, gun_level, is_self, team, weapon)
-    let mut rows: Vec<(String, u32, u32, u8, bool, u8, String)> = Vec::new();
-    let mut seen_self = false;
-    for (id, name, kills, deaths, gun_level, team, weapon, is_bot) in connected_players.iter() {
-        let is_self = *id == self_id;
-        if is_self {
-            seen_self = true;
+    // (name, is_bot, kills, deaths, gun_level, is_self, team, weapon) of row `i`;
+    // any index past the players is the synthetic "You" row
+    let row = |i: usize| -> (&str, bool, u32, u32, u8, bool, u8, &str) {
+        match connected_players.get(i) {
+            Some((id, name, kills, deaths, gun_level, team, weapon, is_bot)) => {
+                (name, *is_bot, *kills, *deaths, *gun_level, *id == self_id, *team, weapon)
+            }
+            None => ("You", false, self_kills, self_deaths, self_gun_level, true, 0u8, ""),
         }
-        let display_name = if *is_bot {
-            format!("[BOT] {}", name)
-        } else {
-            name.clone()
-        };
-        rows.push((
-            display_name,
-            *kills,
-            *deaths,
-            *gun_level,
-            is_self,
-            *team,
-            weapon.clone(),
-        ));
-    }
-    if !seen_self {
-        rows.push((
-            "You".to_string(),
-            self_kills,
-            self_deaths,
-            self_gun_level,
-            true,
-            0u8,
-            "".to_string(),
-        ));
+    };
+
+    let mut rows = ROW_ORDER.take();
+    rows.clear();
+    rows.extend(0..connected_players.len());
+    if !connected_players.iter().any(|p| p.0 == self_id) {
+        rows.push(connected_players.len());
     }
 
     if in_game {
-        rows.sort_by(|a, b| b.1.cmp(&a.1));
+        rows.sort_by(|&a, &b| row(b).2.cmp(&row(a).2));
     } else {
-        rows.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        rows.sort_by(|&a, &b| {
+            let (a, b) = (row(a), row(b));
+            cmp_names_lowercase(a.0, a.1, b.0, b.1)
+        });
     }
 
     // layout — wider to fit K/D/A + weapon columns
@@ -110,9 +132,11 @@ pub fn draw_player_list(
     }
 
     // rows
+    let mut text = ROW_TEXT.take();
     let mut py = y + 62.0;
-    for (i, (name, kills, deaths, gun_level, is_self, team, weapon)) in rows.iter().enumerate() {
-        let bg_alpha = if *is_self { 0.08 } else { 0.0 };
+    for (i, &r) in rows.iter().enumerate() {
+        let (name, is_bot, kills, deaths, gun_level, is_self, team, weapon) = row(r);
+        let bg_alpha = if is_self { 0.08 } else { 0.0 };
         if bg_alpha > 0.0 {
             draw_rectangle(
                 x + 8.0,
@@ -130,30 +154,30 @@ pub fn draw_player_list(
                     || m == crate::net::protocols::MODE_SEARCH_AND_DESTROY
         );
         let name_color = if is_team_mode {
-            match *team {
+            match team {
                 1 => {
-                    if *is_self {
+                    if is_self {
                         Color::from_rgba(255, 150, 150, 255) // brighter red for self
                     } else {
                         Color::from_rgba(230, 120, 120, 255)
                     }
                 }
                 2 => {
-                    if *is_self {
+                    if is_self {
                         Color::from_rgba(150, 200, 255, 255) // brighter blue for self
                     } else {
                         Color::from_rgba(120, 170, 230, 255)
                     }
                 }
                 _ => {
-                    if *is_self {
+                    if is_self {
                         Color::from_rgba(180, 220, 255, 255)
                     } else {
                         WHITE
                     }
                 }
             }
-        } else if *is_self {
+        } else if is_self {
             Color::from_rgba(180, 220, 255, 255)
         } else {
             WHITE
@@ -165,7 +189,7 @@ pub fn draw_player_list(
             let badge_x = col_name_x - 28.0;
             let badge_w = 18.0;
             let badge_h = 18.0;
-            let badge_color = match *team {
+            let badge_color = match team {
                 1 => Color::from_rgba(200, 60, 60, 255),  // Red
                 2 => Color::from_rgba(60, 120, 200, 255), // Blue
                 _ => Color::from_rgba(120, 120, 120, 255),
@@ -182,20 +206,23 @@ pub fn draw_player_list(
         }
 
         // rank + name
-        draw_text_ex(
-            &format!("{}. {}", i + 1, name),
-            col_name_x,
-            py,
-            text_params(18, name_color),
-        );
+        text.clear();
+        let _ = write!(text, "{}. ", i + 1);
+        if is_bot {
+            text.push_str(BOT_PREFIX);
+        }
+        text.push_str(name);
+        draw_text_ex(&text, col_name_x, py, text_params(18, name_color));
 
         // K
-        let k_text = format!("{}", kills);
-        draw_text_ex(&k_text, col_k_x, py, text_params(18, WHITE));
+        text.clear();
+        let _ = write!(text, "{}", kills);
+        draw_text_ex(&text, col_k_x, py, text_params(18, WHITE));
 
         // D
-        let d_text = format!("{}", deaths);
-        draw_text_ex(&d_text, col_d_x, py, text_params(18, dim_color));
+        text.clear();
+        let _ = write!(text, "{}", deaths);
+        draw_text_ex(&text, col_d_x, py, text_params(18, dim_color));
 
         // A (assists not tracked yet)
         draw_text_ex("0", col_a_x, py, text_params(18, dim_color));
@@ -203,12 +230,14 @@ pub fn draw_player_list(
         // weapon column: show weapon name when available (prefer weapon string), fall back to gun_level number
         if in_game {
             let wtext = if !weapon.is_empty() {
-                weapon.clone()
+                weapon
             } else {
-                format!("W{}", gun_level)
+                text.clear();
+                let _ = write!(text, "W{}", gun_level);
+                &text
             };
             draw_text_ex(
-                &wtext,
+                wtext,
                 col_wep_x - 40.0,
                 py,
                 text_params(14, Color::from_rgba(255, 200, 100, 255)),
@@ -217,6 +246,8 @@ pub fn draw_player_list(
 
         py += row_h;
     }
+    ROW_TEXT.set(text);
+    ROW_ORDER.set(rows);
 }
 
 /// Team Deathmatch scoreboard: Red and Blue side by side, each headed by the
@@ -269,6 +300,7 @@ pub fn draw_team_scoreboard(
     let header_color = Color::from_rgba(150, 152, 165, 255);
     let dim = Color::from_rgba(150, 150, 160, 255);
 
+    let mut text = ROW_TEXT.take();
     for (t, team) in teams.iter().enumerate() {
         let (label, accent, head_bg) = looks[t];
         let x = x0 + t as f32 * (col_w + gap);
@@ -278,9 +310,10 @@ pub fn draw_team_scoreboard(
         draw_rectangle(x, y0 + header_h - 3.0, col_w, 3.0, accent);
         draw_text_ex(label, x + 14.0, y0 + 30.0, text_params(20, label_colors[t]));
         let team_score = team_scores[t].unwrap_or_else(|| team.iter().map(|p| p.2).sum());
-        let st = team_score.to_string();
-        let stw = measure_game_text(&st, 30);
-        draw_text_ex(&st, x + col_w - 14.0 - stw, y0 + 34.0, text_params(30, WHITE));
+        text.clear();
+        let _ = write!(text, "{}", team_score);
+        let stw = measure_game_text(&text, 30);
+        draw_text_ex(&text, x + col_w - 14.0 - stw, y0 + 34.0, text_params(30, WHITE));
 
         // body
         let by = y0 + header_h;
@@ -305,20 +338,54 @@ pub fn draw_team_scoreboard(
                 nx += measure_game_text("BOT", 10) + 6.0;
             }
             // keep long names clear of the K/D columns
-            let mut shown = name.clone();
-            while measure_game_text(&shown, 16) > k_x - nx - 10.0 && shown.chars().count() > 3 {
-                shown.pop();
+            let max_w = k_x - nx - 10.0;
+            let mut end = name.len();
+            let mut chars = name.chars().count();
+            while measure_game_text(&name[..end], 16) > max_w && chars > 3 {
+                end = name[..end].char_indices().next_back().map_or(0, |(i, _)| i);
+                chars -= 1;
             }
-            if shown.len() < name.len() {
-                shown.push_str("..");
-            }
-            draw_text_ex(&shown, nx, ry + 18.0, text_params(16, name_color));
-            draw_text_ex(&kills.to_string(), k_x, ry + 18.0, text_params(16, WHITE));
-            draw_text_ex(&deaths.to_string(), d_x, ry + 18.0, text_params(16, dim));
+            let shown = if end < name.len() {
+                text.clear();
+                text.push_str(&name[..end]);
+                text.push_str("..");
+                &text
+            } else {
+                name
+            };
+            draw_text_ex(shown, nx, ry + 18.0, text_params(16, name_color));
+            text.clear();
+            let _ = write!(text, "{}", kills);
+            draw_text_ex(&text, k_x, ry + 18.0, text_params(16, WHITE));
+            text.clear();
+            let _ = write!(text, "{}", deaths);
+            draw_text_ex(&text, d_x, ry + 18.0, text_params(16, dim));
             ry += row_h;
         }
         if team.is_empty() {
             draw_text_ex("No players", x + 14.0, ry + 18.0, text_params(14, dim));
+        }
+    }
+    ROW_TEXT.set(text);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_order_matches_lowercased_strings() {
+        let names = [
+            ("alice", false), ("Alice", false), ("ALICE", true), ("bob", true), ("[bot] a", false),
+            ("Zed", false), ("", false), ("You", false), ("ΣΑΣ", false), ("σας", true),
+            ("Émile", false), ("emile", false), ("_x", false), ("İx", false),
+        ];
+        let shown = |n: &str, bot: bool| if bot { format!("[BOT] {}", n) } else { n.to_string() };
+        for &(a, a_bot) in &names {
+            for &(b, b_bot) in &names {
+                let expected = shown(a, a_bot).to_lowercase().cmp(&shown(b, b_bot).to_lowercase());
+                assert_eq!(cmp_names_lowercase(a, a_bot, b, b_bot), expected, "{a:?}/{a_bot} vs {b:?}/{b_bot}");
+            }
         }
     }
 }

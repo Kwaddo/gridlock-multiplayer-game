@@ -1,7 +1,7 @@
 use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 
-use crate::{Link, LinkStatus};
+use crate::{Link, LinkStatus, Packet};
 
 /// Non-blocking UDP socket on an ephemeral port that talks to one server.
 ///
@@ -30,7 +30,7 @@ impl Link for UdpLink {
         let _ = self.socket.send_to(packet, self.server);
     }
 
-    fn recv(&mut self) -> Vec<Box<[u8]>> {
+    fn recv(&mut self) -> Vec<Packet> {
         let mut out = Vec::new();
         // Stop on WouldBlock, or on any error such as an ICMP "connection
         // refused" from a server that is not running yet.

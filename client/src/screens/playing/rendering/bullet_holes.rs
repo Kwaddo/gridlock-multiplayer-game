@@ -16,6 +16,9 @@ const HOLE_VERTS: usize = DISC_VERTS * 3 + NUM_RAYS * 3;
 /// Indices of one hole: a triangle fan per disc, then 2 triangles per ray.
 const HOLE_INDICES: usize = DISC_SEGMENTS * 3 * 3 + NUM_RAYS * 6;
 
+/// Farthest any vertex of a hole reaches from its centre, in hole sizes.
+const HOLE_REACH: f32 = 3.2;
+
 /// The index list of one hole. It never changes, so it is built at compile time.
 const INDICES: [u16; HOLE_INDICES] = hole_indices();
 
@@ -132,12 +135,25 @@ impl PlayingState {
     }
 
     pub(crate) fn draw_bullet_holes(&self) {
+        if self.bullet_holes.is_empty() {
+            return;
+        }
         let baked = &self.bullet_hole_geometry;
         let uv = vec2(0.0, 0.0);
         let mut verts = [Vertex::new2(Vec3::ZERO, uv, BLANK); HOLE_VERTS];
+        let gl = unsafe { get_internal_gl() };
+        // holes outside the current camera's view (main or mirror) are skipped
+        let frustum = crate::world::render::Frustum::new(gl.quad_gl.get_projection_matrix());
+        gl.quad_gl.texture(None);
+        gl.quad_gl.draw_mode(DrawMode::Triangles);
         for (hole, geo) in self.bullet_holes.iter().zip(baked.iter()) {
             let fade = (hole.lifetime / hole.max_lifetime).clamp(0.0, 1.0);
             if fade <= 0.0 {
+                continue;
+            }
+            // the longest scorch ray reaches 3.1 x size from the centre
+            let reach = Vec3::splat(geo.size * HOLE_REACH);
+            if !frustum.may_see(geo.position - reach, geo.position + reach) {
                 continue;
             }
 
@@ -164,9 +180,6 @@ impl PlayingState {
                 *v = Vertex::new2(pos, uv, color);
             }
 
-            let gl = unsafe { get_internal_gl() };
-            gl.quad_gl.texture(None);
-            gl.quad_gl.draw_mode(DrawMode::Triangles);
             gl.quad_gl.geometry(&verts, &INDICES);
         }
     }

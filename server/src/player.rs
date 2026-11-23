@@ -87,6 +87,8 @@ pub struct Player {
     // smoke break: the id everyone else sees this box under while it's boxed (hiders and decoys)
     // so a hunter can't tell from the packets which box is a human, see smoke_break/alias.rs
     pub smoke_alias: Option<u32>,
+    /// When this player's last relayed `Shoot` went out, see `handlers::shoot`.
+    pub last_shot_at: Option<Instant>,
 }
 
 impl Player {
@@ -124,6 +126,7 @@ impl Player {
             regen_resume_at: None,
             in_box: false,
             smoke_alias: None,
+            last_shot_at: None,
         }
     }
 
@@ -139,5 +142,11 @@ impl Player {
             return true;
         }
         other.team != self.team && other.team != Team::Spectator
+    }
+
+    /// In the maze and still in its post-teleport freeze at `now`: may not
+    /// move or shoot (the damage it would deal is refused too).
+    pub fn spawn_frozen(&self, now: Instant) -> bool {
+        self.world == WorldId::Maze && self.post_teleport_freeze_until.is_some_and(|t| t > now)
     }
 }

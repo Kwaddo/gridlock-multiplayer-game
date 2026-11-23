@@ -38,12 +38,6 @@ pub enum HandsPlaybackMode {
     IdleLoop,
     ReloadOnce,
     Stopped,
-    // Sawnoff-specific states (sawnoff_animated.glb includes hands)
-    SawnoffIdle,
-    SawnoffShot,   // playing shot animation, returns to SawnoffIdle when done
-    SawnoffReload, // playing reload animation, returns to SawnoffIdle when done
-    SawnoffEquip,  // equip animation when switching to sawnoff
-    SawnoffLower,  // lowering animation when switching away from sawnoff
     // Minigun-specific states (minigun_animated.glb includes hands)
     MinigunIdle,
     MinigunShooting, // playing shoot loop
@@ -115,13 +109,15 @@ pub struct PlayingState {
     pub pending_broken_walls: Vec<(u8, u8)>,
     pub pending_respawn: bool,
     pub pending_hits: Vec<(u32, f32, bool, bool)>, // victim_id, damage, backstab attempt?, headshot (any pellet hit the head)
+    /// Where each gun shot fired since the last send ended, for `ClientMsg::Shoot`.
+    pub pending_shots: Vec<Vec3>,
 
     pub weapons: WeaponInventory,
 
     // remember last weapon name sent to server so we only transmit changes.
     pub last_sent_weapon: String,
-    /// When the last position update went out, and the state flags it carried.
-    pub last_position_sent: Option<platform::Instant>,
+    /// Paces position updates; and the state flags the last one carried.
+    pub position_cadence: gridlock_server::cadence::Cadence,
     pub last_state_flags_sent: u8,
 
     // countdown timers (server-synchronized)
@@ -140,7 +136,12 @@ pub struct PlayingState {
     // damage / hit feedback (client-side)
     pub damage_flash_timer: f32, // short red flash when we take damage
     pub last_damage_attacker: Option<String>,
+    /// Where recent hits came from (the red arcs around the crosshair).
+    pub(crate) damage_indicators: Vec<super::rendering::DamageIndicator>,
+    pub(crate) bot_alerts: Vec<super::rendering::BotAlert>, // "?" / "!" over bots that noticed us
     pub stamina_depleted_vignette_alpha: f32,
+    /// Impact puffs, kill/headshot markers, camera punch (purely visual).
+    pub(crate) hit_fx: super::hit_fx::HitFx,
 
     pub target_dummy: TargetDummy,
     pub hit_marker_timer: f32,
@@ -205,9 +206,6 @@ pub struct PlayingState {
     pub knife_miss_slow_timer: f32, // movement slow after missed punch
     pub punch_auto_return: bool, // when true: put knife away when lock expires
 
-    pub sawnoff_shot_requested: bool, // set by input_processing when sawnoff fires
-    pub sawnoff_anim_initialized: bool, // whether fp_hands_sawnoff has been set up
-    pub prev_weapon_was_sawnoff: bool, // track weapon switches to/from sawnoff
     pub minigun_anim_initialized: bool,
     pub prev_weapon_was_minigun: bool,
     pub minigun_was_firing: bool, // tracks whether minigun was firing last frame
@@ -344,9 +342,10 @@ impl PlayingState {
             pending_broken_walls: Vec::new(),
             pending_respawn: false,
             pending_hits: Vec::new(),
+            pending_shots: Vec::new(),
             weapons: WeaponInventory::new(),
             last_sent_weapon: String::new(),
-            last_position_sent: None,
+            position_cadence: gridlock_server::cadence::Cadence::new(gridlock_server::cadence::HZ30),
             last_state_flags_sent: 0,
             target_dummy: TargetDummy::new(vec3(-3.0, 0.0, -3.0)),
             hit_marker_timer: 0.0,
@@ -381,8 +380,11 @@ impl PlayingState {
 
             // damage / hit feedback (client-side)
             damage_flash_timer: 0.0,
+            damage_indicators: Vec::new(),
+            bot_alerts: Vec::new(),
             last_damage_attacker: None,
             stamina_depleted_vignette_alpha: 0.0,
+            hit_fx: Default::default(),
 
             spawn_feedback_message: None,
             spawn_feedback_timer: 0.0,
@@ -403,9 +405,6 @@ impl PlayingState {
             knife_attack_lock_timer: 0.0,
             knife_miss_slow_timer: 0.0,
             punch_auto_return: false,
-            sawnoff_shot_requested: false,
-            sawnoff_anim_initialized: false,
-            prev_weapon_was_sawnoff: false,
             minigun_anim_initialized: false,
             prev_weapon_was_minigun: false,
             minigun_was_firing: false,

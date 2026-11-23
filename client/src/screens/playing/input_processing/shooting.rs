@@ -2,6 +2,7 @@ use crate::types::maze::Maze;
 use crate::types::world::WorldId;
 use crate::weapons::combat::{damage_falloff, CombatEntity, EntityKind, HitZone};
 use crate::weapons::effects::DamageNumber;
+use super::super::hit_fx::ImpactKind;
 use crate::weapons::recoil::apply_shot_recoil;
 
 use macroquad::prelude::*;
@@ -12,6 +13,32 @@ use super::PlayingState;
 use crate::weapons::stats::melee::{
     KNIFE_MISS_MOVE_SLOW_DURATION, KNIFE_MISS_PENALTY_SECS, PUNCH_DAMAGE,
 };
+
+#[cfg(test)]
+mod tests;
+
+/// `entity`'s hit on this pellet, unless a surface at `blocking` is nearer.
+fn unblocked_hit(
+    entity: &impl CombatEntity,
+    eye: Vec3,
+    fwd: Vec3,
+    range: f32,
+    blocking: Option<f32>,
+) -> Option<(HitZone, f32)> {
+    // A hit behind the blocking surface is thrown away, so the hitboxes only
+    // need testing up to it. A box's hit distance does not depend on the
+    // range, only whether it counts, so the hits that remain are unchanged.
+    let reach = blocking.map_or(range, |d| d.min(range));
+    let (zone, dist) = entity.ray_test(eye, fwd, reach)?;
+    let blocked = blocking.map_or(false, |d| d < dist);
+    (!blocked).then_some((zone, dist))
+}
+
+/// Whether a shot passes through a player on `their_team` without hitting
+/// them: a teammate in a team-mode match (the lobby keeps its own rules).
+fn skips_teammate(in_maze: bool, mode: Option<u8>, my_team: u8, their_team: u8) -> bool {
+    in_maze && mode.map_or(false, |m| crate::net::protocols::is_friendly_fire(m, my_team, their_team))
+}
 
 impl PlayingState {
     /// One shot of the active weapon that just fired: recoil, then each
@@ -91,6 +118,11 @@ impl PlayingState {
         // one impact sound per shot, not one per shotgun pellet
         let mut impact_at: Option<Vec3> = None;
 
+        // no friendly fire in the team modes: teammates aren't hit at all
+        let (in_maze, mode, my_team) =
+            (self.current_world == WorldId::Maze, self.match_mode, self.local_team);
+        let friendly_fire_off = |team: u8| skips_teammate(in_maze, mode, my_team, team);
+
         for i in 0..stats.pellet_count as usize {
             // per-pellet nearest-target (reset for each pellet)
             let mut closest: Option<(EntityKind, usize, HitZone, f32)> = None;
@@ -128,49 +160,11 @@ impl PlayingState {
             let box_hit = super::super::cardboard::ray_test_boxes(&box_targets, eye, fwd, mirror_dist.unwrap_or(range));
             let world_range = box_hit.map(|(_, d)| d).or(mirror_dist).unwrap_or(range);
             let world_dist = if self.current_world == WorldId::Maze {
-                // gather all candidate hits
-                let wall_hit = maze
-                    .as_ref()
-                    .and_then(|m| m.ray_test_walls_with_normal(eye, fwd, world_range));
-                let prop_hit = maze
-                    .as_ref()
-                    .and_then(|m| m.ray_test_props_with_normal(eye, fwd, world_range));
-                let fc_hit = maze.as_ref().and_then(|m| {
-                    m.ray_test_floor_ceiling_with_normal(eye, fwd, world_range)
+                // the closest of walls, props, floor/ceiling and lights, as
+                // (distance, normal, Option<wall_cell>, Option<light_cell>)
+                let nearest = maze.as_ref().and_then(|m| {
+                    m.ray_test_surfaces(eye, fwd, world_range, &self.destroyed_lights)
                 });
-                let light_hit = maze.as_ref().and_then(|m| {
-                    m.ray_test_ceiling_lights_with_normal(
-                        eye,
-                        fwd,
-                        world_range,
-                        &self.destroyed_lights,
-                    )
-                });
-
-                // collect all hits as (distance, normal, Option<wall_cell>, is_light_cell)
-                let candidates: [Option<(
-                    f32,
-                    Vec3,
-                    Option<(u8, u8)>,
-                    Option<(u8, u8)>,
-                )>; 4] = [
-                    wall_hit.map(|((wx, wy), d, n)| (d, n, Some((wx, wy)), None)),
-                    prop_hit.map(|(d, n)| (d, n, None, None)),
-                    fc_hit.map(|(d, n)| (d, n, None, None)),
-                    light_hit.map(|((lx, ly), d, n)| (d, n, None, Some((lx, ly)))),
-                ];
-
-                // pick the closest; on equal distance the earlier candidate
-                // wins, as the stable sort this replaces did
-                let nearest = candidates.into_iter().flatten().fold(
-                    None,
-                    |best: Option<(f32, Vec3, Option<(u8, u8)>, Option<(u8, u8)>)>, c| {
-                        match best {
-                            Some(b) if !(c.0 < b.0) => Some(b),
-                            _ => Some(c),
-                        }
-                    },
-                );
 
                 if let Some((dist, norm, wall_cell, light_cell)) = nearest {
                     // if closest hit is a wall, damage it
@@ -275,6 +269,7 @@ impl PlayingState {
                         color: stats.bullet_hole_color,
                         wall_cell: hit_wall_cell,
                     });
+                    self.hit_fx.impact(hit_point, normal, ImpactKind::Surface);
                     // cap total bullet holes to avoid memory bloat
                     if self.bullet_holes.len() > 200 {
                         self.bullet_holes.pop_front();
@@ -283,28 +278,30 @@ impl PlayingState {
             }
 
             // check target dummy first
-            if let Some((zone, dist)) = self.target_dummy.ray_test(eye, fwd, range) {
-                let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                if !blocked {
-                    let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
-                    if is_closer {
-                        closest = Some((EntityKind::Dummy, 0, zone, dist));
-                    }
+            if let Some((zone, dist)) =
+                unblocked_hit(&self.target_dummy, eye, fwd, range, closest_blocking_dist)
+            {
+                let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                if is_closer {
+                    closest = Some((EntityKind::Dummy, 0, zone, dist));
                 }
             }
 
-            // check other players (client-side prediction / hit registration)
+            // check other players (client-side prediction / hit registration);
+            // teammates are skipped, so the bullet carries on past them
             for (idx, other) in self.other_players.iter().enumerate() {
-                if !other.is_alive() || box_targets_carrier(&self.cardboard.boxes, other.id) {
+                if !other.is_alive()
+                    || friendly_fire_off(other.team)
+                    || box_targets_carrier(&self.cardboard.boxes, other.id)
+                {
                     continue;
                 }
-                if let Some((zone, dist)) = other.ray_test(eye, fwd, range) {
-                    let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                    if !blocked {
-                        let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
-                        if is_closer {
-                            closest = Some((EntityKind::Player, idx, zone, dist));
-                        }
+                if let Some((zone, dist)) =
+                    unblocked_hit(other, eye, fwd, range, closest_blocking_dist)
+                {
+                    let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                    if is_closer {
+                        closest = Some((EntityKind::Player, idx, zone, dist));
                     }
                 }
             }
@@ -314,13 +311,12 @@ impl PlayingState {
                 if !bot.is_alive() {
                     continue;
                 }
-                if let Some((zone, dist)) = bot.ray_test(eye, fwd, range) {
-                    let blocked = closest_blocking_dist.map_or(false, |d| d < dist);
-                    if !blocked {
-                        let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
-                        if is_closer {
-                            closest = Some((EntityKind::Bot, idx, zone, dist));
-                        }
+                if let Some((zone, dist)) =
+                    unblocked_hit(bot, eye, fwd, range, closest_blocking_dist)
+                {
+                    let is_closer = closest.map_or(true, |(_, _, _, d)| dist < d);
+                    if is_closer {
+                        closest = Some((EntityKind::Bot, idx, zone, dist));
                     }
                 }
             }
@@ -350,11 +346,11 @@ impl PlayingState {
                             };
                             player_hits[slot].1 += dmg;
                             let victim_pos = Vec3::new(
-                                self.other_players[idx].x,
-                                self.other_players[idx].y,
-                                self.other_players[idx].z,
+                                self.other_players[idx].net.x,
+                                self.other_players[idx].net.y,
+                                self.other_players[idx].net.z,
                             );
-                            let victim_yaw = self.other_players[idx].yaw;
+                            let victim_yaw = self.other_players[idx].net.yaw;
                             let atk_dir = (self.position - victim_pos).normalize_or_zero();
                             let fwd = Vec3::new(victim_yaw.cos(), 0.0, victim_yaw.sin());
                             let is_backstab = atk_dir.dot(fwd) < -0.5;
@@ -364,10 +360,14 @@ impl PlayingState {
                     }
                     EntityKind::Bot => {
                         self.practice_bots[idx].take_damage(dealt_dmg);
+                        if !self.practice_bots[idx].is_alive() {
+                            self.hit_fx.on_kill(zone == HitZone::Head);
+                        }
                     }
                     _ => {}
                 }
 
+                self.hit_fx.impact(eye + fwd * dist, -fwd, ImpactKind::Body);
                 total_dmg += dealt_dmg;
                 if zone == HitZone::Head {
                     any_headshot = true;
@@ -389,6 +389,10 @@ impl PlayingState {
             });
         }
 
+        // dev hit timing: this shot starts the shot -> report -> kill clock
+        if !player_hits.is_empty() {
+            self.dev_mode.hit_timing.shot(get_time());
+        }
         // Send hit reports in all worlds; server enforces lobby combat rules.
         for (victim_id, damage, is_backstab, is_headshot) in player_hits {
             if damage > 0.0 {

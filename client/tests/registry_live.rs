@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use client::net::registry::{registry_url, Announce, Endpoint, ListFetch, Listing};
+use client::net::registry::{registry_url, Announce, Endpoint, ListFetch, Listed, Listing};
 
-fn listed_names(url: &str) -> Vec<String> {
+fn listed(url: &str) -> Vec<Listed> {
     let mut fetch = ListFetch::start(url);
     let listed = loop {
         if let Some(result) = fetch.poll() {
@@ -20,7 +20,11 @@ fn listed_names(url: &str) -> Vec<String> {
         }
         thread::sleep(Duration::from_millis(20));
     };
-    listed.into_iter().map(|l| l.name).collect()
+    listed
+}
+
+fn listed_names(url: &str) -> Vec<String> {
+    listed(url).into_iter().map(|l| l.name).collect()
 }
 
 #[test]
@@ -40,7 +44,8 @@ fn listing_appears_waits_for_its_port_and_withdraws() {
             endpoint: Endpoint::Udp(Box::new(move || {
                 ready.load(std::sync::atomic::Ordering::Relaxed).then_some(7878)
             })),
-            players: Arc::new(AtomicUsize::new(1)),
+            players: Arc::new(AtomicUsize::new(4)),
+            bots: Arc::new(AtomicUsize::new(3)),
         },
     );
 
@@ -49,7 +54,9 @@ fn listing_appears_waits_for_its_port_and_withdraws() {
 
     port_ready.store(true, std::sync::atomic::Ordering::Relaxed);
     thread::sleep(Duration::from_secs(1));
-    assert!(listed_names(&url).contains(&name));
+    let ours = listed(&url).into_iter().find(|l| l.name == name).expect("listed once the port is known");
+    // (a registry from before the bot count lists no bots: this fails against one)
+    assert_eq!((ours.players, ours.bots), (4, 3));
     let addr = listing.listed_addr().expect("registry echoes the address it saw");
     assert!(addr.ends_with(":7878"), "{addr}");
 

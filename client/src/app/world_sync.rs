@@ -13,7 +13,7 @@ mod merge;
 mod players;
 mod world_change;
 
-use combat::{apply_damage, apply_death, apply_kill_feed, spawn_bot_shots};
+use combat::{apply_damage, apply_death, apply_kill_feed, spawn_shots};
 use gun_game::apply_gun_level;
 use merge::{apply_player_info, merge_players};
 use players::{apply_player_list, apply_team_colors};
@@ -25,7 +25,7 @@ pub struct SyncResult {
     pub returned_to_lobby: bool, // true when a world-change back to Lobby was applied this poll
 }
 
-#[inline(always)]
+// not #[inline(always)]: it is called from 8 places and is large
 pub fn sync_world(
     link: Option<&mut dyn Link>,
     player_id: u32,
@@ -144,8 +144,11 @@ pub fn sync_world(
         if let Some((damage, attacker_id, is_stun)) = updates.damage_taken {
             apply_damage(playing_state, damage, attacker_id, is_stun);
         }
-        if let Some(bot_shots) = updates.bot_shots {
-            spawn_bot_shots(playing_state, bot_shots);
+        if let Some(shots) = updates.shots {
+            spawn_shots(playing_state, shots, player_id);
+        }
+        for (bot_id, level) in updates.bot_alerts {
+            playing_state.note_bot_alert(bot_id, level);
         }
         if let Some(kills) = updates.kill_feed {
             apply_kill_feed(playing_state, kills, player_id, username);
@@ -264,7 +267,11 @@ pub fn sync_world(
         // MSG_PLAYER_LIST arrives. MSG_STATE creates/updates OtherPlayer
         // objects with default colors, so without this they would lose
         // their team tint until the next (infrequent) player list packet.
-        apply_team_colors(playing_state);
+        // Colours depend only on ids, teams and the match mode, all of which
+        // arrive from the server, so a poll that received nothing skips it.
+        if updates.received_any {
+            apply_team_colors(playing_state);
+        }
     }
 
     result

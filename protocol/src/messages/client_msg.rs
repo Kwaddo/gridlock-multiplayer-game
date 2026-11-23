@@ -19,6 +19,10 @@ pub enum ClientMsg {
     /// `headshot` trails `backstab` and is only written when it is, so the server can tell everyone how they died
     /// before this the server never knew a kill was a headshot
     Hit { victim_id: u32, damage: f32, weapon: Option<String>, backstab: Option<bool>, headshot: Option<bool> },
+    /// One trigger pull of a gun (not the knife or punch): `end` is where the
+    /// shooter's tracer ended (a shotgun's pellets averaged). The server starts
+    /// the shot at the shooter's own position and relays it to the others.
+    Shoot { end: Vec3 },
     RespawnRequest,
     StartGame {
         mode: Option<u8>,
@@ -124,6 +128,7 @@ impl ClientMsg {
                 }
                 w.finish()
             }
+            ClientMsg::Shoot { end } => Writer::new(MSG_SHOOT).vec3(*end).finish(),
             ClientMsg::RespawnRequest => vec![MSG_RESPAWN_REQUEST],
             ClientMsg::StartGame { mode, duration, autofill, blue_bots } => {
                 let mut w = Writer::new(MSG_START_GAME);
@@ -190,6 +195,7 @@ impl ClientMsg {
                 backstab: r.bool(),
                 headshot: r.bool(),
             },
+            MSG_SHOOT => ClientMsg::Shoot { end: r.vec3()? },
             MSG_RESPAWN_REQUEST => ClientMsg::RespawnRequest,
             MSG_START_GAME => {
                 let mode = r.u8();

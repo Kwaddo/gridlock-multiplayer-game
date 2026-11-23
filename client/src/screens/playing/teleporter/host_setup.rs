@@ -50,7 +50,11 @@ impl PlayingState {
         let tab_w = tab_total_w / modes.len() as f32;
         let tab_start_x = panel_x + 24.0;
 
-        for (i, (label, val)) in modes.iter().enumerate() {
+        // tab shapes first and labels after, so the labels share one text
+        // batch; the colours are kept from the first pass so a click this
+        // frame looks the same as before
+        let mut label_colors = [WHITE; 3];
+        for (i, (_, val)) in modes.iter().enumerate() {
             let tx = tab_start_x + i as f32 * tab_w;
             let selected = self.pending_start_gamemode == *val;
             let hovered = mouse.0 >= tx
@@ -72,15 +76,13 @@ impl PlayingState {
                 draw_rectangle(tx, tab_y + tab_h - 2.0, tab_w, 2.0, ACCENT);
             }
 
-            let lw = measure_game_text(label, 15);
-            let lc = if selected {
+            label_colors[i] = if selected {
                 WHITE
             } else if hovered {
                 TEXT_LABEL
             } else {
                 Color::new(0.42, 0.44, 0.56, 1.0)
             };
-            draw_text_ex(label, tx + (tab_w - lw) / 2.0, tab_y + 28.0, text_params(15, lc));
 
             if hovered && clicked {
                 self.pending_start_gamemode = *val;
@@ -97,6 +99,11 @@ impl PlayingState {
         }
 
         draw_rectangle(tab_start_x, tab_y + tab_h, tab_total_w, 1.0, SEP);
+        for (i, (label, _)) in modes.iter().enumerate() {
+            let tx = tab_start_x + i as f32 * tab_w;
+            let lw = measure_game_text(label, 15);
+            draw_text_ex(label, tx + (tab_w - lw) / 2.0, tab_y + 28.0, text_params(15, label_colors[i]));
+        }
 
         // ── mode description ──────────────────────────────────────────────────
         let desc_y = tab_y + tab_h + 14.0;
@@ -158,7 +165,9 @@ impl PlayingState {
             ];
             let btn_w = section_w / durations.len() as f32;
 
-            for (i, (label, secs)) in durations.iter().enumerate() {
+            // shapes first, labels after (colours kept from the first pass)
+            let mut label_colors = [WHITE; 4];
+            for (i, (_, secs)) in durations.iter().enumerate() {
                 let bx = section_x + i as f32 * btn_w;
                 let selected = config.match_time_override_secs == Some(*secs);
                 let hovered = mouse.0 >= bx
@@ -178,20 +187,13 @@ impl PlayingState {
                     draw_rectangle(bx, btn_y + btn_h - 2.0, btn_w, 2.0, ACCENT);
                 }
 
-                let lc = if selected {
+                label_colors[i] = if selected {
                     WHITE
                 } else if hovered {
                     TEXT_LABEL
                 } else {
                     Color::new(0.42, 0.44, 0.56, 1.0)
                 };
-                let lw = measure_game_text(label, 15);
-                draw_text_ex(
-                    label,
-                    bx + (btn_w - lw) / 2.0,
-                    btn_y + 26.0,
-                    text_params(15, lc),
-                );
 
                 if hovered && clicked {
                     config.match_time_override_secs = Some(*secs);
@@ -200,6 +202,16 @@ impl PlayingState {
             }
 
             draw_rectangle(section_x, btn_y + btn_h, section_w, 1.0, SEP);
+            for (i, (label, _)) in durations.iter().enumerate() {
+                let bx = section_x + i as f32 * btn_w;
+                let lw = measure_game_text(label, 15);
+                draw_text_ex(
+                    label,
+                    bx + (btn_w - lw) / 2.0,
+                    btn_y + 26.0,
+                    text_params(15, label_colors[i]),
+                );
+            }
         }
 
         // ── rounds (Smoke Break) ──────────────────────────────────────────────

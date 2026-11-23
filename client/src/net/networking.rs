@@ -3,8 +3,8 @@ use transport::Link;
 
 use crate::net::player_sync::{take_info, take_state, PlayerInfoCache, SelfState, StateSnapshot};
 use crate::net::protocols::{
-    CardboardBox, ClientMsg, LobbySettings, ServerMsg, SmokeRound, SmokeScore, LEAVE_TIMED_OUT, START_DENIED_ENDING, START_DENIED_NOT_HOST,
-    START_DENIED_STARTING, START_DENIED_TOO_FEW,
+    CardboardBox, ClientMsg, LobbySettings, ServerMsg, SmokeRound, SmokeScore, SndRound, LEAVE_TIMED_OUT,
+    START_DENIED_ENDING, START_DENIED_NOT_HOST, START_DENIED_STARTING, START_DENIED_TOO_FEW,
 };
 use crate::types::maze::{CeilingLightInfo, Maze, Prop, PropKind, Room};
 use crate::types::world::WorldId;
@@ -40,7 +40,9 @@ pub struct NetUpdate {
     pub self_max_hp: Option<f32>,
     pub match_mode: Option<u8>,
     pub self_freeze_secs: Option<u8>,
-    pub bot_shots: Option<Vec<(u32, Vec3, Vec3)>>,
+    /// (shooter, start, end) of each shot a bot or another player fired (`MSG_SHOTS`)
+    pub shots: Option<Vec<(u32, Vec3, Vec3)>>,
+    pub bot_alerts: Vec<(u32, u8)>, // (bot id, BOT_ALERT_*): bots that just noticed us
     // every box in one world, the whole list each time
     pub boxes: Option<(WorldId, Vec<CardboardBox>)>, // (shooter, start, end), before this the shooter was dropped
     pub lobby_leader_id: Option<u32>,         // host player ID (0 = none)
@@ -157,7 +159,8 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
         smoke_feed: Vec::new(),
         received_any: false,
         self_freeze_secs: None,
-        bot_shots: None,
+        shots: None,
+        bot_alerts: Vec::new(),
         boxes: None,
         lobby_leader_id: None,
         lobby_settings: None,
@@ -312,12 +315,7 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
                 }
             }
             ServerMsg::SndRoundState(s) => {
-                let bomb_dropped = if s.bomb_carrier_id == 0 && !s.bomb_planted {
-                    Some(s.bomb_pos)
-                } else {
-                    None
-                };
-
+                let bomb_dropped = dropped_bomb(&s);
                 update.snd_round_state = Some(SndRoundState {
                     round: s.round,
                     max_rounds: s.max_rounds,
@@ -348,12 +346,13 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
                 let how = if reason == LEAVE_TIMED_OUT { "timed out" } else { "left the game" };
                 update.chat.push(ChatEvent::Notice(format!("{} {}", name, how)));
             }
-            ServerMsg::BotShots(fired) => {
-                let shots = update.bot_shots.get_or_insert_with(Vec::new);
+            ServerMsg::Shots(fired) => {
+                let shots = update.shots.get_or_insert_with(Vec::new);
                 shots.extend(fired.iter().map(|s| {
                     (s.shooter_id, vec3(s.start.0, s.start.1, s.start.2), vec3(s.end.0, s.end.1, s.end.2))
                 }));
             }
+            ServerMsg::BotAlert { bot_id, level } => update.bot_alerts.push((bot_id, level)),
             ServerMsg::Boxes { world, boxes } => {
                 update.boxes = Some((WorldId::from_u8(world).unwrap_or(WorldId::Lobby), boxes));
             }
@@ -387,4 +386,43 @@ pub fn poll_updates(link: &mut dyn Link, player_id: u32, info: &mut PlayerInfoCa
     }
 
     update
+}
+
+/// Where the bomb lies on the floor, only when the server says it was
+/// dropped. No carrier alone does not mean dropped: a round without a human
+/// attacker has no bomb at all, and that used to show one at the origin.
+fn dropped_bomb(s: &SndRound) -> Option<(f32, f32, f32)> {
+    (s.bomb_dropped && s.bomb_carrier_id == 0 && !s.bomb_planted).then_some(s.bomb_pos)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round(bomb_carrier_id: u32, bomb_dropped: bool) -> SndRound {
+        SndRound {
+            round: 1,
+            max_rounds: 7,
+            red_wins: 0,
+            blue_wins: 0,
+            phase: 1,
+            attacking_team: 1,
+            bomb_carrier_id,
+            bomb_pos: (4.0, 0.0, 6.0),
+            bomb_site: (10.0, 0.0, 10.0),
+            bomb_planted: false,
+            plant_progress: 0.0,
+            defuse_progress: 0.0,
+            phase_timer: 60.0,
+            bomb_dropped,
+        }
+    }
+
+    #[test]
+    fn only_a_bomb_the_server_dropped_is_shown() {
+        assert_eq!(dropped_bomb(&round(0, true)), Some((4.0, 0.0, 6.0)));
+        // nobody carries it and it was not dropped: no bomb this round
+        assert_eq!(dropped_bomb(&round(0, false)), None);
+        assert_eq!(dropped_bomb(&round(3, false)), None);
+    }
 }

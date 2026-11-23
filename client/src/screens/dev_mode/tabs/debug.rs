@@ -1,9 +1,9 @@
-use crate::ui::fonts::text_params;
 use crate::weapons::crosshair::CrosshairConfig;
 use crate::weapons::state::WeaponInventory;
 use macroquad::prelude::*;
 
 use super::super::state::DevModeState;
+use super::super::text_queue::{queue_fmt, queue_text};
 use super::super::widgets::{draw_action_button, draw_section_header, draw_toggle};
 
 pub(in crate::screens::dev_mode) fn draw_debug_tab(
@@ -42,6 +42,22 @@ pub(in crate::screens::dev_mode) fn draw_debug_tab(
         clicked,
     );
 
+    // shot -> hit report -> kill, to tell slow feedback from slow network
+    y += draw_toggle("Log Hit Timing", &mut dev.log_hit_timing, x, y, mouse, clicked);
+    let t = dev.hit_timing;
+    queue_fmt(
+        format_args!(
+            "Last hit: marker 0 ms, report {} ms, kill {} ms",
+            t.sent_ms.map_or(-1.0, |v| v.round()),
+            t.kill_ms.map_or(-1.0, |v| v.round()),
+        ),
+        x,
+        y + 14.0,
+        14,
+        Color::from_rgba(180, 230, 180, 255),
+    );
+    y += 24.0;
+
     y += draw_section_header("Actions", x, y);
 
     let (h, pressed) = draw_action_button("Refill Ammo", x, y, 160.0, mouse, clicked);
@@ -63,7 +79,7 @@ pub(in crate::screens::dev_mode) fn draw_debug_tab(
     // skin test: put every animation on the next loaded character, check it in the mirror
     y += 20.0;
     y += draw_section_header("Character (skin test)", x, y);
-    draw_text_ex(&dev.character_label, x, y + 14.0, text_params(14, Color::from_rgba(180, 230, 180, 255)));
+    queue_text(&dev.character_label, x, y + 14.0, 14, Color::from_rgba(180, 230, 180, 255));
     y += 22.0;
     let (h, next) = draw_action_button("Next Character", x, y, 170.0, mouse, clicked);
     y += h;
@@ -101,18 +117,14 @@ pub(in crate::screens::dev_mode) fn draw_debug_tab(
 
     if let (Some(start), Some(end)) = (dev.ruler_start, dev.ruler_end) {
         let dist = (end - start).length();
-        draw_text_ex(
-            &format!("Distance: {:.2}", dist),
+        queue_fmt(
+            format_args!("Distance: {:.2}", dist),
             x,
             y + 14.0,
-            text_params(14, Color::from_rgba(180, 230, 180, 255)),
+            14,
+            Color::from_rgba(180, 230, 180, 255),
         );
     } else {
-        draw_text_ex(
-            "Set both points to measure distance",
-            x,
-            y + 14.0,
-            text_params(14, GRAY),
-        );
+        queue_text("Set both points to measure distance", x, y + 14.0, 14, GRAY);
     }
 }

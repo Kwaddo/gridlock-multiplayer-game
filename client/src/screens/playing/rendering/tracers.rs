@@ -6,6 +6,13 @@ use super::super::PlayingState;
 
 impl PlayingState {
     pub(crate) fn draw_tracers(&self, camera_pos: Vec3) {
+        if self.tracers.is_empty() {
+            return;
+        }
+        // every tracer is untextured triangles, so set the batcher state once
+        let gl = unsafe { get_internal_gl() };
+        gl.quad_gl.texture(None);
+        gl.quad_gl.draw_mode(DrawMode::Triangles);
         for t in &self.tracers {
             let dir = t.end - t.start;
             let dist = dir.length();
@@ -66,9 +73,6 @@ impl PlayingState {
                     Vertex::new2(tail + axis * half_w, uv, color),
                     Vertex::new2(head, uv, head_color),
                 ];
-                let gl = unsafe { get_internal_gl() };
-                gl.quad_gl.texture(None);
-                gl.quad_gl.draw_mode(DrawMode::Triangles);
                 gl.quad_gl.geometry(&vertices, &indices);
 
                 let glow_vertices = [
@@ -76,9 +80,6 @@ impl PlayingState {
                     Vertex::new2(tail + axis * glow_w, uv, glow_color),
                     Vertex::new2(head, uv, Color::from_rgba(r, g, b, 0)),
                 ];
-                let gl = unsafe { get_internal_gl() };
-                gl.quad_gl.texture(None);
-                gl.quad_gl.draw_mode(DrawMode::Triangles);
                 gl.quad_gl.geometry(&glow_vertices, &indices);
             }
         }
@@ -97,9 +98,12 @@ impl PlayingState {
 pub(crate) fn draw_muzzle_flash(position: Vec3, t: f32) {
     let alpha = (220.0 * t) as u8;
     let radius = 0.15 * (0.4 + 0.6 * t);
+    // a 15-30 cm flash that lasts 0.07 s: a coarse sphere looks the same as
+    // macroquad's default 16x16 at a sixth of the geometry
+    let coarse = DrawSphereParams { rings: 6, slices: 10, ..Default::default() };
     // bright orange-yellow flash sphere
-    draw_sphere(position, radius, None, Color::from_rgba(255, 200, 80, alpha));
+    draw_sphere_ex(position, radius, None, Color::from_rgba(255, 200, 80, alpha), coarse.clone());
     // outer glow
     let glow_alpha = (100.0 * t) as u8;
-    draw_sphere(position, radius * 2.0, None, Color::from_rgba(255, 150, 50, glow_alpha));
+    draw_sphere_ex(position, radius * 2.0, None, Color::from_rgba(255, 150, 50, glow_alpha), coarse);
 }

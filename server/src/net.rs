@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fmt;
+use std::sync::Arc;
 
 /// Transport-agnostic peer handle. The host (UDP binary or WebRTC tab) maps
 /// its real connections to these ids; bots use ids from `BOT_PEER_BASE` up.
@@ -21,23 +22,59 @@ impl fmt::Display for PeerId {
     }
 }
 
+/// Bytes of one queued packet. A broadcast queues the same allocation for
+/// every recipient instead of a copy each (`Arc`: the server runs on its own
+/// thread when a native client hosts).
+pub type Packet = Arc<[u8]>;
+
 /// Queue of outgoing packets. Mirrors `UdpSocket::send_to` so game code keeps
 /// its shape; the host drains it after each packet/tick and does the real send.
 #[derive(Default)]
 pub struct Outbox {
-    queue: RefCell<Vec<(PeerId, Vec<u8>)>>,
+    queue: RefCell<Vec<(PeerId, Packet)>>,
+    /// Scores changed since the last player list went out: one is owed,
+    /// at a limited rate (`Server::flush_player_list`).
+    player_list_stale: Cell<bool>,
 }
 
 impl Outbox {
     pub fn send_to(&self, buf: &[u8], to: impl Borrow<PeerId>) -> std::io::Result<usize> {
         let to = *to.borrow();
         if !to.is_bot() {
-            self.queue.borrow_mut().push((to, buf.to_vec()));
+            self.queue.borrow_mut().push((to, Packet::from(buf)));
         }
         Ok(buf.len())
     }
 
-    pub fn drain(&self) -> Vec<(PeerId, Vec<u8>)> {
+    /// [`send_to`](Self::send_to) for a packet going to several peers: queues
+    /// `packet` itself rather than a copy of its bytes.
+    pub fn send_shared(&self, packet: &Packet, to: impl Borrow<PeerId>) {
+        let to = *to.borrow();
+        if !to.is_bot() {
+            self.queue.borrow_mut().push((to, Packet::clone(packet)));
+        }
+    }
+
+    /// Whether a player list is owed (see [`set_player_list_stale`](Self::set_player_list_stale)).
+    pub fn player_list_stale(&self) -> bool {
+        self.player_list_stale.get()
+    }
+
+    /// Mark a player list as owed, or as just sent. It rides on the outbox
+    /// because the code that changes scores (a kill, deep in the hit and bot
+    /// paths) only has the outbox to hand.
+    pub fn set_player_list_stale(&self, stale: bool) {
+        self.player_list_stale.set(stale);
+    }
+
+    pub fn drain(&self) -> Vec<(PeerId, Packet)> {
         std::mem::take(&mut *self.queue.borrow_mut())
+    }
+
+    /// Move the queued packets onto the end of `out`. Unlike [`drain`](Self::drain)
+    /// the queue keeps its capacity, so a host that reuses `out` stops
+    /// regrowing both every tick.
+    pub fn drain_into(&self, out: &mut Vec<(PeerId, Packet)>) {
+        out.append(&mut self.queue.borrow_mut());
     }
 }

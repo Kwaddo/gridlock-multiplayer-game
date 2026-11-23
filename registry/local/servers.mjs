@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 
 import { MAX_LISTINGS, MAX_PER_IP, PEER_ID, ROOM_CODE, TTL_SECONDS } from "./config.mjs";
-import { cleanName, clientIp, empty, int, json, log, parseJson, sha256Hex } from "./helpers.mjs";
+import { cleanName, clientIp, empty, int, json, log, occupancy, parseJson, sha256Hex } from "./helpers.mjs";
 import { listings, prune } from "./state.mjs";
 
 // ---------------------------------------------------------------- host list
@@ -28,12 +28,13 @@ function createListing(req, body) {
   const name = cleanName(data?.name);
   const maxPlayers = int(data?.max_players, 1, 255);
   const players = int(data?.players, 0, 255);
+  const bots = int(data?.bots, 0, 255);
   const port = int(data?.port, 1, 65535);
   const room = typeof data?.room === "string" && ROOM_CODE.test(data.room) ? data.room : null;
   if (!ip || !name || maxPlayers === null || players === null || (port === null) === (room === null)) {
     return json({ error: "invalid listing" }, 400);
   }
-  const entry = { name, players: Math.min(players, maxPlayers), max_players: maxPlayers };
+  const entry = { name, ...occupancy(players, bots, maxPlayers), max_players: maxPlayers };
   if (room) entry.room = room;
   else entry.addr = ip.includes(":") ? `[${ip}]:${port}` : `${ip}:${port}`;
 
@@ -56,8 +57,13 @@ function createListing(req, body) {
 function heartbeat(req, body, id) {
   const listing = authorized(req, id);
   if (!listing) return json({ error: "unknown listing" }, 404);
-  const players = int(parseJson(body)?.players, 0, 255);
-  if (players !== null) listing.entry.players = Math.min(players, listing.entry.max_players);
+  const data = parseJson(body);
+  const players = int(data?.players, 0, 255);
+  const bots = int(data?.bots, 0, 255);
+  if (players !== null) {
+    delete listing.entry.bots;
+    Object.assign(listing.entry, occupancy(players, bots, listing.entry.max_players));
+  }
   listing.expires = Date.now() + TTL_SECONDS * 1000;
   return empty();
 }

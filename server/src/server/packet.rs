@@ -109,24 +109,36 @@ impl Server {
             ClientMsg::Discover => handlers::handle_discover(&self.outbox, &self.players, &self.name, src_addr),
             // nobody gets hurt in smoke break, finds are box shots
             ClientMsg::Hit { .. } if self.smoke_on() => {}
-            ClientMsg::Hit { victim_id, damage, weapon, backstab, headshot } => handlers::handle_hit(
-                &self.outbox,
-                &mut self.players,
-                src_addr,
-                victim_id,
-                damage,
-                weapon,
-                backstab,
-                headshot,
-                &mut self.maze,
-                &mut self.match_running,
-                &mut self.match_start_time,
-                &mut self.match_end_pending,
-                self.match_mode,
-                &mut self.snd_state,
-                self.bot_manager.bot_states_mut(),
-                &mut self.team_score,
-            ),
+            ClientMsg::Hit { victim_id, damage, weapon, backstab, headshot } => {
+                // a shot was fired: match bots nearby hear it (suppressed ones barely), as the
+                // weapon the server knows they hold, not the name in the Hit
+                self.bot_manager.hear_shot(&self.players, src_addr);
+                handlers::handle_hit(
+                    &self.outbox,
+                    &mut self.players,
+                    src_addr,
+                    victim_id,
+                    damage,
+                    weapon,
+                    backstab,
+                    headshot,
+                    &mut self.maze,
+                    &mut self.match_running,
+                    &mut self.match_start_time,
+                    &mut self.match_end_pending,
+                    self.match_mode,
+                    &mut self.snd_state,
+                    self.bot_manager.bot_states_mut(),
+                    &mut self.team_score,
+                )
+            }
+            // smoke break: only a hunter who may fire is seen firing in the maze, a hider's shot would give their box away
+            ClientMsg::Shoot { .. } if self.smoke_hides_shot(src_addr) => {}
+            ClientMsg::Shoot { end } => {
+                // a missed shot makes noise too (a hit's Hit is heard as well, for older clients)
+                self.bot_manager.hear_shot(&self.players, src_addr);
+                handlers::handle_shoot(&mut self.shot_queue, &mut self.players, src_addr, end, Instant::now())
+            }
             ClientMsg::RespawnRequest => {
                 handlers::handle_respawn_request(
                     &self.outbox,
@@ -221,6 +233,7 @@ impl Server {
                         regen_resume_at: None,
                         in_box: false,
                         smoke_alias: None,
+                        last_shot_at: None,
 
                     };
 
@@ -275,6 +288,7 @@ impl Server {
                         current_yaw: 0.0,
                         current_pitch: 0.0,
                         tactics: Default::default(),
+                        awareness: Default::default(),
                     };
 
                     self.bot_manager.spawn_bot(&mut self.players, bot_player, bot_state);
@@ -305,6 +319,7 @@ impl Server {
             ClientMsg::BoxEnter { id } => self.handle_box_enter(src_addr, id),
             ClientMsg::BoxExit => self.boxes.exit(&self.players, src_addr),
             ClientMsg::BoxShot { id } => {
+                self.bot_manager.hear_shot(&self.players, src_addr);
                 // refused: their game already broke it, it gets the list back
                 if !self.boxes.shot(&self.players, self.maze.as_ref(), src_addr, id) {
                     self.boxes.resend_to(src_addr);

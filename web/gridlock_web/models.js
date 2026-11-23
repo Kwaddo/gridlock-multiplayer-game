@@ -39,6 +39,8 @@
     // One download per model at a time: the game asking for a model that is
     // being preloaded waits for that download instead of starting another.
     const inflight = new Map(); // path -> Promise<Uint8Array | null>
+    // Models downloaded but still being written to Cache Storage.
+    const storing = new Map(); // path -> Promise
 
     function modelUrl(path) {
         const file = path.slice(MODELS_PREFIX.length).split("/").map(encodeURIComponent).join("/");
@@ -82,6 +84,7 @@
     async function preloadModel(path) {
         if (!inflight.has(path)) {
             const cache = await openModelsCache();
+            await storing.get(path);
             if (cache && (await cache.match(modelUrl(path)))) return;
         }
         await loadModel(path);
@@ -113,6 +116,7 @@
     async function fetchModel(path) {
         const url = modelUrl(path);
         const cache = await openModelsCache();
+        await storing.get(path); // a copy still being written is read back, not downloaded again
         const cached = cache && (await cache.match(url));
         if (cached) {
             const bytes = new Uint8Array(await cached.arrayBuffer());
@@ -121,30 +125,48 @@
         }
         const resp = await fetch(url);
         if (!resp.ok) return null;
+        // The cache gets a copy of the response as it streams in; the model
+        // is used without waiting for that write (the next read of it waits).
+        if (cache) {
+            const stored = cache
+                .put(url, resp.clone())
+                .catch(() => {}) // quota full: still use this copy
+                .finally(() => storing.get(path) === stored && storing.delete(path));
+            storing.set(path, stored);
+        }
         const progress = { received: 0, total: Number(resp.headers.get("Content-Length")) || 0 };
         downloads.set(path, progress);
-        // Read in chunks so the loading screen can show how far along it is.
+        // Read in chunks so the loading screen can show how far along it is,
+        // straight into one buffer when the size is known. (Content-Length is
+        // the compressed size of a compressed response, which a page on
+        // another origin can not tell: then the chunks are put together.)
+        let buffer = progress.total > 0 ? new Uint8Array(progress.total) : null;
         const chunks = [];
         const reader = resp.body.getReader();
         for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
-            chunks.push(value);
+            if (buffer && progress.received + value.length <= buffer.length) {
+                buffer.set(value, progress.received);
+            } else {
+                if (buffer) chunks.push(buffer.subarray(0, progress.received));
+                buffer = null;
+                chunks.push(value);
+            }
             progress.received += value.length;
         }
-        const bytes = new Uint8Array(progress.received);
-        let at = 0;
-        for (const c of chunks) {
-            bytes.set(c, at);
-            at += c.length;
+        let bytes;
+        if (buffer) {
+            bytes = progress.received === buffer.length ? buffer : buffer.slice(0, progress.received);
+        } else {
+            bytes = new Uint8Array(progress.received);
+            let at = 0;
+            for (const c of chunks) {
+                bytes.set(c, at);
+                at += c.length;
+            }
         }
         progress.total = bytes.length;
-        if (cache) {
-            const headers = { "Content-Type": resp.headers.get("Content-Type") || "application/octet-stream" };
-            try {
-                await cache.put(url, new Response(bytes, { headers }));
-            } catch {} // quota full: still use this copy
-        }
         return bytes;
     }
 

@@ -23,6 +23,9 @@
     <!-- the G from the title screen -->
     <link rel="icon" type="image/png" href="favicon.png">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <!-- the game itself, downloading while the scripts below load (load() then
+         finds it here); devices without a mouse download none of it (see below) -->
+    <link rel="preload" href="gridlock.wasm" as="fetch" crossorigin media="(any-pointer: fine)">
     <style>
         html, body, canvas {
             margin: 0;
@@ -71,6 +74,9 @@
             margin: 0;
             max-width: 420px;
         }
+        #unsupported a {
+            color: #8cb8ff;
+        }
     </style>
 </head>
 <body>
@@ -81,6 +87,7 @@
         <div class="bar"></div>
         <p>Gridlock is played with a keyboard and mouse.</p>
         <p>Open gridlock.kwaddo.dev on a computer to play.</p>
+        <p><a href="credits.html">Credits</a></p>
     </div>
     <!-- where models are hosted when they are not next to the page (build_web.sh fills these in) -->
     <script>window.GRIDLOCK_MODELS_URL = ""; window.GRIDLOCK_MODELS_VERSION = "";</script>
@@ -97,6 +104,8 @@
     <script src="gridlock_web/preconnect.js"></script>
     <script src="gridlock_web/models.js"></script>
     <script src="gridlock_web/decode.js"></script>
+    <script src="gridlock_web/tickers.js"></script>
+    <script src="gridlock_web/wheel.js"></script>
     <script src="gridlock_web.js"></script>
     <script>
         // The game needs a keyboard and a mouse (or trackpad). Browsers cannot
@@ -104,6 +113,17 @@
         // only a touchscreen (phones, most tablets) get a note instead of the
         // game, and download none of it.
         if (matchMedia("(any-pointer: fine)").matches) {
+            // Models hosted elsewhere: connect there now, before the game asks.
+            try {
+                const models = new URL(window.GRIDLOCK_MODELS_URL || "", location.href).origin;
+                if (window.GRIDLOCK_MODELS_URL && models !== location.origin) {
+                    const link = document.createElement("link");
+                    link.rel = "preconnect";
+                    link.href = models;
+                    link.crossOrigin = "anonymous";
+                    document.head.appendChild(link);
+                }
+            } catch {}
             load("gridlock.wasm");
         } else {
             document.getElementById("glcanvas").remove();

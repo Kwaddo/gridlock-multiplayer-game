@@ -9,7 +9,8 @@ few networks that block direct connections, once a TURN key is set).
 | File | Role |
 |---|---|
 | `index.html` | The page: a full-window canvas and the three scripts below. |
-| `mq_js_bundle.js` | macroquad's loader (vendored from `macroquad-0.4.14/js/`). Update it together with the macroquad version. |
+| `credits.html` | The credits on the site: renders `credits.md`, which `build_web.sh` copies from the repo's `CREDITS.md`. The game's CREDITS screen links here. |
+| `mq_js_bundle.js` | macroquad's loader (vendored from `macroquad-0.4.14/js/`). Update it together with the macroquad version. One local patch: `glFinish:function(){}` (upstream calls `gl.finish()`, which macroquad issues at the end of every frame and which stalls the CPU until the GPU is done). Reapply it after a macroquad bump. |
 | `gridlock_web.js` | Gridlock's plugin for that loader: WebRTC + signalling, fetch, Web Audio, clocks, randomness, localStorage, pointer lock. It registers the plugin; the code is split into modules under `gridlock_web/` (constants, helpers, ICE servers and spares, the WebRTC socket in three parts, connecting ahead, models, image decoding in a worker), which `index.html` loads before it, in order. |
 
 Why a plugin instead of wasm-bindgen: miniquad's loader instantiates the wasm

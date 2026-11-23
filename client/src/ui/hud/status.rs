@@ -6,18 +6,18 @@ use crate::ui::fonts::text_params;
 
 /// A piece of HUD text kept between frames and rebuilt only when what it
 /// shows (`key`) changes, so drawing it needs no allocation.
-pub(super) struct CachedText<K> {
+pub(crate) struct CachedText<K> {
     key: Option<K>,
     text: String,
 }
 
 impl<K: PartialEq> CachedText<K> {
-    pub(super) const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self { key: None, text: String::new() }
     }
 
     /// The text for `key`, built with `build` if the key changed.
-    pub(super) fn get(&mut self, key: K, build: impl FnOnce() -> String) -> &str {
+    pub(crate) fn get(&mut self, key: K, build: impl FnOnce() -> String) -> &str {
         if self.key.as_ref() != Some(&key) {
             self.text = build();
             self.key = Some(key);
@@ -41,36 +41,15 @@ pub(super) fn draw_status_panels(
     config: &crate::core::GameConfig,
     hider: bool,
 ) {
-    // Match timer (top-center) — only display when not hidden by user and
-    // when the server has sent a time.  infinite matches show as “∞”.
-    if !config.hide_match_timer && match_time_left > 0.0 {
-        let secs = match_time_left.ceil() as u32;
-        TIME_TEXT.with_borrow_mut(|cache| {
-            let time_text = cache.get(secs, || {
-                if secs == u16::MAX as u32 {
-                    // sentinel value used by server to indicate “infinite” duration
-                    "∞".to_string()
-                } else {
-                    let mins = secs / 60;
-                    let s = secs % 60;
-                    format!("{:02}:{:02}", mins, s)
-                }
-            });
-            let tw = crate::ui::fonts::measure_game_text(time_text, 20);
-            draw_text_ex(
-                time_text,
-                (screen_width() - tw) / 2.0,
-                32.0,
-                text_params(20, Color::from_rgba(220, 220, 220, 220)),
-            );
-        });
-    }
-
-    // a smoke break hider can't be hurt (one shot finds them) and can't sprint in a box
+    // a smoke break hider can't be hurt (one shot finds them) and can't sprint
+    // in a box: only the match timer shows
     if hider {
+        draw_match_timer(match_time_left, config);
         return;
     }
 
+    // All bars first, then all text: none of the text overlaps a later bar,
+    // so this only saves the draw calls of switching to the font atlas.
     let hp_bar_x = 20.0;
     let hp_bar_y = screen_height() - 120.0;
     let hp_bar_w = 200.0;
@@ -96,16 +75,6 @@ pub(super) fn draw_status_panels(
 
     draw_rectangle_lines(hp_bar_x, hp_bar_y, hp_bar_w, hp_bar_h, 2.0, WHITE);
 
-    HP_TEXT.with_borrow_mut(|cache| {
-        let hp_text = cache.get(hp.to_bits(), || format!("{:.0} HP", hp));
-        draw_text_ex(
-            hp_text,
-            hp_bar_x + 5.0,
-            hp_bar_y + 15.0,
-            text_params(16, WHITE),
-        );
-    });
-
     let bar_width = 200.0;
     let bar_height = 8.0;
     let bar_x = hp_bar_x;
@@ -125,6 +94,18 @@ pub(super) fn draw_status_panels(
     };
     draw_rectangle(bar_x, bar_y, bar_width * fill, bar_height, bar_color);
     draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, GRAY);
+
+    draw_match_timer(match_time_left, config);
+
+    HP_TEXT.with_borrow_mut(|cache| {
+        let hp_text = cache.get(hp.to_bits(), || format!("{:.0} HP", hp));
+        draw_text_ex(
+            hp_text,
+            hp_bar_x + 5.0,
+            hp_bar_y + 15.0,
+            text_params(16, WHITE),
+        );
+    });
 
     let flags = [
         movement_state.is_sliding,
@@ -155,6 +136,34 @@ pub(super) fn draw_status_panels(
                 20.0,
                 screen_height() - 20.0,
                 text_params(16, Color::from_rgba(150, 150, 150, 255)),
+            );
+        });
+    }
+}
+
+/// Match timer (top-center), unless hidden or no time came from the server.
+fn draw_match_timer(match_time_left: f32, config: &crate::core::GameConfig) {
+    // Match timer (top-center) — only display when not hidden by user and
+    // when the server has sent a time.  infinite matches show as “∞”.
+    if !config.hide_match_timer && match_time_left > 0.0 {
+        let secs = match_time_left.ceil() as u32;
+        TIME_TEXT.with_borrow_mut(|cache| {
+            let time_text = cache.get(secs, || {
+                if secs == u16::MAX as u32 {
+                    // sentinel value used by server to indicate “infinite” duration
+                    "∞".to_string()
+                } else {
+                    let mins = secs / 60;
+                    let s = secs % 60;
+                    format!("{:02}:{:02}", mins, s)
+                }
+            });
+            let tw = crate::ui::fonts::measure_game_text(time_text, 20);
+            draw_text_ex(
+                time_text,
+                (screen_width() - tw) / 2.0,
+                32.0,
+                text_params(20, Color::from_rgba(220, 220, 220, 220)),
             );
         });
     }

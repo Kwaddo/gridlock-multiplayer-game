@@ -224,3 +224,53 @@ fn nav_cells_block_props_and_follow_broken_walls() {
     assert_eq!(maze.nav_cells()[wall], 1);
     assert_eq!(maze.nav_cells(), expected(&maze).as_slice());
 }
+
+/// A teammate standing in the line of fire is never picked: the bot looks
+/// past them to the enemy, and with only teammates around has no target.
+#[test]
+fn bots_never_target_teammates() {
+    let mut manager = BotManager::new();
+    let mut players = HashMap::new();
+    // facing +x (yaw 0), no maze: every sight line is clear
+    let addr = manager.spawn_personality_bot(&mut players, BotPersonalityId::Heater, Team::Red, "M4A1", (0.0, 0.5, 0.0));
+    let in_front = |id: u32, team: Team, x: f32| {
+        let mut p = Player::new(id, format!("p{id}"));
+        p.team = team;
+        p.world = WorldId::Maze;
+        p.position = (x, 0.5, 0.0);
+        p
+    };
+    players.insert(PeerId(1), in_front(1, Team::Red, 2.0));
+
+    let state = manager.bot_states_mut().get_mut(&addr).unwrap();
+    assert!(crate::bot::shooting::try_shoot(addr, &players, state, None, DT).is_none());
+    assert_eq!(state.target_id, None, "targeted a teammate");
+
+    players.insert(PeerId(2), in_front(2, Team::Blue, 6.0));
+    let state = manager.bot_states_mut().get_mut(&addr).unwrap();
+    state.awareness.hurt_by(2, (6.0, 0.5, 0.0)); // noticed (bot::awareness)
+    crate::bot::shooting::try_shoot(addr, &players, state, None, DT);
+    assert_eq!(state.target_id, Some(2), "should look past the teammate to the enemy");
+}
+
+// a knife hit and a gunshot in the same tick: the bots hear the gunshot
+#[test]
+fn a_quiet_noise_never_masks_gunfire_in_the_same_tick() {
+    use crate::bot::awareness::tuning::{GUNFIRE_RADIUS, MELEE_NOISE_RADIUS};
+    let mut manager = BotManager::new();
+    let mut players = HashMap::new();
+    let shooter = PeerId(1);
+    let mut p = Player::new(1, "p".into());
+    p.world = WorldId::Maze;
+    p.current_weapon = "Knife".into();
+    players.insert(shooter, p);
+
+    manager.hear_shot(&players, shooter);
+    assert_eq!(manager.noise_radius(shooter), Some(MELEE_NOISE_RADIUS));
+    players.get_mut(&shooter).unwrap().current_weapon = "M4A1".into();
+    manager.hear_shot(&players, shooter);
+    assert_eq!(manager.noise_radius(shooter), Some(GUNFIRE_RADIUS), "the gunshot was masked");
+    players.get_mut(&shooter).unwrap().current_weapon = "Knife".into();
+    manager.hear_shot(&players, shooter);
+    assert_eq!(manager.noise_radius(shooter), Some(GUNFIRE_RADIUS), "a later knife hit quietened it");
+}

@@ -26,18 +26,40 @@ pub(super) fn apply_damage(
     } else {
         "Hit!".to_string()
     };
+    // a burst of hits from one attacker refreshes one line instead of
+    // stacking a copy per hit (a minigun stacked dozens)
+    if let Some(existing) = playing_state.announcements.iter_mut().find(|(text, _)| *text == ann) {
+        existing.1 = existing.1.max(2.0);
+        return;
+    }
     playing_state.announcements.push((ann, 2.0));
 }
 
-/// Spawns tracers and muzzle flashes for shots fired by bots.
-pub(super) fn spawn_bot_shots(
+/// Spawns tracers and muzzle flashes for shots fired by bots and by the
+/// other players (`MSG_SHOTS`), the same for both. Our own shots were drawn
+/// when we fired, so one that comes back (`player_id`) is not drawn again.
+/// Every shot someone else fired goes through the loop below once, so that
+/// is where its gunfire sound belongs too.
+pub(super) fn spawn_shots(
     playing_state: &mut PlayingState,
-    bot_shots: Vec<(u32, Vec3, Vec3)>,
+    shots: Vec<(u32, Vec3, Vec3)>,
+    player_id: u32,
 ) {
-    for (shooter, start, end) in bot_shots {
-        // the bot's body kicks too, before this only the tracer and flash showed
-        if let Some(bot) = playing_state.other_players.iter_mut().find(|p| p.id == shooter) {
-            bot.fired = true;
+    // The server sends every bot shot to every human, wherever they are: a
+    // shot from a bot in another world (the maze, seen from the lobby) would
+    // draw its tracer at that world's coordinates here. (The server now sends
+    // a bot's shots only to its world; this also covers older hosts.) A
+    // shooter we do not know yet still shows, as before.
+    let world = playing_state.current_world;
+    let mut shots = shots;
+    shots.retain(|&(shooter, ..)| {
+        shooter != player_id
+            && playing_state.other_players.iter().find(|p| p.id == shooter).is_none_or(|p| p.world == world)
+    });
+    for (shooter, start, end) in shots {
+        // the shooter's body kicks too (a bot's or a player's), before this only the tracer and flash showed
+        if let Some(body) = playing_state.other_players.iter_mut().find(|p| p.id == shooter) {
+            body.anim.fired = true;
         }
         playing_state
             .tracers
@@ -137,6 +159,17 @@ pub(super) fn apply_kill_feed(
         // kill confirmation effect for local player
         if killer_id == player_id {
             playing_state.kill_confirm_timer = 0.3;
+            playing_state.note_local_kill(headshot);
+            let dev = &mut playing_state.dev_mode;
+            if let Some(ms) = dev.hit_timing.kill(get_time()) {
+                if dev.log_hit_timing {
+                    macroquad::miniquad::info!(
+                        "hit timing: shot -> report {:?} ms, shot -> kill {:.0} ms",
+                        dev.hit_timing.sent_ms.map(|v| v.round()),
+                        ms
+                    );
+                }
+            }
             // TDM: resupply ammo on kill
             if playing_state.match_mode == Some(client::net::protocols::MODE_TEAM_DEATHMATCH) {
                 playing_state.weapons.resupply_active(15);
@@ -169,10 +202,10 @@ pub(super) fn apply_kill_feed(
         if victim_id != player_id {
             if let Some(victim) = playing_state.other_players.iter_mut().find(|p| p.id == victim_id) {
                 // which way they fall, from stance + where the killer was + headshot, before this stance only
-                victim.skin_type = choose_death(
-                    stance(victim.is_prone, victim.is_crouching),
+                victim.anim.skin_type = choose_death(
+                    stance(victim.net.is_prone, victim.net.is_crouching),
                     victim.render_position(),
-                    victim.render_yaw,
+                    victim.smooth.yaw,
                     killer_pos,
                     headshot,
                     victim_id,

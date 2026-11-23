@@ -58,7 +58,7 @@ pub(super) fn prop_groups(m: &Maze) -> Vec<Range<usize>> {
 
 pub(super) fn bake_prop_group(m: &Maze, index: &PropIndex, lighting: &Lighting, group: Range<usize>) -> Vec<MeshData> {
     // Not cullable by distance (only by the frustum).
-    let mut out = MeshBuilder::new(false);
+    let mut out = MeshBuilder::with_capacity(false, group.len() * 300, group.len());
     let lit = |c: Color, p: Vec3| lighting.lit(c, p);
     for prop in &m.props[group] {
         let c = m.cell_to_world(prop.x as i32, prop.y as i32);
@@ -220,12 +220,18 @@ impl MazeMeshes {
     /// Meshes that may show this frame, in the order the old path drew
     /// them: cells, then roof, pipes and fixtures, then props.
     pub fn visible(&self, frustum: &Frustum, dist: &DistanceCull) -> Vec<&StoredMesh> {
-        self.chunks
-            .iter()
-            .flatten()
-            .chain(&self.globals)
-            .chain(self.props.iter().flatten())
-            .filter(|m| visible(m.bounds(), frustum, dist))
-            .collect()
+        let total = self.chunks.iter().map(Vec::len).sum::<usize>()
+            + self.globals.len()
+            + self.props.iter().map(Vec::len).sum::<usize>();
+        let mut out = Vec::with_capacity(total);
+        out.extend(
+            self.chunks
+                .iter()
+                .flatten()
+                .chain(&self.globals)
+                .chain(self.props.iter().flatten())
+                .filter(|m| visible(m.bounds(), frustum, dist)),
+        );
+        out
     }
 }

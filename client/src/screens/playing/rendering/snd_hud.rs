@@ -1,6 +1,30 @@
 use macroquad::prelude::*;
+use std::cell::RefCell;
 
 use super::super::PlayingState;
+use crate::ui::hud::CachedText;
+
+/// The S&D HUD's numeric strings, rebuilt only when their numbers change.
+struct SndTexts {
+    round: CachedText<(u8, u8)>,
+    red: CachedText<u8>,
+    blue: CachedText<u8>,
+    timer: CachedText<u32>,
+    /// metres to the dropped bomb
+    bomb: CachedText<u32>,
+}
+
+thread_local! {
+    static SND_TEXTS: RefCell<SndTexts> = const {
+        RefCell::new(SndTexts {
+            round: CachedText::new(),
+            red: CachedText::new(),
+            blue: CachedText::new(),
+            timer: CachedText::new(),
+            bomb: CachedText::new(),
+        })
+    };
+}
 
 impl PlayingState {
     /// Draw the Search & Destroy HUD overlay
@@ -8,9 +32,82 @@ impl PlayingState {
         let sw = screen_width();
         let sh = screen_height();
 
-        // ── Spectating overlay when dead (drawn first so HUD elements render on top) ──
-        if self.is_dead && self.snd_phase != 3 {
+        SND_TEXTS.with_borrow_mut(|texts| self.draw_snd_hud_with(texts, player_id, sw, sh));
+    }
+
+    fn draw_snd_hud_with(&self, texts: &mut SndTexts, player_id: u32, sw: f32, sh: f32) {
+        // The backgrounds (spectating bar, timer pill, progress bars) are drawn
+        // before any text: none of them overlaps text drawn ahead of it, so
+        // this only saves the draw calls of switching to the font atlas.
+        let spectating = self.is_dead && self.snd_phase != 3;
+
+        let timer_secs = self.snd_phase_timer.max(0.0).ceil() as u32;
+        let timer_text = texts.timer.get(timer_secs, || {
+            let mins = timer_secs / 60;
+            let secs = timer_secs % 60;
+            format!("{:01}:{:02}", mins, secs)
+        });
+        let (timer_color, timer_size) = match self.snd_phase {
+            2 => {
+                // Bomb planted — show detonation countdown in red, pulse when low
+                let urgent = self.snd_phase_timer < 10.0;
+                let pulse_alpha = if urgent {
+                    let t = (get_time() as f32 * 5.0).sin() * 0.5 + 0.5;
+                    (180.0 + 75.0 * t) as u8
+                } else {
+                    255
+                };
+                (Color::from_rgba(255, 60, 60, pulse_alpha), if urgent { 32 } else { 28 })
+            }
+            1 => (Color::from_rgba(220, 220, 220, 230), 22),
+            0 => (Color::from_rgba(150, 200, 255, 200), 20),
+            _ => (Color::from_rgba(180, 180, 180, 180), 18),
+        };
+        let tw = crate::ui::fonts::measure_game_text(timer_text, timer_size);
+        let pad_x = 12.0;
+        let pad_y = 6.0;
+        let bg_y = 58.0;
+        let bg_h = timer_size as f32 + pad_y * 2.0;
+
+        let planting = self.snd_plant_progress > 0.0 && self.snd_plant_progress < 1.0;
+        let defusing = self.snd_defuse_progress > 0.0 && self.snd_defuse_progress < 1.0;
+
+        // ── Shapes ──
+        // Spectating overlay when dead (drawn first so HUD elements render on top)
+        if spectating {
             draw_rectangle(0.0, 0.0, sw, 40.0, Color::from_rgba(0, 0, 0, 150));
+        }
+        // Phase timer background pill
+        draw_rectangle(
+            (sw - tw) / 2.0 - pad_x,
+            bg_y,
+            tw + pad_x * 2.0,
+            bg_h,
+            Color::from_rgba(0, 0, 0, 160),
+        );
+        if planting {
+            Self::draw_progress_bar_shapes(
+                sw / 2.0,
+                sh - 90.0,
+                200.0,
+                12.0,
+                self.snd_plant_progress,
+                Color::from_rgba(255, 180, 50, 255),
+            );
+        }
+        if defusing {
+            Self::draw_progress_bar_shapes(
+                sw / 2.0,
+                sh - 90.0,
+                200.0,
+                12.0,
+                self.snd_defuse_progress,
+                Color::from_rgba(50, 180, 255, 255),
+            );
+        }
+
+        // ── Text ──
+        if spectating {
             let spec_text = "SPECTATING - Waiting for round to end";
             let spec_w = crate::ui::fonts::measure_game_text(spec_text, 16);
             draw_text_ex(
@@ -22,28 +119,29 @@ impl PlayingState {
         }
 
         // ── Round counter (top center) ──
-        let round_text = format!("Round {}/{}", self.snd_round, self.snd_max_rounds);
-        let round_w = crate::ui::fonts::measure_game_text(&round_text, 22);
+        let round_text = texts.round.get((self.snd_round, self.snd_max_rounds), || {
+            format!("Round {}/{}", self.snd_round, self.snd_max_rounds)
+        });
+        let round_w = crate::ui::fonts::measure_game_text(round_text, 22);
         draw_text_ex(
-            &round_text,
+            round_text,
             (sw - round_w) / 2.0,
             30.0,
             crate::ui::fonts::text_params(22, Color::from_rgba(220, 220, 220, 255)),
         );
 
         // Team scores
-        let red_score = format!("RED {}", self.snd_red_wins);
-        let blue_score = format!("{} BLUE", self.snd_blue_wins);
-        let red_w = crate::ui::fonts::measure_game_text(&red_score, 18);
-        let _blue_w = crate::ui::fonts::measure_game_text(&blue_score, 18);
+        let red_score = texts.red.get(self.snd_red_wins, || format!("RED {}", self.snd_red_wins));
+        let blue_score = texts.blue.get(self.snd_blue_wins, || format!("{} BLUE", self.snd_blue_wins));
+        let red_w = crate::ui::fonts::measure_game_text(red_score, 18);
         draw_text_ex(
-            &red_score,
+            red_score,
             sw / 2.0 - round_w / 2.0 - red_w - 16.0,
             30.0,
             crate::ui::fonts::text_params(18, Color::from_rgba(230, 100, 100, 255)),
         );
         draw_text_ex(
-            &blue_score,
+            blue_score,
             sw / 2.0 + round_w / 2.0 + 16.0,
             30.0,
             crate::ui::fonts::text_params(18, Color::from_rgba(100, 150, 230, 255)),
@@ -72,51 +170,12 @@ impl PlayingState {
         );
 
         // ── Phase timer (top center, below phase indicator) ──
-        {
-            let timer_secs = self.snd_phase_timer.max(0.0).ceil() as u32;
-            let mins = timer_secs / 60;
-            let secs = timer_secs % 60;
-            let timer_text = format!("{:01}:{:02}", mins, secs);
-
-            let (timer_color, timer_size) = match self.snd_phase {
-                2 => {
-                    // Bomb planted — show detonation countdown in red, pulse when low
-                    let urgent = self.snd_phase_timer < 10.0;
-                    let pulse_alpha = if urgent {
-                        let t = (get_time() as f32 * 5.0).sin() * 0.5 + 0.5;
-                        (180.0 + 75.0 * t) as u8
-                    } else {
-                        255
-                    };
-                    (Color::from_rgba(255, 60, 60, pulse_alpha), if urgent { 32 } else { 28 })
-                }
-                1 => (Color::from_rgba(220, 220, 220, 230), 22),
-                0 => (Color::from_rgba(150, 200, 255, 200), 20),
-                _ => (Color::from_rgba(180, 180, 180, 180), 18),
-            };
-
-            let tw = crate::ui::fonts::measure_game_text(&timer_text, timer_size);
-
-            // Background pill
-            let pad_x = 12.0;
-            let pad_y = 6.0;
-            let bg_x = (sw - tw) / 2.0 - pad_x;
-            let bg_y = 58.0;
-            let bg_h = timer_size as f32 + pad_y * 2.0;
-            draw_rectangle(
-                bg_x,
-                bg_y,
-                tw + pad_x * 2.0,
-                bg_h,
-                Color::from_rgba(0, 0, 0, 160),
-            );
-            draw_text_ex(
-                &timer_text,
-                (sw - tw) / 2.0,
-                bg_y + bg_h - pad_y - 2.0,
-                crate::ui::fonts::text_params(timer_size, timer_color),
-            );
-        }
+        draw_text_ex(
+            timer_text,
+            (sw - tw) / 2.0,
+            bg_y + bg_h - pad_y - 2.0,
+            crate::ui::fonts::text_params(timer_size, timer_color),
+        );
 
         // ── Bomb status indicator (bottom center) ──
         let local_team = self
@@ -153,9 +212,14 @@ impl PlayingState {
                 sh - 120.0,
                 crate::ui::fonts::text_params(16, Color::from_rgba(255, 200, 50, 255)),
             );
-        } else if self.snd_bomb_dropped.is_some() && is_attacker {
-            // Bomb is on the ground
-            let bomb_text = "BOMB DROPPED - Pick it up!";
+        } else if let (Some((bx, _by, bz)), true) = (self.snd_bomb_dropped, is_attacker) {
+            // Bomb is on the ground: say how far, the beam above it shows where
+            let dist = ((self.position.x - bx).powi(2) + (self.position.z - bz).powi(2))
+                .sqrt()
+                .round() as u32;
+            let bomb_text = texts
+                .bomb
+                .get(dist, || format!("BOMB DROPPED {dist}m AWAY - Pick it up!"));
             let bw = crate::ui::fonts::measure_game_text(bomb_text, 16);
             draw_text_ex(
                 bomb_text,
@@ -165,28 +229,12 @@ impl PlayingState {
             );
         }
 
-        // ── Plant/Defuse progress bar ──
-        if self.snd_plant_progress > 0.0 && self.snd_plant_progress < 1.0 {
-            Self::draw_progress_bar(
-                sw / 2.0,
-                sh - 90.0,
-                200.0,
-                12.0,
-                self.snd_plant_progress,
-                "PLANTING...",
-                Color::from_rgba(255, 180, 50, 255),
-            );
+        // ── Plant/Defuse progress bar labels ──
+        if planting {
+            Self::draw_progress_bar_label(sw / 2.0, sh - 90.0, "PLANTING...");
         }
-        if self.snd_defuse_progress > 0.0 && self.snd_defuse_progress < 1.0 {
-            Self::draw_progress_bar(
-                sw / 2.0,
-                sh - 90.0,
-                200.0,
-                12.0,
-                self.snd_defuse_progress,
-                "DEFUSING...",
-                Color::from_rgba(50, 180, 255, 255),
-            );
+        if defusing {
+            Self::draw_progress_bar_label(sw / 2.0, sh - 90.0, "DEFUSING...");
         }
 
         // ── Bomb site proximity hint ──
@@ -231,13 +279,12 @@ impl PlayingState {
         }
     }
 
-    fn draw_progress_bar(
+    fn draw_progress_bar_shapes(
         center_x: f32,
         y: f32,
         width: f32,
         height: f32,
         progress: f32,
-        label: &str,
         color: Color,
     ) {
         let x = center_x - width / 2.0;
@@ -264,7 +311,10 @@ impl PlayingState {
             1.0,
             Color::from_rgba(200, 200, 200, 150),
         );
+    }
 
+    /// The label above a progress bar, drawn after draw_progress_bar_shapes.
+    fn draw_progress_bar_label(center_x: f32, y: f32, label: &str) {
         // Label
         let lw = crate::ui::fonts::measure_game_text(label, 14);
         draw_text_ex(

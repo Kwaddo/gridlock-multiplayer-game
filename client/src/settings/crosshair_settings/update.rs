@@ -4,8 +4,8 @@ use crate::weapons::stats::WeaponCategory;
 use crate::weapons::WeaponInventory;
 use macroquad::prelude::*;
 
-use super::draw::{draw_dropdown, draw_shotgun_type_warning, draw_slider, draw_toggle};
-use super::shared::{crosshair_type_name, hsv_to_rgb, CrosshairSettingsPreview, CROSSHAIR_TYPES};
+use super::draw::{dropdown_input, shotgun_warning_ok_clicked, slider_input, toggle_input};
+use super::shared::{hsv_to_rgb, CrosshairSettingsPreview, CROSSHAIR_TYPES};
 
 pub fn update_crosshair_settings(
     state: &mut CrosshairSettingsPreview,
@@ -128,24 +128,24 @@ pub fn update_crosshair_settings(
     let weapon = &mut weapons.weapons[_cat_idx];
     let ch = &mut weapon.crosshair;
 
-    slider_y += draw_toggle("Enable dot", &mut ch.dot_enabled, slider_x, slider_y, mouse, clicked, s);
-    slider_y += draw_slider("Gap", &mut ch.center_gap, 0.0, 10.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
-    slider_y += draw_slider("Length", &mut ch.line_length, 0.0, 10.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
-    slider_y += draw_slider("Thickness", &mut ch.line_thickness, 0.0, 2.0, 0.05, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
-    slider_y += draw_slider("Dot size", &mut ch.dot_size, 0.0, 5.0, 0.1, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
+    // input only: draw_crosshair_settings (panel.rs) paints these rows at the same layout
+    slider_y += toggle_input(&mut ch.dot_enabled, slider_x, slider_y, mouse, clicked, s);
+    slider_y += slider_input(&mut ch.center_gap, 0.0, 10.0, 0.1, slider_x, slider_y, slider_w, mouse, held, s);
+    slider_y += slider_input(&mut ch.line_length, 0.0, 10.0, 0.1, slider_x, slider_y, slider_w, mouse, held, s);
+    slider_y += slider_input(&mut ch.line_thickness, 0.0, 2.0, 0.05, slider_x, slider_y, slider_w, mouse, held, s);
+    slider_y += slider_input(&mut ch.dot_size, 0.0, 5.0, 0.1, slider_x, slider_y, slider_w, mouse, held, s);
     slider_y += 5.0 * s;
-    slider_y += draw_toggle("Outline", &mut ch.outline_enabled, slider_x, slider_y, mouse, clicked, s);
-    slider_y += draw_slider("Thickness", &mut ch.outline_thickness, 0.0, 2.0, 0.05, slider_x, slider_y, slider_w, mouse, clicked, held, None, s);
+    slider_y += toggle_input(&mut ch.outline_enabled, slider_x, slider_y, mouse, clicked, s);
+    slider_y += slider_input(&mut ch.outline_thickness, 0.0, 2.0, 0.05, slider_x, slider_y, slider_w, mouse, held, s);
     slider_y += 5.0 * s;
 
-    let type_names: Vec<&str> = CROSSHAIR_TYPES.iter().map(|t| crosshair_type_name(*t)).collect();
     let mut selected_idx = CROSSHAIR_TYPES
         .iter()
         .position(|t| *t == ch.crosshair_type)
         .unwrap_or(0);
     let prev_idx = selected_idx;
 
-    slider_y += draw_dropdown("Crosshair Type", &type_names, &mut selected_idx, slider_x, slider_y, slider_w, mouse, clicked, s);
+    slider_y += dropdown_input(CROSSHAIR_TYPES.len(), &mut selected_idx, slider_x, slider_y, slider_w, mouse, clicked, s);
 
     if selected_idx < CROSSHAIR_TYPES.len() {
         ch.crosshair_type = CROSSHAIR_TYPES[selected_idx];
@@ -158,7 +158,8 @@ pub fn update_crosshair_settings(
         state.shotgun_type_warning = true;
     }
 
-    slider_y += 10.0 * s;
+    // panel.rs advances 40 * s past the dropdown in total
+    slider_y += 8.0 * s;
 
     let hue_bar_w = 20.0 * s;
     let picker_x = slider_x;
@@ -188,8 +189,7 @@ pub fn update_crosshair_settings(
     }
 
     slider_y = picker_y + picker_size + 10.0 * s;
-    draw_slider(
-        "Alpha",
+    slider_input(
         &mut state.alpha_val,
         0.0,
         255.0,
@@ -198,9 +198,7 @@ pub fn update_crosshair_settings(
         slider_y,
         picker_size + hue_bar_w + 10.0 * s,
         mouse,
-        clicked,
         held,
-        Some(Color::from_rgba(200, 200, 200, 255)),
         s,
     );
 
@@ -247,10 +245,11 @@ pub fn update_crosshair_settings(
         state.color_synced = false;
     }
 
-    if state.shotgun_type_warning {
+    // same gate as panel.rs, which paints it, so no invisible OK button on other tabs
+    if state.preview_weapon == WeaponCategory::Shotgun && state.shotgun_type_warning {
         let warn_x = preview_x;
         let warn_y = btn_row_y;
-        if draw_shotgun_type_warning(warn_x, warn_y, 0.0, 0.0, mouse, clicked, s) {
+        if shotgun_warning_ok_clicked(warn_x, warn_y, mouse, clicked, s) {
             state.shotgun_type_warning = false;
             state.shotgun_warning_shown_this_visit = true;
         }

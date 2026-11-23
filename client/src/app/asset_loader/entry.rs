@@ -1,17 +1,15 @@
 use client::screens::PlayingState;
-use client::types::animated_model::{
-    load_gltf_animated_model, load_gltf_animated_model_with_unskinned,
-};
 use macroquad::prelude::*;
 
 use super::cache::is_asset_cached;
+use super::glb_job::GlbJob;
 use super::paths::resolve_runtime_asset_path;
 use super::prefetch::{read_bytes, take_decoded_image};
-use crate::app::obj_loader::{
-    load_gltf_static_mesh, load_obj_mesh_with_materials,
-};
+use crate::app::obj_loader::load_obj_mesh_with_materials;
 
-pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut PlayingState) {
+/// Load the asset `key` from `path`, or (a GLB model or character) start
+/// loading it: the job returned does the rest a step at a time.
+pub async fn begin_asset_entry(key: &str, path: &str, playing_state: &mut PlayingState) -> Option<GlbJob> {
     // try to resolve the path relative to client/ or server/ if needed; the
     // original manifest entry is kept for caching purposes so we compare on
     // the unmodified string (matches server-side path).
@@ -25,7 +23,7 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
 
     if is_asset_cached(playing_state, key, path, is_obj, is_gltf, is_sound) {
         println!("Asset cache hit: {} ({})", key, path);
-        return;
+        return None;
     }
 
     // clone the strings only when we actually store them
@@ -58,32 +56,16 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     } else if is_gltf {
-        // try animated loader first, but if the returned mesh has no texture we
-        // fall back to static loader. some static weapon GLBs are exported with
-        // a skin/animation placeholder which confuses the animated loader.
-        let keep_unskinned_primitives = key == "fp_hands_sawnoff"
-            || key == "fp_hands_minigun";
         // Read once; works from disk natively and over HTTP in the browser.
         let bytes = match read_bytes(&resolved_path).await {
             Ok(bytes) => bytes,
             Err(e) => {
                 warn!("Failed to read {} from {}: {}", key_string, path_string, e);
-                return;
+                return None;
             }
         };
         // a character (mesh + skeleton) or a bones only animation, see screens/playing/characters.rs
         // before this every anim_ file was a whole character with one animation in it
-        if key.starts_with("character_") {
-            match load_gltf_animated_model(&resolved_path, &bytes) {
-                Ok(model) => {
-                    playing_state.asset_source_paths.insert(key_string.clone(), path_string.clone());
-                    println!("Loaded character: {} from {}", key_string, path_string);
-                    playing_state.add_character(key_string, model);
-                }
-                Err(e) => warn!("Failed to load character {} from {}: {}", key_string, path_string, e),
-            }
-            return;
-        }
         if key.starts_with("anim_") && path.contains("/animations/") {
             match client::types::animated_model::load_clip(&resolved_path, &bytes) {
                 Ok(clip) => {
@@ -93,102 +75,16 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
                 }
                 Err(e) => warn!("Failed to load animation {} from {}: {}", key_string, path_string, e),
             }
-            return;
+            return None;
         }
-        let animated_result = if keep_unskinned_primitives {
-            load_gltf_animated_model_with_unskinned(&resolved_path, &bytes, true)
-        } else {
-            load_gltf_animated_model(&resolved_path, &bytes)
-        };
-        match animated_result {
-            Ok(animated) => {
-                if !animated.has_any_texture() {
-                    // animated model produced but no texture; try static loader
-                    match load_gltf_static_mesh(&resolved_path, &bytes).await {
-                        Ok(meshes) => {
-                            let total_verts: usize = meshes.iter().map(|m| m.vertices.len()).sum();
-                            let entry = playing_state.models.entry(key_string.clone()).or_default();
-                            for mesh in meshes {
-                                entry.push(mesh);
-                            }
-                            playing_state
-                                .asset_source_paths
-                                .insert(key_string.clone(), path_string.clone());
-                            println!(
-                                "Loaded static GLTF model (anim fallback): {} ({} verts across {} sub-meshes) from {}",
-                                key_string,
-                                total_verts,
-                                entry.len(),
-                                path_string
-                            );
-                        }
-                        Err(static_err) => {
-                            // static path failed; keep the textureless animated mesh
-                            let vertex_count = animated.total_vertex_count();
-                            animated.prepare_gpu();
-                            playing_state
-                                .animated_models
-                                .insert(key_string.clone(), animated);
-                            playing_state
-                                .asset_source_paths
-                                .insert(key_string.clone(), path_string.clone());
-                            println!(
-                                "Loaded animated GLTF model (no texture, static fallback failed): {} ({} verts) from {}. Error is {:?}",
-                                key_string, vertex_count, path_string, static_err
-                            );
-                        }
-                    }
-                } else {
-                    let vertex_count = animated.total_vertex_count();
-                    animated.prepare_gpu();
-                    playing_state
-                        .animated_models
-                        .insert(key_string.clone(), animated);
-                    playing_state
-                        .asset_source_paths
-                        .insert(key_string.clone(), path_string.clone());
-                    println!(
-                        "Loaded animated GLTF model: {} ({} verts) from {}",
-                        key_string, vertex_count, path_string
-                    );
-                }
-            }
-            Err(anim_err) => {
-                match load_gltf_static_mesh(&resolved_path, &bytes).await {
-                    Ok(meshes) => {
-                        // if no primitive had a texture, the loader bakes in
-                        // lighting to give the user some built‑in shading
-                        let total_verts: usize = meshes.iter().map(|m| m.vertices.len()).sum();
-                        let entry = playing_state.models.entry(key_string.clone()).or_default();
-                        for mesh in meshes {
-                            entry.push(mesh);
-                        }
-                        playing_state
-                            .asset_source_paths
-                            .insert(key_string.clone(), path_string.clone());
-                        println!(
-                            "Loaded static GLTF model: {} ({} verts across {} sub-meshes) from {}",
-                            key_string,
-                            total_verts,
-                            entry.len(),
-                            path_string
-                        );
-                    }
-                    Err(static_err) => {
-                        warn!(
-                            "Failed GLTF load {} from {}. animated_err={:?} static_err={:?}",
-                            key_string, path_string, anim_err, static_err
-                        );
-                    }
-                }
-            }
-        }
+        // a character or another model: a step at a time
+        return GlbJob::start(key, path, &resolved_path, &bytes);
     } else if is_sound {
         match read_bytes(&resolved_path).await {
             Ok(bytes) => {
                 if let Err(e) = playing_state.audio.insert(key_string.clone(), bytes).await {
                     warn!("Failed to decode sound {} from {}: {}", key_string, path_string, e);
-                    return;
+                    return None;
                 }
                 playing_state
                     .asset_source_paths
@@ -231,4 +127,5 @@ pub async fn load_asset_entry(key: &str, path: &str, playing_state: &mut Playing
             }
         }
     }
+    None
 }

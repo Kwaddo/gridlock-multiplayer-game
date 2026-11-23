@@ -59,18 +59,21 @@ function room(req, res, body, url, code, action) {
     const r = rooms.get(code);
     if (!r || (asHost && r.host !== id)) return json({ error: "room closed" }, 410);
     if (asHost && url.searchParams.has("keep")) r.expires = now + HOST_TTL_SECONDS * 1000;
-    // Every message for the caller from the last MESSAGE_TTL_MS, with ids; the
+    // Every message for the caller from the last MESSAGE_TTL_MS newer than
+    // `after` (the newest seq it has; without it, all of them), with ids; the
     // client skips the ones it has seen (same contract as the live registry).
-    // `seq` lets a long poll say which messages it already has.
+    // Seqs only grow and a reply holds every message up to its newest, so
+    // the caller has all of those at or before `after`.
+    const after = Number(url.searchParams.get("after")) || 0;
     const reply = () => {
       const current = rooms.get(code);
       if (!current || (asHost && current.host !== id)) return json({ error: "room closed" }, 410);
-      const out = json(current.messages.filter((m) => m.to === id).map((m) => ({ id: m.id, seq: m.seq, ...m.body })));
+      const mine = current.messages.filter((m) => m.to === id && m.seq > after);
+      const out = json(mine.map((m) => ({ id: m.id, seq: m.seq, ...m.body })));
       out.headers[LONG_POLL_HEADER] = "1";
       return out;
     };
     if (!url.searchParams.has("wait")) return reply();
-    const after = Number(url.searchParams.get("after")) || 0;
     if (r.messages.some((m) => m.to === id && m.seq > after)) return reply();
     return new Promise((resolve) => {
       let done = false;
@@ -78,7 +81,12 @@ function room(req, res, body, url, code, action) {
         if (done) return;
         done = true;
         clearTimeout(timer);
-        waiting.get(id)?.delete(finish);
+        const callbacks = waiting.get(id);
+        if (callbacks) {
+          callbacks.delete(finish);
+          // (no empty set left behind for every peer ever held)
+          if (!callbacks.size) waiting.delete(id);
+        }
         resolve(reply());
       };
       const timer = setTimeout(finish, LONG_POLL_MS);

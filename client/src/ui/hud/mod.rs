@@ -2,12 +2,14 @@ use macroquad::prelude::*;
 use std::collections::HashMap;
 
 mod crosshair;
+mod hit_feedback;
 mod loading;
 mod minimap;
 mod players;
 pub use players::{draw_player_list, draw_team_scoreboard};
 mod scope;
 mod status;
+pub(crate) use status::CachedText;
 mod team_score;
 pub use team_score::draw_team_score_bar;
 pub use loading::draw_background_loading;
@@ -21,6 +23,10 @@ use crate::types::world::WorldId;
 use crate::ui::OtherPlayer;
 use crate::weapons::effects::DamageNumber;
 use crate::weapons::WeaponInventory;
+
+thread_local! {
+    static HIT_BY_TEXT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
 
 pub fn draw_hud(
     username: &str,
@@ -74,17 +80,28 @@ pub fn draw_hud(
             Color::from_rgba(255, 40, 40, alpha),
         );
         // just above the crosshair where you're already looking, the kill feed keeps the top left
-        let hit_text = match last_damage_attacker {
-            Some(att) => format!("Hit by {}", att),
-            None => "Hit!".to_string(),
+        let draw_centred = |text: &str| {
+            let w = crate::ui::fonts::measure_game_text(text, 18);
+            draw_text_ex(
+                text,
+                screen_width() / 2.0 - w / 2.0,
+                cy - 70.0,
+                crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
+            );
         };
-        let w = crate::ui::fonts::measure_game_text(&hit_text, 18);
-        draw_text_ex(
-            &hit_text,
-            screen_width() / 2.0 - w / 2.0,
-            cy - 70.0,
-            crate::ui::fonts::text_params(18, Color::from_rgba(255, 255, 255, alpha)),
-        );
+        if let Some(att) = last_damage_attacker {
+            HIT_BY_TEXT.with_borrow_mut(|text| {
+                // rebuilt only when the attacker changes
+                if text.strip_prefix("Hit by ") != Some(att) {
+                    text.clear();
+                    text.push_str("Hit by ");
+                    text.push_str(att);
+                }
+                draw_centred(text);
+            });
+        } else {
+            draw_centred("Hit!");
+        }
     }
 
     if !no_gun {

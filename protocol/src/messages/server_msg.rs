@@ -20,8 +20,10 @@ pub enum ServerMsg {
         match_timer: Option<u16>,
     },
     Assets { world: u8, entries: Vec<(String, String)> },
-    /// LAN discovery reply; `version` trails it as in `Welcome`.
-    Discover { players: u8, max_players: u8, name: String, version: Option<u16> },
+    /// LAN discovery reply; `version` trails it as in `Welcome`, and `bots`
+    /// (how many of `players` are bots) trails `version`. Older hosts send
+    /// neither; older clients stop reading after `version`.
+    Discover { players: u8, max_players: u8, name: String, version: Option<u16>, bots: Option<u8> },
     WallBroken { x: u8, y: u8 },
     Death { killer_id: u32, weapon: String },
     Respawn { position: Vec3, kind: Option<u8> }, // kind: 0=random, 1=teleporter fallback
@@ -37,8 +39,8 @@ pub enum ServerMsg {
     MatchTimer { secs: u16 },
     SndRoundState(SndRound),
     LobbyLeader { id: u32 }, // 0 = no leader
-    /// Every shot bots fired in one bot tick.
-    BotShots(Vec<BotShot>),
+    /// Every shot bots fired in one bot tick, or one shot another player fired.
+    Shots(Vec<Shot>),
     /// What rarely changes about players, see `PlayerInfo`.
     PlayerInfo(Vec<PlayerInfo>),
     Chat { from_id: u32, name: String, text: String }, // from_id 0 = server notice
@@ -64,6 +66,8 @@ pub enum ServerMsg {
     SmokeDots(Vec<(Vec3, bool)>),
     // a box got shot: target is who was found, 0 when it was a decoy. points is what it cost (the found hider, or the shooter for a decoy)
     SmokeFeed { shooter: u32, target: u32, red_handed: bool, points: i16 },
+    /// A bot's awareness of you went up to `level` (BOT_ALERT_*); only you get it.
+    BotAlert { bot_id: u32, level: u8 },
 }
 
 impl ServerMsg {
@@ -125,11 +129,15 @@ impl ServerMsg {
                 }
                 w.finish()
             }
-            ServerMsg::Discover { players, max_players, name, version } => {
+            ServerMsg::Discover { players, max_players, name, version, bots } => {
                 let mut w = Writer::new(MSG_DISCOVER);
                 w.u8(*players).u8(*max_players).str8(name);
                 if let Some(v) = version {
                     w.u16(*v);
+                    // positional: only after a version
+                    if let Some(b) = bots {
+                        w.u8(*b);
+                    }
                 }
                 w.finish()
             }
@@ -200,11 +208,12 @@ impl ServerMsg {
                 w.u8(s.phase).u8(s.attacking_team).u32(s.bomb_carrier_id);
                 w.vec3(s.bomb_pos).vec3(s.bomb_site).bool(s.bomb_planted);
                 w.f32(s.plant_progress).f32(s.defuse_progress).f32(s.phase_timer);
+                w.bool(s.bomb_dropped);
                 w.finish()
             }
             ServerMsg::LobbyLeader { id } => Writer::new(MSG_LOBBY_LEADER).u32(*id).finish(),
-            ServerMsg::BotShots(shots) => {
-                let mut w = Writer::new(MSG_BOT_SHOT);
+            ServerMsg::Shots(shots) => {
+                let mut w = Writer::new(MSG_SHOTS);
                 w.u8(shots.len().min(255) as u8);
                 for shot in shots.iter().take(255) {
                     shot.write(&mut w);
@@ -286,6 +295,7 @@ impl ServerMsg {
             ServerMsg::SmokeFeed { shooter, target, red_handed, points } => {
                 Writer::new(MSG_SMOKE_FEED).u32(*shooter).u32(*target).bool(*red_handed).u16(*points as u16).finish()
             }
+            ServerMsg::BotAlert { bot_id, level } => Writer::new(MSG_BOT_ALERT).u32(*bot_id).u8(*level).finish(),
             ServerMsg::SmokeDots(dots) => {
                 let mut w = Writer::new(MSG_SMOKE_DOTS);
                 w.u8(dots.len().min(255) as u8);
@@ -348,12 +358,12 @@ impl ServerMsg {
                 }
                 ServerMsg::Assets { world, entries }
             }
-            MSG_DISCOVER => ServerMsg::Discover {
-                players: r.u8()?,
-                max_players: r.u8()?,
-                name: r.str8()?,
-                version: r.u16(),
-            },
+            MSG_DISCOVER => {
+                let (players, max_players, name) = (r.u8()?, r.u8()?, r.str8()?);
+                let version = r.u16();
+                let bots = version.and_then(|_| r.u8());
+                ServerMsg::Discover { players, max_players, name, version, bots }
+            }
             MSG_WALL_BROKEN => ServerMsg::WallBroken { x: r.u8()?, y: r.u8()? },
             MSG_DEATH => ServerMsg::Death { killer_id: r.u32()?, weapon: r.str8()? },
             MSG_RESPAWN => ServerMsg::Respawn { position: r.vec3()?, kind: r.u8() },
@@ -408,14 +418,15 @@ impl ServerMsg {
                 plant_progress: r.f32()?,
                 defuse_progress: r.f32()?,
                 phase_timer: r.f32()?,
+                bomb_dropped: r.bool().unwrap_or(false), // older packets have no bomb_dropped byte
             }),
             MSG_LOBBY_LEADER => ServerMsg::LobbyLeader { id: r.u32()? },
-            MSG_BOT_SHOT => {
+            MSG_SHOTS => {
                 let mut shots = Vec::new();
                 for _ in 0..r.u8()? {
-                    shots.push(BotShot::read(&mut r)?);
+                    shots.push(Shot::read(&mut r)?);
                 }
-                ServerMsg::BotShots(shots)
+                ServerMsg::Shots(shots)
             }
             MSG_PLAYER_INFO => {
                 let mut entries = Vec::new();
@@ -480,6 +491,7 @@ impl ServerMsg {
                 red_handed: r.bool()?,
                 points: r.u16()? as i16,
             },
+            MSG_BOT_ALERT => ServerMsg::BotAlert { bot_id: r.u32()?, level: r.u8()? },
             _ => return None,
         };
         Some(msg)

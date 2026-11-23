@@ -9,7 +9,7 @@ use super::mesh::Bounds;
 
 /// The six clip planes of a view-projection matrix, as (normal, distance);
 /// a point is inside a plane when `normal.dot(p) + distance >= 0`.
-pub(super) struct Frustum {
+pub(crate) struct Frustum {
     planes: [Vec4; 6],
 }
 

@@ -1,27 +1,28 @@
 use macroquad::prelude::*;
 
 use crate::core::GameConfig;
-use crate::types::maze::{CellKind, CellKindCache, Maze};
+use crate::types::maze::{CellKindCache, Maze};
 use crate::types::player::OtherPlayer;
 use crate::types::world::WorldId;
+use crate::ui::prims::{fill_disc, ring};
 use crate::weapons::combat::CombatEntity;
 use crate::world::lobby::{LANDMARK_CUBES, LOBBY_CONSOLE_POS, LOBBY_CONSOLE_SIZE, PARKOUR_CUBES};
+
+mod layer;
+mod texels;
 
 const MINIMAP_MARGIN: f32 = 16.0;
 /// Fraction of the radius where edge fade begins.
 const FADE_START: f32 = 0.80;
 
 const BG_COLOR: Color = Color::new(0.05, 0.06, 0.10, 0.90);
-const WALL_COLOR: Color = Color::new(0.38, 0.40, 0.48, 1.0);
-const FLOOR_COLOR: Color = Color::new(0.13, 0.15, 0.20, 1.0);
-const ROOM_FLOOR_COLOR: Color = Color::new(0.16, 0.18, 0.24, 1.0);
-const BREAKABLE_COLOR: Color = Color::new(0.50, 0.38, 0.22, 1.0);
 const LOCAL_PLAYER_COLOR: Color = Color::new(0.3, 0.9, 0.4, 1.0);
 const BORDER_COLOR: Color = Color::new(0.45, 0.50, 0.60, 0.95);
 const BORDER_GLOW: Color = Color::new(0.30, 0.35, 0.45, 0.35);
 
 thread_local! {
-    /// Cell colours of the maze on the minimap, re-derived only when it changes.
+    /// Cell kinds of the maze on the minimap, re-derived only when it changes
+    /// (and the cell texture with them).
     static CELL_KINDS: std::cell::RefCell<CellKindCache> = const { std::cell::RefCell::new(CellKindCache::new()) };
 }
 
@@ -62,7 +63,7 @@ pub fn draw_minimap(
 
     // Background
     if circular {
-        draw_circle(center_x, center_y, half + 1.0, BG_COLOR);
+        fill_disc(center_x, center_y, half + 1.0, 20, BG_COLOR);
     } else {
         draw_rectangle(
             center_x - half,
@@ -115,8 +116,8 @@ pub fn draw_minimap(
 
     // Border
     if circular {
-        draw_circle_lines(center_x, center_y, half + 2.0, 3.0, BORDER_GLOW);
-        draw_circle_lines(center_x, center_y, half, 2.0, BORDER_COLOR);
+        ring(center_x, center_y, half + 2.0, 3.0, 30, BORDER_GLOW);
+        ring(center_x, center_y, half, 2.0, 30, BORDER_COLOR);
     } else {
         let tl_x = center_x - half;
         let tl_y = center_y - half;
@@ -145,44 +146,20 @@ fn draw_maze_layer(
 ) {
     let cell_size = maze.cell_size;
     let ppwu = diameter / (cell_size * 33.0); // 16 cells each side + center
-    let cell_px = cell_size * ppwu;
-
-    let player_cx = local_pos.x / cell_size;
-    let player_cz = local_pos.z / cell_size;
-    let pcx = player_cx.floor() as i32;
-    let pcy = player_cz.floor() as i32;
-    let frac_x = player_cx - pcx as f32;
-    let frac_z = player_cz - pcy as f32;
-
-    CELL_KINDS.with(|kinds| kinds.borrow_mut().sync(maze));
-    let view_r = (half / cell_px).ceil() as i32 + 1;
-
-    for dy in -view_r..=view_r {
-        for dx in -view_r..=view_r {
-            let cx = pcx + dx;
-            let cy = pcy + dy;
-
-            // Screen position of cell center (north-up: no rotation)
-            let sx = center_x + (dx as f32 - frac_x + 0.5) * cell_px;
-            let sy = center_y + (dy as f32 - frac_z + 0.5) * cell_px;
-
-            let alpha = fade_alpha(sx, sy, center_x, center_y, half, circular);
-            if alpha <= 0.0 {
-                continue;
-            }
-
-            let base = match CELL_KINDS.with(|kinds| kinds.borrow().kind_at(cx, cy)) {
-                CellKind::RoomFloor => ROOM_FLOOR_COLOR,
-                CellKind::Floor => FLOOR_COLOR,
-                CellKind::BreakableWall => BREAKABLE_COLOR,
-                CellKind::Wall => WALL_COLOR,
-            };
-
-            let color = Color::new(base.r, base.g, base.b, base.a * alpha);
-            let h = cell_px / 2.0;
-            draw_rectangle(sx - h, sy - h, cell_px, cell_px, color);
-        }
-    }
+    let texture = CELL_KINDS.with(|kinds| {
+        let mut kinds = kinds.borrow_mut();
+        let changed = kinds.sync(maze);
+        layer::maze_texture(&kinds, changed)
+    });
+    let view = layer::View {
+        center: vec2(center_x, center_y),
+        half,
+        player_cells: vec2(local_pos.x, local_pos.z) / cell_size,
+        px_per_cell: cell_size * ppwu,
+        circular,
+        fade_start: FADE_START,
+    };
+    layer::draw_layer(&view, layer::Ground::Maze(&texture));
 }
 
 // ─── Lobby layer ──────────────────────────────────────────────────────────────
@@ -196,59 +173,24 @@ fn draw_lobby_layer(
     circular: bool,
 ) {
     let ppwu = diameter / (LOBBY_VIEW_RANGE * 2.0);
-    let floor_half = 25.0;
 
-    // Draw lobby floor as a grid of 1x1 world-unit tiles so each tile respects
-    // circular fade (avoids square overflow outside the circle).
-    let tile_px = ppwu; // 1 world unit per tile
-    let view_tiles = (half / tile_px).ceil() as i32 + 1;
-    let player_tx = local_pos.x.floor() as i32;
-    let player_tz = local_pos.z.floor() as i32;
-    let frac_x = local_pos.x - player_tx as f32;
-    let frac_z = local_pos.z - player_tz as f32;
-
-    for dy in -view_tiles..=view_tiles {
-        for dx in -view_tiles..=view_tiles {
-            let wx = player_tx + dx;
-            let wz = player_tz + dy;
-
-            // Only draw within the lobby floor bounds (-25..25)
-            if (wx as f32) < -floor_half
-                || (wx as f32) >= floor_half
-                || (wz as f32) < -floor_half
-                || (wz as f32) >= floor_half
-            {
-                continue;
-            }
-
-            let sx = center_x + (dx as f32 - frac_x + 0.5) * tile_px;
-            let sy = center_y + (dy as f32 - frac_z + 0.5) * tile_px;
-
-            let alpha = fade_alpha(sx, sy, center_x, center_y, half, circular);
-            if alpha <= 0.0 {
-                continue;
-            }
-
-            let color = Color::new(
-                LOBBY_FLOOR_COLOR.r,
-                LOBBY_FLOOR_COLOR.g,
-                LOBBY_FLOOR_COLOR.b,
-                LOBBY_FLOOR_COLOR.a * alpha,
-            );
-            let tp = tile_px / 2.0;
-            draw_rectangle(sx - tp, sy - tp, tile_px, tile_px, color);
-
-            // Draw grid lines on tile edges (matching in-game 1-unit grid)
-            let grid_c = Color::new(
-                LOBBY_GRID_COLOR.r,
-                LOBBY_GRID_COLOR.g,
-                LOBBY_GRID_COLOR.b,
-                LOBBY_GRID_COLOR.a * alpha,
-            );
-            draw_line(sx - tp, sy - tp, sx + tp, sy - tp, 0.5, grid_c); // top
-            draw_line(sx - tp, sy - tp, sx - tp, sy + tp, 0.5, grid_c); // left
-        }
-    }
+    // The lobby floor (-25..25) as 1x1 world-unit tiles with a grid line on
+    // each tile's top and left edge (matching the in-game 1-unit grid), each
+    // tile faded on its own so none overflows the circle.
+    let view = layer::View {
+        center: vec2(center_x, center_y),
+        half,
+        player_cells: vec2(local_pos.x, local_pos.z),
+        px_per_cell: ppwu, // 1 world unit per tile
+        circular,
+        fade_start: FADE_START,
+    };
+    let ground = layer::Ground::Lobby {
+        floor_half: 25.0,
+        floor: LOBBY_FLOOR_COLOR,
+        line: LOBBY_GRID_COLOR,
+    };
+    layer::draw_layer(&view, ground);
 
     // Landmark cubes
     let landmark_colors = [RED, GREEN, BLUE, YELLOW];
@@ -347,8 +289,8 @@ fn draw_other_players(
         }
         if let Some(hunters) = smoke_hunters { if !hunters.contains(&p.id) { continue; } }
 
-        let sx = center_x + (p.render_x - local_pos.x) * ppwu;
-        let sy = center_y + (p.render_z - local_pos.z) * ppwu;
+        let sx = center_x + (p.smooth.x - local_pos.x) * ppwu;
+        let sy = center_y + (p.smooth.z - local_pos.z) * ppwu;
 
         let alpha = fade_alpha(sx, sy, center_x, center_y, half, circular);
         if alpha <= 0.0 {
@@ -357,14 +299,9 @@ fn draw_other_players(
 
         let dot_size = (ppwu * 0.9).clamp(3.0, 6.0);
         let c = p.color;
-        draw_circle(sx, sy, dot_size, Color::new(c.r, c.g, c.b, c.a * alpha));
-        draw_circle_lines(
-            sx,
-            sy,
-            dot_size,
-            1.0,
-            Color::new(0.0, 0.0, 0.0, 0.5 * alpha),
-        );
+        // a 3-6 px dot: 12 sides is visually a circle
+        fill_disc(sx, sy, dot_size, 12, Color::new(c.r, c.g, c.b, c.a * alpha));
+        ring(sx, sy, dot_size, 1.0, 12, Color::new(0.0, 0.0, 0.0, 0.5 * alpha));
     }
 }
 

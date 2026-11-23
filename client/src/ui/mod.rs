@@ -1,8 +1,10 @@
-use crate::ui::fonts::{measure_game_text, text_params};
+use crate::ui::fonts::measure_game_text;
 use macroquad::prelude::*;
 
 pub mod fonts;
 pub mod hud;
+pub mod prims;
+pub mod text_batch;
 pub use crate::types::player::OtherPlayer;
 
 /// Draws a thick arc using triangle strips. Used by both HUD crosshairs and crosshair settings preview.
@@ -19,19 +21,22 @@ pub fn draw_arc(
     let angle_range = end_angle - start_angle;
     let angle_step = angle_range / (segments as f32);
 
+    // each segment's end angle is the next one's start, so its trig is reused
+    let (mut sin1, mut cos1) = start_angle.sin_cos();
     for i in 0..segments {
-        let a1 = start_angle + (i as f32) * angle_step;
         let a2 = start_angle + ((i + 1) as f32) * angle_step;
+        let (sin2, cos2) = a2.sin_cos();
 
-        let x1_inner = cx + (radius - thickness / 2.0) * a1.cos();
-        let y1_inner = cy - (radius - thickness / 2.0) * a1.sin();
-        let x2_inner = cx + (radius - thickness / 2.0) * a2.cos();
-        let y2_inner = cy - (radius - thickness / 2.0) * a2.sin();
+        let x1_inner = cx + (radius - thickness / 2.0) * cos1;
+        let y1_inner = cy - (radius - thickness / 2.0) * sin1;
+        let x2_inner = cx + (radius - thickness / 2.0) * cos2;
+        let y2_inner = cy - (radius - thickness / 2.0) * sin2;
 
-        let x1_outer = cx + (radius + thickness / 2.0) * a1.cos();
-        let y1_outer = cy - (radius + thickness / 2.0) * a1.sin();
-        let x2_outer = cx + (radius + thickness / 2.0) * a2.cos();
-        let y2_outer = cy - (radius + thickness / 2.0) * a2.sin();
+        let x1_outer = cx + (radius + thickness / 2.0) * cos1;
+        let y1_outer = cy - (radius + thickness / 2.0) * sin1;
+        let x2_outer = cx + (radius + thickness / 2.0) * cos2;
+        let y2_outer = cy - (radius + thickness / 2.0) * sin2;
+        (sin1, cos1) = (sin2, cos2);
 
         draw_triangle(
             vec2(x1_inner, y1_inner),
@@ -59,9 +64,9 @@ pub fn is_button_clicked(
 ) -> bool {
     let mouse = mouse_position();
     let hover = mouse.0 >= x && mouse.0 <= x + w && mouse.1 >= y && mouse.1 <= y + h;
-    draw_rectangle(x, y, w, h, if hover { hover_color } else { color });
-    draw_rectangle_lines(x, y, w, h, 1.0, WHITE);
+    text_batch::rect(x, y, w, h, if hover { hover_color } else { color });
+    text_batch::rect_lines(x, y, w, h, 1.0, WHITE);
     let tw = measure_game_text(label, 20);
-    draw_text_ex(label, x + (w - tw) / 2.0, y + 26.0, text_params(20, WHITE));
+    text_batch::text(label, x + (w - tw) / 2.0, y + 26.0, 20, WHITE);
     hover && is_mouse_button_pressed(MouseButton::Left)
 }

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -9,13 +9,25 @@ use ureq::config::IpFamily;
 use super::{create_body, heartbeat_body, Announce, Created, Listed, HEARTBEAT_SECS, RETRY_SECS};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long an idle connection is kept for the next request. Longer than the
+/// heartbeat period (ureq's default, 15 s, is not), so a beat reuses the last
+/// one's TLS connection instead of redoing DNS, TCP and the handshake.
+const KEEP_IDLE: Duration = Duration::from_secs(60);
 
 fn agent(family: IpFamily) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(REQUEST_TIMEOUT))
         .ip_family(family)
+        .max_idle_age(KEEP_IDLE)
         .build()
         .into()
+}
+
+/// One agent for every list fetch, so a refresh can reuse the previous one's
+/// connection (a fresh agent starts with an empty pool).
+fn list_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| agent(IpFamily::Any))
 }
 
 /// The public list, fetched on a background thread.
@@ -29,9 +41,7 @@ impl ListFetch {
         let url = format!("{base}/servers");
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = agent(IpFamily::Any)
-                .get(&url)
-                .call()
+            let result = retry_once_on_transport_error(|| list_agent().get(&url).call())
                 .and_then(|mut resp| resp.body_mut().read_to_string())
                 .map_err(|e| e.to_string())
                 .and_then(|body| serde_json::from_str(&body).map_err(|e| e.to_string()));
@@ -67,6 +77,8 @@ impl ListFetch {
 pub struct Listing {
     stop: Arc<AtomicBool>,
     listed_addr: Arc<Mutex<Option<String>>>,
+    /// The heartbeat thread, woken on drop so it withdraws the listing at once.
+    worker: thread::Thread,
 }
 
 impl Listing {
@@ -74,8 +86,8 @@ impl Listing {
         let stop = Arc::new(AtomicBool::new(false));
         let listed_addr = Arc::new(Mutex::new(None));
         let (flag, addr) = (stop.clone(), listed_addr.clone());
-        thread::spawn(move || heartbeat_loop(&base, &announce, &flag, &addr));
-        Listing { stop, listed_addr }
+        let worker = thread::spawn(move || heartbeat_loop(&base, &announce, &flag, &addr)).thread().clone();
+        Listing { stop, listed_addr, worker }
     }
 
     /// The heartbeat runs on its own thread here; nothing to do per frame.
@@ -90,7 +102,10 @@ impl Listing {
 
 impl Drop for Listing {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        // store, then unpark: the thread checks the flag after every wake-up,
+        // and an unpark before it parks makes that park return at once
+        self.stop.store(true, Ordering::Release);
+        self.worker.unpark();
     }
 }
 
@@ -98,14 +113,13 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
     // The registry lists the address our requests come from, and game hosts
     // only serve IPv4, so announce over IPv4.
     let agent = agent(IpFamily::Ipv4Only);
-    let players = || announce.players.load(Ordering::Relaxed);
 
     let mut listed: Option<Created> = None;
     while !stop.load(Ordering::Relaxed) {
         listed = match listed.take() {
             None => {
                 // Wait for the endpoint (e.g. the router's port) before announcing.
-                let Some(body) = create_body(announce, players()) else {
+                let Some(body) = create_body(announce) else {
                     thread::sleep(Duration::from_millis(100));
                     continue;
                 };
@@ -120,10 +134,12 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
                 created
             }
             Some(created) => {
-                let beat = agent
-                    .put(&format!("{base}/servers/{}", created.id))
-                    .header("Authorization", &format!("Bearer {}", created.token))
-                    .send_json(heartbeat_body(players()));
+                let beat = retry_once_on_transport_error(|| {
+                    agent
+                        .put(&format!("{base}/servers/{}", created.id))
+                        .header("Authorization", &format!("Bearer {}", created.token))
+                        .send_json(heartbeat_body(announce))
+                });
                 // Only a 404 means the listing is gone (it expired, or the
                 // registry lost it): register again. Other failures keep it and
                 // retry, so a passing error never lists the game twice.
@@ -145,11 +161,26 @@ fn heartbeat_loop(base: &str, announce: &Announce, stop: &AtomicBool, listed_add
     }
 }
 
+/// Run an idempotent request, once more if it failed below HTTP (a kept-alive
+/// connection the registry closed while idle fails like that, and ureq does
+/// not retry a reused connection). An HTTP status is never retried.
+fn retry_once_on_transport_error<T>(send: impl Fn() -> Result<T, ureq::Error>) -> Result<T, ureq::Error> {
+    match send() {
+        Err(ureq::Error::StatusCode(code)) => Err(ureq::Error::StatusCode(code)),
+        Err(_) => send(),
+        ok => ok,
+    }
+}
+
+/// Sleep up to `total`, waking early when the Listing is dropped (it unparks
+/// this thread), instead of checking the flag every 100 ms.
 fn sleep_unless_stopped(total: Duration, stop: &AtomicBool) {
-    let step = Duration::from_millis(100);
-    let mut waited = Duration::ZERO;
-    while waited < total && !stop.load(Ordering::Relaxed) {
-        thread::sleep(step);
-        waited += step;
+    let deadline = std::time::Instant::now() + total;
+    while !stop.load(Ordering::Acquire) {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+        thread::park_timeout(deadline - now);
     }
 }

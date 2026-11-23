@@ -6,8 +6,9 @@
 
 (function (gridlockWeb) {
     const {
-        FORCE_RELAY, POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, LONG_POLL_HEADER,
-        LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, SEND_BATCH_MS, sleep, roomHttpUrl, gathered,
+        FORCE_RELAY, POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, POLL_FULL_MS, ROOM_MAX_PLAYERS,
+        HELLO_MS, HELLO_MAX_MS, PLAYER_GIVE_UP_MS, LONG_POLL_HEADER,
+        LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, SEEN_KEEP, SEND_BATCH_MS, sleep, roomHttpUrl, gathered,
         iceServersFor, spareFor,
     } = gridlockWeb;
 
@@ -37,6 +38,10 @@
             // How long each step of a join took, logged once it connects.
             this.t0 = performance.now();
             this.marks = [];
+            // Player: since when it has had no open channel (see poll). The
+            // game restarts it when it takes over a socket opened ahead.
+            this.waitingSince = Date.now();
+            this.closedAt = null; // set by shutdown
             this.start(roomUrl);
         }
 
@@ -139,6 +144,7 @@
         async poll() {
             let lastKeep = Date.now();
             let lastHello = Date.now();
+            let helloGap = HELLO_MS; // doubles with each hello, up to HELLO_MAX_MS
             const seen = new Map(); // id -> seq of messages already handled
             let longPoll = false; // the registry holds polls (see LONG_POLL_HEADER)
             let lastSeq = 0; // newest message seq seen, for a long poll's `after`
@@ -147,27 +153,56 @@
                 // A connected player needs no signalling: if the host goes,
                 // the WebRTC connection itself reports it.
                 const connected = !this.isHost && [...this.peers.values()].some((p) => p.open);
+                if (connected) {
+                    // Lost later, the host is looked for afresh: hellos
+                    // start over, and so does the time to give up.
+                    this.waitingSince = lastHello = Date.now();
+                    helloGap = HELLO_MS;
+                } else if (!this.isHost && Date.now() - this.waitingSince >= PLAYER_GIVE_UP_MS) {
+                    // Nothing opened in all this time: the host is gone or
+                    // can't be reached. Stop asking (every poll and hello
+                    // keeps the registry, and the host's poll, busy); the
+                    // game sees the socket close, a failed connect.
+                    console.info(`gridlock_web: no connection to the host after ${PLAYER_GIVE_UP_MS} ms, giving up`);
+                    return this.shutdown();
+                }
+                // Host: whether a player is connecting (the registry then
+                // looks at its mailbox often), and whether the room is full
+                // (it then polls now and then, plainly).
+                const busy = this.isHost && this.handshaking();
+                const quiet = this.isHost && !busy && this.roomFull();
                 if (!connected) {
                     try {
                         let q = `?id=${encodeURIComponent(this.me.id)}&token=${encodeURIComponent(this.me.token)}`;
                         if (this.isHost) {
-                            q += "&host";
+                            q += busy ? "&host&busy" : "&host&idle";
                             if (Date.now() - lastKeep >= HOST_KEEP_MS) {
                                 q += "&keep";
                                 lastKeep = Date.now();
                             }
                         }
-                        // Ask to be held until something new arrives; a registry
-                        // without long polling ignores this.
-                        const have = [...seen].filter(([, seq]) => seq >= lastSeq - HAVE_WINDOW).slice(-HAVE_MAX);
-                        q += `&wait&after=${lastSeq}&have=${have.map(([id]) => encodeURIComponent(id)).join(",")}`;
+                        // Ask to be held until something new arrives (not
+                        // in a full room); a registry without long polling
+                        // ignores this.
+                        // Messages too old to come again are forgotten on the
+                        // way, so `seen` stays small for a host up for hours.
+                        const have = [];
+                        seen.forEach((seq, id) => {
+                            if (seq < lastSeq - SEEN_KEEP) seen.delete(id);
+                            else if (seq >= lastSeq - HAVE_WINDOW) have.push(id);
+                        });
+                        if (!quiet) q += "&wait";
+                        q += `&after=${lastSeq}&have=${have.slice(-HAVE_MAX).map((id) => encodeURIComponent(id)).join(",")}`;
                         const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
                         longPoll = resp.headers.has(LONG_POLL_HEADER);
                         failures = 0;
                         // A host whose claim was lost claims the room again;
                         // players already connected are not affected.
                         if (resp.status === 410 && this.isHost && (await this.reclaim())) {
-                            this.publishSpares(); // they name the host by its new id
+                            this.publishSpares(true); // they name the host by its new id
+                            // A restarted local registry numbers messages from 1
+                            // again; an old `after` would hide every new one.
+                            lastSeq = 0;
                             continue;
                         }
                         // 410: the host left; 403/404: this room is gone for us.
@@ -200,8 +235,9 @@
                                 this.onSignal(msg, offering);
                             }
                         }
-                        if (!this.isHost && Date.now() - lastHello >= HELLO_MS) {
+                        if (!this.isHost && Date.now() - lastHello >= helloGap) {
                             lastHello = Date.now();
+                            helloGap = Math.min(helloGap * 2, HELLO_MAX_MS);
                             this.post("/hello", {});
                         }
                     } catch {
@@ -210,7 +246,9 @@
                 }
                 const delay = failures
                     ? Math.min(POLL_RETRY_MS * 2 ** (failures - 1), this.pollDelay(connected))
-                    : longPoll && !connected
+                    : quiet
+                      ? POLL_FULL_MS
+                      : longPoll && !connected
                       ? LONG_POLL_GAP_MS
                       : this.pollDelay(connected);
                 await sleep(delay);
@@ -223,6 +261,22 @@
             if ([...this.peers.values()].some((p) => !p.open)) return POLL_CONNECTING_MS;
             if (this.isHost) return POLL_HOST_MS;
             return connected ? POLL_CONNECTED_MS : POLL_CONNECTING_MS;
+        }
+
+        // Host: a player's connection under way (one stuck that long is
+        // not: its player gives up by then).
+        handshaking() {
+            const now = performance.now();
+            return [...this.peers.values()].some((p) => !p.open && now - p.t0 < PLAYER_GIVE_UP_MS);
+        }
+
+        // Host: no room for another player (itself and every one connected
+        // that has sent something: one connected ahead from the browse
+        // list, see preconnect, holds no place yet).
+        roomFull() {
+            let open = 1;
+            for (const p of this.peers.values()) if (p.open && p.heard) open++;
+            return open >= ROOM_MAX_PLAYERS;
         }
 
         async reclaim() {

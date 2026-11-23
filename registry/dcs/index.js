@@ -5,8 +5,9 @@
 // - State lives in a private bucket reached through the S3 API (STATE_BUCKET).
 //   The host list is one object, state.json. The bucket has no conditional
 //   writes, so two writes at once can overwrite each other: every change to
-//   it is checked after a moment and applied again on top of the other one if
-//   it went missing (commit). A host whose listing still went missing gets
+//   it (but a heartbeat, which the next one heals) is checked after a moment
+//   and applied again on top of the other one if it went missing (commit,
+//   after the reply). A host whose listing still went missing gets
 //   404 on its next heartbeat and registers again.
 // - WebRTC signalling never touches state.json, since it is on the path of
 //   every join: each room's claim and each message are objects of their own
@@ -22,10 +23,11 @@
 //   deletes whatever a crashed tab left behind.
 //
 // Host list. Game hosts announce themselves with a heartbeat; clients fetch the list.
-//   GET    /servers        -> [{ id, name, addr | room, players, max_players, lan? }]
+//   GET    /servers        -> [{ id, name, addr | room, players, bots?, max_players, lan? }]
 //   (lan: the listing came from the asker's own network; its address is never shown.)
-//   POST   /servers        { name, port | room, players, max_players } -> { id, token, ttl, addr? }
-//   PUT    /servers/:id    { players }   (Authorization: Bearer <token>)
+//   POST   /servers        { name, port | room, players, bots?, max_players } -> { id, token, ttl, addr? }
+//   PUT    /servers/:id    { players, bots? }   (Authorization: Bearer <token>)
+//   (bots: how many of players are bots, who give their place to a joiner.)
 //   DELETE /servers/:id                  (Authorization: Bearer <token>)
 //   A native host's address is the IP the request came from, never a
 //   client-supplied one, so a listing can only point at the machine that made it.
@@ -44,7 +46,7 @@
 //                                  player's offer) reach the host with the join
 //   POST   /room/:code/hello       { id, token, to?, via?, signals? }  a player re-announcing itself
 //   POST   /room/:code/send        { id, token, host?, to?, via?, signals: [{ receiver, data }] }
-//   GET    /room/:code/poll?id&token[&host][&keep][&wait][&after=<seq>][&have=<ids>]
+//   GET    /room/:code/poll?id&token[&host][&keep][&busy|&idle][&wait][&after=<seq>][&have=<ids>]
 //                                  -> [{ id, seq, NewPeer | PeerLeft | Signal: { sender, data } }]
 //   POST   /room/:code/leave       { id, token, host?, to?, via? }
 //   POST   /room/:code/spare       { id, token, host: true, offers: [{ oid, data }] }
@@ -52,13 +54,14 @@
 //   GET    /room/:code/spare       -> { host, oid, data }   one of them, at random (404: none)
 //   A player answers a spare offer and sends the answer (tagged with its
 //   `oid`) with its join, so a join is one signalling trip; the host
-//   republishes its spares as they are taken and every 30 s or so.
+//   republishes its spares as they change, and at least every 50 s.
 //   A poll returns the caller's messages from the last MESSAGE_TTL_MS, newer
 //   than `after` (the newest seq it has) and not among `have` (ids it has
 //   from around then); with `wait` it is held until there is one, for up to
 //   LONG_POLL_MS, and the reply carries LONG_POLL_HEADER. The host's polls
-//   carry ?host (its token is a host token) and, every so often, ?keep to
-//   renew its claim; a room not renewed for HOST_TTL_SECONDS closes, and a
+//   carry ?host (its token is a host token), ?busy while a handshake is under
+//   way or ?idle otherwise (see LONG_POLL_IDLE_CHECK_MS), and, every so
+//   often, ?keep to renew its claim; a room not renewed for HOST_TTL_SECONDS closes, and a
 //   joining player's polls get 410. (`to` and `via` from a join are accepted
 //   for older pages; a player's messages always go to the room's host.)
 //   Players are only ever introduced to the host, never to each other.
@@ -74,19 +77,31 @@
 const TTL_SECONDS = 60;
 const HOST_TTL_SECONDS = 120;
 const MESSAGE_TTL_MS = 60000;
-// Long polling (see room): how long a poll is held, how often it looks for
-// new messages, and how often it checks that the room is still open. A
-// player's mailbox, or a host's that had a message in the last
-// LONG_POLL_ACTIVE_MS, is in the middle of a handshake and is looked at more
-// often; an idle host's (waiting for someone to join) less, since each look
-// is an S3 request.
+// Long polling (see room): how long a poll is held and how often it looks
+// for new messages. A player's mailbox, or a host's in the middle of a
+// handshake, is looked at often; an idle host's (waiting for someone to
+// join) less, since each look is an S3 request. The host says which it is
+// (?busy or ?idle); for a page that says neither, a host whose mailbox had a
+// message in the last LONG_POLL_ACTIVE_MS counts as busy. (Whether the room
+// is still open is read once per poll, at its start: a held poll is answered
+// within LONG_POLL_MS, and the next one finds out.)
 const LONG_POLL_MS = 6000; // the function itself times out at 10 s
 const LONG_POLL_ACTIVE_MS = 10000;
 // (Each look itself takes an S3 round trip, ~150 ms from the edge, on top.)
 const LONG_POLL_CHECK_MS = 25;
-const LONG_POLL_IDLE_CHECK_MS = 50;
-const LONG_POLL_CLAIM_CHECK_MS = 2000;
+// An idle host is looked at about once a second: the first message of a
+// join may wait up to this long (a write in the same isolate still wakes the
+// poll at once), and each look saved is an S3 LIST. A join answering a spare
+// offer is that one message; the host is busy from then on.
+const LONG_POLL_IDLE_CHECK_MS = 1000;
+// A look that fails waits twice as long before the next, up to this; after
+// LONG_POLL_MAX_FAILURES in a row the poll gives up with a 503, as when its
+// first look fails, so a failing store is not asked 20-40 times a second.
+const LONG_POLL_FAIL_MAX_MS = 1000;
+const LONG_POLL_MAX_FAILURES = 3;
 const LONG_POLL_HEADER = "X-Gridlock-Long-Poll";
+// A poll lists at most this many pages (of 200) of its mailbox per look.
+const UNSEEN_MAX_PAGES = 3;
 // How far apart two isolates' clocks may be, for a poll's `after`.
 const CLOCK_SKEW_MS = 2000;
 // How long a host claiming a room waits before checking its claim stuck.
@@ -98,7 +113,7 @@ const SWEEP_EVERY_MS = 10 * 60 * 1000;
 const SWEEP_MARGIN_MS = 60 * 1000;
 const SWEEP_MAX_PAGES = 20;
 const DELETE_PARALLEL = 16;
-// A host rewrites its spares every 30 s; ones older than this are gone.
+// A host rewrites its spares at least every 50 s; ones older than this are gone.
 const SPARE_TTL_MS = 75000;
 const SPARE_MAX_OFFERS = 4;
 const SPARE_MAX_BYTES = 64 * 1024;
@@ -110,6 +125,12 @@ const MAX_SIGNALS = 64;
 const ROOM_CODE = /^[A-Za-z0-9_-]{4,32}$/;
 const PEER_ID = /^[0-9a-f-]{36}$/;
 const TURN_CREDENTIAL_TTL = 86400;
+// Minted TURN credentials are handed out again this long (the page itself
+// keeps them 30 min more), far within their TURN_CREDENTIAL_TTL.
+const ICE_REUSE_MS = 30 * 60 * 1000;
+// GET /servers answers from this isolate's last read of state.json for this
+// long (requests at once share one read); its own writes drop it at once.
+const HOST_LIST_REUSE_MS = 2000;
 const STUN_ONLY = { iceServers: [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }] };
 
 export default {
@@ -121,7 +142,15 @@ export default {
         if (!ROOM_CODE.test(arg)) return cors(json({ error: "bad room code" }, 400));
         return cors(await room(request, env, ctx, arg, action));
       }
-      if (root === "ice" && request.method === "GET") return cors(json(await iceServers(env)));
+      if (root === "ice" && request.method === "GET") {
+        const servers = await iceServers(env);
+        const resp = json(servers);
+        // The page may reuse these a while; not a failed mint (STUN only
+        // although TURN is configured), so the next ask tries again.
+        const failedMint = servers === STUN_ONLY && !env.TURN_URLS && env.TURN_KEY_ID && env.TURN_KEY_API_TOKEN;
+        resp.headers.set("Cache-Control", failedMint ? "no-store" : "private, max-age=600");
+        return cors(resp);
+      }
       if (root === "models" && request.method === "GET" && env.MODELS_ORIGIN) return cors(await model(request, env));
       if (root === "servers") return cors(await servers(request, env, ctx, arg, action));
       return cors(json({ error: "not found" }, 404));
@@ -143,19 +172,58 @@ async function loadState(store) {
   return { listings };
 }
 
+// The host list as GET /servers last read it in this isolate: { at, state: Promise }.
+let hostList = null;
+
+function listedState(store) {
+  if (hostList && Date.now() - hostList.at < HOST_LIST_REUSE_MS) return hostList.state;
+  const entry = { at: Date.now(), state: loadState(store) };
+  hostList = entry;
+  entry.state.catch(() => {
+    if (hostList === entry) hostList = null;
+  });
+  return entry.state;
+}
+
 // Apply a change to state.json and make sure it stuck: a write made at the
 // same moment can overwrite ours, so read back after a moment and apply the
-// change again on top of what is there if it is missing. `apply` must be
-// safe to repeat; `applied` tells whether a state has the change.
-async function commit(store, apply, applied) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const state = await loadState(store);
-    if (attempt > 0 && applied(state)) return;
-    apply(state);
-    await store.put(STATE_KEY, state);
-    await new Promise((r) => setTimeout(r, 100 + Math.random() * 200));
-    if (applied(await loadState(store))) return;
-  }
+// change again on top of what is there if it is missing. The state is read
+// here, right before the write, never earlier: anything a caller awaited in
+// between (its request body, say) would widen the window in which another
+// write is read and then overwritten with what was there before it.
+// `apply(state)` makes the change, or returns false to refuse it (nothing is
+// written then): checks that need the state, such as authorization, go in
+// it. It must be safe to repeat. `applied` tells whether a state has the
+// change (then a check writes nothing). Options: `ctx`, to make that check
+// after the response is sent (in ctx.waitUntil); `check: false` to write
+// once and not check at all, for a change that heals itself (a heartbeat:
+// the next one comes long before the listing would expire).
+// Returns false when `apply` refused the change.
+async function commit(store, apply, applied, { ctx, check = true } = {}) {
+  const state = await loadState(store);
+  // Nothing to change (a leave for a room that was never listed, say):
+  // write nothing, so a listing or heartbeat written meanwhile stays.
+  if (applied(state)) return true;
+  if (apply(state) === false) return false;
+  await putState(store, state);
+  if (!check) return true;
+  const settle = async () => {
+    for (let attempt = 1; attempt < 4; attempt++) {
+      await delay(100 + Math.random() * 200);
+      const now = await loadState(store);
+      if (applied(now) || apply(now) === false) return;
+      await putState(store, now);
+    }
+  };
+  if (ctx) ctx.waitUntil(settle().catch((e) => console.error("gridlock-registry: commit:", e && e.stack ? e.stack : e)));
+  else await settle();
+  return true;
+}
+
+async function putState(store, state) {
+  hostList = null;
+  await store.put(STATE_KEY, state);
+  hostList = null;
 }
 
 // ---------------------------------------------------------------- host list
@@ -165,7 +233,7 @@ async function servers(request, env, ctx, id, extra) {
   const store = new Store(env);
 
   if (!id && request.method === "GET") {
-    const { listings } = await loadState(store);
+    const { listings } = await listedState(store);
     const ip = request.headers.get("CF-Connecting-IP");
     return json(
       Object.entries(listings).map(([id, listing]) => ({
@@ -175,87 +243,118 @@ async function servers(request, env, ctx, id, extra) {
       })),
     );
   }
-  if (!id && request.method === "POST") return createListing(request, store);
+  if (!id && request.method === "POST") return createListing(request, store, ctx);
   if (!id || !PEER_ID.test(id)) return json({ error: "not found" }, 404);
   if (request.method === "PUT") return heartbeat(request, store, id);
-  if (request.method === "DELETE") return removeListing(request, store, id);
+  if (request.method === "DELETE") return removeListing(request, store, ctx, id);
   return json({ error: "method not allowed" }, 405);
 }
 
-async function createListing(request, store) {
+async function createListing(request, store, ctx) {
   const ip = request.headers.get("CF-Connecting-IP");
   const body = await readJson(request);
   const name = cleanName(body?.name);
   const maxPlayers = int(body?.max_players, 1, 255);
   const players = int(body?.players, 0, 255);
+  const bots = int(body?.bots, 0, 255);
   const port = int(body?.port, 1, 65535);
   const room = typeof body?.room === "string" && ROOM_CODE.test(body.room) ? body.room : null;
   if (!ip || !name || maxPlayers === null || players === null || (port === null) === (room === null)) {
     return json({ error: "invalid listing" }, 400);
   }
-  const entry = { name, players: Math.min(players, maxPlayers), max_players: maxPlayers };
+  const entry = { name, ...occupancy(players, bots, maxPlayers), max_players: maxPlayers };
   if (room) entry.room = room;
   else entry.addr = ip.includes(":") ? `[${ip}]:${port}` : `${ip}:${port}`;
 
   // One listing per game: a host registering again (its old listing lost a
   // heartbeat) replaces what it had, so the game is never listed twice.
   // Only the machine that listed a room may replace that listing: anyone else
-  // could otherwise take over (or rename) another host's game.
-  const { listings } = await loadState(store);
-  for (const [other, l] of Object.entries(listings)) {
-    if (room ? l.entry.room !== room : l.entry.addr !== entry.addr) continue;
-    if (l.ip !== ip) return json({ error: "room already listed" }, 409);
-    delete listings[other];
-  }
-  const fromIp = Object.values(listings).filter((l) => l.ip === ip).length;
-  if (fromIp >= MAX_PER_IP || Object.keys(listings).length >= MAX_LISTINGS) {
-    return json({ error: "too many listings" }, 429);
-  }
-
+  // could otherwise take over (or rename) another host's game. (Checked in
+  // commit, on the state it writes over.)
   const id = crypto.randomUUID();
   const token = crypto.randomUUID();
   const listing = { tokenHash: await sha256Hex(token), ip, expires: Date.now() + TTL_SECONDS * 1000, entry };
-  const replaced = (l) => (room ? l.entry.room === room : l.entry.addr === entry.addr) && l.ip === ip;
-  await commit(
+  const same = (l) => (room ? l.entry.room === room : l.entry.addr === entry.addr);
+  let refusal = null; // the first attempt's: the answer
+  const listed = await commit(
     store,
     (s) => {
-      for (const [other, l] of Object.entries(s.listings)) if (replaced(l)) delete s.listings[other];
+      for (const [other, l] of Object.entries(s.listings)) {
+        if (!same(l) || other === id) continue;
+        if (l.ip !== ip) {
+          refusal ??= json({ error: "room already listed" }, 409);
+          return false;
+        }
+        delete s.listings[other];
+      }
+      const fromIp = Object.values(s.listings).filter((l) => l.ip === ip).length;
+      if (!s.listings[id] && (fromIp >= MAX_PER_IP || Object.keys(s.listings).length >= MAX_LISTINGS)) {
+        refusal ??= json({ error: "too many listings" }, 429);
+        return false;
+      }
       s.listings[id] = listing;
     },
     (s) => Boolean(s.listings[id]),
+    { ctx },
   );
+  if (!listed) return refusal;
   // Echo the address back so a host can tell whether it is reachable as listed.
   return json({ id, token, ttl: TTL_SECONDS, ...(entry.addr ? { addr: entry.addr } : {}) }, 201);
 }
 
 async function heartbeat(request, store, id) {
-  const { listings } = await loadState(store);
-  if (!(await authorized(request, listings, id))) return json({ error: "unknown listing" }, 404);
-  const players = int((await readJson(request))?.players, 0, 255);
+  const tokenHash = await sha256Hex(bearer(request));
+  const body = await readJson(request);
+  const players = int(body?.players, 0, 255);
+  const bots = int(body?.bots, 0, 255);
   const expires = Date.now() + TTL_SECONDS * 1000;
-  await commit(
+  // Authorized on the state commit reads once the body is in, and only the
+  // listing itself changed: a listing created, renewed or removed by
+  // another request meanwhile stays as that request left it. One another
+  // write took out is 404, and the host lists itself again.
+  const beat = await commit(
     store,
     (s) => {
-      const l = (s.listings[id] ??= listings[id]);
-      if (players !== null) l.entry.players = Math.min(players, l.entry.max_players);
+      const l = s.listings[id];
+      if (l?.tokenHash !== tokenHash) return false;
+      if (players !== null) {
+        delete l.entry.bots;
+        Object.assign(l.entry, occupancy(players, bots, l.entry.max_players));
+      }
       l.expires = expires;
     },
     (s) => s.listings[id]?.expires >= expires,
+    // A heartbeat lost to a write at the same moment heals with the next
+    // one (HEARTBEAT_SECS 20 against TTL_SECONDS 60), so it is not checked.
+    { check: false },
   );
+  if (!beat) return json({ error: "unknown listing" }, 404);
   return new Response(null, { status: 204 });
 }
 
-async function removeListing(request, store, id) {
-  if (!(await authorized(request, (await loadState(store)).listings, id))) return json({ error: "unknown listing" }, 404);
-  await commit(store, (s) => delete s.listings[id], (s) => !s.listings[id]);
+async function removeListing(request, store, ctx, id) {
+  const tokenHash = await sha256Hex(bearer(request));
+  let known = false;
+  await commit(
+    store,
+    (s) => {
+      const l = s.listings[id];
+      // Gone already: refused if it was never ours to remove; on the check
+      // after a moment, nothing left to do.
+      if (!l) return known ? undefined : false;
+      if (l.tokenHash !== tokenHash) return false;
+      known = true;
+      delete s.listings[id];
+    },
+    (s) => !s.listings[id],
+    { ctx },
+  );
+  if (!known) return json({ error: "unknown listing" }, 404);
   return new Response(null, { status: 204 });
 }
 
-async function authorized(request, listings, id) {
-  const listing = listings[id];
-  if (!listing) return null;
-  const token = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
-  return listing.tokenHash === (await sha256Hex(token)) ? listing : null;
+function bearer(request) {
+  return (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
 }
 
 // ---------------------------------------------------------------- ICE / TURN
@@ -270,8 +369,25 @@ async function iceServers(env) {
     };
     return { iceServers: [...STUN_ONLY.iceServers, turn] };
   }
-  // Cloudflare's TURN service, with short-lived credentials minted per request.
+  // Cloudflare's TURN service, with short-lived credentials (a day), minted
+  // once per ICE_REUSE_MS in this isolate; requests at once share one mint.
   if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) return STUN_ONLY;
+  const now = Date.now();
+  if (minted?.keyId === env.TURN_KEY_ID && now - minted.at < ICE_REUSE_MS) return minted.servers;
+  const entry = { keyId: env.TURN_KEY_ID, at: now, servers: mintIceServers(env) };
+  minted = entry;
+  // A failed mint is not kept: the next request tries again.
+  const forget = () => {
+    if (minted === entry) minted = null;
+  };
+  entry.servers.then((s) => s === STUN_ONLY && forget(), forget);
+  return entry.servers;
+}
+
+// Minted ICE servers in this isolate: { keyId, at, servers: Promise }.
+let minted = null;
+
+async function mintIceServers(env) {
   const resp = await fetch(
     `https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`,
     {
@@ -372,18 +488,21 @@ async function room(request, env, ctx, code, action) {
     }
     // Long poll: hold the request until something arrives, looking again
     // every LONG_POLL_CHECK_MS (or at once when a write in this same isolate
-    // wakes us), and checking now and then that the room is still open.
-    let lastClaimCheck = Date.now();
-    // (A player only polls while it connects.)
-    const active = !asHost || now - after < LONG_POLL_ACTIVE_MS;
+    // wakes us). (A player only polls while it connects.)
+    const said = url.searchParams;
+    const active =
+      !asHost || (said.has("busy") || said.has("idle") ? said.has("busy") : now - after < LONG_POLL_ACTIVE_MS);
     const check = active ? LONG_POLL_CHECK_MS : LONG_POLL_IDLE_CHECK_MS;
+    let failures = 0; // looks failed in a row
     while (wait && !messages.length && Date.now() - now < LONG_POLL_MS) {
-      await nextMessage(box, check);
+      await nextMessage(box, failures ? Math.min(check * 2 ** failures, LONG_POLL_FAIL_MAX_MS) : check);
       // A look that failed (the store has the odd hiccup) is tried again.
-      messages = await look().catch(() => []);
-      if (!messages.length && Date.now() - lastClaimCheck >= LONG_POLL_CLAIM_CHECK_MS) {
-        lastClaimCheck = Date.now();
-        if (!open(await loadClaim())) return json({ error: "room closed" }, 410);
+      try {
+        messages = await look();
+        failures = 0;
+      } catch (e) {
+        if (++failures >= LONG_POLL_MAX_FAILURES) throw e;
+        messages = [];
       }
     }
     const resp = json(messages);
@@ -450,6 +569,7 @@ async function room(request, env, ctx, code, action) {
             for (const [lid, l] of Object.entries(s.listings)) if (l.entry.room === code) delete s.listings[lid];
           },
           (s) => !Object.values(s.listings).some((l) => l.entry.room === code),
+          { ctx },
         );
       }
       return new Response(null, { status: 204 });
@@ -499,13 +619,23 @@ async function deliver(store, box, sender, bodies) {
 // clocks of two isolates disagree by a moment, except the ids in `have`.
 // Without `have`, only messages newer than `after`.
 //
-// The whole mailbox is listed (it holds only a handful of messages): those
-// in `have` (the caller has them) and expired ones are deleted, in the
-// background and once each (`deleting`).
+// The mailbox is listed from `from` on (keys sort by time; S3 start-after),
+// so older messages, however many, can't hide new ones, and a flood is
+// listed a few pages deep (UNSEEN_MAX_PAGES). Those in `have` (the caller
+// has them) are deleted, in the background and once each (`deleting`);
+// expired ones are left to the sweep. (A store that ignored start-after
+// would list from the start, and expired ones are deleted then too.)
 async function unseen(store, ctx, prefix, after, have, deleting) {
   const now = Date.now();
   const from = Math.max(have ? after - CLOCK_SKEW_MS : after + 1, now - MESSAGE_TTL_MS, 0);
-  const { items } = await store.list(prefix);
+  const items = [];
+  let token = null;
+  for (let page = 0; page < UNSEEN_MAX_PAGES; page++) {
+    const listed = await store.list(prefix, { token, startAfter: prefix + String(from).padStart(15, "0") });
+    items.push(...listed.items);
+    token = listed.next;
+    if (!token) break;
+  }
   const fresh = [];
   const done = [];
   for (const { key } of items) {
@@ -564,7 +694,7 @@ async function sweep(store) {
       if (message) {
         if (Number(message[1]) < now - MESSAGE_TTL_MS - SWEEP_MARGIN_MS) stale.push(key);
       } else if (/^rooms\/[^/]+\/spare\.json$/.test(key)) {
-        // A host rewrites its spares every 30 s or so.
+        // A host rewrites its spares at least every 50 s.
         if (now - Date.parse(modified || "") > SPARE_TTL_MS + SWEEP_MARGIN_MS) stale.push(key);
       } else if (/^rooms\/[^/]+\.json$/.test(key)) {
         const age = now - Date.parse(modified || "");
@@ -608,7 +738,12 @@ function nextMessage(key, ms) {
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
-      localWaiters.get(key)?.delete(done);
+      const waiters = localWaiters.get(key);
+      if (waiters) {
+        waiters.delete(done);
+        // (no empty set left behind for every mailbox ever polled)
+        if (!waiters.size) localWaiters.delete(key);
+      }
       resolve();
     };
     const timer = setTimeout(done, ms);
@@ -634,9 +769,19 @@ async function hostVia(env, code, id, host) {
   return hmacHex(env.SIGNAL_SECRET, `${code}:${id}>${host}`);
 }
 
+// SIGNAL_SECRET's HMAC key, imported once per isolate: { secret, key: Promise }.
+let signalKey = null;
+
 async function hmacHex(secret, message) {
-  const key = await crypto.subtle.importKey("raw", utf8(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return hex(await crypto.subtle.sign("HMAC", key, utf8(message)));
+  let entry = signalKey;
+  if (entry?.secret !== secret) {
+    entry = { secret, key: crypto.subtle.importKey("raw", utf8(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]) };
+    signalKey = entry;
+    entry.key.catch(() => {
+      if (signalKey === entry) signalKey = null;
+    });
+  }
+  return hex(await crypto.subtle.sign("HMAC", await entry.key, utf8(message)));
 }
 
 async function validPeer(env, code, id, token, asHost) {
@@ -696,9 +841,12 @@ class Store {
   // One page of the keys under `prefix`, in order (ListObjectsV2), as
   // { items: [{ key, modified }], next }: `next` is the token for the page
   // after, if there is one.
-  async list(prefix, { token, maxKeys = 200 } = {}) {
+  // `startAfter`: only keys after it (ignored with a token, which carries on
+  // from its own page).
+  async list(prefix, { token, maxKeys = 200, startAfter } = {}) {
     const query = { "list-type": "2", prefix, "max-keys": String(maxKeys) };
     if (token) query["continuation-token"] = token;
+    else if (startAfter) query["start-after"] = startAfter;
     const resp = await this.send("GET", "/", query);
     if (!resp.ok) throw new Error(`S3 LIST ${prefix}: ${resp.status}`);
     const xml = await resp.text();
@@ -718,7 +866,7 @@ class Store {
 
     const amzDate = new Date().toISOString().replace(/[-:]|\.\d{3}/g, "");
     const date = amzDate.slice(0, 8);
-    const payloadHash = await sha256Hex(body);
+    const payloadHash = body === "" ? EMPTY_SHA256 : await sha256Hex(body);
     const headers = { host: url.host, "x-amz-content-sha256": payloadHash, "x-amz-date": amzDate };
     const signedHeaders = Object.keys(headers).sort().join(";");
     const canonicalHeaders = Object.keys(headers).sort().map((h) => `${h}:${headers[h]}\n`).join("");
@@ -726,9 +874,8 @@ class Store {
     const scope = `${date}/auto/s3/aws4_request`;
     const toSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${await sha256Hex(canonicalRequest)}`;
 
-    let key = utf8(`AWS4${this.env.S3_SECRET_ACCESS_KEY}`);
-    for (const part of [date, "auto", "s3", "aws4_request"]) key = await hmac(key, part);
-    const signature = hex(await hmac(key, toSign));
+    const key = await signingKey(this.env.S3_SECRET_ACCESS_KEY, date);
+    const signature = hex(await crypto.subtle.sign("HMAC", key, utf8(toSign)));
 
     return fetch(url, {
       method,
@@ -741,6 +888,29 @@ class Store {
       },
     });
   }
+}
+
+// SHA-256 of an empty body (every GET, LIST and DELETE).
+const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+// The SigV4 signing key, derived from the secret and the UTC date, so the
+// same all day: derived once a day per isolate. { secret, date, key: Promise }
+let signing = null;
+
+function signingKey(secret, date) {
+  if (signing?.secret === secret && signing.date === date) return signing.key;
+  const entry = { secret, date, key: deriveSigningKey(secret, date) };
+  signing = entry;
+  entry.key.catch(() => {
+    if (signing === entry) signing = null;
+  });
+  return entry.key;
+}
+
+async function deriveSigningKey(secret, date) {
+  let key = utf8(`AWS4${secret}`);
+  for (const part of [date, "auto", "s3", "aws4_request"]) key = await hmac(key, part);
+  return crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 
 function xmlText(text) {
@@ -756,12 +926,18 @@ async function sha256Hex(text) {
   return hex(await crypto.subtle.digest("SHA-256", utf8(text)));
 }
 
+const HEX = Array.from({ length: 256 }, (_, b) => b.toString(16).padStart(2, "0"));
+
 function hex(buffer) {
-  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  let out = "";
+  for (const b of new Uint8Array(buffer)) out += HEX[b];
+  return out;
 }
 
+const encoder = new TextEncoder();
+
 function utf8(text) {
-  return new TextEncoder().encode(text);
+  return encoder.encode(text);
 }
 
 function rfc3986(value) {
@@ -799,6 +975,18 @@ function int(value, min, max) {
   return Number.isInteger(value) && value >= min && value <= max ? value : null;
 }
 
+// The counts a listing shows: `players` (bots included) and, when the host
+// sent it, `bots`, how many of them are bots. A joiner takes a bot's place,
+// so the list counts a game full only when its people fill it: the seats cap
+// the people, and the bots are whatever is left of the capped players.
+// Hosts from before the bot count send none, and list none.
+function occupancy(players, bots, maxPlayers) {
+  const listed = Math.min(players, maxPlayers);
+  if (bots === null) return { players: listed };
+  const people = Math.min(players - Math.min(bots, players), maxPlayers);
+  return { players: listed, bots: listed - people };
+}
+
 async function readJson(request) {
   try {
     return await request.json();
@@ -820,6 +1008,9 @@ function cors(response) {
   headers.set("Access-Control-Allow-Origin", "*");
   headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  // Browsers may skip the preflight this long (Chromium caps it at 2 h):
+  // without it they ask again after 5 s, so before every heartbeat.
+  headers.set("Access-Control-Max-Age", "86400");
   // The page reads this one to know its polls are held (see room).
   headers.set("Access-Control-Expose-Headers", LONG_POLL_HEADER);
   return new Response(response.body, { status: response.status, headers });

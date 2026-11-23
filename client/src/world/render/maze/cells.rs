@@ -55,7 +55,9 @@ fn brace_enclosed(m: &Maze) -> bool {
 
 /// Bake the cells of chunk (`chunk_x`, `chunk_y`), row by row.
 pub(super) fn bake_chunk(m: &Maze, lighting: &Lighting, chunk_x: usize, chunk_y: usize) -> Vec<MeshData> {
-    let mut out = MeshBuilder::new(true);
+    // about 2,000 vertices for a full chunk; one item per cell
+    let cells = CHUNK_CELLS * CHUNK_CELLS;
+    let mut out = MeshBuilder::with_capacity(true, cells * 40, cells);
     let braces = !brace_enclosed(m);
     let y_end = ((chunk_y + 1) * CHUNK_CELLS).min(m.height as usize);
     let x_end = ((chunk_x + 1) * CHUNK_CELLS).min(m.width as usize);

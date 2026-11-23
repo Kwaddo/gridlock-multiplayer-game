@@ -5,6 +5,11 @@ use platform::Instant;
 use crate::player::{Player, Team, WorldId};
 use crate::protocols::*;
 use crate::server::broadcast;
+use crate::server::snd_gate::{RoundStateGate, RoundStateKey};
+
+mod bomb;
+#[cfg(test)]
+mod tests;
 
 /// S&D round phase
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +42,8 @@ pub struct SndState {
 
     /// If the bomb is dropped (carrier died), its world position
     pub bomb_dropped_pos: Option<(f32, f32, f32)>,
+    /// Where the carrier was last seen, to drop the bomb if they disconnect
+    carrier_last_pos: Option<(f32, f32, f32)>,
 
     /// Bomb site world position (center of the middle room)
     pub bomb_site: (f32, f32, f32),
@@ -62,6 +69,9 @@ pub struct SndState {
     /// Saved spawn positions so we can re-use them across rounds
     pub red_spawn: (f32, f32, f32),
     pub blue_spawn: (f32, f32, f32),
+
+    /// Holds back round-state broadcasts that would show nothing new.
+    round_state_gate: RoundStateGate,
 }
 
 // S&D timing constants
@@ -91,6 +101,7 @@ impl SndState {
             attacking_team: Team::Red, // Red starts as attacker
             bomb_carrier: None,
             bomb_dropped_pos: None,
+            carrier_last_pos: None,
             bomb_site,
             bomb_planted: false,
             plant_progress: 0.0,
@@ -101,6 +112,7 @@ impl SndState {
             round_alive: HashMap::new(),
             red_spawn,
             blue_spawn,
+            round_state_gate: RoundStateGate::default(),
         }
     }
 
@@ -138,14 +150,9 @@ impl SndState {
         self.defuse_progress = 0.0;
         self.defuser = None;
         self.bomb_plant_time = None;
-        self.bomb_dropped_pos = None;
-        self.bomb_carrier = None;
         self.round_alive.clear();
 
         // Respawn all maze players at their team spawns, reset health
-        // Give bomb to first player on attacking team
-        let mut first_attacker: Option<u32> = None;
-
         for (addr, player) in players.iter_mut() {
             if player.world != WorldId::Maze {
                 continue;
@@ -162,10 +169,6 @@ impl SndState {
 
             self.round_alive.insert(*addr, true);
 
-            if player.team == self.attacking_team && first_attacker.is_none() {
-                first_attacker = Some(player.id);
-            }
-
             player.post_teleport_freeze_until =
                 Some(Instant::now() + std::time::Duration::from_secs(SND_FREEZE_TIME as u64));
 
@@ -174,8 +177,9 @@ impl SndState {
             let _ = socket.send_to(&respawn_msg, *addr);
         }
 
-        // Assign bomb to first attacker
-        self.bomb_carrier = first_attacker;
+        // Give the bomb to a human attacker; no humans attacking, no bomb
+        let carrier = self.pick_bomb_carrier(players).map(|p| (p.id, p.position));
+        self.give_bomb(carrier);
 
         // Broadcast state
         broadcast::broadcast_state(socket, players);
@@ -192,6 +196,10 @@ impl SndState {
         players: &mut HashMap<PeerId, Player>,
     ) -> Option<(String, u32)> {
         self.phase_timer -= dt;
+
+        // drop the bomb when its carrier is gone, and let an attacker pick it up
+        self.track_bomb_carrier(players);
+        self.auto_pickup_bomb(players);
 
         match self.phase {
             SndPhase::FreezeTime => {
@@ -306,8 +314,14 @@ impl SndState {
             }
         }
 
-        // Broadcast round state
-        self.broadcast_round_state(socket, players);
+        // Broadcast round state, when a client would see a change (or as a
+        // heartbeat), not on every tick
+        // keyed on who is in the maze: one arriving from the lobby gets it at once
+        let in_maze = players.values().filter(|p| !p.is_bot && p.world == WorldId::Maze).count();
+        let key = self.round_state_key(in_maze);
+        if self.round_state_gate.should_send(key, dt) {
+            self.broadcast_round_state(socket, players);
+        }
 
         None
     }
@@ -354,33 +368,6 @@ impl SndState {
         } else {
             None
         }
-    }
-
-    /// Handle bomb pickup request
-    pub fn try_pickup_bomb(
-        &mut self,
-        player_addr: PeerId,
-        players: &HashMap<PeerId, Player>,
-    ) -> bool {
-        let player = match players.get(&player_addr) {
-            Some(p) => p,
-            None => return false,
-        };
-
-        // Must be alive, on attacking team, and bomb must be on the ground
-        if !player.is_alive || player.team != self.attacking_team {
-            return false;
-        }
-
-        if let Some(bomb_pos) = self.bomb_dropped_pos {
-            if Self::distance(player.position, bomb_pos) <= SND_BOMB_PICKUP_RANGE {
-                self.bomb_carrier = Some(player.id);
-                self.bomb_dropped_pos = None;
-                return true;
-            }
-        }
-
-        false
     }
 
     /// Handle plant start request
@@ -439,6 +426,26 @@ impl SndState {
         }
     }
 
+    fn round_state_key(&self, players: usize) -> RoundStateKey {
+        RoundStateKey {
+            round: self.current_round,
+            wins: (self.red_round_wins, self.blue_round_wins),
+            phase: self.phase as u8,
+            attacking_team: self.attacking_team.as_u8(),
+            bomb_carrier: self.bomb_carrier.unwrap_or(0),
+            bomb_pos: self.bomb_dropped_pos.unwrap_or((0.0, 0.0, 0.0)),
+            bomb_dropped: self.bomb_dropped_pos.is_some(),
+            bomb_planted: self.bomb_planted,
+            plant_step: RoundStateKey::progress_step(self.plant_progress),
+            defuse_step: RoundStateKey::progress_step(self.defuse_progress),
+            planting: self.plant_progress > 0.0,
+            defusing: self.defuse_progress > 0.0,
+            timer_secs: RoundStateKey::timer_secs(self.phase_timer),
+            urgent: RoundStateKey::urgent(self.phase_timer),
+            players,
+        }
+    }
+
     /// Broadcast the S&D round state to all players
     pub fn broadcast_round_state(
         &self,
@@ -461,11 +468,16 @@ impl SndState {
             plant_progress: self.plant_progress,
             defuse_progress: self.defuse_progress,
             phase_timer: self.phase_timer,
+            bomb_dropped: self.bomb_dropped_pos.is_some(),
         })
         .encode();
 
-        for (addr, _p) in players.iter() {
-            let _ = socket.send_to(&msg, *addr);
+        // only the maze shows it (lobby clients drop their match mode)
+        let msg = crate::net::Packet::from(msg);
+        for (addr, p) in players.iter() {
+            if !p.is_bot && p.world == WorldId::Maze {
+                socket.send_shared(&msg, *addr);
+            }
         }
     }
 

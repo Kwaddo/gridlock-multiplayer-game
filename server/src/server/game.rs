@@ -11,10 +11,10 @@ use crate::player::WorldId;
 // Clients send at least a keepalive every 4 s (client/src/app/runner.rs), so a
 // player silent this long is gone (e.g. a force-closed browser).
 pub const PLAYER_TIMEOUT: Duration = Duration::from_secs(10);
-// World state goes out at most this often (30 a second), however fast the
-// server is ticked: the browser host ticks every frame (up to 144 a second)
-// and the native host after every packet. Rarer events still send at once.
-pub const STATE_BROADCAST_INTERVAL: Duration = Duration::from_millis(33);
+// World state goes out at this rate (30 a second), however fast the server is
+// ticked: the browser host ticks every frame (up to 144 a second) and the
+// native host after every packet. Rarer events still send at once.
+pub const STATE_BROADCAST_INTERVAL: Duration = crate::cadence::HZ30;
 pub const MAZE_CELL_SIZE: f32 = 1.8;
 // The maze is square and sized for the players in the match (humans plus
 // bots), so a duel isn't a long hunt and a full lobby still has room. Sides
@@ -165,19 +165,16 @@ pub fn choose_team_weapon_for_player(
         Team::Spectator => return "Knife".to_string(),
     };
 
-    // collect weapons already used by teammates
-    let mut used = std::collections::HashSet::new();
-    for p in players.values() {
-        if p.team == player.team {
-            if !p.current_weapon.is_empty() {
-                used.insert(p.current_weapon.clone());
-            }
-        }
-    }
+    // weapons already used by teammates
+    let used = |w: &str| {
+        players.values().any(|p| {
+            p.team == player.team && !p.current_weapon.is_empty() && p.current_weapon == w
+        })
+    };
 
     // pick the first unused weapon from pool
     for &w in pool.iter() {
-        if !used.contains(w) {
+        if !used(w) {
             return w.to_string();
         }
     }
@@ -188,7 +185,35 @@ pub fn choose_team_weapon_for_player(
         .unwrap_or_else(|| "Knife".to_string())
 }
 
-/// iterate over all alive/dead players and automatically respawn as needed
+/// The weapon `player` respawns with, the same for both respawn paths
+/// (timed auto-respawn and the client's `RespawnRequest`):
+/// - Gun Game: the weapon of their `gun_level` (Punch past the last level).
+/// - TDM / S&D: the weapon they hold, or one from their team's loadout.
+/// - Smoke Break: what the round gave them (a hunter's gun, a hider's none).
+/// - Otherwise (or with no team): Knife.
+pub fn respawn_weapon_for(
+    players: &HashMap<PeerId, Player>,
+    player: &Player,
+    match_mode: u8,
+) -> String {
+    use crate::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_SMOKE_BREAK, MODE_TEAM_DEATHMATCH};
+    match match_mode {
+        MODE_SMOKE_BREAK => player.current_weapon.clone(),
+        MODE_GUN_GAME => {
+            let level = (player.gun_level as usize).max(1);
+            GUN_GAME_PROGRESSION.get(level - 1).unwrap_or(&"Punch").to_string()
+        }
+        MODE_TEAM_DEATHMATCH | MODE_SEARCH_AND_DESTROY if player.team != Team::Spectator => {
+            if player.current_weapon.is_empty() {
+                choose_team_weapon_for_player(players, player)
+            } else {
+                player.current_weapon.clone()
+            }
+        }
+        _ => "Knife".to_string(),
+    }
+}
+
 /// Choose a spawn point in the maze that is at least `min_dist` away
 /// from every other player.  Falls back to a normal random spawn if no
 /// suitable spot is found after a few tries.
@@ -287,30 +312,9 @@ pub fn process_auto_respawns(
             kind: Some(*used_fallback as u8),
         }
         .encode();
-        // choose weapon for the respawned player based on mode
-        let chosen_weapon = if let Some(pref) = players.get(socket_addr) {
-            if match_mode == crate::protocols::MODE_GUN_GAME {
-                let gl = pref.gun_level as usize;
-                if gl >= 1 && gl <= GUN_GAME_PROGRESSION.len() {
-                    GUN_GAME_PROGRESSION[gl - 1].to_string()
-                } else if gl > GUN_GAME_PROGRESSION.len() {
-                    "Punch".to_string()
-                } else {
-                    GUN_GAME_PROGRESSION[0].to_string()
-                }
-            } else if pref.team != Team::Spectator {
-                // TDM/S&D: keep current weapon, or pick from team loadout
-                if !pref.current_weapon.is_empty() {
-                    pref.current_weapon.clone()
-                } else {
-                    choose_team_weapon_for_player(players, pref)
-                }
-            } else {
-                "Knife".to_string()
-            }
-        } else {
-            "Knife".to_string()
-        };
+        let chosen_weapon = players
+            .get(socket_addr)
+            .map_or_else(|| "Knife".to_string(), |p| respawn_weapon_for(players, p, match_mode));
         if let Some(pmut) = players.get_mut(socket_addr) {
             pmut.current_weapon = chosen_weapon;
         }
@@ -325,10 +329,13 @@ pub fn process_auto_respawns(
 
 /// Regenerate player health after 7 seconds out of combat.
 /// Applies to all worlds; combat resets the timer via regen_resume_at.
+/// Match bots in the maze heal the same way (a wounded bot falls back until
+/// it has); shooting-range bots don't.
 pub fn process_lobby_regen(players: &mut HashMap<PeerId, Player>) {
     let now = Instant::now();
     for player in players.values_mut() {
-        if player.is_bot || !player.is_alive {
+        let range_bot = player.is_bot && player.world != WorldId::Maze;
+        if range_bot || !player.is_alive {
             // In lobby, keep human players alive (no real death)
             if player.world == WorldId::Lobby && !player.is_bot && !player.is_alive {
                 player.is_alive = true;
@@ -395,11 +402,15 @@ pub fn lobby_team_counts(players: &HashMap<PeerId, Player>) -> (usize, usize) {
 pub fn balance_lobby_teams(players: &mut HashMap<PeerId, Player>) -> bool {
     use crate::player::Team;
     // Fast path (every tick): nobody to place and the teams are balanced, so
-    // the full pass below would change nothing.
-    let (red, blue) = lobby_team_counts(players);
-    let unplaced = players
-        .values()
-        .any(|p| p.world == WorldId::Lobby && !p.is_bot && p.team == Team::Spectator);
+    // the full pass below would change nothing. One pass counts all three.
+    let (mut red, mut blue, mut unplaced) = (0usize, 0usize, false);
+    for p in players.values().filter(|p| p.world == WorldId::Lobby && !p.is_bot) {
+        match p.team {
+            Team::Red => red += 1,
+            Team::Blue => blue += 1,
+            Team::Spectator => unplaced = true,
+        }
+    }
     if !unplaced && red.abs_diff(blue) <= 1 {
         return false;
     }
@@ -409,7 +420,6 @@ pub fn balance_lobby_teams(players: &mut HashMap<PeerId, Player>) -> bool {
         .map(|(addr, p)| (p.id, *addr))
         .collect();
     lobby.sort();
-    let (mut red, mut blue) = (red, blue);
     let mut changed = false;
 
     for (_, addr) in &lobby {

@@ -1,4 +1,5 @@
 use crate::core::GameConfig;
+use crate::physics::{collider_height, collision};
 use crate::screens::input;
 use crate::types::world::WorldId;
 
@@ -28,6 +29,7 @@ impl PlayingState {
             sens,
         );
 
+        let was_prone = self.movement_state.is_prone;
         self.move_dir = input::process_movement_keys(self.yaw, config);
         // prone: no a/d, only crawl forward or back (there are no sideways prone clips anymore)
         // w+a still crawls forward at full speed instead of drifting, before this you could strafe while lying down
@@ -140,6 +142,7 @@ impl PlayingState {
             self.movement_state.is_sliding = false;
             self.jump_requested = false;
         }
+        self.stay_down_under_ceiling(config, was_prone);
         if weapon_input_locked {
             self.movement_state.is_sprinting = false;
         }
@@ -159,6 +162,28 @@ impl PlayingState {
         {
             // Depleted stamina penalty: slower weapon switching.
             self.weapons.switch_cooldown /= self.movement_config.stamina_depleted_speed_mult;
+        }
+    }
+
+    /// Getting up needs room for the head: under a low cube or mirror you stay crouched
+    /// (or prone) until there's space. checked with the collider, not the eyes
+    fn stay_down_under_ceiling(&mut self, config: &GameConfig, was_prone: bool) {
+        let state = &self.movement_state;
+        if state.is_sliding {
+            return;
+        }
+        let cubes = self.current_world == WorldId::Lobby;
+        let blocked = |eye: f32| {
+            collision::head_blocked(self.position, collider_height(eye), cubes, &self.mirrors)
+        };
+        if was_prone && !state.is_prone && blocked(config.crouch_height) {
+            self.movement_state.is_prone = true;
+            self.movement_state.is_crouching = false;
+            self.movement_state.is_sprinting = false;
+            self.movement_state.is_slow_walking = false;
+        } else if !state.is_prone && !state.is_crouching && blocked(config.standing_height) {
+            self.movement_state.is_crouching = true;
+            self.movement_state.is_sprinting = false;
         }
     }
 }

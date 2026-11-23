@@ -4,10 +4,16 @@ use std::time::Duration;
 use platform::Instant;
 
 use super::{broadcast, game, handlers, Server};
+use crate::player::WorldId;
 use crate::protocols::*;
 
 /// Cadence of the per-tick bookkeeping that has no need to run per packet.
 const BOOKKEEPING_INTERVAL: Duration = game::STATE_BROADCAST_INTERVAL;
+/// How often the lobby leader is repeated while it stays the same.
+const LEADER_REFRESH: Duration = Duration::from_secs(5);
+/// Least time between player lists sent for score changes: a list per kill
+/// was the biggest share of a match's non-state traffic.
+pub(super) const PLAYER_LIST_MIN_GAP: Duration = Duration::from_millis(500);
 
 impl Server {
     /// Periodic simulation step; call after each packet and at least every 100ms.
@@ -50,7 +56,9 @@ impl Server {
         // smoke break runs its own rounds, and cleans up once its match is fully over
         self.forget_smoke_break();
         self.tick_smoke_break(dt);
-        // tick bots
+        // tick bots; in S&D freeze time they stand still like the humans
+        let round_frozen = self.match_mode == MODE_SEARCH_AND_DESTROY
+            && self.snd_state.as_ref().is_some_and(|s| s.phase == super::snd::SndPhase::FreezeTime);
         self.bot_manager.tick(
             &self.outbox,
             &mut self.players,
@@ -58,6 +66,8 @@ impl Server {
             self.match_mode,
             self.maze.as_ref(),
             &mut self.team_score,
+            round_frozen,
+            &mut self.shot_queue,
         );
         if self.bot_manager.handle_range_challenge_timeout(&mut self.players) {
             broadcast::broadcast_state(&self.outbox, &self.players);
@@ -68,28 +78,42 @@ impl Server {
         if game::balance_lobby_teams(&mut self.players) {
             broadcast::broadcast_player_list(&self.outbox, &self.players);
         }
-        if self.last_regen_tick.elapsed() >= Duration::from_secs(1) {
+        if now_tick.saturating_duration_since(self.last_regen_tick) >= Duration::from_secs(1) {
             game::process_lobby_regen(&mut self.players);
-            self.last_regen_tick = Instant::now();
+            self.last_regen_tick = now_tick;
         }
         // what rarely changes goes out ahead of the state that may first show it
+        self.sync_lobby_leader(now_tick);
         self.sync_player_info();
 
         // sync boxes with clients
         self.sync_boxes();
 
-        let due = self
-            .last_state_broadcast
-            .map_or(true, |t| t.elapsed() >= game::STATE_BROADCAST_INTERVAL);
+        let due = self.state_cadence.due(now_tick);
         if due || self.players.len() != self.last_broadcast_players {
-            self.last_state_broadcast = Some(Instant::now());
+            if !due {
+                // a join or leave went out early: the next one is a full
+                // interval after it
+                self.state_cadence.restart(now_tick);
+            }
             self.last_broadcast_players = self.players.len();
-            broadcast::broadcast_state_with_events(&self.outbox, &self.players);
+            // Players can't hurt each other in the lobby: its world goes out
+            // at half rate, except when a join or leave forces a send or
+            // bots are there (a range challenge: players shoot at them).
+            let lobby_bots = self.players.values().any(|p| p.is_bot && p.world == WorldId::Lobby);
+            let lobby = !due || self.lobby_state_turn || lobby_bots;
+            if due {
+                self.lobby_state_turn = !self.lobby_state_turn;
+            }
+            broadcast::broadcast_state_with_events(&self.outbox, &self.players, lobby);
             // One-shot movement events have now gone out; they stay set until
-            // then, however many position updates arrive in between.
+            // then, however many position updates arrive in between (a lobby
+            // player's wait for the lobby's next turn).
             for player in self.players.values_mut() {
-                player.evt_jump_start = false;
-                player.evt_landed = false;
+                if lobby || player.world != WorldId::Lobby {
+                    player.evt_jump_start = false;
+                    player.evt_landed = false;
+                }
             }
         }
 
@@ -99,7 +123,15 @@ impl Server {
             .last_bookkeeping
             .map_or(true, |t| t.elapsed() >= BOOKKEEPING_INTERVAL);
         if bookkeeping_due {
-            self.last_bookkeeping = Some(Instant::now());
+            let now = Instant::now();
+            self.last_bookkeeping = Some(now);
+            // An expired freeze reads the same as none; clearing it spares
+            // every later freeze check a clock read.
+            for p in self.players.values_mut() {
+                if p.post_teleport_freeze_until.is_some_and(|t| t <= now) {
+                    p.post_teleport_freeze_until = None;
+                }
+            }
             self.forget_rejected();
             let timed_out = game::cleanup_inactive_players(&mut self.players);
             if !timed_out.is_empty() {
@@ -145,10 +177,11 @@ impl Server {
         // Periodically rebroadcast warmup countdown so clients that missed
         // the original packet can catch up (helps offscreen/paused clients).
         if let Some(end) = self.match_warmup_end {
-            let secs = if Instant::now() >= end {
+            let now = Instant::now();
+            let secs = if now >= end {
                 0u8
             } else {
-                end.saturating_duration_since(Instant::now())
+                end.saturating_duration_since(now)
                     .as_secs()
                     .min(255) as u8
             };
@@ -224,10 +257,11 @@ impl Server {
         // display the remaining end-of-match timer even if they missed the
         // original MSG_MATCH_END packet.
         if let Some((when, winner_id, winner_name)) = self.match_end_pending.as_ref() {
-            let secs = if Instant::now() >= *when {
+            let now = Instant::now();
+            let secs = if now >= *when {
                 0u8
             } else {
-                when.saturating_duration_since(Instant::now())
+                when.saturating_duration_since(now)
                     .as_secs()
                     .min(255) as u8
             };
@@ -248,6 +282,42 @@ impl Server {
         }
         self.send_match_status(false);
         self.send_team_score();
+        self.flush_player_list(now_tick);
+    }
+
+    /// Send the player list a score change owes, unless one went out less
+    /// than `PLAYER_LIST_MIN_GAP` ago: a lone kill's list goes out with this
+    /// tick, the rest of a burst together at most that much later. Once a
+    /// match is decided it goes at once, so the end screen shows the final
+    /// scores. Joins, leaves and team changes send their own at once.
+    fn flush_player_list(&mut self, now: Instant) {
+        if !self.outbox.player_list_stale() {
+            return;
+        }
+        let due = self.match_end_pending.is_some()
+            || self
+                .last_player_list
+                .map_or(true, |t| now.saturating_duration_since(t) >= PLAYER_LIST_MIN_GAP);
+        if due {
+            broadcast::broadcast_player_list(&self.outbox, &self.players);
+            self.last_player_list = Some(now);
+        }
+    }
+
+    /// Tell everyone who the lobby leader is when that changes, and every few
+    /// seconds anyway: it is a small packet that can be lost. It used to ride
+    /// along with every player list (every kill).
+    fn sync_lobby_leader(&mut self, now: Instant) {
+        let leader = broadcast::lobby_leader_id(&self.players);
+        let due = match self.last_leader_sent {
+            Some((sent, at)) => sent != leader || now.saturating_duration_since(at) >= LEADER_REFRESH,
+            None => true,
+        };
+        if due {
+            let msg = ServerMsg::LobbyLeader { id: leader }.encode();
+            broadcast::to_humans(&self.outbox, &self.players, &msg);
+            self.last_leader_sent = Some((leader, now));
+        }
     }
 
     /// Broadcast the team score during a Team Deathmatch: when it changes, and

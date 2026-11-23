@@ -2,6 +2,7 @@
 //! timer, the scheduled return to the lobby, and auto-fill bot selection.
 
 mod bot_fill;
+mod late_join;
 mod match_end;
 mod match_start;
 mod start_request;

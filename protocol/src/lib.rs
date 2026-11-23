@@ -10,7 +10,7 @@ pub use messages::*;
 /// `ServerMsg::Welcome`). Builds from before the check have no version on
 /// the wire and count as 1.
 // 3: pitch added to MSG_STATE (one byte) and MSG_POSITION, so a 2 cant read a 3's state packets
-pub const PROTOCOL_VERSION: u16 = 5; // 4 added cardboard shit, 5 added smoke break
+pub const PROTOCOL_VERSION: u16 = 7; // 4 added cardboard shit, 5 added smoke break, 6 added the S&D bomb_dropped byte, 7 added Shoot (players see each other fire) and BotAlert
 
 /// What the server tells a client of another version once it has let it in
 /// far enough to be heard: a chat notice is all an old build can show.
@@ -24,7 +24,7 @@ pub const MSG_JOIN: u8 = 1; // client -> server: username
 pub const MSG_WELCOME: u8 = 2; // server -> client: player id, username
 pub const MSG_POSITION: u8 = 3; // client -> server: x, y, yaw
 pub const MSG_STATE: u8 = 4; // server -> client: all player positions
-pub const MSG_SHOOT: u8 = 5; // client -> server: reserved (not handled by server)
+pub const MSG_SHOOT: u8 = 5; // client -> server: I fired, tracer end point (relayed to others as `MSG_SHOTS`)
 pub const MSG_HIT: u8 = 6; // server -> client: you got hit
 pub const MSG_DISCONNECT: u8 = 7; // client -> server: leaving
 pub const MSG_MAZE: u8 = 8; // server -> client: maze layout
@@ -90,6 +90,15 @@ pub const MODE_TEAM_DEATHMATCH: u8 = 2;
 pub const MODE_SEARCH_AND_DESTROY: u8 = 3;
 pub const MODE_SMOKE_BREAK: u8 = 4;
 
+/// Friendly fire is off in the team modes: a hit on someone of your own
+/// team (both Red = 1, or both Blue = 2) does nothing. Gun Game puts
+/// everyone on no team (0), so every hit there counts.
+pub fn is_friendly_fire(mode: u8, attacker_team: u8, victim_team: u8) -> bool {
+    matches!(mode, MODE_TEAM_DEATHMATCH | MODE_SEARCH_AND_DESTROY)
+        && matches!(attacker_team, 1 | 2)
+        && attacker_team == victim_team
+}
+
 // Auto-fill bot limits for MSG_START_GAME, shared so the host's lobby console
 // offers exactly what the server accepts
 pub const MAX_BOTS_PER_TEAM: u8 = 8; // team modes, per team
@@ -120,7 +129,7 @@ pub const MSG_MATCH_TIMER: u8 = 25; // server -> all: authoritative match time r
                                     // format: [MSG_MATCH_TIMER][secs_hi:1][secs_lo:1] (big-endian u16)
                                     // value 0 means time is up; max representable duration is 65535s (~18h).
 pub const MSG_SET_TEAM: u8 = 26; // client -> server: set preferred team (team:u8)
-pub const MSG_SND_ROUND_STATE: u8 = 27; // server -> all: S&D round state (round:1, max_rounds:1, red_wins:1, blue_wins:1, phase:1, bomb_carrier_id:4, bomb_x:f32, bomb_y:f32, bomb_z:f32, bomb_site_x:f32, bomb_site_y:f32, bomb_site_z:f32, bomb_planted:1, plant_progress:f32, defuse_progress:f32)
+pub const MSG_SND_ROUND_STATE: u8 = 27; // server -> all: S&D round state (round:1, max_rounds:1, red_wins:1, blue_wins:1, phase:1, bomb_carrier_id:4, bomb_x:f32, bomb_y:f32, bomb_z:f32, bomb_site_x:f32, bomb_site_y:f32, bomb_site_z:f32, bomb_planted:1, plant_progress:f32, defuse_progress:f32, phase_timer:f32, bomb_dropped:1)
 pub const MSG_SND_BOMB_PICKUP: u8 = 28; // client -> server: request to pick up dropped bomb
 pub const MSG_SND_PLANT_START: u8 = 29; // client -> server: start planting bomb
 pub const MSG_SND_PLANT_STOP: u8 = 30; // client -> server: stop planting bomb
@@ -158,7 +167,10 @@ pub const SMOKE_NO_WINNER: u8 = 255; // the round isn't over yet
 // bot bulshit
 pub const MSG_BOT_SPAWN: u8 = 50;
 pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
-pub const MSG_BOT_SHOT: u8 = 52; // server -> client: every shot bots fired in one bot tick, see `BotShot`
+pub const MSG_SHOTS: u8 = 52; // server -> client: shots fired by bots (one bot tick) or another player, see `Shot`
+pub const MSG_BOT_ALERT: u8 = 60; // server -> the spotted player only: [bot_id:4][level:1] (BOT_ALERT_*); clients without it ignore it
+pub const BOT_ALERT_SUSPICIOUS: u8 = 1; // "?": the bot noticed something of you
+pub const BOT_ALERT_ENGAGED: u8 = 2; // "!": the bot has spotted you and fights
 
 pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
 pub const FLAG_SILENT: u8 = 1 << 7; // no footstep sounds
@@ -189,5 +201,24 @@ mod bot_split_tests {
         assert_eq!(balanced_bot_order(1, 1, 2), vec![true, false]);
         // lopsided humans: every bot goes to the small team until it catches up
         assert_eq!(balanced_bot_order(3, 0, 3), vec![false, false, false]);
+    }
+}
+
+#[cfg(test)]
+mod friendly_fire_tests {
+    use super::*;
+
+    #[test]
+    fn same_team_hits_are_friendly_fire_only_in_team_modes() {
+        for mode in [MODE_TEAM_DEATHMATCH, MODE_SEARCH_AND_DESTROY] {
+            assert!(is_friendly_fire(mode, 1, 1));
+            assert!(is_friendly_fire(mode, 2, 2));
+            assert!(!is_friendly_fire(mode, 1, 2));
+            assert!(!is_friendly_fire(mode, 0, 0));
+        }
+        // Gun Game (no teams) and no mode at all: every hit counts
+        assert!(!is_friendly_fire(MODE_GUN_GAME, 1, 1));
+        assert!(!is_friendly_fire(MODE_GUN_GAME, 0, 0));
+        assert!(!is_friendly_fire(0, 1, 1));
     }
 }

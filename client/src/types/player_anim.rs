@@ -5,7 +5,16 @@ use macroquad::prelude::*;
 use crate::types::animated_model::{ AnimatedModel, Pose };
 use crate::types::player::PlayerSkin;
 
-use crate::types::blend_space::{ weights, STANDING };
+use crate::types::blend_space::{ weights, MAX_MIX, STANDING };
+
+mod clips;
+mod evaluate;
+#[cfg(test)]
+mod tests;
+mod view;
+
+use clips::*;
+pub use view::{BodyView, FAR_POSE_DISTANCE};
 
 /*
    one players animation clock, before this every clip had one clock shared by everyone, so 2 people walking were clones
@@ -20,9 +29,6 @@ const FADE_TIME: f32 = 0.2;
 
 // how long the upper body layer takes to fade in or out
 const UPPER_FADE: f32 = 0.1;
-
-// only the start of the fire clip plays, the kick, every shot restarts it so auto fire reads as recoil
-const FIRE_KICK: f32 = 0.25;
 
 // the cpu skinning fallback is slow, each body bends its mesh this often at most, same 30 fps cap the shared clips had
 const CPU_SKIN_INTERVAL: f32 = 1.0 / 30.0;
@@ -45,6 +51,16 @@ const SLOW_WALK_BELOW: f32 = 2.2;
 // ...for at least this long means slow walk, long enough that speeding up or coasting to a stop doesnt count
 const SLOW_WALK_AFTER: f32 = 0.4;
 
+/// How much of a body's pose `PlayerAnim::evaluate` works out.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PoseDetail {
+    /// Every bone and the skinning matrices, to draw the body.
+    Full,
+    /// Only the bones the hitboxes are built from (`AnimatedModel::hit_nodes`),
+    /// bit for bit what `Full` gives them. For bodies nobody can see.
+    Hitboxes,
+}
+
 #[derive(Copy, Clone)]
 enum FadeFrom {
     Clip(PlayerSkin, f32), // clip and how far into it, it keeps playing while it fades
@@ -66,6 +82,7 @@ pub struct PlayerAnim {
     stride: f32, 
     mix_pose: Option<Pose>, // scratch pose for the blend space, kept so it isnt remade every tick
     still: Option<Pose>, // scratch pose for the blend space's last pose, kept so it isnt remade every tick
+    still_partial: bool, // still was last written hidden, so only its hitbox nodes are right (see evaluate)
 
     // how long theyve been walking forward slowly, see SLOW_WALK_AFTER
     slow_for: f32,
@@ -75,6 +92,20 @@ pub struct PlayerAnim {
     upper_weight: f32,
     upper_pose: Option<Pose>,
     cpu_skin_accum: f32, // seconds since this body's mesh was last bent on the cpu
+
+    // what advance worked out for evaluate, so the pose can be worked out again (in full) without moving the clocks
+    posable: bool,   // there's a model for the clip, without one there's no pose, same as before
+    local_vel: Vec2, // ground velocity against where they face, x = right, y = forward, for the blend space
+    pitch: f32,      // look up/down to bend the upper body by
+    bend: bool,      // the look bend and the upper layer apply, not while dying or prone
+    // the hitbox bones' pose for bodies nobody sees, see PoseDetail::Hitboxes
+    hit_pose: Option<Pose>,
+    hit_fresh: bool, // the last evaluate went to hit_pose, so hitboxes read that, not pose
+    hit_nodes: Vec<usize>, // scratch list of the hitbox nodes, kept so it isnt remade every tick
+    ticks: u32,      // advances so far, wrapping
+    full_at: u32,    // the advance pose was last fully worked out at
+    /// Whether the camera may see this body this frame, and how often its full pose is due.
+    pub view: BodyView,
 }
 
 impl PlayerAnim {
@@ -91,12 +122,23 @@ impl PlayerAnim {
             stride: 0.0,
             mix_pose: None,
             still: None,
+            still_partial: false,
             slow_for: 0.0,
             upper_clip: None,
             upper_time: 0.0,
             upper_weight: 0.0,
             upper_pose: None,
             cpu_skin_accum: 0.0,
+            posable: false,
+            local_vel: Vec2::ZERO,
+            pitch: 0.0,
+            bend: false,
+            hit_pose: None,
+            hit_fresh: false,
+            hit_nodes: Vec::new(),
+            ticks: 0,
+            full_at: 0,
+            view: BodyView::default(),
         }
     }
 
@@ -105,19 +147,46 @@ impl PlayerAnim {
         self.slow_for >= SLOW_WALK_AFTER
     }
 
+    // the full pose, for drawing, from the last frame it was worked out in full
     pub fn pose(&self) -> Option<&Pose> {
         // no pose until first tick, falls back to own pose until then
         self.pose.as_ref()
     }
 
+    /// The pose the hitboxes read: the latest one worked out, full or only
+    /// the hitbox bones (whose joints are the same either way).
+    pub fn hit_pose(&self) -> Option<&Pose> {
+        if self.hit_fresh { self.hit_pose.as_ref() } else { self.pose.as_ref() }
+    }
+
+    /// Whether the camera wants this frame's full pose and it isn't worked out yet.
+    pub fn needs_full_pose(&self) -> bool {
+        self.posable && self.view.wants_full() && !(self.pose.is_some() && self.full_at == self.ticks)
+    }
+
+    // move the clocks and work out the whole pose, one call per frame, for bodies that are always drawn (yours)
     pub fn tick(&mut self, input: &AnimInput, dt: f32, models: &HashMap<String, AnimatedModel>) {
-        let (skin, pos, pitch) = (input.skin, input.pos, input.pitch);
+        self.advance(input, dt, models);
+        self.evaluate(models, PoseDetail::Full);
+    }
+
+    /// Move this body's clocks on by `dt`: velocity, clip switches and fades,
+    /// the blend space's stride, the upper layer. Then `evaluate` works out
+    /// the pose for where the clocks are; it can run again (in full) without
+    /// moving them.
+    pub fn advance(&mut self, input: &AnimInput, dt: f32, models: &HashMap<String, AnimatedModel>) {
+        self.ticks = self.ticks.wrapping_add(1);
+        self.view.aged(dt);
+        let (skin, pos) = (input.skin, input.pos);
         // smoothed ground velocity, which way and how fast, before this it was only the speed
         if let (Some(last), true) = (self.last_pos, dt > 0.0) {
             let step = vec2(pos.x - last.x, pos.z - last.z);
             // a respawn or teleport jumps metres in one frame, skip it, before this it read as a huge speed for a moment
             if step.length() < 2.0 {
                 self.vel += (step / dt - self.vel) * (1.0 - (-12.0 * dt).exp());
+            } else {
+                // and the pose from before the jump (a corpse, say) is no good to draw, far or not
+                self.view.pose_due();
             }
         }
         self.last_pos = Some(pos);
@@ -161,59 +230,40 @@ impl PlayerAnim {
         self.clip = skin;
 
         let Some(model) = find(models, skin) else {
+            self.posable = false;
             return; // no model for this skin, so no pose
         };
+        self.posable = true;
 
         let rate = playback_rate(skin, speed);
-        // lent out of self for this tick so the upper layer can use self too, handed back at the end
-        let mut owned = self.pose.take().unwrap_or_else(|| model.new_pose()); // make a pose if we dont have one yet
-        if !model.pose_fits(&owned) {
-            owned = model.new_pose(); // the character changed to one with a different skeleton
-        }
-        let pose = &mut owned;
         if now_space {
             // how they move compared to where they face, x = right, y = forward
             let (sin, cos) = input.yaw.sin_cos();
-            let local = vec2(self.vel.dot(vec2(-sin, cos)), self.vel.dot(vec2(cos, sin)));
-            self.sample_space(local, dt, models, pose);
+            self.local_vel = vec2(self.vel.dot(vec2(-sin, cos)), self.vel.dot(vec2(cos, sin)));
+            self.advance_space(dt, models);
         } else {
             self.time = advance(skin, self.time, dt * rate, clip_end(skin, model.duration()));
-            model.sample_local(self.time, pose);
         }
 
-        // still fading out of the old clip or the blend space's still, mix it in
+        // still fading out of the old clip or the blend space's still, its clock keeps going
         if let Some(from) = self.prev {
             self.fade += dt;
             let w = smoothstep(self.fade / FADE_TIME);
             match from {
                 _ if w >= 1.0 => self.prev = None, // fade done, just the new clip now
-                FadeFrom::Still => match &self.still {
-                    Some(still) if model.pose_fits(still) => pose.blend_from(still, w),
-                    _ => self.prev = None,
-                },
+                FadeFrom::Still => {
+                    if !self.still.as_ref().is_some_and(|still| model.pose_fits(still)) {
+                        self.prev = None;
+                    }
+                }
                 FadeFrom::Clip(prev_skin, prev_time) => match find(models, prev_skin) {
                     Some(prev_model) => {
                         let prev_time = advance(prev_skin, prev_time, dt * rate, clip_end(prev_skin, prev_model.duration()));
                         self.prev = Some(FadeFrom::Clip(prev_skin, prev_time));
-                        let prev_pose = self.prev_pose.get_or_insert_with(|| prev_model.new_pose());
-                        if !prev_model.pose_fits(prev_pose) {
-                            *prev_pose = prev_model.new_pose();
-                        }
-                        prev_model.sample_local(prev_time, prev_pose);
-                        pose.blend_from(prev_pose, w);
                     }
                     None => self.prev = None,
                 },
             }
-        }
-
-        // a still of the blend space before the aim and look bends, leaving it fades from this
-        if now_space {
-            let still = self.still.get_or_insert_with(|| model.new_pose());
-            if !model.pose_fits(still) {
-                *still = model.new_pose();
-            }
-            still.copy_from(pose);
         }
 
         // aiming while moving, legs keep the move clip and the upper body aims, before this you glided in the aim idle
@@ -222,38 +272,28 @@ impl PlayerAnim {
         // no upper layer while dying or prone, a kick on a body on the floor looks broken
         let layerable = !is_one_shot(skin) && !is_prone(skin);
         let (wants, fired) = if layerable { (wants, input.fired) } else { (None, false) };
-        self.layer_upper(wants, fired, dt, models, model, pose);
+        self.advance_upper(wants, fired, dt, models);
 
         // look up/down, not while dying or lying prone (bending a body on the floor looks broken)
-        if !is_one_shot(skin) && !is_prone(skin) {
-            model.bend_upper_body(pose, pitch);
-        }
+        self.bend = layerable;
+        self.pitch = input.pitch;
 
-        model.finish_pose(pose);
         if !model.drawn_on_gpu() {
-            // if gpu skinning is off, bend the mesh on the cpu for this pose so we can draw it
-            // capped per body, before this every body did it every frame and the fallback tanked fps
+            // capped per body, see evaluate, before this every body did it every frame and the fallback tanked fps
             self.cpu_skin_accum += dt;
-            if self.cpu_skin_accum >= CPU_SKIN_INTERVAL || model.needs_cpu_skin(pose) {
-                self.cpu_skin_accum = 0.0;
-                model.skin_pose_on_cpu(pose);
-            }
         }
-        self.pose = Some(owned);
     }
 }
 
 impl PlayerAnim {
-    // fade the upper layer toward 'wants' and mix it onto the upper body of 'pose'
-    fn layer_upper(
-        &mut self,
-        wants: Option<PlayerSkin>,
-        fired: bool,
-        dt: f32,
-        models: &HashMap<String, AnimatedModel>,
-        model: &AnimatedModel,
-        pose: &mut Pose,
-    ) {
+    // fade the upper layer toward 'wants', its clock and weight, evaluate mixes it onto the upper body
+    fn advance_upper(&mut self, wants: Option<PlayerSkin>, fired: bool, dt: f32, models: &HashMap<String, AnimatedModel>) {
+        // nothing wanted and already faded out, nothing to do, before this it looked up the fire clip every tick anyway
+        // (a faded out layer never holds a clip, see the end of this, so no kick can be left playing)
+        if wants.is_none() && !fired && self.upper_weight <= 0.0 {
+            self.upper_clip = None;
+            return;
+        }
         // a shot restarts the kick, it beats aiming until it finishes, then aiming (or nothing) takes back over
         if fired {
             self.upper_clip = Some(PlayerSkin::RifleFire);
@@ -282,40 +322,25 @@ impl PlayerAnim {
         let Some(clip) = self.upper_clip else { return };
         let Some(upper_model) = find(models, clip) else { return };
         self.upper_time = advance(clip, self.upper_time, dt, clip_end(clip, upper_model.duration()));
-        let layer = self.upper_pose.get_or_insert_with(|| upper_model.new_pose());
-        if !upper_model.pose_fits(layer) {
-            *layer = upper_model.new_pose();
-        }
-        upper_model.sample_local(self.upper_time, layer);
-        model.layer_upper_body(pose, layer, smoothstep(self.upper_weight));
     }
 
-    // standing moves, mixes the blend space's clips by how they really move
-    // every moving clip shares one stride so the feet land together, idle keeps its own clock
-    fn sample_space(&mut self, local_vel: Vec2, dt: f32, models: &HashMap<String, AnimatedModel>, pose: &mut Pose) {
-        let mix = weights(&STANDING, local_vel);
-        if let Some(len) = stride_length(&mix, |s| find(models, s).map(|m| m.duration())) {
+    // the blend space's clocks: every moving clip shares one stride so the feet land together, idle keeps its own clock
+    fn advance_space(&mut self, dt: f32, models: &HashMap<String, AnimatedModel>) {
+        let mix = weights(&STANDING, self.local_vel);
+        // each clip's model looked up once, before this the stride, the idle clock and the sampling each looked it up again
+        let mut found: [Option<&AnimatedModel>; MAX_MIX] = [None; MAX_MIX];
+        for (slot, &(skin, _)) in found.iter_mut().zip(mix.iter()) {
+            *slot = find(models, skin);
+        }
+        let model_of = |skin: PlayerSkin| match mix.iter().position(|(s, _)| *s == skin) {
+            Some(i) => found[i],
+            None => find(models, skin),
+        };
+        if let Some(len) = stride_length(&mix, |s| model_of(s).map(|m| m.duration())) {
             self.stride = (self.stride + dt / len).fract();
         }
-        if let Some(idle) = find(models, STANDING.idle) {
+        if let Some(idle) = model_of(STANDING.idle) {
             self.time = advance(STANDING.idle, self.time, dt, idle.duration());
-        }
-        let mut total = 0.0;
-        for &(skin, w) in &mix {
-            let Some(m) = find(models, skin) else { continue };
-            let t = if skin == STANDING.idle { self.time } else { self.stride * m.duration() };
-            let first = total == 0.0;
-            total += w;
-            if first {
-                m.sample_local(t, pose);
-                continue;
-            }
-            let scratch = self.mix_pose.get_or_insert_with(|| m.new_pose());
-            if !m.pose_fits(scratch) {
-                *scratch = m.new_pose();
-            }
-            m.sample_local(t, scratch);
-            pose.mix_in(scratch, w / total);
         }
     }
 }
@@ -323,165 +348,5 @@ impl PlayerAnim {
 impl Default for PlayerAnim {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// the model for a skin, missing clip falls back to idle, same as drawing does
-fn find(models: &HashMap<String, AnimatedModel>, skin: PlayerSkin) -> Option<&AnimatedModel> {
-    skin.model_key()
-        .and_then(|k| models.get(k))
-        .or_else(|| models.get("anim_rifle_idle"))
-}
-
-// move a clip's time forward, one shots stop on their last frame, everything else loops
-fn advance(skin: PlayerSkin, time: f32, step: f32, end: f32) -> f32 {
-    let t = time + step;
-    if is_one_shot(skin) {
-        t.min(end) // deaths and slides stop on their last frame
-    } else if end > 0.0 {
-        t.rem_euclid(end) // loop the clip, so walking and running keep going
-    } else {
-        0.0
-    }
-}
-
-// soft start and end for the fade, 0..1 in, 0..1 out
-fn smoothstep(x: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0);
-    x * x * (3.0 - 2.0 * x)
-}
-
-// clips that play once and hold, instead of looping
-fn is_one_shot(skin: PlayerSkin) -> bool {
-    matches!(
-        skin,
-        PlayerSkin::StandDeath
-            | PlayerSkin::CrouchDeath
-            | PlayerSkin::ProneDeath
-            | PlayerSkin::Slide
-            // the chooser's deaths, before this they looped so bodies kept dying
-            | PlayerSkin::DeathFront
-            | PlayerSkin::DeathBack
-            | PlayerSkin::DeathSide
-            | PlayerSkin::DeathFrontHeadshot
-            | PlayerSkin::DeathBackHeadshot
-            | PlayerSkin::RifleFire
-    )
-}
-
-// the death clips, every one stays down on its last frame
-fn is_death(skin: PlayerSkin) -> bool {
-    is_one_shot(skin) && !matches!(skin, PlayerSkin::Slide | PlayerSkin::RifleFire)
-}
-
-// lying on the floor, no look up/down bend here
-fn is_prone(skin: PlayerSkin) -> bool {
-    use PlayerSkin::*;
-    matches!(skin, ProneIdle | ProneForward | ProneBack | ProneTurnLeft | ProneTurnRight)
-}
-
-// standing clips the blend space drives, idle too so starting and stopping blend by speed
-// before this tapping w played the walk at full stride
-fn in_space(skin: PlayerSkin) -> bool {
-    use PlayerSkin::*;
-    matches!(skin, RifleIdle | RifleWalk | WalkBack | WalkLeft | WalkRight | SprintForward | SprintLeft | SprintRight)
-}
-
-// one step's length for this mix, the moving clips' lengths by weight, None when its all idle
-fn stride_length(mix: &[(PlayerSkin, f32)], length_of: impl Fn(PlayerSkin) -> Option<f32>) -> Option<f32> {
-    let (mut len, mut moving) = (0.0, 0.0);
-    for &(skin, w) in mix.iter().filter(|(s, _)| *s != STANDING.idle) {
-        if let Some(l) = length_of(skin) {
-            len += l * w;
-            moving += w;
-        }
-    }
-    (moving > 0.0 && len > 0.0).then(|| len / moving)
-}
-
-// looping clips where the feet move, switching between two of these keeps the stride
-fn is_moving_loop(skin: PlayerSkin) -> bool {
-    use PlayerSkin::*;
-    matches!(
-        skin,
-        RifleWalk | WalkBack | WalkLeft | WalkRight | SlowWalkForward
-            | SprintForward | SprintLeft | SprintRight
-            | CrouchForward | CrouchBack | CrouchLeft | CrouchRight
-            | ProneForward | ProneBack | ProneTurnLeft | ProneTurnRight
-    )
-}
-
-// how fast to play a moving clip, real speed / the speed the clip is made for (the movement config speeds)
-// so coasting to a stop slows the steps down instead of swinging full strides, 1.0 for everything else
-fn playback_rate(skin: PlayerSkin, speed: f32) -> f32 {
-    use PlayerSkin::*;
-    let made_for = match skin {
-        RifleWalk | WalkBack | WalkLeft | WalkRight => 5.0, // walk_speed
-        SlowWalkForward => 1.8, // slow_walk_speed
-        SprintForward | SprintLeft | SprintRight => 8.0, // sprint_speed
-        CrouchForward | CrouchBack | CrouchLeft | CrouchRight => 2.5, // crouch_speed
-        ProneForward | ProneBack | ProneTurnLeft | ProneTurnRight => 1.5, // prone_speed
-        _ => return 1.0,
-    };
-    (speed / made_for).clamp(0.5, 1.5)
-}
-
-// where a clip ends, the slide file is longer than the slide, only the first second is used, same as before
-fn clip_end(skin: PlayerSkin, duration: f32) -> f32 {
-    match skin {
-        PlayerSkin::Slide => duration.min(1.0),
-        PlayerSkin::RifleFire => duration.min(FIRE_KICK),
-        _ => duration,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn one_shots_hold_and_loops_wrap() {
-        assert_eq!(advance(PlayerSkin::StandDeath, 1.9, 0.5, 2.0), 2.0);
-        assert!((advance(PlayerSkin::RifleWalk, 0.9, 0.3, 1.0) - 0.2).abs() < 1e-5);
-    }
-
-    #[test]
-    fn walk_slows_down_when_barely_moving() {
-        assert_eq!(playback_rate(PlayerSkin::RifleWalk, 5.0), 1.0);
-        assert_eq!(playback_rate(PlayerSkin::RifleWalk, 0.5), 0.5); // coasting, half speed steps
-        assert_eq!(playback_rate(PlayerSkin::RifleIdle, 0.0), 1.0); // idle isnt speed matched
-    }
-
-    #[test]
-    fn every_death_holds_its_last_frame() {
-        use PlayerSkin::*;
-        for death in [StandDeath, CrouchDeath, ProneDeath, DeathFront, DeathBack, DeathSide, DeathFrontHeadshot, DeathBackHeadshot] {
-            assert_eq!(advance(death, 1.9, 0.5, 2.0), 2.0, "{death:?} looped");
-        }
-    }
-
-    #[test]
-    fn fire_plays_just_the_kick_and_holds() {
-        assert_eq!(clip_end(PlayerSkin::RifleFire, 1.2), FIRE_KICK);
-        assert_eq!(clip_end(PlayerSkin::RifleFire, 0.1), 0.1); // a short clip plays whole
-        assert_eq!(advance(PlayerSkin::RifleFire, 0.2, 0.2, FIRE_KICK), FIRE_KICK); // stops at the end, no loop
-    }
-
-    #[test]
-    fn stride_length_mixes_the_moving_clips() {
-        use PlayerSkin::*;
-        let len = |s| Some(match s { RifleWalk => 1.0, SprintForward => 0.6, _ => 2.0 });
-        assert_eq!(stride_length(&[(RifleIdle, 1.0)], len), None); // standing still, stride waits
-        let mid = stride_length(&[(RifleWalk, 0.5), (SprintForward, 0.5)], len).unwrap();
-        assert!((mid - 0.8).abs() < 1e-5);
-        let slow = stride_length(&[(RifleIdle, 0.5), (RifleWalk, 0.5)], len).unwrap();
-        assert!((slow - 1.0).abs() < 1e-5); // idle doesnt stretch the step
-    }
-
-    #[test]
-    fn fade_starts_and_ends_soft() {
-        assert_eq!(smoothstep(0.0), 0.0);
-        assert_eq!(smoothstep(1.0), 1.0);
-        assert!((smoothstep(0.5) - 0.5).abs() < 1e-5);
     }
 }

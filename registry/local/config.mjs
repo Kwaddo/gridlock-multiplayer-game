@@ -56,6 +56,8 @@ const CORS = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Access-Control-Expose-Headers": "X-Gridlock-Long-Poll",
+  // Browsers may skip the preflight this long (Chromium caps it at 2 h).
+  "Access-Control-Max-Age": "86400",
 };
 
 export {

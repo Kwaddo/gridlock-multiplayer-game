@@ -21,29 +21,51 @@ const WORLD_WEAPON_FORWARD_OFFSET: f32 = 0.1; // units, tweak for desired spacin
 // how far past the gun's grip its muzzle sits, roughly a rifle's length, good enough for a flash
 const MUZZLE_REACH: f32 = 0.5;
 
+// generous box around render_position() for frustum culling: body, held weapon
+// and animation overshoot in any direction, whether the anchor is feet or eyes
+const PLAYER_CULL_BELOW: Vec3 = Vec3::new(1.5, 2.2, 1.5);
+const PLAYER_CULL_ABOVE: Vec3 = Vec3::new(1.5, 2.6, 1.5);
+
 impl PlayingState {
     #[inline(always)]
     pub(crate) fn draw_other_players(&self) {
-        for p in self.other_players.iter().filter(|p| !self.is_boxed(p.id)) {
-            self.draw_player_model(p);
-        }
+        // skip bodies wholly outside the current camera's frustum (main or mirror pass)
+        let frustum = {
+            let gl = unsafe { get_internal_gl() };
+            crate::world::render::Frustum::new(gl.quad_gl.get_projection_matrix())
+        };
+        let may_see = |p: &crate::types::player::OtherPlayer| {
+            let c = p.render_position();
+            frustum.may_see(c - PLAYER_CULL_BELOW, c + PLAYER_CULL_ABOVE)
+        };
 
-        for bot in &self.practice_bots {
-            self.draw_player_model(&bot.player);
+        // and skip bodies the frame's camera test (simulation/body_view.rs) found hidden behind walls,
+        // that test is a little wider than this frustum and counts every body when there's a mirror;
+        // a smoke break box carrier is drawn as its box, not a body
+        let mut drawn = 0;
+        for p in self.other_players.iter().chain(self.practice_bots.iter().map(|bot| &bot.player)) {
+            if p.anim.body.view.seen() && may_see(p) && !self.is_boxed(p.id) {
+                self.draw_player_model(p);
+                drawn += 1;
+            }
         }
+        super::super::simulation::count_bodies(|s| s.drawn += drawn);
     }
 
     // draws the body and its gun, returns where the gun's muzzle is (for the muzzle flash), none if no gun
     pub(super) fn draw_player_model(&self, p: &crate::types::player::OtherPlayer) -> Option<Vec3> {
         let mut muzzle: Option<Vec3> = None;
         let render_pos = p.render_position();
-        let render_yaw = p.render_yaw;
-        let desired_key = p.skin_type.model_key();
+        let render_yaw = p.smooth.yaw;
+        let desired_key = p.anim.skin_type.model_key();
         let desired_anim = desired_key.and_then(|k| self.animated_models.get(k));
-        let desired_static = desired_key.and_then(|k| self.models.get(k));
-
         let anim_model = desired_anim.or_else(|| self.animated_models.get("anim_rifle_idle"));
-        let static_mesh_list = desired_static.or_else(|| self.models.get("anim_rifle_idle"));
+        // only looked up when there is no animated model to draw
+        let static_mesh_list = || {
+            desired_key
+                .and_then(|k| self.models.get(k))
+                .or_else(|| self.models.get("anim_rifle_idle"))
+        };
 
         // draw the player body; remember whether we actually rendered a model so
         // we can fall back to cubes and still attach a weapon later.
@@ -54,12 +76,12 @@ impl PlayingState {
         let mut anim_scale = WORLD_PLAYER_RENDER_SCALE;
         let mut _anim_y_offset = 0.0f32;
 
-        if p.skin_type.is_model_based() {
+        if p.anim.skin_type.is_model_based() {
             if let Some(anim) = anim_model {
                 drawn_body = true;
                 let s = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
                 // this body's own pose, before this every body was drawn in the clip's shared pose (the clones)
-                let pose = p.anim.pose().unwrap_or(anim.own_pose());
+                let pose = p.anim.body.pose().unwrap_or(anim.own_pose());
                 anim_scale = s;
                 let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
                 _anim_y_offset = y_offset;
@@ -99,7 +121,7 @@ impl PlayingState {
                         + vec3(0.0, y_offset, 0.0);
                     hand_world_pos = Some(render_pos + offset);
                 }
-            } else if let Some(meshes) = static_mesh_list {
+            } else if let Some(meshes) = static_mesh_list() {
                 drawn_body = true;
                 let transform = Mat4::from_translation(render_pos)
                     * Mat4::from_rotation_y(-render_yaw + PLAYER_MODEL_YAW_OFFSET)
@@ -146,7 +168,7 @@ impl PlayingState {
                 Some(render_pos + right * 0.3 * anim_scale + vec3(0.0, 1.0 * anim_scale, 0.0));
         }
 
-        if let Some(weapon_id) = crate::weapons::stats::WeaponId::from_name(&p.current_weapon) {
+        if let Some(weapon_id) = p.weapon_id() {
             if let Some(model_key) = weapon_id.stats().viewmodel_model {
                 // for world drawing we prefer a dedicated static model if one exists
                 // (e.g. `fp_hands_minigun` → `minigun_model`). this keeps other
@@ -167,26 +189,21 @@ impl PlayingState {
                 } else {
                     model_key
                 };
-                let is_sawnoff = world_key.contains("sawnoff");
-                let is_hands_rig = is_sawnoff || world_key.contains("minigun");
+                let is_hands_rig = world_key.contains("minigun");
 
                 let wgl = unsafe { get_internal_gl() };
                 if let Some(hand_world) = hand_world_pos {
-                    // reduce overall model scale; sawnoff tends to come in huge so
-                    // apply an additional shrink factor when its key is detected.
-                    let mut scale_factor = anim_scale * 0.1;
-                    if is_sawnoff {
-                        scale_factor *= 0.1;
-                    }
+                    // reduce overall model scale
+                    let scale_factor = anim_scale * 0.1;
 
                     // rotate most guns slightly to the right when the player
                     // is moving (walking/sprinting) or aiming down sights. idle
                     // players should not have the yaw adjustment applied.
                     let mut yaw_rot = -render_yaw + PLAYER_MODEL_YAW_OFFSET;
-                    let is_moving = p.is_sprinting
-                        || p.is_crouching
+                    let is_moving = p.net.is_sprinting
+                        || p.net.is_crouching
                         || matches!(
-                            p.skin_type,
+                            p.anim.skin_type,
                             crate::types::player::PlayerSkin::RifleWalk
                                 | crate::types::player::PlayerSkin::WalkBack
                                 | crate::types::player::PlayerSkin::WalkLeft
@@ -199,12 +216,12 @@ impl PlayingState {
                                 | crate::types::player::PlayerSkin::CrouchLeft
                                 | crate::types::player::PlayerSkin::CrouchRight
                         );
-                    if is_moving || p.is_ads {
+                    if is_moving || p.net.is_ads {
                         let adjust = if self.dev_mode.is_unlocked() {
                             // allow tweaking movement vs ADS separately
                             if is_moving {
                                 self.dev_mode.weapon_yaw_adjust_move
-                            } else if p.is_ads {
+                            } else if p.net.is_ads {
                                 self.dev_mode.weapon_yaw_adjust_ads
                             } else {
                                 self.dev_mode.weapon_rot_offset.1 // fallback
@@ -230,7 +247,7 @@ impl PlayingState {
                     } else {
                         // when the player is walking/running/aiming, use the smaller
                         // default offset instead of whatever the sliders are set to.
-                        let (off_x, off_y, off_z) = if is_moving || p.is_ads {
+                        let (off_x, off_y, off_z) = if is_moving || p.net.is_ads {
                             (-0.03, -0.03, -0.01)
                         } else {
                             (
@@ -239,13 +256,13 @@ impl PlayingState {
                                 self.dev_mode.weapon_pos_offset.2,
                             )
                         };
-                        let zval = if is_moving || p.is_ads { off_z } else { -off_z };
+                        let zval = if is_moving || p.net.is_ads { off_z } else { -off_z };
                         let right_dir = vec3(-forward_dir.z, 0.0, forward_dir.x);
                         let pos = hand_world
                             + forward_dir * zval
                             + right_dir * off_x
                             + vec3(0.0, 1.0, 0.0) * off_y;
-                        let dyn_forward = if is_moving || p.is_ads {
+                        let dyn_forward = if is_moving || p.net.is_ads {
                             WORLD_WEAPON_FORWARD_OFFSET
                         } else {
                             -0.05
@@ -255,7 +272,7 @@ impl PlayingState {
                     // tilt the gun up/down with where they look, around the body's sideways axis
                     // before this the gun stayed level even when the body aimed up or down
                     let side = vec3(-forward_dir.z, 0.0, forward_dir.x);
-                    let aim_tilt = Mat4::from_axis_angle(side, p.render_pitch);
+                    let aim_tilt = Mat4::from_axis_angle(side, p.smooth.pitch);
                     let weapon_transform = if self.dev_mode.is_unlocked() {
                         let (rp, _, rr) = self.dev_mode.weapon_rot_offset;
                         Mat4::from_translation(weapon_pos)
@@ -270,19 +287,23 @@ impl PlayingState {
                             * Mat4::from_rotation_y(yaw_rot)
                             * Mat4::from_scale(Vec3::splat(scale_factor))
                     };
-                    wgl.quad_gl.push_model_matrix(weapon_transform);
                     if let Some(weapon_meshes) = self.models.get(world_key) {
-                        for mesh in weapon_meshes {
-                            draw_mesh(mesh);
+                        // uploaded once, drawn from GPU buffers; draw_mesh only as fallback
+                        if !crate::types::static_gpu::draw_static_meshes(world_key, weapon_meshes, weapon_transform) {
+                            wgl.quad_gl.push_model_matrix(weapon_transform);
+                            weapon_meshes.iter().for_each(draw_mesh);
+                            wgl.quad_gl.pop_model_matrix();
                         }
                     } else if let Some(animated) = self.animated_models.get(world_key) {
-                        for mesh in animated.meshes() {
-                            draw_mesh(mesh);
+                        // no world model loaded (yet): the first-person rig, GPU-skinned like draw_mesh drew it
+                        if !animated.draw_gpu(weapon_transform, WHITE) {
+                            wgl.quad_gl.push_model_matrix(weapon_transform);
+                            animated.meshes().for_each(draw_mesh);
+                            wgl.quad_gl.pop_model_matrix();
                         }
                     }
-                    wgl.quad_gl.pop_model_matrix();
                     // the end of the barrel, a bit out from the gun along where they aim
-                    let aim_dir = forward_dir * p.render_pitch.cos() + Vec3::Y * p.render_pitch.sin();
+                    let aim_dir = forward_dir * p.smooth.pitch.cos() + Vec3::Y * p.smooth.pitch.sin();
                     muzzle = Some(weapon_pos + aim_dir * MUZZLE_REACH);
                 }
             }

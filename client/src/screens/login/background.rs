@@ -5,6 +5,61 @@ use macroquad::prelude::*;
 use super::LoginScreen;
 use super::{ACCENT, MENU_BG, PANEL_BG, PANEL_BORDER, TEXT_DIM, TEXT_LABEL};
 
+/// Sides of macroquad's draw_circle polygon.
+const CIRCLE_SIDES: usize = 20;
+
+/// Reused geometry for the animated background. It holds the same triangles
+/// draw_circle / draw_line would build, without their per-call trig, Vec
+/// allocations and (for the scanlines) per-frame rebuild.
+pub(super) struct BackgroundMesh {
+    /// Unit-circle rim points, exactly as draw_poly computes them.
+    rim: [(f32, f32); CIRCLE_SIDES + 1],
+    particles: Mesh,
+    scanlines: Mesh,
+    /// Screen size the scanlines were built for.
+    scan_size: (f32, f32),
+}
+
+impl BackgroundMesh {
+    pub(super) fn new() -> Self {
+        let rot = 0.0_f32.to_radians();
+        let sides = CIRCLE_SIDES as f32;
+        let rim = std::array::from_fn(|i| {
+            let a = i as f32 / sides * std::f32::consts::PI * 2. + rot;
+            (a.cos(), a.sin())
+        });
+        let empty = || Mesh { vertices: Vec::new(), indices: Vec::new(), texture: None };
+        Self { rim, particles: empty(), scanlines: empty(), scan_size: (-1.0, -1.0) }
+    }
+
+    /// Rebuilds the scanlines (one draw_line quad every 4 px) for a new size.
+    fn build_scanlines(&mut self, sw: f32, sh: f32) {
+        let color = Color::new(0.0, 0.0, 0.0, 0.06);
+        let mesh = &mut self.scanlines;
+        mesh.vertices.clear();
+        mesh.indices.clear();
+        // same maths as draw_line(0.0, y, sw, y, 1.0, color)
+        let (nx, ny) = (-0.0_f32, sw);
+        let tlen = (nx * nx + ny * ny).sqrt() / (1.0 * 0.5);
+        if tlen >= f32::EPSILON {
+            let (tx, ty) = (nx / tlen, ny / tlen);
+            let mut y = 0.0;
+            while y < sh {
+                let base = mesh.vertices.len() as u16;
+                mesh.vertices.extend_from_slice(&[
+                    Vertex::new(0.0 + tx, y + ty, 0., 0., 0., color),
+                    Vertex::new(0.0 - tx, y - ty, 0., 0., 0., color),
+                    Vertex::new(sw + tx, y + ty, 0., 0., 0., color),
+                    Vertex::new(sw - tx, y - ty, 0., 0., 0., color),
+                ]);
+                mesh.indices.extend([0, 1, 2, 2, 1, 3].map(|i| base + i));
+                y += 4.0;
+            }
+        }
+        self.scan_size = (sw, sh);
+    }
+}
+
 impl LoginScreen {
     pub fn update_background(&mut self) {
         let dt = get_frame_time();
@@ -32,16 +87,41 @@ impl LoginScreen {
     pub fn draw_background(&self) {
         clear_background(MENU_BG);
 
-        for p in &self.particles {
-            draw_circle(p.x, p.y, p.size, Color::new(0.50, 0.55, 0.80, p.alpha));
-        }
-
         let sw = screen_width();
         let sh = screen_height();
-        let mut y = 0.0;
-        while y < sh {
-            draw_line(0.0, y, sw, y, 1.0, Color::new(0.0, 0.0, 0.0, 0.06));
-            y += 4.0;
+        let mut bg = self.background_mesh.borrow_mut();
+        let bg = &mut *bg;
+
+        // the particle dots: draw_circle's 20-gon, all in one mesh
+        let mesh = &mut bg.particles;
+        mesh.vertices.clear();
+        mesh.indices.clear();
+        for p in &self.particles {
+            let color = Color::new(0.50, 0.55, 0.80, p.alpha);
+            let base = mesh.vertices.len() as u16;
+            mesh.vertices.push(Vertex::new(p.x, p.y, 0., 0., 0., color));
+            for (i, &(rx, ry)) in bg.rim.iter().enumerate() {
+                mesh.vertices.push(Vertex::new(p.x + p.size * rx, p.y + p.size * ry, 0., rx, ry, color));
+                if i != CIRCLE_SIDES {
+                    let i = i as u16;
+                    mesh.indices.extend_from_slice(&[base, base + i + 1, base + i + 2]);
+                }
+            }
+        }
+        draw_mesh(mesh);
+
+        // u16 indices cover up to 16k scanlines (a 64k px tall window)
+        if sh / 4.0 < 16_000.0 {
+            if bg.scan_size != (sw, sh) {
+                bg.build_scanlines(sw, sh);
+            }
+            draw_mesh(&bg.scanlines);
+        } else {
+            let mut y = 0.0;
+            while y < sh {
+                draw_line(0.0, y, sw, y, 1.0, Color::new(0.0, 0.0, 0.0, 0.06));
+                y += 4.0;
+            }
         }
     }
 

@@ -1,13 +1,22 @@
 # Credits
 
-Gridlock uses the following third-party assets. All are licensed under
-[Creative Commons Attribution 4.0](http://creativecommons.org/licenses/by/4.0/) (CC BY 4.0)
-unless noted. Models were converted and resized for the game.
+Gridlock is built with assets made and shared by these creators. Thank you!
+Models were converted to glTF and resized for the game.
 
-<!-- DRAFT: titles, authors, licenses and links were read from the metadata Sketchfab
-     embeds in each .glb file the live game downloads. Check before publishing. -->
+<!-- This file is the one list of third-party assets. The game shows it on the
+     main menu's CREDITS screen (compiled in, client/src/screens/login/credits/)
+     and the website at credits.html (build_web.sh copies it next to the page).
+     Both read only this subset of Markdown: "#" and "##" headings, paragraphs,
+     "- " lists, tables (the first row is the header and is not shown), and
+     [text](url) links, one per line or table row. Keep the text ASCII: the
+     game's pixel font has no other characters. HTML comments are not shown.
 
-## Weapon models by [TastyTony](https://sketchfab.com/TastyTony) (Sketchfab)
+     Sketchfab entries were checked against the metadata in each .glb and the
+     Sketchfab API (license "CC Attribution"). -->
+
+## Weapon models by [TastyTony](https://sketchfab.com/TastyTony)
+
+From Sketchfab, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 | In game | Model |
 |---|---|
@@ -32,10 +41,12 @@ unless noted. Models were converted and resized for the game.
 | Hunting Rifle | ["Low-Poly Winchester 1895 Russian"](https://sketchfab.com/3d-models/low-poly-winchester-1895-russian-fea1814c60e74d9c9639d3a32507c996) |
 | Semi-Auto Sniper | ["Low-Poly SVD Dragunov"](https://sketchfab.com/3d-models/low-poly-svd-dragunov-fe40c5c2696441bc8696ed042056709e) |
 | Minigun | ["Low-Poly M134 Minigun"](https://sketchfab.com/3d-models/low-poly-m134-minigun-eed0c95de51b4895a48c5729582732cc) |
-| Grenade Launcher (not yet in game) | ["Low-Poly Milkor MGL Mk 1s"](https://sketchfab.com/3d-models/low-poly-milkor-mgl-mk-1s-f62f582eada147b8aeb3c08773379d29) |
-| RPG (not yet in game) | ["Low-Poly RPG-7"](https://sketchfab.com/3d-models/low-poly-rpg-7-5243ac034391491f9a47f797ea212afe) |
+| Grenade Launcher (coming soon) | ["Low-Poly Milkor MGL Mk 1s"](https://sketchfab.com/3d-models/low-poly-milkor-mgl-mk-1s-f62f582eada147b8aeb3c08773379d29) |
+| RPG (coming soon) | ["Low-Poly RPG-7"](https://sketchfab.com/3d-models/low-poly-rpg-7-5243ac034391491f9a47f797ea212afe) |
 
-## First-person hand animations by [DJMaesen](https://sketchfab.com/bumstrum) (Sketchfab)
+## First-person hands by [DJMaesen](https://sketchfab.com/bumstrum)
+
+From Sketchfab, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 | Used for | Model |
 |---|---|
@@ -45,19 +56,55 @@ unless noted. Models were converted and resized for the game.
 | Snipers | ["sniper animated"](https://sketchfab.com/3d-models/sniper-animated-b48999a250b2433da59f705c371a49b2) |
 | Minigun | ["Minigun animated"](https://sketchfab.com/3d-models/minigun-animated-e5dbbb2d2e594ebfac33d82d65a97380) |
 
-## Prop models (Sketchfab)
+## Cardboard box by [PolyProps3D](https://sketchfab.com/PolyProps3D)
 
-| In game | Model | Author |
-|---|---|---|
-| Cardboard box, "LowPoly" look (F6) | ["LowPoly Cardboard Box"](https://sketchfab.com/3d-models/lowpoly-cardboard-box-f2b1e7d7d4cc4a699a969a3e0fe8d211) | PolyProps3D |
-| Cardboard box, "Old" look (F6) | ["Old Cardboard Box"](https://sketchfab.com/3d-models/old-cardboard-box-a60d4d56b93e4a52975d051a00eb4bd8) | Matrix Rex |
+From Sketchfab, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
-## Still to identify
+| In game | Model |
+|---|---|
+| Box, "LowPoly" look | ["LowPoly Cardboard Box"](https://sketchfab.com/3d-models/lowpoly-cardboard-box-f2b1e7d7d4cc4a699a969a3e0fe8d211) |
 
-<!-- These files have no source info embedded; fill in or remove. -->
-- Player character model and animations (`assets/models/player/*.glb`, exported from Blender; the animation names suggest Mixamo)
-- Knife/punch sprite frames and pistol/shotgun sprites (`assets/images/weapons/FPS Weapon Sprites/`)
-- Crosshairs (`assets/images/weapons/kenney_crosshair-pack/`): Kenney packs are CC0, so credit is optional
-- Weapon icons (`assets/images/weapons/*.png`)
-- Lobby floor texture (`assets/images/textures/rocks.png`)
-- Sounds (`assets/sounds/pew.ogg`) and any fonts
+## Cardboard box by [Matrix Rex](https://sketchfab.com/matrixrex)
+
+From Sketchfab, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+| In game | Model |
+|---|---|
+| Box, "Old" look | ["Old Cardboard Box"](https://sketchfab.com/3d-models/old-cardboard-box-a60d4d56b93e4a52975d051a00eb4bd8) |
+
+## Fist sprites by Ragnar Random
+
+From OpenGameArt, public domain ([CC0](https://creativecommons.org/publicdomain/zero/1.0/)). Sprites by Ragnar Random, derivative of works by Quaternius.
+
+| In game | Pack |
+|---|---|
+| Punch | ["FPS Weapon Sprites"](https://opengameart.org/content/fps-weapon-sprites) |
+
+## Player characters and animations from [Mixamo](https://www.mixamo.com)
+
+By Adobe, used under the Mixamo terms (free to use in games).
+
+| In game | From Mixamo |
+|---|---|
+| Characters | Ch15, Pete, Vecna, Amy, Alien, Paladin, Racer, Romero, Steve, Zlorp, Big Vegas, Ortiz, Mousey, Maw, Ty |
+| Animations | Moving, aiming, jumping, deaths and emotes |
+
+## Font by Ahmad Suhadi (suhadidesign)
+
+Licence terms on the designer's page.
+
+| In game | Font |
+|---|---|
+| All text | ["Pixel Game"](https://suhadidesign.gumroad.com/l/hkzhcw) |
+
+<!-- Still to identify (not shown in the game or on the site until filled in):
+     - Pixel Game font: the shipped .otf says "For Personal Use Only"; the designer
+       sells commercial and app/game licences. Confirm which licence covers Gridlock.
+     - Sounds: assets/sounds/taunt.mp3 and assets/sounds/coin_pickup.mp3
+     - Weapon icons: assets/images/weapons/{pistol,smg,shotgun,ar,Sniper}.png
+       (made with Adobe Express; credit the source if they are not our own art)
+     - Lobby floor texture: assets/images/textures/rocks.png
+     Shipped but not used, so not credited (drop them from manifest.json, or credit
+     them once they are used):
+     - Crosshairs xhair_scope_* (Kenney "Crosshair Pack", CC0, https://www.kenney.nl)
+     - pistol_fp_sprite and shotgun_fp_sprite (same FPS Weapon Sprites pack as the fist) -->

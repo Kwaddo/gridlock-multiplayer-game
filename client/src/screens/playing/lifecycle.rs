@@ -1,6 +1,7 @@
 use crate::types::world::WorldId;
 
 use macroquad::prelude::*;
+use std::fmt::Write;
 
 use super::PlayingState;
 
@@ -82,11 +83,15 @@ impl PlayingState {
                 .find(|(id, ..)| *id == aid)
                 .map(|(_, name, ..)| name.clone())
         });
-        let _ = damage;
+        let source = attacker_id.and_then(|aid| self.note_damage_direction(aid));
+        // a short camera punch, view only: the aim stays where it was
+        self.punch_from_hit(damage, source);
     }
 
     pub fn die(&mut self, _killer_id: Option<u32>) {
         self.is_dead = true;
+        self.clear_damage_indicators();
+        self.clear_bot_alerts();
         self.hp = 0.0;
         self.death_timer = 3.0;
         // dying loses the box on the server too, and a taunt not sent yet stays unsent
@@ -213,6 +218,9 @@ impl PlayingState {
         self.my_death = None; // next death gets picked fresh
         self.death_weapon_name = None;
         self.death_camera_phase = super::state::DeathCameraPhase::None;
+        // resend the weapon in hand: the server picks one on respawn, and
+        // must show everyone the one we actually hold
+        self.last_sent_weapon.clear();
     }
 
     /// Full-screen victory overlay displayed when the match ends.
@@ -235,15 +243,34 @@ impl PlayingState {
         let row_highlight = Color::new(0.12, 0.14, 0.24, 1.0);
         let gold = Color::new(1.0, 0.85, 0.30, 1.0);
 
-        // Full screen overlay
-        draw_rectangle(0.0, 0.0, sw, sh, overlay_bg);
-
         // Panel dimensions
         let panel_w = 500.0_f32.min(sw * 0.85);
         let scoreboard_rows = self.connected_players.len().min(12);
         let panel_h = 260.0 + (scoreboard_rows as f32 * 30.0);
         let panel_x = (sw - panel_w) / 2.0;
         let panel_y = (sh - panel_h) / 2.0;
+
+        // Text baselines, top to bottom
+        let header_y = panel_y + 36.0;
+        let winner_y = header_y + 36.0;
+        let subtitle_y = winner_y + 14.0;
+        let separator_y = subtitle_y + 32.0;
+        let columns_y = separator_y + 16.0;
+        let first_row_y = columns_y + 22.0;
+        let row_y = |i: usize| first_row_y + i as f32 * 28.0;
+
+        // Sort players by kills (descending; stable, so ties keep their order)
+        let mut sorted_players: Vec<_> = self.connected_players.iter().collect();
+        // connected_players: (id, name, kills, deaths, gun_level, team, weapon, is_bot)
+        sorted_players.sort_by(|a, b| b.2.cmp(&a.2));
+        let shown = sorted_players.len().min(12);
+
+        // Shapes first, then every text: nothing here overlaps (rows are
+        // 28 px apart with 26 px backgrounds), so the picture is the same
+        // and the text draws as one batch instead of one per row.
+
+        // Full screen overlay
+        draw_rectangle(0.0, 0.0, sw, sh, overlay_bg);
 
         // Panel background + border
         draw_rectangle(panel_x, panel_y, panel_w, panel_h, panel_bg);
@@ -252,59 +279,53 @@ impl PlayingState {
         // Top accent line
         draw_rectangle(panel_x, panel_y, panel_w, 3.0, accent);
 
-        let mut cy = panel_y + 36.0;
+        // Separator line
+        draw_rectangle(panel_x + 20.0, separator_y, panel_w - 40.0, 1.0, panel_border);
+
+        // Row backgrounds
+        for (i, player) in sorted_players.iter().take(shown).enumerate() {
+            let bg = if player.0 == local_player_id { row_highlight } else { row_bg };
+            draw_rectangle(panel_x + 12.0, row_y(i) - 13.0, panel_w - 24.0, 26.0, bg);
+        }
+
+        // Bottom accent line
+        draw_rectangle(panel_x, panel_y + panel_h - 3.0, panel_w, 3.0, accent);
 
         // "MATCH OVER" header
         let header = "MATCH OVER";
         let hw = measure_game_text(header, 16);
-        draw_text_ex(header, (sw - hw) / 2.0, cy, text_params(16, text_dim));
-        cy += 36.0;
+        draw_text_ex(header, (sw - hw) / 2.0, header_y, text_params(16, text_dim));
 
         // Winner name (large, gold/orange)
-        let winner_text = format!("{}", winner_name);
-        let ww = measure_game_text(&winner_text, 42);
-        draw_text_ex(&winner_text, (sw - ww) / 2.0, cy, text_params(42, gold));
-        cy += 14.0;
+        let ww = measure_game_text(winner_name, 42);
+        draw_text_ex(winner_name, (sw - ww) / 2.0, winner_y, text_params(42, gold));
 
         // "WINS THE MATCH" subtitle
         let subtitle = "WINS THE MATCH";
         let stw = measure_game_text(subtitle, 16);
-        draw_text_ex(subtitle, (sw - stw) / 2.0, cy, text_params(16, text_label));
-        cy += 32.0;
-
-        // Separator line
-        draw_rectangle(panel_x + 20.0, cy, panel_w - 40.0, 1.0, panel_border);
-        cy += 16.0;
+        draw_text_ex(subtitle, (sw - stw) / 2.0, subtitle_y, text_params(16, text_label));
 
         // Scoreboard header
         let col_rank_x = panel_x + 24.0;
         let col_name_x = panel_x + 60.0;
         let col_kills_x = panel_x + panel_w - 80.0;
-        draw_text_ex("#", col_rank_x, cy, text_params(13, text_dim));
-        draw_text_ex("PLAYER", col_name_x, cy, text_params(13, text_dim));
-        draw_text_ex("KILLS", col_kills_x, cy, text_params(13, text_dim));
-        cy += 22.0;
+        draw_text_ex("#", col_rank_x, columns_y, text_params(13, text_dim));
+        draw_text_ex("PLAYER", col_name_x, columns_y, text_params(13, text_dim));
+        draw_text_ex("KILLS", col_kills_x, columns_y, text_params(13, text_dim));
 
-        // Sort players by kills (descending)
-        let mut sorted_players = self.connected_players.clone();
-        // connected_players: (id, name, kills, deaths, gun_level, team, weapon, is_bot)
-        sorted_players.sort_by(|a, b| b.2.cmp(&a.2));
-
-        for (i, (pid, name, kills, _deaths, _gun_level, _team, _weapon, _is_bot)) in
-            sorted_players.iter().take(12).enumerate()
+        let mut num = String::new(); // rank and kill counts, reused per row
+        for (i, (pid, name, kills, _deaths, _gun_level, team, _weapon, _is_bot)) in
+            sorted_players.iter().take(shown).copied().enumerate()
         {
             let is_local = *pid == local_player_id;
             let is_winner = name == winner_name;
-            let row_y = cy - 13.0;
-
-            // Row background
-            let bg = if is_local { row_highlight } else { row_bg };
-            draw_rectangle(panel_x + 12.0, row_y, panel_w - 24.0, 26.0, bg);
+            let cy = row_y(i);
 
             // Rank
-            let rank = format!("{}", i + 1);
+            num.clear();
+            let _ = write!(num, "{}", i + 1);
             let rank_color = if i == 0 { gold } else { text_dim };
-            draw_text_ex(&rank, col_rank_x, cy, text_params(14, rank_color));
+            draw_text_ex(&num, col_rank_x, cy, text_params(14, rank_color));
 
             // Player name: prefer winner/local emphasis, otherwise color by team
             let name_color = if is_winner {
@@ -312,37 +333,30 @@ impl PlayingState {
             } else if is_local {
                 text_bright
             } else {
-                // Try to color by team when available via connected_players
-                if let Some((_id, _pname, _kills, _deaths, _gl, team, _wep, _is_bot)) =
-                    self.connected_players.iter().find(|(_pid, n, ..)| n == name)
-                {
-                    match *team {
-                        1 => Color::from_rgba(230, 120, 120, 255),
-                        2 => Color::from_rgba(120, 170, 230, 255),
-                        _ => text_label,
-                    }
-                } else {
-                    text_label
+                // this row's own team (a lookup by name gave two players who
+                // share a name the first one's colour)
+                match *team {
+                    1 => Color::from_rgba(230, 120, 120, 255),
+                    2 => Color::from_rgba(120, 170, 230, 255),
+                    _ => text_label,
                 }
             };
             draw_text_ex(name, col_name_x, cy, text_params(14, name_color));
 
             // Kills
-            let kills_text = format!("{}", kills);
-            let kw = measure_game_text(&kills_text, 14);
+            num.clear();
+            let _ = write!(num, "{}", kills);
+            let kw = measure_game_text(&num, 14);
             draw_text_ex(
-                &kills_text,
+                &num,
                 col_kills_x + (40.0 - kw) / 2.0,
                 cy,
                 text_params(14, text_bright),
             );
-
-            cy += 28.0;
         }
 
-        cy += 12.0;
-
         // Countdown
+        let cy = row_y(shown) + 12.0;
         let secs = self.match_end_countdown_timer.ceil() as i32;
         let countdown_text = format!("Returning to lobby in {}s", secs);
         let ctw = measure_game_text(&countdown_text, 14);
@@ -352,8 +366,5 @@ impl PlayingState {
             cy,
             text_params(14, text_dim),
         );
-
-        // Bottom accent line
-        draw_rectangle(panel_x, panel_y + panel_h - 3.0, panel_w, 3.0, accent);
     }
 }

@@ -17,7 +17,7 @@ pub(super) fn refresh_player_hitboxes(
     animated_models: &HashMap<String, AnimatedModel>,
     player: &mut OtherPlayer,
 ) {
-    let desired_key = player.skin_type.model_key();
+    let desired_key = player.anim.skin_type.model_key();
     let anim = desired_key
         .and_then(|k| animated_models.get(k))
         .or_else(|| animated_models.get("anim_rifle_idle"));
@@ -36,7 +36,7 @@ pub(super) fn refresh_player_hitboxes(
     let scale = anim.normalize_scale * WORLD_PLAYER_RENDER_SCALE;
     let y_offset = anim.y_offset * WORLD_PLAYER_RENDER_SCALE;
     if let Some(hitboxes) =
-        build_standing_hitboxes_from_joints(anim, player.anim.pose(), player.render_yaw, scale, y_offset)
+        build_standing_hitboxes_from_joints(anim, player.anim.body.hit_pose(), player.smooth.yaw, scale, y_offset)
     {
         // reuse the vec's allocation rather than building a new one every frame
         player.hitboxes.clear();
@@ -63,8 +63,10 @@ fn build_standing_hitboxes_from_joints(
         Here we are using the same model scaling as the render so visual hitbox indicators line up with the actual hitboxes, and we also apply the same scaling to
         the y_offset which is used to adjust the hitbox positions up or down based on the players height (crouching, standing, etc)
     */
+    // the same rotation for every joint, built once
+    let rotation = Mat3::from_rotation_y(-yaw + PLAYER_MODEL_YAW_OFFSET);
     let to_offset = |p: Vec3| -> Vec3 {
-        let rotated = Mat3::from_rotation_y(-yaw + PLAYER_MODEL_YAW_OFFSET) * (p * scale);
+        let rotated = rotation * (p * scale);
         rotated + vec3(0.0, y_offset, 0.0)
     };
 
@@ -205,4 +207,33 @@ fn build_standing_hitboxes_from_joints(
         head_box, torso, l_torso, r_torso, l_leg, r_leg, l_upper_arm, l_forearm, r_upper_arm,
         r_forearm,
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::animated_model::{test_rig, Nodes};
+
+    // the boxes a hidden body gets (only its hitbox bones posed) are the boxes the full pose gives, bit for bit
+    #[test]
+    fn hitbox_bones_only_pose_gives_the_same_boxes() {
+        let rig = test_rig(3, 1.1);
+        let mut nodes = Vec::new();
+        rig.hit_nodes(&mut nodes);
+        let (mut full, mut hit) = (rig.new_pose(), rig.new_pose());
+        for step in 0..30 {
+            let t = step as f32 * 0.041;
+            rig.sample_local(t, &mut full);
+            rig.sample_local_nodes(t, &mut hit, Nodes::Only(&nodes));
+            rig.bend_upper_body(&mut full, 0.4);
+            rig.bend_upper_body(&mut hit, 0.4);
+            rig.finish_pose(&mut full);
+            rig.finish_hit_pose(&mut hit);
+            let yaw = step as f32 * 0.3;
+            let a = build_standing_hitboxes_from_joints(&rig, Some(&full), yaw, 0.9, 0.1).unwrap();
+            let b = build_standing_hitboxes_from_joints(&rig, Some(&hit), yaw, 0.9, 0.1).unwrap();
+            let bits = |h: &Hitbox| (h.center_offset.to_array().map(f32::to_bits), h.half_extents.to_array().map(f32::to_bits), h.zone);
+            assert_eq!(a.iter().map(bits).collect::<Vec<_>>(), b.iter().map(bits).collect::<Vec<_>>(), "step {step}");
+        }
+    }
 }

@@ -60,10 +60,17 @@ pub(in crate::world::render) struct MeshData {
 
 impl MeshData {
     fn new(cullable: bool) -> Self {
+        Self::with_capacity(cullable, 0, 0)
+    }
+
+    /// Room for `vertices` vertices (and their quads' indices) and `items`
+    /// items, so a bake does not grow the vectors step by step.
+    fn with_capacity(cullable: bool, vertices: usize, items: usize) -> Self {
+        let vertices = vertices.min(MAX_MESH_VERTICES);
         Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-            items: Vec::new(),
+            vertices: Vec::with_capacity(vertices),
+            indices: Vec::with_capacity(vertices / 4 * 6),
+            items: Vec::with_capacity(items),
             bounds: Bounds {
                 min: Vec3::splat(f32::INFINITY),
                 max: Vec3::splat(f32::NEG_INFINITY),
@@ -94,8 +101,15 @@ pub(in crate::world::render) struct MeshBuilder {
 }
 
 impl MeshBuilder {
+    #[cfg(test)]
     pub fn new(cullable: bool) -> Self {
-        Self { cullable, cull: Vec2::ZERO, meshes: vec![MeshData::new(cullable)] }
+        Self::with_capacity(cullable, 0, 0)
+    }
+
+    /// A builder whose first mesh has room for about `vertices` vertices in
+    /// `items` items (a guess; the vectors still grow past it).
+    pub fn with_capacity(cullable: bool, vertices: usize, items: usize) -> Self {
+        Self { cullable, cull: Vec2::ZERO, meshes: vec![MeshData::with_capacity(cullable, vertices, items)] }
     }
 
     /// Following cubes belong to the cell (or prop) centred at `cull`.

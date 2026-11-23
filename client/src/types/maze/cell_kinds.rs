@@ -60,7 +60,9 @@ impl CellKindCache {
     }
 
     /// Reclassify if `m` changed since the last call (cheap when it did not).
-    pub fn sync(&mut self, m: &Maze) {
+    /// Returns whether it did, so views baked from the kinds (the minimap's
+    /// cell texture) know when to rebuild.
+    pub fn sync(&mut self, m: &Maze) -> bool {
         let changed = match &mut self.snapshot {
             Some(s) => s.sync(m) != MazeChange::Unchanged,
             None => {
@@ -73,6 +75,12 @@ impl CellKindCache {
             self.height = m.height as i32;
             self.kinds = classify_cells(m);
         }
+        changed
+    }
+
+    /// Cells across (x) and down (y) the classified maze.
+    pub fn size(&self) -> (i32, i32) {
+        (self.width, self.height)
     }
 
     /// Kind of cell (`cx`, `cy`); outside the maze counts as wall.

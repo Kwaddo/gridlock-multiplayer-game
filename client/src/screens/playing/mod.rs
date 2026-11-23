@@ -1,5 +1,6 @@
 mod camera;
 mod cardboard;
+mod hit_fx;
 mod characters;
 pub mod chat;
 mod movement;

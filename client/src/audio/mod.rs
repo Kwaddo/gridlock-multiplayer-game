@@ -21,7 +21,7 @@ type Sample = rodio::source::Buffered<rodio::Decoder<std::io::Cursor<Vec<u8>>>>;
 
 pub struct Audio {
     #[cfg(not(target_arch = "wasm32"))]
-    output: Option<(rodio::OutputStream, rodio::OutputStreamHandle)>,
+    output: Output,
     #[cfg(not(target_arch = "wasm32"))]
     samples: HashMap<String, Sample>,
 
@@ -40,9 +40,7 @@ impl Audio {
     pub fn new() -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let audio = Audio {
-            output: rodio::OutputStream::try_default()
-                .map_err(|e| println!("Failed to initialize audio output stream: {:?}", e))
-                .ok(),
+            output: Output::open(),
             samples: HashMap::new(),
             master: 0.0,
             warned: RefCell::default(),
@@ -129,7 +127,7 @@ impl Audio {
         #[cfg(not(target_arch = "wasm32"))]
         {
             use rodio::Source;
-            let Some((_, handle)) = &self.output else {
+            let Some(handle) = self.output.handle() else {
                 return;
             };
             let Some(sample) = self.samples.get(key) else {
@@ -166,6 +164,66 @@ impl Audio {
             macroquad::logging::warn!("sound '{}' isn't loaded, is it in manifest.json?", key);
             warned.insert(key.to_string());
         }
+    }
+}
+
+/// The output device (native builds), opened on a thread of its own: opening
+/// it takes tens of milliseconds (far longer the first time after boot), which
+/// held up the first frame, and closing it about as long. The stream can not
+/// move between threads, so that thread keeps it until the `Audio` is dropped.
+#[cfg(not(target_arch = "wasm32"))]
+struct Output {
+    handle: std::cell::OnceCell<Option<rodio::OutputStreamHandle>>,
+    opened: std::sync::mpsc::Receiver<Option<rodio::OutputStreamHandle>>,
+    /// Dropped with the `Audio`, which has the thread close the stream.
+    _close: std::sync::mpsc::Sender<()>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Output {
+    fn open() -> Self {
+        let (opened_tx, opened) = std::sync::mpsc::channel();
+        let (close, closed) = std::sync::mpsc::channel::<()>();
+        let spawned = std::thread::Builder::new().name("audio output".into()).spawn(move || {
+            let stream = rodio::OutputStream::try_default()
+                .map_err(|e| println!("Failed to initialize audio output stream: {:?}", e))
+                .ok();
+            let Some((stream, handle)) = stream else {
+                let _ = opened_tx.send(None);
+                return;
+            };
+            let _ = opened_tx.send(Some(handle));
+            let _ = closed.recv(); // until the `Audio` is dropped
+            drop(stream);
+        });
+        if let Err(e) = spawned {
+            println!("Failed to initialize audio output stream: {:?}", e);
+        }
+        Output { handle: std::cell::OnceCell::new(), opened, _close: close }
+    }
+
+    /// The device, or `None` if it could not be opened. The first call waits
+    /// for it to open, which it normally did long before the first sound.
+    fn handle(&self) -> Option<&rodio::OutputStreamHandle> {
+        self.handle.get_or_init(|| self.opened.recv().ok().flatten()).as_ref()
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::Output;
+
+    /// Opening the device does not block, asking for it gives the same
+    /// answer every time (also without a device), and dropping it does not
+    /// wait for the stream to close.
+    #[test]
+    fn output_opens_in_the_background() {
+        let output = Output::open();
+        let opened = output.handle().is_some();
+        assert_eq!(output.handle().is_some(), opened);
+        let start = std::time::Instant::now();
+        drop(output);
+        assert!(start.elapsed() < std::time::Duration::from_millis(20), "closed on its own thread");
     }
 }
 

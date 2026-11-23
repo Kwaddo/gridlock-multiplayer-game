@@ -18,6 +18,8 @@ impl PlayingState {
         player_id: u32,
         maze: Option<&Maze>,
     ) {
+        // hit effects are view only, a kill's hitstop slows them and never the game
+        self.hit_fx.tick(get_frame_time());
         self.update_head_bob(get_frame_time());
         let camera = self.build_camera(config, maze);
         // update cached shapes first, so every camera below only reads
@@ -117,9 +119,11 @@ impl PlayingState {
                 &self.other_players,
                 &self.weapons,
                 &self.assets,
-                self.hit_marker_timer,
+                // the kill marker takes the hit marker's place while it's up
+                if self.hit_fx.kill_marker_on() { 0.0 } else { self.hit_marker_timer },
                 self.hit_marker_headshot,
-                &self.damage_numbers,
+                // floating damage numbers are a setting, on by default
+                if config.damage_numbers { &self.damage_numbers } else { &[] },
                 self.hit_marker_pellet_mask,
                 self.hp,
                 self.max_hp,
@@ -143,6 +147,15 @@ impl PlayingState {
                 self.smoke_hiding(),
                 self.smoke_gun_locked(),
             );
+
+            // where recent hits came from, around the crosshair
+            self.draw_damage_indicators();
+            // kill and headshot markers, wherever the crosshair shows
+            if !self.smoke_hiding() && !self.smoke_gun_locked() {
+                self.draw_hit_fx_hud();
+            }
+            // bots that just noticed us: over their heads, or on the screen's edge
+            self.draw_bot_alerts(&camera);
 
             let dt = get_frame_time();
             if self.movement_state.is_stamina_depleted {

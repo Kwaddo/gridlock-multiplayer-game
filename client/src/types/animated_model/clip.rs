@@ -96,6 +96,8 @@ impl AnimatedModel {
             duration: clip.duration,
             time: 0.0,
             skin_accum: SKIN_INTERVAL,
+            posed_time: None,
+            cpu_skinned_time: None,
             playback_loop: true,
             playback_paused: false,
             playback_finished: false,
@@ -192,10 +194,7 @@ mod tests {
         }
         let normalize_scale = 1.5 / (hi - lo).max(0.0001);
         Ok(AnimatedModel {
-            geometry: Rc::new(super::super::SharedGeometry {
-                parts: Vec::new(),
-                gpu: std::cell::RefCell::new(super::super::gpu::GpuGeometry::Untried),
-            }),
+            geometry: Rc::new(super::super::SharedGeometry::new(Vec::new())),
             gpu_drawn: Cell::new(false),
             pose: super::super::Pose::new(&node_rest, joint_nodes.len()),
             joint_roles: super::super::joints::resolve_joint_roles(&joint_names),
@@ -210,6 +209,8 @@ mod tests {
             duration,
             time: 0.0,
             skin_accum: 0.0,
+            posed_time: None,
+            cpu_skinned_time: None,
             playback_loop: true,
             playback_paused: false,
             playback_finished: false,

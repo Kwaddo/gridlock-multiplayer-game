@@ -15,9 +15,6 @@ impl PlayingState {
         if id == WeaponId::Minigun {
             return "fp_hands_minigun";
         }
-        if id == WeaponId::Sawnoff {
-            return "fp_hands_sawnoff";
-        }
         match id.category() {
             WeaponCategory::Pistol => "fp_hands_pistol",
             WeaponCategory::Smg => "fp_hands_smg",
@@ -82,36 +79,19 @@ impl PlayingState {
             .get(preferred_hands_key)
             .and_then(|mvec| mvec.first())
             .or_else(|| self.models.get("fp_hands").and_then(|mvec| mvec.first()));
-        let draw_hands = !matches!(weapon.id, WeaponId::Sawnoff | WeaponId::Minigun);
+        let draw_hands = weapon.id != WeaponId::Minigun;
 
         if let Some(model_key) = stats.viewmodel_model {
             // All of a weapon's meshes are drawn in one call, under one
             // camera and model matrix, so a weapon made of many meshes (the
             // SPAS-12 has 38) batches into a few draw calls instead of
             // flushing the batch several times per mesh.
-            if let Some(meshes) = self.models.get(model_key) {
-                self.draw_3d_viewmodel(
-                    meshes.iter(),
-                    1.0,
-                    0.0,
-                    hands_anim,
-                    hands_static,
-                    weapon,
-                    stats,
-                    draw_hands,
-                );
-                return;
-            } else if let Some(animated_model) = self.animated_models.get(model_key) {
-                self.draw_3d_viewmodel(
-                    animated_model.meshes(),
-                    animated_model.normalize_scale,
-                    animated_model.y_offset,
-                    hands_anim,
-                    hands_static,
-                    weapon,
-                    stats,
-                    draw_hands,
-                );
+            let weapon_model = match self.models.get(model_key) {
+                Some(meshes) => Some(ViewmodelWeapon::Static(model_key, meshes)),
+                None => self.animated_models.get(model_key).map(ViewmodelWeapon::Animated),
+            };
+            if let Some(weapon_model) = weapon_model {
+                self.draw_3d_viewmodel(weapon_model, hands_anim, hands_static, weapon, stats, draw_hands);
                 return;
             }
             // Not loaded yet (it arrives in the background after joining) or
@@ -135,12 +115,12 @@ impl PlayingState {
         }
     }
 
-    /// Draw the weapon's `meshes`, then the hands and muzzle flash once.
-    fn draw_3d_viewmodel<'m>(
+    /// Draw the weapon model, then the hands and muzzle flash once. Both
+    /// kinds of weapon model draw from GPU-resident buffers where they can,
+    /// instead of re-batching their meshes every frame.
+    fn draw_3d_viewmodel(
         &self,
-        meshes: impl IntoIterator<Item = &'m Mesh>,
-        mesh_normalize_scale: f32,
-        mesh_y_offset: f32,
+        weapon_model: ViewmodelWeapon<'_>,
         hands_anim: Option<&crate::types::animated_model::AnimatedModel>,
         hands_static: Option<&Mesh>,
         weapon: &crate::weapons::WeaponState,
@@ -238,6 +218,10 @@ impl PlayingState {
             Normalize and transform weapon mesh to world position. We apply normalization first so that
             the viewmodel_scale stat can be used to tune overall weapon size without affecting the mesh's position offset.
         */
+        let (mesh_normalize_scale, mesh_y_offset) = match weapon_model {
+            ViewmodelWeapon::Static(..) => (1.0, 0.0),
+            ViewmodelWeapon::Animated(m) => (m.normalize_scale, m.y_offset),
+        };
         let normalize_mat = Mat4::from_translation(vec3(0.0, mesh_y_offset, 0.0))
             * Mat4::from_scale(Vec3::splat(mesh_normalize_scale.max(0.0001)));
         let scale_mat = Mat4::from_scale(vec3(
@@ -258,18 +242,29 @@ impl PlayingState {
         let gl = unsafe { get_internal_gl() }; // unsafe is required to access internal GL for custom shader uniforms
         gl.quad_gl.depth_test(true);
 
-        // avoid allocating a transformed mesh every frame by using the GL model matrix
-        gl.quad_gl.push_model_matrix(transform);
-        for mesh in meshes {
-            draw_mesh(mesh);
+        // The minigun rig (arms and gun in one animated model)
+        // skins on the GPU like the hands, untinted and with their materials'
+        // own alpha, as `draw_mesh` drew them; after a GPU draw, update()
+        // stops re-skinning them on the CPU.
+        let on_gpu = match weapon_model {
+            ViewmodelWeapon::Static(key, ms) => crate::types::static_gpu::draw_static_meshes(key, ms, transform),
+            ViewmodelWeapon::Animated(m) => m.draw_gpu(transform, WHITE),
+        };
+        if !on_gpu {
+            // avoid allocating a transformed mesh every frame by using the GL model matrix
+            gl.quad_gl.push_model_matrix(transform);
+            match weapon_model {
+                ViewmodelWeapon::Static(_, ms) => ms.iter().for_each(draw_mesh),
+                ViewmodelWeapon::Animated(m) => m.meshes().for_each(draw_mesh),
+            }
+            gl.quad_gl.pop_model_matrix();
         }
-        gl.quad_gl.pop_model_matrix();
 
         /*
             DRAWING ANIMATED HANDS HERE
         */
 
-        let mut draw_hands = |hands_mesh: &Mesh, normalize_scale: f32, y_offset: f32| {
+        let hands_transform_for = |normalize_scale: f32, y_offset: f32| {
             // Keep hands scale independent from weapon scale so tiny weapon tuning
             // does not make hands disappear.
             let hands_scale = HANDS_BASE_SCALE * stats.viewmodel_hands_scale.max(0.01);
@@ -295,23 +290,28 @@ impl PlayingState {
             let clamped_normalize = normalize_scale.clamp(0.2, 5.0);
             let hands_normalize_mat = Mat4::from_translation(vec3(0.0, y_offset, 0.0))
                 * Mat4::from_scale(Vec3::splat(clamped_normalize));
-            let hands_transform =
-                hands_trans * hands_rot_mat * hands_scale_mat * hands_normalize_mat;
-
-            // Viewmodel hands should be fully opaque regardless of source material
-            // alpha; only a mesh that is not needs its own copy.
-            gl.quad_gl.push_model_matrix(hands_transform);
-            draw_mesh_opaque(hands_mesh);
-            gl.quad_gl.pop_model_matrix();
+            hands_trans * hands_rot_mat * hands_scale_mat * hands_normalize_mat
         };
 
+        // Viewmodel hands should be fully opaque regardless of source material
+        // alpha; only a mesh that is not needs its own copy. One transform for
+        // all of a model's meshes, worked out once.
         if should_draw_hands {
             if let Some(hands_model) = hands_anim {
-                for mesh in hands_model.meshes() {
-                    draw_hands(mesh, hands_model.normalize_scale, hands_model.y_offset);
+                let hands_transform = hands_transform_for(hands_model.normalize_scale, hands_model.y_offset);
+                // skinned on the GPU from buffers uploaded once; after a GPU draw,
+                // update() stops re-skinning the hands on the CPU
+                if !hands_model.draw_gpu_opaque(hands_transform) {
+                    gl.quad_gl.push_model_matrix(hands_transform);
+                    for mesh in hands_model.meshes() {
+                        draw_mesh_opaque(mesh);
+                    }
+                    gl.quad_gl.pop_model_matrix();
                 }
             } else if let Some(hands_mesh) = hands_static {
-                draw_hands(hands_mesh, 1.0, 0.0);
+                gl.quad_gl.push_model_matrix(hands_transform_for(1.0, 0.0));
+                draw_mesh_opaque(hands_mesh);
+                gl.quad_gl.pop_model_matrix();
             }
         }
 
@@ -332,13 +332,14 @@ impl PlayingState {
                 let alpha = (220.0 * t) as u8;
                 let radius = 18.0 * vm_scale * 28.0 * (0.4 + 0.6 * t);
 
-                draw_circle(
+                // allocation-free circles (macroquad's draw_circle allocates per call)
+                crate::ui::prims::draw_circle(
                     fx,
                     fy,
                     radius * 1.4,
                     Color::from_rgba(255, 190, 80, alpha / 2),
                 );
-                draw_circle(fx, fy, radius, Color::from_rgba(255, 240, 180, alpha));
+                crate::ui::prims::draw_circle(fx, fy, radius, Color::from_rgba(255, 240, 180, alpha));
             }
     }
     }
@@ -420,6 +421,14 @@ impl PlayingState {
             );
         }
     }
+}
+
+/// The first-person weapon model: a static model (its key and meshes), or an
+/// animated rig that holds the arms and gun together (the minigun).
+#[derive(Clone, Copy)]
+enum ViewmodelWeapon<'m> {
+    Static(&'m str, &'m [Mesh]),
+    Animated(&'m crate::types::animated_model::AnimatedModel),
 }
 
 /// Opacity checks kept at most; one per hands mesh drawn.

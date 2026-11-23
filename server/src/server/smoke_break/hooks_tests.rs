@@ -19,7 +19,7 @@ fn match_of_two() -> (Server, PeerId, PeerId) {
     (server, a, b)
 }
 
-fn messages(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<ServerMsg> {
+fn messages(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<ServerMsg> {
     out.iter().filter(|(p, _)| *p == peer).filter_map(|(_, m)| ServerMsg::decode(m)).collect()
 }
 
@@ -36,6 +36,15 @@ fn the_first_tick_starts_round_1_and_moves_everyone() {
         assert!(got.iter().any(|m| matches!(m, ServerMsg::Respawn { .. })), "{peer} wasn't moved");
         assert!(got.iter().any(|m| matches!(m, ServerMsg::SmokeRound(_))), "{peer} got no round");
     }
+}
+
+// the server list counts people and bots, never the decoy crowd
+#[test]
+fn decoys_are_not_counted_as_players_or_bots() {
+    let (mut server, _, _) = match_of_two();
+    server.tick();
+    assert!(server.players.keys().any(|p| is_decoy(*p)), "the crowd is out");
+    assert_eq!((server.player_count(), server.bot_count()), (2, 0));
 }
 
 #[test]

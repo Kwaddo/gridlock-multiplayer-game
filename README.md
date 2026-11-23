@@ -10,8 +10,8 @@ A multiplayer first-person shooter written in Rust. Built on [macroquad](https:/
 - **Procedural maze arena** — generated server-side and streamed to clients on join.
 - **Full weapon roster** — pistols (M1911, Deagle, Revolver, Suppressed, Taurus Raging), SMGs (MP5, P90, Honey Badger, Tommy Gun), shotguns (Benelli, SPAS), assault rifles (M4A1, AK, FAMAS, M16, SCAR, AS-VAL), snipers (Bolt Action, Hunting Rifle, Semi-Auto), and heavies (Grenade Launcher, Minigun, RPG).
 - **Per-weapon stats and recoil** — server-validated stats table (`server/src/weapons_stats.rs`) with client-side recoil/spread (`client/src/weapons/recoil.rs`).
-- **Animated FP viewmodels** — separate rigged hand rigs per weapon class (carbine, pistol, SMG, sniper, minigun, sawn-off).
-- **3rd-person player animations** — walk/sprint/crouch/prone/jump/slide/death sets in `assets/models/player/`.
+- **Animated FP viewmodels** — separate rigged hand rigs per weapon class (carbine, pistol, SMG, sniper, minigun).
+- **3rd-person player animations** — walk/sprint/crouch/prone/jump/death clips in `assets/models/animations/`, played on the characters in `assets/models/characters/`.
 - **Crosshair presets** — JSON-driven crosshair customization (`client/crosshair_presets_shadow.json`).
 - **Bots** — server-side AI players (`server/src/bot/`).
 - **Bombsite / objective logic** — see `server/src/server/game.rs`.
@@ -157,7 +157,7 @@ The client loads all art/audio paths from `manifest.json` at startup. Keys are g
 
 - **Hands / viewmodels** — `assets/models/hand/*.glb`
 - **Weapons** — `assets/models/weapons/<Class>/*.glb`
-- **Player animations** — `assets/models/player/*.glb`
+- **Player characters and animations** — `assets/models/characters/*.glb`, `assets/models/animations/*.glb`
 - **Sounds** — `assets/sounds/*.ogg`
 - **Sprites / icons** — `assets/images/weapons/`
 - **Crosshairs** — `assets/images/weapons/kenney_crosshair-pack/`

@@ -42,8 +42,10 @@ fn server_messages_round_trip() {
         rt_server(ServerMsg::WorldChange { world: 1, spawn: (1.0, 0.0, 2.0), mode, freeze_secs, match_timer });
     }
     rt_server(ServerMsg::Assets { world: 255, entries: vec![("k".into(), "a/b.glb".into())] });
-    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "Gridlock".into(), version: None });
-    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "G".into(), version: Some(PROTOCOL_VERSION) });
+    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "Gridlock".into(), version: None, bots: None });
+    let version = Some(PROTOCOL_VERSION);
+    rt_server(ServerMsg::Discover { players: 2, max_players: 16, name: "G".into(), version, bots: None });
+    rt_server(ServerMsg::Discover { players: 9, max_players: 16, name: "G".into(), version, bots: Some(7) });
     rt_server(ServerMsg::Respawn { position: (1.0, 2.0, 3.0), kind: Some(1) });
     rt_server(ServerMsg::Damage { amount: 12.5, attacker_id: 4, stun: true });
     rt_server(ServerMsg::KillFeed { killer_id: 3, victim_id: 9, weapon: "AK".into(), headshot: false });
@@ -64,9 +66,9 @@ fn server_messages_round_trip() {
         is_bot: true,
     }]));
     rt_server(ServerMsg::MatchTimer { secs: 65535 });
-    let shot = BotShot { shooter_id: 1, victim_id: 2, start: (0.0, 1.25, 0.0), end: (1.0, 1.0, 76.5) };
-    rt_server(ServerMsg::BotShots(vec![shot, BotShot { shooter_id: 3, ..shot }]));
-    rt_server(ServerMsg::BotShots(Vec::new()));
+    let shot = Shot { shooter_id: 1, victim_id: 2, start: (0.0, 1.25, 0.0), end: (1.0, 1.0, 76.5) };
+    rt_server(ServerMsg::Shots(vec![shot, Shot { shooter_id: 3, ..shot }]));
+    rt_server(ServerMsg::Shots(Vec::new()));
     // on the fixed-point grid again (1/64 m, quarter turn) so it comes back exact
     let cbox = CardboardBox { id: 7, position: (2.0, 0.0, -9.5), yaw: std::f32::consts::FRAC_PI_2, carrier: 0 };
     rt_server(ServerMsg::Boxes { world: 0, boxes: vec![cbox, CardboardBox { id: 65535, carrier: 42, ..cbox }] });
@@ -93,9 +95,8 @@ fn server_messages_round_trip() {
     rt_server(ServerMsg::PlayerLeft { id: 4, name: "bob".into(), reason: LEAVE_TIMED_OUT });
 }
 
-#[test]
-fn snd_round_state_is_48_bytes() {
-    let m = ServerMsg::SndRoundState(SndRound {
+fn snd_round(bomb_dropped: bool) -> SndRound {
+    SndRound {
         round: 1,
         max_rounds: 7,
         red_wins: 0,
@@ -109,9 +110,24 @@ fn snd_round_state_is_48_bytes() {
         plant_progress: 0.25,
         defuse_progress: 0.0,
         phase_timer: 30.0,
-    });
-    assert_eq!(m.encode().len(), 48);
+        bomb_dropped,
+    }
+}
+
+#[test]
+fn snd_round_state_is_49_bytes() {
+    let m = ServerMsg::SndRoundState(snd_round(true));
+    assert_eq!(m.encode().len(), 49);
     rt_server(m);
+    rt_server(ServerMsg::SndRoundState(snd_round(false)));
+}
+
+#[test]
+fn snd_round_state_from_an_older_server_has_no_dropped_bomb() {
+    // older servers send 48 bytes, without the trailing bomb_dropped byte
+    let mut bytes = ServerMsg::SndRoundState(snd_round(true)).encode();
+    bytes.pop();
+    assert_eq!(ServerMsg::decode(&bytes), Some(ServerMsg::SndRoundState(snd_round(false))));
 }
 
 #[test]
@@ -149,6 +165,19 @@ fn client_messages_round_trip() {
 fn boxes_message_size() {
     let b = CardboardBox { id: 1, position: (0.0, 0.0, 0.0), yaw: 0.0, carrier: 0 };
     assert_eq!(ServerMsg::Boxes { world: 0, boxes: vec![b; 3] }.encode().len(), 3 + 3 * 14);
+}
+
+#[test]
+fn shoot_round_trips_with_its_wire_layout() {
+    let end = (12.5, -1.25, 300.75);
+    let m = ClientMsg::Shoot { end };
+    let bytes = m.encode();
+    // [MSG_SHOOT][end: 3 x f32]
+    assert_eq!(bytes.len(), 13);
+    assert_eq!(bytes[0], MSG_SHOOT);
+    rt_client(m);
+    // a truncated end point is malformed, not a shot at the origin
+    assert_eq!(ClientMsg::decode(&bytes[..12]), None);
 }
 
 // a kill feed from before the headshot byte still reads, as not a headshot
@@ -212,4 +241,13 @@ fn smoke_break_golden_messages_round_trip() {
     rt_client(ClientMsg::SmokeGoGolden);
     rt_server(ServerMsg::SmokeFeed { shooter: 7, target: 9001, red_handed: true, points: -100 });
     rt_server(ServerMsg::SmokeFeed { shooter: 7, target: 0, red_handed: false, points: -10 });
+}
+
+#[test]
+fn bot_alert_round_trips_and_is_six_bytes() {
+    rt_server(ServerMsg::BotAlert { bot_id: 9003, level: BOT_ALERT_SUSPICIOUS });
+    rt_server(ServerMsg::BotAlert { bot_id: 9003, level: BOT_ALERT_ENGAGED });
+    let msg = ServerMsg::BotAlert { bot_id: 9003, level: BOT_ALERT_ENGAGED }.encode();
+    assert_eq!(msg.len(), 1 + 4 + 1);
+    assert_eq!(ServerMsg::decode(&msg[..5]), None, "truncated");
 }

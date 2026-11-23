@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use client::types::animated_model::GlbImages;
 use gltf::mesh::util::ReadIndices;
 use macroquad::prelude::*;
 
@@ -260,15 +261,14 @@ fn lift_dark_untextured_color(mut color: [u8; 4]) -> [u8; 4] {
     color
 }
 
-/// Load a static GLB mesh. When no primitive has a texture, lighting is baked
-/// into the vertex colors.  This is mostly useful for untextured models
-/// (view‑models, props) so they still have visible depth without requiring a
-/// custom shader. Deciding up front parses the file once, not twice.
-pub async fn load_gltf_static_mesh(path: &str, bytes: &[u8]) -> Result<Vec<Mesh>, String> {
-    let (doc, buffers, images) = client::types::animated_model::import_glb(path, bytes)?;
+/// Load a static GLB mesh from what `import_glb` made of the file. When no
+/// primitive has a texture, lighting is baked into the vertex colors. Useful
+/// for untextured models (view‑models, props), so they still have visible
+/// depth without a custom shader. Deciding that up front parses no file again.
+pub fn load_gltf_static_mesh(doc: &gltf::Document, buffers: &[gltf::buffer::Data], images: &GlbImages) -> Result<Vec<Mesh>, String> {
     let any_textured = doc.meshes().flat_map(|mesh| mesh.primitives()).any(|prim| {
         let has_positions = prim.reader(|buffer| Some(&buffers[buffer.index()])).read_positions().is_some();
-        has_positions && base_texture_index(&prim.material()).and_then(|i| images.texture(i)).is_some()
+        has_positions && base_texture_index(&prim.material()).and_then(|i| images.texture(buffers, i)).is_some()
     });
     load_gltf_static_mesh_impl(doc, buffers, images, !any_textured)
 }
@@ -282,9 +282,9 @@ fn base_texture_index(mat: &gltf::Material) -> Option<usize> {
 }
 
 fn load_gltf_static_mesh_impl(
-    doc: gltf::Document,
-    buffers: Vec<gltf::buffer::Data>,
-    images: client::types::animated_model::GlbImages,
+    doc: &gltf::Document,
+    buffers: &[gltf::buffer::Data],
+    images: &GlbImages,
     bake_lighting: bool,
 ) -> Result<Vec<Mesh>, String> {
     // we'll accumulate one mesh per primitive so that each texture can be
@@ -362,7 +362,7 @@ fn load_gltf_static_mesh_impl(
             };
 
             // load texture for this primitive if we haven't already
-            let prim_texture: Option<Texture2D> = base_tex_info.and_then(|index| images.texture(index));
+            let prim_texture: Option<Texture2D> = base_tex_info.and_then(|index| images.texture(buffers, index));
 
             let Some(pos_iter) = reader.read_positions() else {
                 continue;

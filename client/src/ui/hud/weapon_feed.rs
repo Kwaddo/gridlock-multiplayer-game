@@ -80,10 +80,28 @@ fn draw_feed_lines(
     local_player_id: u32,
     local_team: u8,
 ) {
+    // Three passes (backgrounds, text, icons) over the same lines: a line's
+    // background ends above the next line's text, so the order only changes
+    // how many times the batch switches texture.
     let feed_x = 12.0;
-    let mut feed_y = 20.0;
-    for entry in kill_feed.iter().rev().take(5) {
-        let alpha = ((entry.timer / 5.0).min(1.0) * 255.0) as u8;
+    let lines = || kill_feed.iter().rev().take(5).zip((0..).map(|i| 20.0 + i as f32 * 22.0));
+
+    for (entry, feed_y) in lines() {
+        let alpha = feed_alpha(entry);
+        let text = feed_text(texts, entry);
+        let tag_w = entry.tag.as_ref().map_or(0.0, |(t, _)| measure_game_text(t, 14) + 8.0);
+        let full_w = measure_game_text(&text.full_text, 14) + tag_w;
+        draw_rectangle(
+            feed_x - 4.0,
+            feed_y - 14.0,
+            full_w + 8.0,
+            20.0,
+            Color::from_rgba(8, 10, 16, (alpha as f32 * 0.6) as u8),
+        );
+    }
+
+    for (entry, feed_y) in lines() {
+        let alpha = feed_alpha(entry);
         let weapon_color = Color::from_rgba(200, 200, 210, alpha);
 
         let killer_name = entry.killer_name.as_str();
@@ -111,16 +129,6 @@ fn draw_feed_lines(
 
         let text = feed_text(texts, entry);
         let weapon_display = &text.weapon_display;
-        let full_text = &text.full_text;
-        let tag_w = entry.tag.as_ref().map_or(0.0, |(t, _)| measure_game_text(t, 14) + 8.0);
-        let full_w = measure_game_text(full_text, 14) + tag_w;
-        draw_rectangle(
-            feed_x - 4.0,
-            feed_y - 14.0,
-            full_w + 8.0,
-            20.0,
-            Color::from_rgba(8, 10, 16, (alpha as f32 * 0.6) as u8),
-        );
 
         let mut x_offset = feed_x;
 
@@ -128,17 +136,7 @@ fn draw_feed_lines(
         x_offset += measure_game_text(killer_name, 14) + 4.0;
 
         let weapon_icon_key = &text.weapon_icon_key;
-        if let Some(icon_tex) = assets.get(weapon_icon_key) {
-            draw_texture_ex(
-                icon_tex,
-                x_offset,
-                feed_y - 12.0,
-                Color::from_rgba(255, 255, 255, alpha),
-                DrawTextureParams {
-                    dest_size: Some(vec2(16.0, 16.0)),
-                    ..Default::default()
-                },
-            );
+        if assets.contains_key(weapon_icon_key) {
             x_offset += 20.0;
         } else {
             draw_text_ex(weapon_display, x_offset, feed_y, text_params(14, weapon_color));
@@ -151,9 +149,30 @@ fn draw_feed_lines(
             let c = Color::new(color.r, color.g, color.b, alpha as f32 / 255.0);
             draw_text_ex(tag, tx, feed_y, text_params(14, c));
         }
-
-        feed_y += 22.0;
     }
+
+    for (entry, feed_y) in lines() {
+        let alpha = feed_alpha(entry);
+        let text = feed_text(texts, entry);
+        if let Some(icon_tex) = assets.get(&text.weapon_icon_key) {
+            let x_offset = feed_x + measure_game_text(&entry.killer_name, 14) + 4.0;
+            draw_texture_ex(
+                icon_tex,
+                x_offset,
+                feed_y - 12.0,
+                Color::from_rgba(255, 255, 255, alpha),
+                DrawTextureParams {
+                    dest_size: Some(vec2(16.0, 16.0)),
+                    ..Default::default()
+                },
+            );
+        }
+    }
+}
+
+/// A kill-feed line's opacity, from the time it has left on screen.
+fn feed_alpha(entry: &crate::screens::playing::KillFeedEntry) -> u8 {
+    ((entry.timer / 5.0).min(1.0) * 255.0) as u8
 }
 
 pub(super) fn draw_weapon_and_kill_feed(
@@ -199,9 +218,10 @@ pub(super) fn draw_weapon_and_kill_feed(
     let total_height = slots.len() as f32 * slot_height + (slots.len() as f32 - 1.0) * slot_gap;
     let base_y = screen_height() - total_height - margin_bottom;
 
-    for (i, (weapon, key_label, is_active)) in slots.iter().enumerate() {
+    // Shapes, then text, then icons: everything stays inside its own slot and
+    // the icons still go over the text, so only the texture switches change.
+    for (i, (_, _, is_active)) in slots.iter().enumerate() {
         let y = base_y + i as f32 * (slot_height + slot_gap);
-        let alpha = if *is_active { 255u8 } else { 120u8 };
         let bg_alpha = if *is_active { 100u8 } else { 35u8 };
 
         // slot background
@@ -216,6 +236,11 @@ pub(super) fn draw_weapon_and_kill_feed(
                 Color::from_rgba(255, 107, 53, 200),
             );
         }
+    }
+
+    for (i, (weapon, key_label, is_active)) in slots.iter().enumerate() {
+        let y = base_y + i as f32 * (slot_height + slot_gap);
+        let alpha = if *is_active { 255u8 } else { 120u8 };
 
         // key label (left side)
         draw_text_ex(
@@ -282,6 +307,23 @@ pub(super) fn draw_weapon_and_kill_feed(
                 );
             });
         }
+    }
+
+    // indicate locked slot (Gun Game)
+    if weapons.locked_slot.is_some() {
+        let lock_y = base_y - 16.0;
+        draw_text_ex(
+            "(locked)",
+            base_x + slot_width - measure_game_text("(locked)", 11) - 4.0,
+            lock_y,
+            text_params(11, Color::from_rgba(255, 140, 140, 180)),
+        );
+    }
+
+    for (i, (weapon, _, is_active)) in slots.iter().enumerate() {
+        let y = base_y + i as f32 * (slot_height + slot_gap);
+        let alpha = if *is_active { 255u8 } else { 120u8 };
+        let stats = weapon.stats();
 
         // weapon icon (right side)
         let icon_size = 64.0;
@@ -300,17 +342,6 @@ pub(super) fn draw_weapon_and_kill_feed(
                 },
             );
         }
-    }
-
-    // indicate locked slot (Gun Game)
-    if weapons.locked_slot.is_some() {
-        let lock_y = base_y - 16.0;
-        draw_text_ex(
-            "(locked)",
-            base_x + slot_width - measure_game_text("(locked)", 11) - 4.0,
-            lock_y,
-            text_params(11, Color::from_rgba(255, 140, 140, 180)),
-        );
     }
 
     draw_kill_feed(kill_feed, assets, local_player_id, local_team);

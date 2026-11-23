@@ -73,11 +73,13 @@ impl PlayingState {
             0.0
         };
 
-        let forward = vec3(
-            self.yaw.cos() * self.pitch.cos(),
-            self.pitch.sin(),
-            self.yaw.sin() * self.pitch.cos(),
-        );
+        // the hit punch / kill kick: only roll and a FOV pinch, which leave the screen centre where
+        // shots go (self.yaw/self.pitch). Tilting pitch or yaw would put the crosshair off the aim
+        // for a moment, and with hits decided here, shots would seem not to register under fire
+        let (_, _, punch_roll, fov_pinch) = self.hit_fx.view_offsets();
+        let (yaw, pitch) = (self.yaw, self.pitch);
+        let forward = vec3(yaw.cos() * pitch.cos(), pitch.sin(), yaw.sin() * pitch.cos());
+        let up = if punch_roll == 0.0 { Vec3::Y } else { Quat::from_axis_angle(forward, punch_roll) * Vec3::Y };
 
         let eye_pos = vec3(
             self.position.x,
@@ -91,12 +93,12 @@ impl PlayingState {
         let ads_fov = weapon.stats().ads_zoom_fov;
         let fov = base_fov + (ads_fov - base_fov) * weapon.ads_progress;
         // slow walk focus, fades out as ads takes over so the two zooms dont stack
-        let fov = fov * self.slow_walk_fov_factor();
+        let fov = fov * self.slow_walk_fov_factor() * (1.0 - fov_pinch);
 
         Camera3D {
             position: eye_pos,
             target: eye_pos + forward,
-            up: vec3(0.0, 1.0, 0.0),
+            up,
             fovy: fov.to_radians(),
             aspect: None,
             z_near: 0.01,

@@ -1,5 +1,11 @@
+use super::ValueText;
 use crate::ui::fonts::text_params;
 use macroquad::prelude::*;
+use std::cell::RefCell;
+
+thread_local! {
+    static VALUE_TEXT: RefCell<ValueText> = const { RefCell::new(ValueText::new()) };
+}
 
 pub const FOV_MIN: f32 = 40.0;
 pub const FOV_MAX: f32 = 120.0;
@@ -68,15 +74,12 @@ pub fn draw(
 
     draw_text_ex("FOV", label_x, row_y + 16.0 * s, text_params(label_fs, WHITE));
 
+    // Shapes first, then the text on top, so each batches into one draw call.
+    // The label stays before the shapes: it may run under the < button.
+
     // < button
     let lt_x = slider_x - btn_size - 5.0 * s;
     draw_rectangle(lt_x, row_y, btn_size, btn_size, Color::from_rgba(60, 60, 60, 255));
-    draw_text_ex(
-        "<",
-        lt_x + btn_size * 0.2,
-        row_y + btn_size * 0.72,
-        text_params(btn_fs, WHITE),
-    );
 
     // Slider bar
     draw_rectangle(
@@ -99,6 +102,14 @@ pub fn draw(
     // > button
     let gt_x = slider_x + slider_w + 5.0 * s;
     draw_rectangle(gt_x, row_y, btn_size, btn_size, Color::from_rgba(60, 60, 60, 255));
+
+    // < and > button glyphs, inside their buttons
+    draw_text_ex(
+        "<",
+        lt_x + btn_size * 0.2,
+        row_y + btn_size * 0.72,
+        text_params(btn_fs, WHITE),
+    );
     draw_text_ex(
         ">",
         gt_x + btn_size * 0.3,
@@ -107,10 +118,12 @@ pub fn draw(
     );
 
     // Value text
-    draw_text_ex(
-        &format!("{:.0}", value),
-        slider_x + slider_w + btn_size + 15.0 * s,
-        row_y + 16.0 * s,
-        text_params(val_fs, WHITE),
-    );
+    VALUE_TEXT.with_borrow_mut(|text| {
+        draw_text_ex(
+            text.get(value),
+            slider_x + slider_w + btn_size + 15.0 * s,
+            row_y + 16.0 * s,
+            text_params(val_fs, WHITE),
+        );
+    });
 }

@@ -1,4 +1,5 @@
 mod audio;
+mod body_view;
 mod constants;
 mod hands;
 mod hitboxes;
@@ -15,6 +16,7 @@ use macroquad::prelude::*;
 
 use super::PlayingState;
 
+pub(super) use body_view::count as count_bodies;
 
 // player_anims_in_use is gone, it picked which shared clip clocks to tick each frame
 // now every body ticks its own clock (PlayerAnim), so nothing has to pick
@@ -22,6 +24,13 @@ use super::PlayingState;
 impl PlayingState {
     #[inline(always)]
     pub fn simulate(&mut self, config: &GameConfig, maze: Option<&Maze>) {
+        body_view::reset_stats();
+        self.simulate_step(config, maze);
+        // after all movement, every path (dead, or a skipped long frame) included
+        self.prepare_bodies(config, maze);
+    }
+
+    fn simulate_step(&mut self, config: &GameConfig, maze: Option<&Maze>) {
         self.audio.set_levels(config.master_volume, config.mute_audio);
         let raw_delta = get_frame_time();
         if raw_delta > 0.20 {
@@ -53,9 +62,6 @@ impl PlayingState {
         if self.dev_mode.default_character_requested {
             self.dev_mode.default_character_requested = false;
             self.set_character(Self::DEFAULT_CHARACTER); // straight back to the default soldier
-        }
-        if self.dev_mode.is_unlocked() {
-            self.dev_mode.character_label = self.character_label(); // kept fresh so "still loading" counts down
         }
 
         self.update_box_feel(delta);
@@ -137,19 +143,21 @@ impl PlayingState {
         }
         self.apply_gravity(delta);
 
+        // collide with the whole body, eyes plus the head on top
+        let body_height = self.movement_state.collider_height();
         match self.current_world {
             WorldId::Lobby => {
                 collision::resolve_vertical(
                     &mut self.position,
                     &mut self.movement_state.velocity,
-                    self.movement_state.height,
+                    body_height,
                     &mut self.movement_state.is_grounded,
                 );
                 self.apply_movement(delta);
                 collision::resolve_horizontal(
                     &mut self.position,
                     &mut self.movement_state.velocity,
-                    self.movement_state.height,
+                    body_height,
                     self.movement_state.is_grounded,
                 );
             }
@@ -187,7 +195,7 @@ impl PlayingState {
         collision::resolve_mirrors(
             &mut self.position,
             &mut self.movement_state.velocity,
-            self.movement_state.height,
+            body_height,
             &self.mirrors,
         );
         self.resolve_box_collision();

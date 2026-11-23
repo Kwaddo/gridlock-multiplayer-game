@@ -94,17 +94,19 @@ impl Online {
                 max_players: MAX_PLAYERS.min(255) as u8,
                 endpoint,
                 players: handle.players(),
+                bots: handle.bots(),
             },
         );
         Online { listing, mapping, started: Instant::now(), notified: false }
     }
 
     fn notice(&self, port: u16) -> Option<String> {
-        let forward_hint = format!("Online players need UDP port {port} forwarded to this machine.");
+        // built only when a notice is shown, not every frame while pending
+        let forward_hint = || format!("Online players need UDP port {port} forwarded to this machine.");
         match self.mapping.status() {
             PortStatus::Pending => None,
             PortStatus::Unavailable(reason) => {
-                Some(format!("Couldn't open a port automatically: {reason}. {forward_hint}"))
+                Some(format!("Couldn't open a port automatically: {reason}. {}", forward_hint()))
             }
             PortStatus::Open { external, method } => {
                 // The registry sees the address the internet sees. If it differs
@@ -113,7 +115,8 @@ impl Online {
                 match seen {
                     None if self.started.elapsed() < NOTICE_WAIT => None,
                     Some(seen) if seen.ip() != IpAddr::V4(*external.ip()) => Some(format!(
-                        "Router opened a port, but your provider shares your public address. {forward_hint}"
+                        "Router opened a port, but your provider shares your public address. {}",
+                        forward_hint()
                     )),
                     _ => Some(format!(
                         "Port {} opened on your router ({method}): online players can join.",

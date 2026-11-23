@@ -64,13 +64,7 @@ impl SmokeState {
         players: &mut HashMap<PeerId, Player>,
         boxes: &mut Boxes
     ) -> Shot {
-        // only hunters, and only once they're out and before the round is over
-        let live = matches!(self.phase, SmokePhase::Released | SmokePhase::Coins);
-        if !live || !self.hunters.contains(&shooter) {
-            return Shot::NotAllowed;
-        }
-        // a found hider's locked gun can't break anything
-        if self.gun_locks.get(&shooter).is_some_and(|l| l.locked_for > 0.0) {
+        if !self.may_fire(shooter) {
             return Shot::NotAllowed;
         }
         let inside = boxes.carrier_of(id);
@@ -131,6 +125,14 @@ impl SmokeState {
             self.end_round(SMOKE_SIDE_HUNTER);
         }
         shot
+    }
+
+    /// can `shooter` fire at all right now: only hunters, only once they're out and before the round is over,
+    /// and not while a found hider's gun is locked. box shots and the shots everyone sees (MSG_SHOOT) both ask
+    pub(in crate::server) fn may_fire(&self, shooter: PeerId) -> bool {
+        let live = matches!(self.phase, SmokePhase::Released | SmokePhase::Coins);
+        live && self.hunters.contains(&shooter)
+            && !self.gun_locks.get(&shooter).is_some_and(|l| l.locked_for > 0.0)
     }
 
     /// a hunter's shots can't come in faster than the deagle fires (with some room, packets bunch up)

@@ -1,5 +1,6 @@
 use client::screens::dev_mode::{
-    draw_action_button_public, draw_section_header_public, draw_toggle_public,
+    draw_action_button_fmt_public, draw_action_button_public, draw_section_header_public,
+    draw_toggle_public, queue_fmt_public,
 };
 use client::types::ai::simulated_player::{MovementPattern, SimulatedPlayer, YawMode};
 use client::types::world::WorldId;
@@ -15,16 +16,9 @@ pub fn draw_bot_tab(
     mouse: (f32, f32),
     clicked: bool,
 ) {
-    use client::ui::fonts::text_params;
-
     y += draw_section_header_public("Bots", x, y);
 
-    draw_text_ex(
-        &format!("Active Bots: {}", bots.len()),
-        x,
-        y + 14.0,
-        text_params(14, WHITE),
-    );
+    queue_fmt_public(format_args!("Active Bots: {}", bots.len()), x, y + 14.0, 14, WHITE);
     y += 24.0;
 
     let (btn_h, spawn_pressed) =
@@ -57,24 +51,20 @@ pub fn draw_bot_tab(
         y += draw_section_header_public("Selected Bot", x, y);
 
         if let Some(bot) = bots.first_mut() {
-            draw_text_ex(
-                &format!("Bot ID: {}", bot.player.id),
-                x,
-                y + 14.0,
-                text_params(14, WHITE),
-            );
+            queue_fmt_public(format_args!("Bot ID: {}", bot.player.id), x, y + 14.0, 14, WHITE);
             y += 24.0;
 
-            let skin_key = bot.player.skin_type.model_key().unwrap_or("None");
-            draw_text_ex(
-                &format!(
+            let skin_key = bot.player.anim.skin_type.model_key().unwrap_or("None");
+            queue_fmt_public(
+                format_args!(
                     "Skin Debug: {} ({})",
-                    bot.player.skin_type.label(),
+                    bot.player.anim.skin_type.label(),
                     skin_key
                 ),
                 x,
                 y + 14.0,
-                text_params(13, Color::from_rgba(180, 220, 255, 255)),
+                13,
+                Color::from_rgba(180, 220, 255, 255),
             );
             y += 20.0;
 
@@ -92,8 +82,8 @@ pub fn draw_bot_tab(
                 MovementPattern::Random => "Random",
             };
 
-            let (btn_h, pattern_pressed) = draw_action_button_public(
-                &format!("Pattern: {}", pattern_label),
+            let (btn_h, pattern_pressed) = draw_action_button_fmt_public(
+                format_args!("Pattern: {}", pattern_label),
                 x,
                 y,
                 220.0,
@@ -121,8 +111,8 @@ pub fn draw_bot_tab(
             } else {
                 "Auto"
             };
-            let (btn_h, mode_pressed) = draw_action_button_public(
-                &format!("Skin Mode: {}", skin_mode_label),
+            let (btn_h, mode_pressed) = draw_action_button_fmt_public(
+                format_args!("Skin Mode: {}", skin_mode_label),
                 x,
                 y,
                 220.0,
@@ -135,12 +125,12 @@ pub fn draw_bot_tab(
                 if bot.skin_override.is_some() {
                     bot.skin_override = None;
                 } else {
-                    bot.skin_override = Some(bot.player.skin_type);
+                    bot.skin_override = Some(bot.player.anim.skin_type);
                 }
             }
 
-            let (btn_h, skin_pressed) = draw_action_button_public(
-                &format!("Skin: {}", bot.player.skin_type.label()),
+            let (btn_h, skin_pressed) = draw_action_button_fmt_public(
+                format_args!("Skin: {}", bot.player.anim.skin_type.label()),
                 x,
                 y,
                 220.0,
@@ -150,8 +140,8 @@ pub fn draw_bot_tab(
             y += btn_h;
 
             if skin_pressed {
-                let next_skin = bot.player.skin_type.next();
-                bot.player.skin_type = next_skin;
+                let next_skin = bot.player.anim.skin_type.next();
+                bot.player.anim.skin_type = next_skin;
                 bot.skin_override = Some(next_skin);
             }
 
@@ -160,8 +150,8 @@ pub fn draw_bot_tab(
                 YawMode::FacePlayer => "Face Player",
                 YawMode::Spin => "Spin",
             };
-            let (btn_h, yaw_pressed) = draw_action_button_public(
-                &format!("Yaw: {}", yaw_label),
+            let (btn_h, yaw_pressed) = draw_action_button_fmt_public(
+                format_args!("Yaw: {}", yaw_label),
                 x,
                 y,
                 220.0,
@@ -179,13 +169,8 @@ pub fn draw_bot_tab(
             }
 
             if bot.yaw_mode == YawMode::Fixed {
-                let yaw_deg = bot.player.yaw.to_degrees();
-                draw_text_ex(
-                    &format!("Yaw: {:.0}°", yaw_deg),
-                    x,
-                    y + 14.0,
-                    text_params(14, WHITE),
-                );
+                let yaw_deg = bot.player.net.yaw.to_degrees();
+                queue_fmt_public(format_args!("Yaw: {:.0}°", yaw_deg), x, y + 14.0, 14, WHITE);
                 y += 20.0;
 
                 let (btn_h, left_pressed) =
@@ -195,10 +180,10 @@ pub fn draw_bot_tab(
                 y += btn_h;
 
                 if left_pressed {
-                    bot.set_yaw(bot.player.yaw - std::f32::consts::FRAC_PI_4);
+                    bot.set_yaw(bot.player.net.yaw - std::f32::consts::FRAC_PI_4);
                 }
                 if right_pressed {
-                    bot.set_yaw(bot.player.yaw + std::f32::consts::FRAC_PI_4);
+                    bot.set_yaw(bot.player.net.yaw + std::f32::consts::FRAC_PI_4);
                 }
             }
 

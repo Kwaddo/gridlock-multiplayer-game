@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::{PeerId, Server};
+use crate::{Packet, PeerId, Server};
 
 pub const DEFAULT_PORT: u16 = 7878;
 
@@ -21,6 +21,18 @@ const PEER_IDLE_TTL: Duration = Duration::from_secs(10);
 const TICK_INTERVAL: Duration = Duration::from_micros(16_667);
 /// `set_read_timeout` rejects zero; the shortest wait used instead.
 const MIN_WAIT: Duration = Duration::from_millis(1);
+/// A read timeout this much shorter than the wait wanted is kept: waking up
+/// that early only costs one more pass through the loop, and it spares a
+/// syscall per packet.
+const TIMEOUT_SLACK: Duration = Duration::from_millis(1);
+
+/// The read timeout to set for a wait of `wanted`, or `None` to keep
+/// `current`: it never waits past `wanted`, and wakes at most
+/// [`TIMEOUT_SLACK`] early.
+fn timeout_change(current: Duration, wanted: Duration) -> Option<Duration> {
+    let keep = current <= wanted && wanted - current <= TIMEOUT_SLACK;
+    (!keep).then_some(wanted)
+}
 
 /// A [`Server`] bound to a UDP socket, mapping socket addresses to peer ids.
 pub struct UdpHost {
@@ -32,6 +44,10 @@ pub struct UdpHost {
     next_peer: u32,
     last_prune: Instant,
     next_tick: Instant,
+    /// The socket's read timeout, as last set.
+    read_timeout: Duration,
+    /// Packets taken from the server for sending; kept so its capacity is reused.
+    sending: Vec<(PeerId, Packet)>,
 }
 
 impl UdpHost {
@@ -48,6 +64,8 @@ impl UdpHost {
             next_peer: 1,
             last_prune: Instant::now(),
             next_tick: Instant::now(),
+            read_timeout: TICK_INTERVAL,
+            sending: Vec::new(),
         })
     }
 
@@ -89,7 +107,11 @@ impl UdpHost {
             return Ok(());
         }
 
-        self.socket.set_read_timeout(Some((self.next_tick - now).max(MIN_WAIT)))?;
+        let wanted = (self.next_tick - now).max(MIN_WAIT);
+        if let Some(timeout) = timeout_change(self.read_timeout, wanted) {
+            self.socket.set_read_timeout(Some(timeout))?;
+            self.read_timeout = timeout;
+        }
         match self.socket.recv_from(buffer) {
             Ok((0, _)) => {}
             Ok((n, src)) => {
@@ -112,7 +134,8 @@ impl UdpHost {
     }
 
     fn flush(&mut self) {
-        for (peer, bytes) in self.server.drain_outbox() {
+        self.server.drain_outbox_into(&mut self.sending);
+        for (peer, bytes) in self.sending.drain(..) {
             if let Some(addr) = self.addr_of.get(&peer) {
                 let _ = self.socket.send_to(&bytes, addr);
             }
@@ -150,6 +173,7 @@ impl UdpHost {
 pub struct HostHandle {
     port: u16,
     players: Arc<AtomicUsize>,
+    bots: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -160,9 +184,10 @@ impl HostHandle {
         let mut host = UdpHost::bind(port, server)?;
         let port = host.port();
         let players = Arc::new(AtomicUsize::new(0));
+        let bots = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
-            let (players, stop) = (players.clone(), stop.clone());
+            let (players, bots, stop) = (players.clone(), bots.clone(), stop.clone());
             thread::Builder::new().name("gridlock-host".into()).spawn(move || {
                 let mut buffer = [0u8; 8192];
                 while !stop.load(Ordering::Relaxed) {
@@ -171,10 +196,11 @@ impl HostHandle {
                         break;
                     }
                     players.store(host.server().player_count(), Ordering::Relaxed);
+                    bots.store(host.server().bot_count(), Ordering::Relaxed);
                 }
             })?
         };
-        Ok(HostHandle { port, players, stop, thread: Some(thread) })
+        Ok(HostHandle { port, players, bots, stop, thread: Some(thread) })
     }
 
     pub fn port(&self) -> u16 {
@@ -185,6 +211,11 @@ impl HostHandle {
     pub fn players(&self) -> Arc<AtomicUsize> {
         self.players.clone()
     }
+
+    /// Live count of the bots among [`players`](Self::players).
+    pub fn bots(&self) -> Arc<AtomicUsize> {
+        self.bots.clone()
+    }
 }
 
 impl Drop for HostHandle {
@@ -193,5 +224,27 @@ impl Drop for HostHandle {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ms(v: f64) -> Duration {
+        Duration::from_secs_f64(v / 1000.0)
+    }
+
+    #[test]
+    fn read_timeout_is_kept_only_when_it_wakes_at_most_1ms_early() {
+        // the same, or a little shorter: kept
+        assert_eq!(timeout_change(ms(10.0), ms(10.0)), None);
+        assert_eq!(timeout_change(ms(9.5), ms(10.0)), None);
+        assert_eq!(timeout_change(ms(9.1), ms(10.0)), None);
+        // too short: would wake well before the tick
+        assert_eq!(timeout_change(ms(8.0), ms(10.0)), Some(ms(10.0)));
+        // longer than wanted: would oversleep the tick
+        assert_eq!(timeout_change(ms(10.2), ms(10.0)), Some(ms(10.0)));
+        assert_eq!(timeout_change(TICK_INTERVAL, MIN_WAIT), Some(MIN_WAIT));
     }
 }

@@ -8,6 +8,7 @@ mod boxes;
 pub mod game;
 pub mod handlers;
 pub mod snd;
+mod snd_gate;
 pub mod utils;
 mod match_flow;
 mod packet;
@@ -17,11 +18,15 @@ mod version;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod late_join_tests;
+#[cfg(test)]
+mod team_rules_tests;
+#[cfg(test)]
 mod wire_tests;
 
 use crate::bot::manager::BotManager;
 use crate::maze::MazeData;
-use crate::net::{Outbox, PeerId};
+use crate::net::{Outbox, Packet, PeerId};
 use crate::player::Player;
 use crate::protocols::*;
 
@@ -75,7 +80,10 @@ pub struct Server {
     last_tick: Instant,
     // Regen fires at most once per second to avoid per-packet health spikes
     last_regen_tick: Instant,
-    last_state_broadcast: Option<Instant>,
+    /// Paces the world state broadcast.
+    state_cadence: crate::cadence::Cadence,
+    /// The lobby gets every other periodic state broadcast (15 a second).
+    lobby_state_turn: bool,
     /// Last run of the tick's rate-limited bookkeeping (inactivity timeouts).
     last_bookkeeping: Option<Instant>,
     /// Player count at the last state broadcast: a join or leave sends at once.
@@ -88,12 +96,18 @@ pub struct Server {
     team_score: game::TeamScore,
     /// Last `MSG_TEAM_SCORE` broadcast: value and time.
     last_team_score_sent: Option<(game::TeamScore, Instant)>,
+    /// The lobby leader everyone was last told of, and when.
+    last_leader_sent: Option<(u32, Instant)>,
     /// What `MSG_PLAYER_INFO` has told whom.
     info_sync: player_info::InfoSync,
+    /// Last player list sent for a score change (`flush_player_list`).
+    last_player_list: Option<Instant>,
     /// Clients of another protocol version, turned away at the door.
     rejected: HashMap<PeerId, version::Rejected>,
     /// every cardboard box
     boxes: boxes::Boxes,
+    /// Players' shots waiting for the next bot tick, see `handlers::shoot`.
+    shot_queue: broadcast::ShotQueue,
 }
 
 impl Server {
@@ -131,16 +145,20 @@ impl Server {
             },
             last_tick: Instant::now(),
             last_regen_tick: Instant::now(),
-            last_state_broadcast: None,
+            state_cadence: crate::cadence::Cadence::new(game::STATE_BROADCAST_INTERVAL),
+            lobby_state_turn: true,
             last_bookkeeping: None,
             last_broadcast_players: 0,
             last_chat: HashMap::new(),
             last_status_sent: None,
             team_score: game::TeamScore::default(),
             last_team_score_sent: None,
+            last_leader_sent: None,
             info_sync: player_info::InfoSync::default(),
+            last_player_list: None,
             rejected: HashMap::new(),
             boxes: boxes::Boxes::new(),
+            shot_queue: broadcast::ShotQueue::default(),
         }
     }
 
@@ -150,13 +168,26 @@ impl Server {
     }
 
     /// Connected players, bots included (the same count discovery reports).
+    /// Smoke Break's decoys are scenery, not players: not counted.
     pub fn player_count(&self) -> usize {
-        self.players.len()
+        self.players.keys().filter(|p| !smoke_break::is_decoy(**p)).count()
+    }
+
+    /// How many of [`player_count`](Self::player_count) are bots: a late
+    /// joiner takes a bot's place, so a game full of bots is still joinable.
+    pub fn bot_count(&self) -> usize {
+        self.players.iter().filter(|(peer, p)| p.is_bot && !smoke_break::is_decoy(**peer)).count()
     }
 
     /// Packets queued since the last call, as `(destination, bytes)`.
-    pub fn drain_outbox(&mut self) -> Vec<(PeerId, Vec<u8>)> {
+    pub fn drain_outbox(&mut self) -> Vec<(PeerId, Packet)> {
         self.outbox.drain()
+    }
+
+    /// [`drain_outbox`](Self::drain_outbox) onto the end of `out`, for a host
+    /// that keeps one buffer across ticks: no allocation once both have grown.
+    pub fn drain_outbox_into(&mut self, out: &mut Vec<(PeerId, Packet)>) {
+        self.outbox.drain_into(out);
     }
 
     /// Whether `peer` currently owns a player (joined and not timed out).

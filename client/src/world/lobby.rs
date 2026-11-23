@@ -45,6 +45,10 @@ pub const PARKOUR_CUBES: [(Vec3, Vec3); 12] = [
 pub const LOBBY_CONSOLE_POS: Vec3 = vec3(2.0, 0.0, -9.0);
 pub const LOBBY_CONSOLE_SIZE: Vec3 = vec3(0.8, 1.2, 0.4);
 
+/// Drawn grouped by texture and mode, since macroquad opens a new draw call on
+/// every texture or triangles/lines change: textured floors, opaque solids,
+/// edge lines, then the console's see-through parts. About 5 draw calls
+/// instead of ~46 when every piece alternated cube and wires.
 pub fn draw_lobby(floor_texture: Option<&Texture2D>) {
     // Ground
     draw_cube(
@@ -53,9 +57,23 @@ pub fn draw_lobby(floor_texture: Option<&Texture2D>) {
         floor_texture,
         DARKGRAY,
     );
-    shooting_range::draw_shooting_range(floor_texture);
+    shooting_range::draw_shooting_range_floor(floor_texture);
 
-    // Grid lines on the ground
+    // Opaque solids: landmark cubes, parkour cubes, range, console body
+    let colors = [RED, GREEN, BLUE, YELLOW];
+    for (i, (center, size)) in LANDMARK_CUBES.iter().enumerate() {
+        draw_cube(*center, *size, None, colors[i]);
+    }
+    // Parkour cubes — gradient from cyan to magenta
+    for (i, (center, size)) in PARKOUR_CUBES.iter().enumerate() {
+        let t = i as f32 / (PARKOUR_CUBES.len() - 1) as f32;
+        let color = Color::new(0.2 + 0.6 * t, 0.8 - 0.5 * t, 0.9 - 0.3 * t, 1.0);
+        draw_cube(*center, *size, None, color);
+    }
+    shooting_range::draw_shooting_range_fills();
+    draw_lobby_console_fills();
+
+    // Lines: the ground grid and every edge
     for i in -25..=25 {
         let pos = i as f32;
         draw_line_3d(
@@ -69,62 +87,64 @@ pub fn draw_lobby(floor_texture: Option<&Texture2D>) {
             Color::from_rgba(100, 100, 100, 255),
         );
     }
-
-    // Landmark cubes
-    let colors = [RED, GREEN, BLUE, YELLOW];
-    for (i, (center, size)) in LANDMARK_CUBES.iter().enumerate() {
-        draw_cube(*center, *size, None, colors[i]);
+    for (center, size) in LANDMARK_CUBES.iter().chain(PARKOUR_CUBES.iter()) {
         draw_cube_wires(*center, *size, BLACK);
     }
+    shooting_range::draw_shooting_range_wires();
+    draw_lobby_console_wires();
 
-    // Parkour cubes — gradient from cyan to magenta
-    for (i, (center, size)) in PARKOUR_CUBES.iter().enumerate() {
-        let t = i as f32 / (PARKOUR_CUBES.len() - 1) as f32;
-        let color = Color::new(0.2 + 0.6 * t, 0.8 - 0.5 * t, 0.9 - 0.3 * t, 1.0);
-        draw_cube(*center, *size, None, color);
-        draw_cube_wires(*center, *size, BLACK);
-    }
-
-    // Draw the improved lobby console (multi-part model)
-    draw_lobby_console_model();
+    // See-through console parts last, over everything they cover
+    draw_lobby_console_glow();
 }
 
-/// Improved multi-part console model: pedestal base, angled screen, accent trim.
-fn draw_lobby_console_model() {
-    let base_pos = LOBBY_CONSOLE_POS;
+// Improved multi-part console model: pedestal base, angled screen, accent trim.
+const CONSOLE_PEDESTAL_H: f32 = 0.7;
+const CONSOLE_PEDESTAL_SIZE: Vec3 = vec3(0.9, CONSOLE_PEDESTAL_H, 0.5);
+const CONSOLE_PEDESTAL_CENTER: Vec3 =
+    vec3(LOBBY_CONSOLE_POS.x, LOBBY_CONSOLE_POS.y + CONSOLE_PEDESTAL_H / 2.0, LOBBY_CONSOLE_POS.z);
+// screen housing (slightly angled look via two stacked sections)
+const CONSOLE_SCREEN_BASE_H: f32 = 0.45;
+const CONSOLE_SCREEN_BASE_SIZE: Vec3 = vec3(0.75, CONSOLE_SCREEN_BASE_H, 0.35);
+const CONSOLE_SCREEN_BASE_CENTER: Vec3 = vec3(
+    LOBBY_CONSOLE_POS.x,
+    LOBBY_CONSOLE_POS.y + CONSOLE_PEDESTAL_H + CONSOLE_SCREEN_BASE_H / 2.0,
+    LOBBY_CONSOLE_POS.z,
+);
 
+/// The console's opaque pedestal and screen housing.
+fn draw_lobby_console_fills() {
     // pedestal base (dark metal)
-    let pedestal_h = 0.7;
-    let pedestal_size = vec3(0.9, pedestal_h, 0.5);
-    let pedestal_center = base_pos + vec3(0.0, pedestal_h / 2.0, 0.0);
-    draw_cube(pedestal_center, pedestal_size, None, Color::from_rgba(50, 52, 58, 255));
-    draw_cube_wires(pedestal_center, pedestal_size, Color::from_rgba(30, 30, 35, 255));
+    draw_cube(CONSOLE_PEDESTAL_CENTER, CONSOLE_PEDESTAL_SIZE, None, Color::from_rgba(50, 52, 58, 255));
+    draw_cube(CONSOLE_SCREEN_BASE_CENTER, CONSOLE_SCREEN_BASE_SIZE, None, Color::from_rgba(40, 42, 48, 255));
+}
 
-    // screen housing (slightly angled look via two stacked sections)
-    let screen_base_h = 0.45;
-    let screen_base_size = vec3(0.75, screen_base_h, 0.35);
-    let screen_base_center = base_pos + vec3(0.0, pedestal_h + screen_base_h / 2.0, 0.0);
-    draw_cube(screen_base_center, screen_base_size, None, Color::from_rgba(40, 42, 48, 255));
-    draw_cube_wires(screen_base_center, screen_base_size, Color::from_rgba(25, 25, 30, 255));
+fn draw_lobby_console_wires() {
+    draw_cube_wires(CONSOLE_PEDESTAL_CENTER, CONSOLE_PEDESTAL_SIZE, Color::from_rgba(30, 30, 35, 255));
+    draw_cube_wires(CONSOLE_SCREEN_BASE_CENTER, CONSOLE_SCREEN_BASE_SIZE, Color::from_rgba(25, 25, 30, 255));
+}
+
+/// The console's translucent screen and trims, then the screen's glow edge.
+fn draw_lobby_console_glow() {
+    let base_pos = LOBBY_CONSOLE_POS;
 
     // glowing screen face (front face highlight — orange accent matching UI theme)
     let screen_h = 0.30;
     let screen_w = 0.60;
     let screen_depth = 0.02;
-    let screen_center = base_pos + vec3(0.0, pedestal_h + 0.10 + screen_h / 2.0, -0.17);
+    let screen_center = base_pos + vec3(0.0, CONSOLE_PEDESTAL_H + 0.10 + screen_h / 2.0, -0.17);
     draw_cube(screen_center, vec3(screen_w, screen_h, screen_depth), None, Color::from_rgba(255, 107, 53, 240));
-
-    // screen border glow
-    draw_cube_wires(screen_center, vec3(screen_w + 0.04, screen_h + 0.04, screen_depth + 0.01), Color::from_rgba(255, 140, 80, 180));
 
     // top accent strip (orange trim)
     let trim_h = 0.04;
-    let trim_center = base_pos + vec3(0.0, pedestal_h + screen_base_h + trim_h / 2.0, 0.0);
+    let trim_center = base_pos + vec3(0.0, CONSOLE_PEDESTAL_H + CONSOLE_SCREEN_BASE_H + trim_h / 2.0, 0.0);
     draw_cube(trim_center, vec3(0.80, trim_h, 0.38), None, Color::from_rgba(255, 107, 53, 200));
 
     // base accent strip
     let base_trim_center = base_pos + vec3(0.0, 0.02, 0.0);
     draw_cube(base_trim_center, vec3(0.95, 0.04, 0.55), None, Color::from_rgba(255, 107, 53, 150));
+
+    // screen border glow
+    draw_cube_wires(screen_center, vec3(screen_w + 0.04, screen_h + 0.04, screen_depth + 0.01), Color::from_rgba(255, 140, 80, 180));
 }
 
 /// Ground plane as an AABB for ray testing (matches the draw_cube in draw_lobby).

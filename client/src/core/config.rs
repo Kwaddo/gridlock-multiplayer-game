@@ -102,6 +102,8 @@ pub struct GameConfig {
     pub hide_match_timer: bool,
     // smoke break: a tiny dot in the middle of the screen for hiders, off by default
     pub smoke_hider_dot: bool,
+    // floating damage numbers over the crosshair when you hit, on by default (they always showed before the setting)
+    pub damage_numbers: bool,
     // Audio
 }
 
@@ -174,6 +176,7 @@ impl GameConfig {
             match_time_override_secs: None,
             hide_match_timer: false,
             smoke_hider_dot: false,
+            damage_numbers: true,
         }
     }
 

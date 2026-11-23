@@ -91,11 +91,46 @@ pub(super) fn difficulty_summary(mask: u8) -> String {
 pub(super) fn draw_wrapped(text: &str, x: f32, w: f32, y: f32, size: u16, color: Color, centred: bool) {
     use crate::ui::fonts::{measure_game_text, text_params};
 
+    WRAPPED.with_borrow_mut(|cache| {
+        let lines = wrapped_lines(cache, text, w, size);
+        let line_h = size as f32 + 6.0;
+        for (i, line) in lines.iter().enumerate() {
+            let lx = if centred { x + (w - measure_game_text(line, size)) / 2.0 } else { x };
+            draw_text_ex(line, lx, y + i as f32 * line_h, text_params(size, color));
+        }
+    });
+}
+
+/// Texts draw_wrapped has wrapped lately; the console shows only a few.
+const WRAPPED_CACHE: usize = 8;
+
+/// One text wrapped for a width and size.
+struct Wrapped {
+    text: String,
+    /// (width bits, size, DPI scale bits, game font loaded): what the lines depend on
+    key: (u32, u16, u32, bool),
+    lines: Vec<String>,
+}
+
+thread_local! {
+    static WRAPPED: std::cell::RefCell<Vec<Wrapped>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The lines of `text` wrapped to `w`, wrapped again only when the text,
+/// width, size or font scale changes.
+fn wrapped_lines<'a>(cache: &'a mut Vec<Wrapped>, text: &str, w: f32, size: u16) -> &'a [String] {
+    use crate::ui::fonts::{game_font, measure_game_text_uncached};
+
+    let key = (w.to_bits(), size, screen_dpi_scale().to_bits(), game_font().is_some());
+    if let Some(i) = cache.iter().position(|c| c.key == key && c.text == text) {
+        return &cache[i].lines;
+    }
+
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
     for word in text.split_whitespace() {
         let test = if cur.is_empty() { word.to_string() } else { format!("{} {}", cur, word) };
-        if !cur.is_empty() && measure_game_text(&test, size) > w {
+        if !cur.is_empty() && measure_game_text_uncached(&test, size) > w {
             lines.push(std::mem::replace(&mut cur, word.to_string()));
         } else {
             cur = test;
@@ -104,9 +139,10 @@ pub(super) fn draw_wrapped(text: &str, x: f32, w: f32, y: f32, size: u16, color:
     if !cur.is_empty() {
         lines.push(cur);
     }
-    let line_h = size as f32 + 6.0;
-    for (i, line) in lines.iter().enumerate() {
-        let lx = if centred { x + (w - measure_game_text(line, size)) / 2.0 } else { x };
-        draw_text_ex(line, lx, y + i as f32 * line_h, text_params(size, color));
+
+    if cache.len() >= WRAPPED_CACHE {
+        cache.remove(0);
     }
+    cache.push(Wrapped { text: text.to_string(), key, lines });
+    &cache[cache.len() - 1].lines
 }

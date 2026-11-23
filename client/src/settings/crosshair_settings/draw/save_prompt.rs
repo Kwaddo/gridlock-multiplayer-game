@@ -1,8 +1,15 @@
 use crate::ui::fonts::{measure_game_text, text_params};
 use crate::weapons::crosshair_presets::CrosshairPresetManager;
 use macroquad::prelude::*;
+use std::cell::RefCell;
+use std::fmt::Write;
 
 use super::super::shared::CrosshairSettingsPreview;
+
+thread_local! {
+    // reused for the name input and "Current:" lines so the open prompt does not allocate
+    static PROMPT_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
+}
 
 pub fn draw_crosshair_save_prompt(
     state: &CrosshairSettingsPreview,
@@ -130,13 +137,17 @@ pub fn draw_crosshair_save_prompt(
         } else {
             ""
         };
-        let display = format!("{}{}", state.name_input, cursor);
-        draw_text_ex(
-            &display,
-            input_x + 8.0,
-            input_y + 22.0,
-            text_params(16, WHITE),
-        );
+        PROMPT_TEXT.with_borrow_mut(|display| {
+            display.clear();
+            display.push_str(&state.name_input);
+            display.push_str(cursor);
+            draw_text_ex(
+                display,
+                input_x + 8.0,
+                input_y + 22.0,
+                text_params(16, WHITE),
+            );
+        });
 
         if !state.name_error.is_empty() {
             draw_text_ex(
@@ -173,14 +184,17 @@ pub fn draw_crosshair_save_prompt(
     } else {
         "None"
     };
-    let msg = format!("Current: {}", preset_name);
-    let msg_w = measure_game_text(&msg, 14);
-    draw_text_ex(
-        &msg,
-        px + (pw - msg_w) / 2.0,
-        py + 65.0,
-        text_params(14, GRAY),
-    );
+    PROMPT_TEXT.with_borrow_mut(|msg| {
+        msg.clear();
+        let _ = write!(msg, "Current: {}", preset_name);
+        let msg_w = measure_game_text(msg, 14);
+        draw_text_ex(
+            msg,
+            px + (pw - msg_w) / 2.0,
+            py + 65.0,
+            text_params(14, GRAY),
+        );
+    });
 
     let is_custom = state.selected_preset < presets.presets.len()
         && !presets.presets[state.selected_preset].is_default;

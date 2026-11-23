@@ -72,6 +72,31 @@ pub fn resolve_mirrors(
     }
 }
 
+/// True when a body this tall standing here would poke into a box above it (lobby cubes when
+/// `cubes`, mirrors always). checked before standing up so you stay down under a low ceiling,
+/// before this un-crouching under a cube shoved you sideways out of it
+pub fn head_blocked(position: Vec3, player_height: f32, cubes: bool, mirrors: &[Mirror]) -> bool {
+    const FEET_EPS: f32 = 0.05; // the cube you stand on is not above you
+    const SIDE_EPS: f32 = 0.01; // walls you were just pushed out of sit at exactly one radius
+    let head_y = position.y + player_height;
+    let reach = PLAYER_RADIUS - SIDE_EPS;
+    let mirror_boxes = mirrors.iter().map(|m| {
+        let (center, size) = m.collider();
+        (center - size * 0.5, center + size * 0.5)
+    });
+    let cube_boxes = all_cubes()
+        .filter(|_| cubes)
+        .map(|(center, size)| (*center - *size * 0.5, *center + *size * 0.5));
+    mirror_boxes.chain(cube_boxes).any(|(min, max)| {
+        if max.y <= position.y + FEET_EPS || min.y >= head_y {
+            return false;
+        }
+        let dx = position.x - position.x.clamp(min.x, max.x);
+        let dz = position.z - position.z.clamp(min.z, max.z);
+        dx * dx + dz * dz < reach * reach
+    })
+}
+
 /// resolve vertical collision: land on cube tops, bump head on cube bottoms, land on ground.
 pub fn resolve_vertical(
     position: &mut Vec3,
@@ -311,4 +336,28 @@ pub fn resolve_maze(position: &mut Vec3, velocity: &mut Vec3, maze: &Maze, dt: f
     position.z -= velocity.z * dt;
     velocity.x = 0.0;
     velocity.z = 0.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::physics::collider_height;
+
+    #[test]
+    fn head_fits_crouched_but_not_standing_under_a_cube() {
+        let (center, size) = all_cubes().next().expect("lobby has cubes");
+        let bottom = center.y - size.y * 0.5;
+        // feet 1.0 under the cube: the crouched head (0.92) fits, the standing head (1.32) does not
+        let feet = vec3(center.x, bottom - 1.0, center.z);
+        assert!(!head_blocked(feet, collider_height(0.8), true, &[]));
+        assert!(head_blocked(feet, collider_height(1.2), true, &[]));
+        // cubes off (maze): nothing above
+        assert!(!head_blocked(feet, collider_height(1.2), false, &[]));
+        // 1.25 of room: the standing eyes (1.2, the old collider) fit, the head does not
+        let feet = vec3(center.x, bottom - 1.25, center.z);
+        assert!(head_blocked(feet, collider_height(1.2), true, &[]));
+        // the cube you stand on is not above you
+        let top = vec3(center.x, center.y + size.y * 0.5, center.z);
+        assert!(!head_blocked(top, collider_height(0.3), true, &[]));
+    }
 }

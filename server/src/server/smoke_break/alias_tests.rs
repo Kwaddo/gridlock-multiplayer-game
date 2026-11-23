@@ -29,7 +29,7 @@ fn round_of_three() -> (Server, PeerId, Vec<PeerId>) {
     (server, hunter, hiders)
 }
 
-fn last_state(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<PlayerState> {
+fn last_state(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<PlayerState> {
     out.iter()
         .filter(|(p, _)| *p == peer)
         .filter_map(|(_, m)| match ServerMsg::decode(m) {
@@ -40,7 +40,7 @@ fn last_state(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<PlayerState> {
         .expect("no state")
 }
 
-fn last_boxes(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<CardboardBox> {
+fn last_boxes(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<CardboardBox> {
     out.iter()
         .filter(|(p, _)| *p == peer)
         .filter_map(|(_, m)| match ServerMsg::decode(m) {
@@ -51,7 +51,7 @@ fn last_boxes(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<CardboardBox> {
         .expect("no box list")
 }
 
-fn infos(out: &[(PeerId, Vec<u8>)], peer: PeerId) -> Vec<PlayerInfo> {
+fn infos(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<PlayerInfo> {
     out.iter()
         .filter(|(p, _)| *p == peer)
         .filter_map(|(_, m)| match ServerMsg::decode(m) {
@@ -115,7 +115,7 @@ fn a_hider_and_a_decoy_in_the_same_spot_look_the_same() {
     d.position = at;
     d.yaw = yaw;
     server.drain_outbox();
-    crate::server::broadcast::broadcast_state_with_events(&server.outbox, &server.players);
+    crate::server::broadcast::broadcast_state_with_events(&server.outbox, &server.players, true);
     for peer in server.players.keys().copied().collect::<Vec<_>>() {
         server.boxes.resend_to(peer);
     }

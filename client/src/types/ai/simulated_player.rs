@@ -58,10 +58,10 @@ pub struct SimulatedPlayer {
 impl SimulatedPlayer {
     pub fn new(id: u32, username: String, world: WorldId, spawn_pos: Vec3) -> Self {
         let mut player = OtherPlayer::new(id, username, world);
-        player.x = spawn_pos.x;
-        player.y = spawn_pos.y;
-        player.z = spawn_pos.z;
-        player.apply_snapshot(spawn_pos.x, spawn_pos.y, spawn_pos.z, player.yaw);
+        player.net.x = spawn_pos.x;
+        player.net.y = spawn_pos.y;
+        player.net.z = spawn_pos.z;
+        player.apply_snapshot(spawn_pos.x, spawn_pos.y, spawn_pos.z, player.net.yaw);
 
         Self {
             player,
@@ -97,7 +97,7 @@ impl SimulatedPlayer {
     }
 
     pub fn set_yaw(&mut self, yaw: f32) {
-        self.player.yaw = yaw;
+        self.player.net.yaw = yaw;
     }
 
     pub fn simulate_yaw(&mut self, delta: f32, player_pos: Option<Vec3>) {
@@ -105,25 +105,25 @@ impl SimulatedPlayer {
             YawMode::Fixed => {} // manual control only
             YawMode::FacePlayer => {
                 if let Some(pp) = player_pos {
-                    let dx = pp.x - self.player.x;
-                    let dz = pp.z - self.player.z;
+                    let dx = pp.x - self.player.net.x;
+                    let dz = pp.z - self.player.net.z;
                     // Match gameplay yaw convention (forward = (cos(yaw), sin(yaw))).
-                    self.player.yaw = dz.atan2(dx);
+                    self.player.net.yaw = dz.atan2(dx);
                 }
             }
             YawMode::Spin => {
-                self.player.yaw += 1.5 * delta; // ~90 deg/sec
+                self.player.net.yaw += 1.5 * delta; // ~90 deg/sec
             }
         }
     }
 
     pub fn simulate(&mut self, delta: f32) {
         self.movement_timer += delta;
-        let prev_x = self.player.x;
-        let prev_z = self.player.z;
-        self.player.is_sprinting = self.action_state.sprint;
-        self.player.is_crouching = self.action_state.crouch;
-        self.player.is_ads = self.action_state.ads;
+        let prev_x = self.player.net.x;
+        let prev_z = self.player.net.z;
+        self.player.net.is_sprinting = self.action_state.sprint;
+        self.player.net.is_crouching = self.action_state.crouch;
+        self.player.net.is_ads = self.action_state.ads;
 
         let active_pattern = if self.pattern == MovementPattern::Random {
             self.pattern_change_timer -= delta;
@@ -146,7 +146,7 @@ impl SimulatedPlayer {
 
         let move_speed = 3.0;
         let oscillation_period = 2.0;
-        let forward = vec2(self.player.yaw.cos(), self.player.yaw.sin());
+        let forward = vec2(self.player.net.yaw.cos(), self.player.net.yaw.sin());
         let right = vec2(-forward.y, forward.x);
 
         match resolved_pattern {
@@ -154,43 +154,43 @@ impl SimulatedPlayer {
             MovementPattern::ForwardBack => {
                 let t =
                     (self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0).sin();
-                self.player.x += forward.x * t * move_speed * delta;
-                self.player.z += forward.y * t * move_speed * delta;
+                self.player.net.x += forward.x * t * move_speed * delta;
+                self.player.net.z += forward.y * t * move_speed * delta;
             }
             MovementPattern::SideToSide => {
                 let t =
                     (self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0).sin();
-                self.player.x += right.x * t * move_speed * delta;
-                self.player.z += right.y * t * move_speed * delta;
+                self.player.net.x += right.x * t * move_speed * delta;
+                self.player.net.z += right.y * t * move_speed * delta;
             }
             MovementPattern::Forward => {
-                self.player.x += forward.x * move_speed * delta;
-                self.player.z += forward.y * move_speed * delta;
+                self.player.net.x += forward.x * move_speed * delta;
+                self.player.net.z += forward.y * move_speed * delta;
             }
             MovementPattern::Back => {
-                self.player.x -= forward.x * move_speed * delta;
-                self.player.z -= forward.y * move_speed * delta;
+                self.player.net.x -= forward.x * move_speed * delta;
+                self.player.net.z -= forward.y * move_speed * delta;
             }
             MovementPattern::Left => {
-                self.player.x -= right.x * move_speed * delta;
-                self.player.z -= right.y * move_speed * delta;
+                self.player.net.x -= right.x * move_speed * delta;
+                self.player.net.z -= right.y * move_speed * delta;
             }
             MovementPattern::Right => {
-                self.player.x += right.x * move_speed * delta;
-                self.player.z += right.y * move_speed * delta;
+                self.player.net.x += right.x * move_speed * delta;
+                self.player.net.z += right.y * move_speed * delta;
             }
             MovementPattern::Circle => {
                 // Keep circle movement close for easier visual/aim testing.
                 let radius = 2.0;
                 let angle = self.movement_timer / oscillation_period * std::f32::consts::PI * 2.0;
-                self.player.x = self.circle_center.x + angle.cos() * radius;
-                self.player.z = self.circle_center.y + angle.sin() * radius;
+                self.player.net.x = self.circle_center.x + angle.cos() * radius;
+                self.player.net.z = self.circle_center.y + angle.sin() * radius;
             }
             MovementPattern::Random => {} // handled by resolved_pattern — defensively do nothing here
         }
 
-        self.player.x = self.player.x.clamp(-50.0, 50.0);
-        self.player.z = self.player.z.clamp(-50.0, 50.0);
+        self.player.net.x = self.player.net.x.clamp(-50.0, 50.0);
+        self.player.net.z = self.player.net.z.clamp(-50.0, 50.0);
 
         let mut jump_started = false;
         if self.action_state.jump_spam {
@@ -206,9 +206,9 @@ impl SimulatedPlayer {
         let anim_state = AnimState::from_movement(
             prev_x,
             prev_z,
-            self.player.x,
-            self.player.z,
-            self.player.yaw,
+            self.player.net.x,
+            self.player.net.z,
+            self.player.net.yaw,
             self.action_state.sprint,
             self.action_state.ads,
             self.action_state.crouch,
@@ -216,11 +216,11 @@ impl SimulatedPlayer {
             self.action_state.slide,
             jump_started,
         );
-        self.player.skin_type = AnimState::skin_from_state(anim_state, self.skin_override);
+        self.player.anim.skin_type = AnimState::skin_from_state(anim_state, self.skin_override);
 
         // Keep render snapshot in sync so model draw position matches gameplay position.
         self.player
-            .apply_snapshot(self.player.x, self.player.y, self.player.z, self.player.yaw);
+            .apply_snapshot(self.player.net.x, self.player.net.y, self.player.net.z, self.player.net.yaw);
         self.player.update(delta);
     }
 

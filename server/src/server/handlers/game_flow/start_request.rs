@@ -3,17 +3,15 @@ use crate::net::{Outbox, PeerId};
 use std::time::Duration;
 use platform::Instant;
 
+use crate::bot::manager::BotManager;
 use crate::maze::MazeData;
-use crate::player::Team;
 use crate::player::{Player, WorldId};
 use crate::protocols::*;
 
+use crate::server::snd::SndState;
 use crate::server::{
-    broadcast, game,
-    game::{
-        MATCH_MAX_PLAYERS, MATCH_POST_TELEPORT_FREEZE_SECS, MATCH_START_COUNTDOWN_SECS,
-        MAZE_CELL_SIZE, MIN_PLAYERS_TO_START,
-    },
+    game,
+    game::{MATCH_START_COUNTDOWN_SECS, MIN_PLAYERS_TO_START},
 };
 
 /// Handle a `MSG_START_GAME` packet sent from a lobby player.  This routine does not
@@ -27,6 +25,8 @@ pub fn handle_start_game(
     match_warmup_end: &mut Option<Instant>,
     match_end_pending: &mut Option<(Instant, u32, String)>,
     match_total_maze_entries: &mut usize,
+    bot_manager: &mut BotManager,
+    snd_state: &mut Option<SndState>,
     match_mode: u8,
     // pointer to variable that will hold the duration for the upcoming match
     match_duration: &mut Option<Duration>,
@@ -98,116 +98,18 @@ pub fn handle_start_game(
             );
         }
     } else {
-        // match is already running and contains players — allow the requester to
-        // join if there's a vacant slot, otherwise notify them that the match is full.
-        let maze_count = players
-            .values()
-            .filter(|p| p.world == WorldId::Maze)
-            .count();
-        if maze_count < MATCH_MAX_PLAYERS {
-            // compute team counts before taking a mutable borrow of the
-            // joining requester so we don't hold mutable and immutable
-            // borrows at the same time
-            let red_count = players
-                .values()
-                .filter(|p| p.world == WorldId::Maze && p.team == Team::Red)
-                .count();
-            let blue_count = players
-                .values()
-                .filter(|p| p.world == WorldId::Maze && p.team == Team::Blue)
-                .count();
-
-            if let Some(req_player) = players.get_mut(&src_addr) {
-                if req_player.world == WorldId::Lobby {
-                    let current_maze = match &*maze {
-                        Some(m) => m,
-                        None => {
-                            // shouldn't happen: match_running implies a maze exists
-                            let _ = socket.send_to(&ServerMsg::StartDenied { reason: None }.encode(), src_addr);
-                            return;
-                        }
-                    };
-                    // assign team by balancing current maze teams (skip for Gun Game)
-                    if match_mode != MODE_GUN_GAME && match_mode != MODE_SMOKE_BREAK {
-                        req_player.team = if red_count <= blue_count {
-                            Team::Red
-                        } else {
-                            Team::Blue
-                        };
-                    } else {
-                        req_player.team = Team::Spectator;
-                    }
-
-                    let (sx, sy, sz, _used_fallback) =
-                        current_maze.random_spawn_world(MAZE_CELL_SIZE);
-                    req_player.world = WorldId::Maze;
-                    req_player.position = (sx, sy, sz);
-                    // set per-player freeze for newly-teleported joiners
-                    req_player.post_teleport_freeze_until =
-                        Some(Instant::now() + Duration::from_secs(MATCH_POST_TELEPORT_FREEZE_SECS));
-
-                    // include authoritative timer so clients don't get stuck on the
-                    // default 120s value if packets reorder.  if we don't have a
-                    // start time (shouldn't happen while match_running is true) just
-                    // send the nominal duration.
-                    // determine remaining seconds clamped to 255
-                    // compute remaining timer, using u16::MAX as a stand-in for “infinite”
-                    let timer_secs: u16 = if let Some(start) = *match_start_time {
-                        let elapsed = Instant::now().duration_since(start);
-                        match *match_duration {
-                            Some(dur) => {
-                                if elapsed >= dur {
-                                    0u16
-                                } else {
-                                    (dur - elapsed).as_secs().min(u16::MAX as u64) as u16
-                                }
-                            }
-                            None => u16::MAX,
-                        }
-                    } else {
-                        match *match_duration {
-                            Some(dur) => dur.as_secs().min(u16::MAX as u64) as u16,
-                            None => u16::MAX,
-                        }
-                    };
-                    let response = ServerMsg::WorldChange {
-                        world: WorldId::Maze.as_u8(),
-                        spawn: req_player.position,
-                        mode: Some(match_mode),
-                        freeze_secs: Some(MATCH_POST_TELEPORT_FREEZE_SECS as u8),
-                        match_timer: Some(timer_secs),
-                    }
-                    .encode();
-                    let _ = socket.send_to(&response, src_addr);
-
-                    current_maze.send(&socket, src_addr);
-
-                    *match_total_maze_entries += 1;
-                    log!(
-                        "Player '{}' joined running match (vacant slot)",
-                        req_player.username
-                    );
-
-                    // Broadcast announcement to all connected players
-                    let ann = ServerMsg::MatchJoined {
-                        id: req_player.id,
-                        name: req_player.username.clone(),
-                    }
-                    .encode();
-                    for (addr, _) in players.iter() {
-                        let _ = socket.send_to(&ann, *addr);
-                    }
-
-                    // After assigning team and moving the player, broadcast
-                    // authoritative state and player list so clients update.
-                    broadcast::broadcast_state(socket, players);
-                    broadcast::broadcast_player_list(socket, players);
-                }
-            }
-        } else {
-            // Inform the requester the match is running and full
-            let _ = socket.send_to(&ServerMsg::StartDenied { reason: None }.encode(), src_addr);
-            log!("Start-game request rejected: match already running and full.");
-        }
+        // match is already running: the requester joins it as it is
+        super::late_join::join_running_match(
+            socket,
+            players,
+            maze,
+            bot_manager,
+            snd_state,
+            match_mode,
+            *match_start_time,
+            *match_duration,
+            match_total_maze_entries,
+            src_addr,
+        );
     }
 }

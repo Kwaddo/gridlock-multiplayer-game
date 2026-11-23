@@ -5,11 +5,16 @@
 //! server in its own tab.
 //! Either way the game only sees whole packets going to and from one host.
 
+use std::sync::Arc;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod udp;
 #[cfg(not(target_arch = "wasm32"))]
 pub use udp::UdpLink;
 
+// Used by the browser build; built everywhere so its tests run natively.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod rtc_event;
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 #[cfg(target_arch = "wasm32")]
@@ -24,11 +29,15 @@ pub enum LinkStatus {
     Closed,
 }
 
+/// One received packet. Shared, so a host in the same process can hand the
+/// bytes it queued for several players to its own player without a copy.
+pub type Packet = Arc<[u8]>;
+
 pub trait Link {
     /// Send one packet to the host. Dropped silently if the link is not open.
     fn send(&mut self, packet: &[u8]);
     /// Drain every packet that has arrived since the last call.
-    fn recv(&mut self) -> Vec<Box<[u8]>>;
+    fn recv(&mut self) -> Vec<Packet>;
     fn status(&mut self) -> LinkStatus;
 }
 
@@ -65,12 +74,12 @@ pub fn preconnect(target: &str) {
 /// A link that first replays packets read before it was handed over
 /// (e.g. everything that arrived in the same batch as the join reply).
 pub struct Backlogged {
-    pending: Vec<Box<[u8]>>,
+    pending: Vec<Packet>,
     inner: Box<dyn Link>,
 }
 
 impl Backlogged {
-    pub fn new(inner: Box<dyn Link>, pending: Vec<Box<[u8]>>) -> Self {
+    pub fn new(inner: Box<dyn Link>, pending: Vec<Packet>) -> Self {
         Backlogged { pending, inner }
     }
 }
@@ -80,7 +89,11 @@ impl Link for Backlogged {
         self.inner.send(packet);
     }
 
-    fn recv(&mut self) -> Vec<Box<[u8]>> {
+    fn recv(&mut self) -> Vec<Packet> {
+        // replayed already (every call after the first): no copy needed
+        if self.pending.is_empty() {
+            return self.inner.recv();
+        }
         let mut out = std::mem::take(&mut self.pending);
         out.extend(self.inner.recv());
         out

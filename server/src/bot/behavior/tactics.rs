@@ -11,6 +11,29 @@ use super::routing::route;
 
 //  Helper functions
 
+/// How a bot takes on an enemy it knows about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Stance {
+    Push,
+    Flank,
+    Hold,
+}
+
+/// The stance the bot's current roll (kept for a few seconds) gives, weighted
+/// by its personality.
+pub(super) fn stance(state: &BotState) -> Stance {
+    let p = &state.personality;
+    let total = (p.push_weight + p.flank_weight + p.hold_angle_weight).max(0.001);
+    let roll = state.tactics.stance_roll * total;
+    if roll < p.push_weight {
+        Stance::Push
+    } else if roll < p.push_weight + p.flank_weight {
+        Stance::Flank
+    } else {
+        Stance::Hold
+    }
+}
+
 pub(super) fn flank_behind_enemy(
     bot_cell: (u8, u8),
     enemy: &Player,
@@ -157,6 +180,16 @@ pub(super) fn pick_hold_angle(
     Some(BotBehavior::Reposition { path, path_index: 0, hold_face: Some((face_dx, face_dz)) })
 }
 
+/// Hold an angle where the bot stands for `secs`, facing `enemy` (or the way
+/// it faces now).
+pub(super) fn hold_here(bot: &Player, enemy: Option<&Player>, secs: f32) -> BotBehavior {
+    let facing = (bot.yaw.cos(), bot.yaw.sin());
+    let (dx, dz) = enemy.map_or(facing, |e| (e.position.0 - bot.position.0, e.position.2 - bot.position.2));
+    let len = (dx * dx + dz * dz).sqrt();
+    let face_direction = if len > 0.01 { (dx / len, dz / len) } else { facing };
+    BotBehavior::HoldAngle { face_direction, hold_timer: 0.0, max_hold_time: secs }
+}
+
 pub(super) fn roam_to_random_point(
     bot_cell: (u8, u8),
     analysis: &MazeAnalysis,
@@ -165,30 +198,35 @@ pub(super) fn roam_to_random_point(
 ) -> Option<BotBehavior> {
     let mut rng = rand::thread_rng();
 
-    // prefer intersections as roam destinations
-    let target = if !analysis.intersections.is_empty() {
-        analysis.intersections[rng.gen_range(0..analysis.intersections.len())]
-    } else {
-        // random walkable cell
-        let mut attempts = 0;
-        loop {
-            let x = rng.gen_range(1..maze.width - 1);
-            let y = rng.gen_range(1..maze.height - 1);
-            let idx = (y as usize) * (maze.width as usize) + (x as usize);
-            if maze.cells[idx] == 1 {
-                break (x, y);
+    // a few tries: a pick can be the bot's own cell, or out of reach
+    for _ in 0..8 {
+        // prefer intersections as roam destinations
+        let target = if !analysis.intersections.is_empty() {
+            analysis.intersections[rng.gen_range(0..analysis.intersections.len())]
+        } else {
+            // random walkable cell
+            let mut attempts = 0;
+            loop {
+                let x = rng.gen_range(1..maze.width - 1);
+                let y = rng.gen_range(1..maze.height - 1);
+                let idx = (y as usize) * (maze.width as usize) + (x as usize);
+                if maze.cells[idx] == 1 {
+                    break (x, y);
+                }
+                attempts += 1;
+                if attempts > 100 {
+                    return None;
+                }
             }
-            attempts += 1;
-            if attempts > 100 {
-                return None;
-            }
+        };
+
+        if target == bot_cell {
+            continue;
         }
-    };
 
-    if target == bot_cell {
-        return None;
+        if let Some(path) = route(nav_cells, maze, bot_cell, target) {
+            return Some(BotBehavior::Reposition { path, path_index: 0, hold_face: None });
+        }
     }
-
-    let path = route(nav_cells, maze, bot_cell, target)?;
-    Some(BotBehavior::Reposition { path, path_index: 0, hold_face: None })
+    None
 }

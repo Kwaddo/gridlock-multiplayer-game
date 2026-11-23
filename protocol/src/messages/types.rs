@@ -112,23 +112,24 @@ impl PlayerInfo {
     }
 }
 
-/// One shot in `MSG_BOT_SHOT` (`[shooter:4][victim:4][start: 3 x i16][end: 3 x i16]`,
-/// fixed-point like `PlayerState::position`): where a bot's tracer runs.
+/// One shot in `MSG_SHOTS` (`[shooter:4][victim:4][start: 3 x i16][end: 3 x i16]`,
+/// fixed-point like `PlayerState::position`): where a bot's or another player's tracer
+/// runs. `victim` is 0 for a player's shot (the server does not know what it hit).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BotShot {
+pub struct Shot {
     pub shooter_id: u32,
     pub victim_id: u32,
     pub start: Vec3,
     pub end: Vec3,
 }
 
-impl BotShot {
+impl Shot {
     pub(super) fn write(&self, w: &mut Writer) {
         w.u32(self.shooter_id).u32(self.victim_id).pos16(self.start).pos16(self.end);
     }
 
     pub(super) fn read(r: &mut Reader) -> Option<Self> {
-        Some(BotShot { shooter_id: r.u32()?, victim_id: r.u32()?, start: r.pos16()?, end: r.pos16()? })
+        Some(Shot { shooter_id: r.u32()?, victim_id: r.u32()?, start: r.pos16()?, end: r.pos16()? })
     }
 }
 
@@ -181,7 +182,8 @@ pub struct MazeLayout {
     pub cells: Vec<u8>,
 }
 
-/// `MSG_SND_ROUND_STATE` (fixed 47-byte payload).
+/// `MSG_SND_ROUND_STATE` (48-byte payload; packets from older servers stop
+/// one byte short, before `bomb_dropped`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SndRound {
     pub round: u8,
@@ -192,13 +194,16 @@ pub struct SndRound {
     pub attacking_team: u8,
     // 0 = no carrier
     pub bomb_carrier_id: u32,
-    // dropped bomb position, zeros when not dropped
+    // dropped bomb position, only meaningful while `bomb_dropped`
     pub bomb_pos: Vec3,
     pub bomb_site: Vec3,
     pub bomb_planted: bool,
     pub plant_progress: f32,
     pub defuse_progress: f32,
     pub phase_timer: f32,
+    /// The bomb lies on the floor at `bomb_pos`. Older servers never drop it
+    /// and leave the byte out, which reads as false.
+    pub bomb_dropped: bool,
 }
 
 /*
