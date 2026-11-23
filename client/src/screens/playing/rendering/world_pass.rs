@@ -67,5 +67,6 @@ impl PlayingState {
         self.draw_tracers(eye);
         self.draw_world_muzzle_flashes();
         self.draw_bullet_holes();
+        self.hit_fx.draw_world(eye);
     }
 }

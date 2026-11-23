@@ -2,6 +2,7 @@ use crate::types::maze::Maze;
 use crate::types::world::WorldId;
 use crate::weapons::combat::{damage_falloff, CombatEntity, EntityKind, HitZone};
 use crate::weapons::effects::DamageNumber;
+use super::super::hit_fx::ImpactKind;
 use crate::weapons::recoil::apply_shot_recoil;
 
 use macroquad::prelude::*;
@@ -268,6 +269,7 @@ impl PlayingState {
                         color: stats.bullet_hole_color,
                         wall_cell: hit_wall_cell,
                     });
+                    self.hit_fx.impact(hit_point, normal, ImpactKind::Surface);
                     // cap total bullet holes to avoid memory bloat
                     if self.bullet_holes.len() > 200 {
                         self.bullet_holes.pop_front();
@@ -365,6 +367,7 @@ impl PlayingState {
                     _ => {}
                 }
 
+                self.hit_fx.impact(eye + fwd * dist, -fwd, ImpactKind::Body);
                 total_dmg += dealt_dmg;
                 if zone == HitZone::Head {
                     any_headshot = true;
