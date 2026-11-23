@@ -61,21 +61,25 @@ impl HitFx {
         self.punch.offsets()
     }
 
-    /// Advances the effects by a frame of `dt` real seconds. Returns the
-    /// frame's view time: `dt`, but slowed to a crawl during a kill's
-    /// hitstop, for the other view-only motion (head bob) to use. The game
-    /// itself (movement, shots, network) never sees it.
-    pub(super) fn tick(&mut self, dt: f32) -> f32 {
-        let view_dt = if self.hitstop > 0.0 {
+    /// This frame's time for the hit effects: `dt`, slowed to a crawl
+    /// during a kill's hitstop (which itself runs out in real time).
+    fn view_dt(&mut self, dt: f32) -> f32 {
+        if self.hitstop > 0.0 {
             self.hitstop = (self.hitstop - dt).max(0.0);
             dt * HITSTOP_RATE
         } else {
             dt
-        };
+        }
+    }
+
+    /// Advances the effects by a frame of `dt` real seconds. The puffs and
+    /// the punch freeze for a kill's hitstop; the game itself (movement,
+    /// mouse, shots, network, head bob) never sees it.
+    pub(super) fn tick(&mut self, dt: f32) {
+        let view_dt = self.view_dt(dt);
         self.particles.update(view_dt);
         self.punch.step(view_dt);
         self.kill_marker = (self.kill_marker - dt).max(0.0);
-        view_dt
     }
 }
 

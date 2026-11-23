@@ -109,13 +109,13 @@ fn stacked_hits_stay_capped_and_a_long_frame_is_stable() {
 #[test]
 fn a_kill_slows_view_time_briefly_then_lets_go() {
     let mut fx = HitFx::default();
-    assert_eq!(fx.tick(0.01), 0.01);
+    assert_eq!(fx.view_dt(0.01), 0.01);
     fx.on_kill(false);
-    let slowed = fx.tick(0.01);
+    let slowed = fx.view_dt(0.01);
     assert!((slowed - 0.01 * HITSTOP_RATE).abs() < 1e-6);
     // the hitstop counts down in real time, so it ends on schedule
     fx.tick(HITSTOP_SECS);
-    assert_eq!(fx.tick(0.01), 0.01);
+    assert_eq!(fx.view_dt(0.01), 0.01);
     // the marker kept going in real time through it
     assert!(fx.kill_marker_on());
 }

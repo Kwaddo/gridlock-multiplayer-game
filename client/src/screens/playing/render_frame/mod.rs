@@ -18,9 +18,9 @@ impl PlayingState {
         player_id: u32,
         maze: Option<&Maze>,
     ) {
-        // view effects only; a kill's hitstop slows these, never the game
-        let view_dt = self.hit_fx.tick(get_frame_time());
-        self.update_head_bob(view_dt);
+        // hit effects are view only, a kill's hitstop slows them and never the game
+        self.hit_fx.tick(get_frame_time());
+        self.update_head_bob(get_frame_time());
         let camera = self.build_camera(config, maze);
         // update cached shapes first, so every camera below only reads
         self.bake_bullet_holes();
