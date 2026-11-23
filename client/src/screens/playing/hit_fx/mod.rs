@@ -1,7 +1,8 @@
 //! Hit feedback that is only for the eyes (#63): impact puffs, the kill and
-//! headshot markers and the camera punch when you're hit. Nothing here
-//! touches the aim, the simulation or the network: the punch is an offset on
-//! the camera only, shots still go where `yaw`/`pitch` point.
+//! headshot markers, the camera punch when you're hit and the kick and
+//! hitstop on a kill. Nothing here touches the aim, the simulation or the
+//! network: the punch is an offset on the camera only, shots still go where
+//! `yaw`/`pitch` point.
 
 mod hud;
 mod particles;
@@ -14,6 +15,9 @@ use macroquad::prelude::Vec3;
 
 /// How long the kill marker stays up.
 pub(super) const KILL_MARKER_SECS: f32 = 0.55;
+/// A kill's hitstop: this long (real time) with view effects at `HITSTOP_RATE` speed.
+pub(super) const HITSTOP_SECS: f32 = 0.06;
+pub(super) const HITSTOP_RATE: f32 = 0.1;
 
 #[derive(Default)]
 pub struct HitFx {
@@ -23,6 +27,8 @@ pub struct HitFx {
     kill_marker: f32,
     /// Whether that kill was a headshot.
     kill_headshot: bool,
+    /// Real seconds left in the kill's hitstop.
+    hitstop: f32,
 }
 
 impl HitFx {
@@ -30,6 +36,8 @@ impl HitFx {
     pub(crate) fn on_kill(&mut self, headshot: bool) {
         self.kill_marker = KILL_MARKER_SECS;
         self.kill_headshot = headshot;
+        self.hitstop = HITSTOP_SECS;
+        self.punch.kill();
     }
 
     /// Whether the kill marker is up (the plain hit marker gives way to it).
@@ -53,11 +61,21 @@ impl HitFx {
         self.punch.offsets()
     }
 
-    /// Advances the effects by a frame of `dt` real seconds.
-    pub(super) fn tick(&mut self, dt: f32) {
-        self.particles.update(dt);
-        self.punch.step(dt);
+    /// Advances the effects by a frame of `dt` real seconds. Returns the
+    /// frame's view time: `dt`, but slowed to a crawl during a kill's
+    /// hitstop, for the other view-only motion (head bob) to use. The game
+    /// itself (movement, shots, network) never sees it.
+    pub(super) fn tick(&mut self, dt: f32) -> f32 {
+        let view_dt = if self.hitstop > 0.0 {
+            self.hitstop = (self.hitstop - dt).max(0.0);
+            dt * HITSTOP_RATE
+        } else {
+            dt
+        };
+        self.particles.update(view_dt);
+        self.punch.step(view_dt);
         self.kill_marker = (self.kill_marker - dt).max(0.0);
+        view_dt
     }
 }
 

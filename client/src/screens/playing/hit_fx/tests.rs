@@ -105,3 +105,28 @@ fn stacked_hits_stay_capped_and_a_long_frame_is_stable() {
     let (p, ..) = fx.view_offsets();
     assert!(p.abs() < 1e-3);
 }
+
+#[test]
+fn a_kill_slows_view_time_briefly_then_lets_go() {
+    let mut fx = HitFx::default();
+    assert_eq!(fx.tick(0.01), 0.01);
+    fx.on_kill(false);
+    let slowed = fx.tick(0.01);
+    assert!((slowed - 0.01 * HITSTOP_RATE).abs() < 1e-6);
+    // the hitstop counts down in real time, so it ends on schedule
+    fx.tick(HITSTOP_SECS);
+    assert_eq!(fx.tick(0.01), 0.01);
+    // the marker kept going in real time through it
+    assert!(fx.kill_marker_on());
+}
+
+#[test]
+fn a_kill_kicks_the_view_and_pinches_the_fov() {
+    let mut fx = HitFx::default();
+    fx.on_kill(true);
+    settle(&mut fx, 0.1);
+    let (pitch, _, _, pinch) = fx.view_offsets();
+    assert!(pitch > 0.0 && pinch > 0.0);
+    settle(&mut fx, 0.6);
+    assert_eq!(fx.view_offsets(), (0.0, 0.0, 0.0, 0.0));
+}

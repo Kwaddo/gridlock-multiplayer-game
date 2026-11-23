@@ -71,6 +71,12 @@ impl Punch {
         self.yaw.kick(-side * MAX_YAW * 0.5 * s, MAX_YAW);
     }
 
+    /// A kill: a small upward kick and a quick zoom pinch.
+    pub(super) fn kill(&mut self) {
+        self.pitch.kick(MAX_PITCH * 0.2, MAX_PITCH);
+        self.fov.kick(MAX_FOV * 0.6, MAX_FOV);
+    }
+
     pub(super) fn step(&mut self, dt: f32) {
         for s in [&mut self.pitch, &mut self.yaw, &mut self.roll, &mut self.fov] {
             s.step(dt);
