@@ -212,3 +212,47 @@ fn other_versions_are_turned_away() {
     }
     assert_eq!(server.player_count(), 0);
 }
+
+#[test]
+fn lobby_state_goes_out_at_half_rate_and_keeps_jump_events() {
+    use protocol::{ClientMsg, ServerMsg};
+    use std::time::{Duration, Instant};
+    let (mut server, a, b) = joined_pair();
+    let out = server.drain_outbox();
+    let a_id = decoded(&out, a)
+        .iter()
+        .find_map(|m| match m {
+            ServerMsg::Welcome { id, .. } => Some(*id),
+            _ => None,
+        })
+        .expect("welcome");
+    let jump = ClientMsg::Position {
+        position: (1.0, 0.5, 1.0),
+        yaw: 0.0,
+        state_flags: Some(0),
+        event_flags: Some(protocol::EVT_JUMP_START),
+        pitch: Some(0.0),
+    };
+    server.handle_packet(a, &jump.encode());
+
+    // tick like a fast host for 0.6 s
+    let start = Instant::now();
+    let mut states = Vec::new();
+    while start.elapsed() < Duration::from_millis(600) {
+        server.tick();
+        for m in decoded(&server.drain_outbox(), b) {
+            if let ServerMsg::State { players, .. } = m {
+                states.push(players);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(4));
+    }
+    // 15 a second (30 would be 18), with slack for a slow machine
+    assert!((5..=11).contains(&states.len()), "{} lobby states in 0.6 s", states.len());
+    let jumps = states
+        .iter()
+        .flatten()
+        .filter(|p| p.id == a_id && p.event_flags & protocol::EVT_JUMP_START != 0)
+        .count();
+    assert_eq!(jumps, 1, "the jump goes out once, on the lobby's turn");
+}

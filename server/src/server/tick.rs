@@ -4,6 +4,7 @@ use std::time::Duration;
 use platform::Instant;
 
 use super::{broadcast, game, handlers, Server};
+use crate::player::WorldId;
 use crate::protocols::*;
 
 /// Cadence of the per-tick bookkeeping that has no need to run per packet.
@@ -78,12 +79,23 @@ impl Server {
                 self.state_cadence.restart(now_tick);
             }
             self.last_broadcast_players = self.players.len();
-            broadcast::broadcast_state_with_events(&self.outbox, &self.players);
+            // Players can't hurt each other in the lobby: its world goes out
+            // at half rate, except when a join or leave forces a send or
+            // bots are there (a range challenge: players shoot at them).
+            let lobby_bots = self.players.values().any(|p| p.is_bot && p.world == WorldId::Lobby);
+            let lobby = !due || self.lobby_state_turn || lobby_bots;
+            if due {
+                self.lobby_state_turn = !self.lobby_state_turn;
+            }
+            broadcast::broadcast_state_with_events(&self.outbox, &self.players, lobby);
             // One-shot movement events have now gone out; they stay set until
-            // then, however many position updates arrive in between.
+            // then, however many position updates arrive in between (a lobby
+            // player's wait for the lobby's next turn).
             for player in self.players.values_mut() {
-                player.evt_jump_start = false;
-                player.evt_landed = false;
+                if lobby || player.world != WorldId::Lobby {
+                    player.evt_jump_start = false;
+                    player.evt_landed = false;
+                }
             }
         }
 

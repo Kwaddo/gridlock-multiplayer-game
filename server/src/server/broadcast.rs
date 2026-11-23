@@ -136,22 +136,24 @@ pub fn move_all_players_to_lobby(
 /// broadcast in `Server::tick` ([`broadcast_state_with_events`]), which then
 /// clears them. Sending them here too would replay them on the next tick.
 pub fn broadcast_state(socket: &Outbox, players: &HashMap<PeerId, Player>) {
-    send_state(socket, players, false);
+    send_state(socket, players, false, true);
 }
 
-/// [`broadcast_state`] including pending movement events; the caller clears them.
-pub fn broadcast_state_with_events(socket: &Outbox, players: &HashMap<PeerId, Player>) {
-    send_state(socket, players, true);
+/// [`broadcast_state`] including pending movement events; the caller clears
+/// them for the worlds that were sent. With `lobby` false, receivers in the
+/// lobby get nothing this time.
+pub fn broadcast_state_with_events(socket: &Outbox, players: &HashMap<PeerId, Player>, lobby: bool) {
+    send_state(socket, players, true, lobby);
 }
 
-fn send_state(socket: &Outbox, players: &HashMap<PeerId, Player>, include_events: bool) {
+fn send_state(socket: &Outbox, players: &HashMap<PeerId, Player>, include_events: bool, lobby: bool) {
     let now = Instant::now();
     // The message only depends on the receiver's world: encode it once per
     // world (at most a couple) and send the same bytes to everyone in it.
     let mut by_world: Vec<(WorldId, Packet)> = Vec::with_capacity(2);
 
     for (recv_addr, receiver) in players.iter() {
-        if receiver.is_bot {
+        if receiver.is_bot || (!lobby && receiver.world == WorldId::Lobby) {
             continue;
         }
         let at = match by_world.iter().position(|(w, _)| *w == receiver.world) {
@@ -274,10 +276,19 @@ mod tests {
         }
         for include_events in [false, true] {
             let outbox = Outbox::default();
-            send_state(&outbox, &players, include_events);
+            send_state(&outbox, &players, include_events, true);
             let shared = outbox.drain();
             assert_eq!(shared, per_receiver(&players, include_events));
             assert_eq!(shared.len(), players.values().filter(|p| !p.is_bot).count());
+
+            // without the lobby: the same packets, less the lobby receivers'
+            send_state(&outbox, &players, include_events, false);
+            let maze_only: Vec<_> = per_receiver(&players, include_events)
+                .into_iter()
+                .filter(|(addr, _)| players[addr].world != WorldId::Lobby)
+                .collect();
+            assert!(!maze_only.is_empty());
+            assert_eq!(outbox.drain(), maze_only);
         }
     }
 }

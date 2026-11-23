@@ -73,6 +73,8 @@ pub struct Server {
     last_regen_tick: Instant,
     /// Paces the world state broadcast.
     state_cadence: crate::cadence::Cadence,
+    /// The lobby gets every other periodic state broadcast (15 a second).
+    lobby_state_turn: bool,
     /// Last run of the tick's rate-limited bookkeeping (inactivity timeouts).
     last_bookkeeping: Option<Instant>,
     /// Player count at the last state broadcast: a join or leave sends at once.
@@ -124,6 +126,7 @@ impl Server {
             last_tick: Instant::now(),
             last_regen_tick: Instant::now(),
             state_cadence: crate::cadence::Cadence::new(game::STATE_BROADCAST_INTERVAL),
+            lobby_state_turn: true,
             last_bookkeeping: None,
             last_broadcast_players: 0,
             last_chat: HashMap::new(),
