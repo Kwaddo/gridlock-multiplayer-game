@@ -98,8 +98,7 @@ pub fn sense(
 ) {
     let perception = tuning::perception(&state.personality, state.difficulty);
     let hearing = tuning::hearing(&state.personality, state.difficulty);
-    let fov = state.personality.base_fov_degrees.max(difficulty_mods(state.difficulty).fov_degrees);
-    let half_fov = fov.clamp(1.0, 359.0).to_radians() * 0.5;
+    let half_fov = half_fov(state);
     let view_range = (state.personality.range_max * SIGHT_RANGE_MULT).max(SIGHT_MIN_RANGE);
     let fighting = state.target_id.is_some();
     let aw = &mut state.awareness;
@@ -229,6 +228,13 @@ fn stall_hint(aw: &mut Awareness, bot: &Player, players: &HashMap<PeerId, Player
 /// A spot `r` from `pos` in direction `angle` (radians).
 pub(crate) fn rough_spot(pos: (f32, f32, f32), angle: f32, r: f32) -> (f32, f32, f32) {
     (pos.0 + angle.cos() * r, pos.1, pos.2 + angle.sin() * r)
+}
+
+/// Half the bot's field of view (radians): its personality's or its
+/// difficulty's, the wider.
+pub(crate) fn half_fov(state: &BotState) -> f32 {
+    let fov = state.personality.base_fov_degrees.max(difficulty_mods(state.difficulty).fov_degrees);
+    fov.clamp(1.0, 359.0).to_radians() * 0.5
 }
 
 /// Angle between the bot's view and `p`, as a fraction of half its field of view.

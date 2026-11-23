@@ -207,6 +207,19 @@ pub fn handle_set_team(
     broadcast::broadcast_player_list(socket, players);
 }
 
+/// Where `attacker` stands as `victim` faces, on the ground plane: 1 dead
+/// ahead, -1 right behind.
+fn facing_dot(players: &HashMap<PeerId, Player>, attacker: PeerId, victim: PeerId) -> f32 {
+    let atk_pos = players.get(&attacker).map(|a| a.position).unwrap_or((0.0, 0.0, 0.0));
+    let vic_pos = players.get(&victim).map(|v| v.position).unwrap_or((0.0, 0.0, 0.0));
+    let vic_yaw = players.get(&victim).map(|v| v.yaw).unwrap_or(0.0);
+    let vic_fwd = (vic_yaw.cos(), vic_yaw.sin());
+    let dx = atk_pos.0 - vic_pos.0;
+    let dz = atk_pos.2 - vic_pos.2;
+    let len = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
+    vic_fwd.0 * dx / len + vic_fwd.1 * dz / len
+}
+
 pub fn apply_damage(
     socket: &Outbox,
     players: &mut HashMap<PeerId, Player>,
@@ -273,28 +286,18 @@ pub fn apply_damage(
     }
 
     let melee = weapon_name.eq_ignore_ascii_case("knife") || weapon_name.eq_ignore_ascii_case("punch");
-    // a match bot that never noticed the attacker: any melee hit is a backstab
+    let facing = facing_dot(players, attacker_addr, victim_addr);
+    let behind = facing < -BACKSTAB_CONE_DOT;
+    // a match bot that never noticed the attacker: a melee hit from behind
+    // it or from outside its view cone is a backstab, one to its face is not
     let attacker_id = players.get(&attacker_addr).map_or(0, |a| a.id);
     let caught_unaware = melee
-        && bot_states
-            .get(&victim_addr)
-            .is_some_and(|s| s.personality_id.is_some() && s.awareness.unaware_of(attacker_id));
-    let backstab_verified = if caught_unaware {
-        true
-    } else if is_backstab && melee {
-        let atk_pos = players.get(&attacker_addr).map(|a| a.position).unwrap_or((0.0, 0.0, 0.0));
-        let vic_pos = players.get(&victim_addr).map(|v| v.position).unwrap_or((0.0, 0.0, 0.0));
-        let vic_yaw = players.get(&victim_addr).map(|v| v.yaw).unwrap_or(0.0);
-        let vic_fwd = (vic_yaw.cos(), vic_yaw.sin());
-        let dx = atk_pos.0 - vic_pos.0;
-        let dz = atk_pos.2 - vic_pos.2;
-        let len = (dx * dx + dz * dz).sqrt().max(f32::EPSILON);
-        let vic_to_atk = (dx / len, dz / len);
-        let dot = vic_fwd.0 * vic_to_atk.0 + vic_fwd.1 * vic_to_atk.1;
-        dot < -BACKSTAB_CONE_DOT
-    } else {
-        false
-    };
+        && bot_states.get(&victim_addr).is_some_and(|s| {
+            s.personality_id.is_some()
+                && s.awareness.unaware_of(attacker_id)
+                && (behind || facing.clamp(-1.0, 1.0).acos() > crate::bot::awareness::sense::half_fov(s))
+        });
+    let backstab_verified = caught_unaware || (is_backstab && melee && behind);
 
     let mut damage = if backstab_verified {
         players
@@ -447,3 +450,7 @@ pub fn apply_damage(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "backstab_tests.rs"]
+mod backstab_tests;
