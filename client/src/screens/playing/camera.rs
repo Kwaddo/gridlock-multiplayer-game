@@ -73,9 +73,11 @@ impl PlayingState {
             0.0
         };
 
-        // the hit punch / kill kick: the view only, shots still use self.yaw/self.pitch
-        let (punch_pitch, punch_yaw, punch_roll, fov_pinch) = self.hit_fx.view_offsets();
-        let (yaw, pitch) = (self.yaw + punch_yaw, (self.pitch + punch_pitch).clamp(-1.55, 1.55));
+        // the hit punch / kill kick: only roll and a FOV pinch, which leave the screen centre where
+        // shots go (self.yaw/self.pitch). Tilting pitch or yaw would put the crosshair off the aim
+        // for a moment, and with hits decided here, shots would seem not to register under fire
+        let (_, _, punch_roll, fov_pinch) = self.hit_fx.view_offsets();
+        let (yaw, pitch) = (self.yaw, self.pitch);
         let forward = vec3(yaw.cos() * pitch.cos(), pitch.sin(), yaw.sin() * pitch.cos());
         let up = if punch_roll == 0.0 { Vec3::Y } else { Quat::from_axis_angle(forward, punch_roll) * Vec3::Y };
 

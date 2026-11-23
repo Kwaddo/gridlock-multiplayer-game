@@ -122,7 +122,7 @@ impl PlayingState {
                 // the kill marker takes the hit marker's place while it's up
                 if self.hit_fx.kill_marker_on() { 0.0 } else { self.hit_marker_timer },
                 self.hit_marker_headshot,
-                // floating damage numbers are a setting, off by default
+                // floating damage numbers are a setting, on by default
                 if config.damage_numbers { &self.damage_numbers } else { &[] },
                 self.hit_marker_pellet_mask,
                 self.hp,

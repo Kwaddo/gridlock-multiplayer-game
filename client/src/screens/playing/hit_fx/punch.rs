@@ -1,7 +1,9 @@
 //! The camera punch: a small, quick tilt of the view when you get hit (and a
 //! kick on a kill). It is an offset on the camera only. The aim (`yaw`,
 //! `pitch`) and every shot are untouched, and it springs back to nothing in
-//! a couple of tenths of a second.
+//! a couple of tenths of a second. The camera uses only its roll and FOV
+//! pinch (see `build_camera`): pitch and yaw are worked out but not shown,
+//! as they would move the crosshair off where shots go.
 
 /// How stiff the spring back is (rad/s). Critically damped, so it settles
 /// in about 5/OMEGA seconds without overshooting.
