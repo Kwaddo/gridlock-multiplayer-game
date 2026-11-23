@@ -87,8 +87,9 @@ pub(super) async fn finish_frame(
         client::ui::hud::draw_background_loading(loaded, total);
     }
 
-    // A game we host: step it (the browser runs the server in this loop), and
-    // pass on what the host should know, e.g. whether outsiders can reach it.
+    // A game we host: step it (the browser runs the server in this tab, on a
+    // timer of its own as well as here), and pass on what the host should
+    // know, e.g. whether outsiders can reach it.
     if let Some(host) = session.as_mut().and_then(|s| s.host.as_mut()) {
         host.update();
         if let Some(notice) = host.take_notice() {

@@ -21,7 +21,7 @@
 (function (gridlockWeb) {
     const {
         PLUGIN_VERSION, sockets, readString, readBytes, writeU32, writeBytes, heapFloats, roomHttpUrl, iceServersFor, prewarm,
-        RtcSocket, preconnect, takePreconnected, registerModels, registerDecode,
+        RtcSocket, preconnect, takePreconnected, registerModels, registerDecode, keepRunningWhenHidden, startHostTicker,
     } = gridlockWeb;
 
     const requests = new Map(); // id -> { done, status, body }
@@ -41,53 +41,6 @@
             }
         }
         return audioContext;
-    }
-
-    // ------------------------------------------------------------ hidden tabs
-
-    // The game advances once per animation frame, and browsers stop animation
-    // frames in hidden tabs, which would freeze a game hosted in one (players
-    // could connect but nobody would answer). While hidden with a game open,
-    // a worker's ticks run the frames instead: worker timers and the messages
-    // they post keep going in the background. Those frames only keep the game
-    // and its connections going, without drawing (see platform::page_hidden),
-    // so 20 a second is plenty.
-    // The worker only runs while the tab is hidden (from the first game on):
-    // a visible tab has its animation frames.
-    const HIDDEN_FRAME_MS = 50;
-    let hiddenTicker = null;
-    let hiddenTickerUrl = null;
-    let watchingVisibility = false;
-
-    function keepRunningWhenHidden() {
-        if (typeof Worker === "undefined") return;
-        if (!watchingVisibility) {
-            watchingVisibility = true;
-            document.addEventListener("visibilitychange", updateHiddenTicker);
-        }
-        updateHiddenTicker();
-    }
-
-    function updateHiddenTicker() {
-        if (!document.hidden) {
-            if (hiddenTicker) hiddenTicker.terminate();
-            hiddenTicker = null;
-            return;
-        }
-        if (hiddenTicker) return;
-        const source = `setInterval(() => postMessage(0), ${HIDDEN_FRAME_MS});`;
-        try {
-            hiddenTickerUrl ??= URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
-            hiddenTicker = new Worker(hiddenTickerUrl);
-        } catch {
-            return; // no workers (e.g. a strict content policy): the game pauses when hidden
-        }
-        hiddenTicker.onmessage = () => {
-            if (!document.hidden || !wasm_exports) return;
-            let inGame = false;
-            for (const s of sockets.values()) if (!s.closed) inGame = true;
-            if (inGame) wasm_exports.frame();
-        };
     }
 
     // ------------------------------------------------------------ imports
@@ -342,6 +295,9 @@
         };
 
         // ---- transport crate: WebRTC and fetch (transport/src/web.rs)
+
+        // A game hosted here steps on a timer of its own (gridlock_web/tickers.js).
+        env.gridlock_host_ticker_start = startHostTicker;
 
         env.gridlock_rtc_open = function (urlPtr, urlLen, isHost) {
             const handle = nextHandle++;
