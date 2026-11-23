@@ -369,13 +369,13 @@ mod tests {
     }
 
     #[test]
-    fn damage_numbers_stay_off_for_older_files() {
-        // a file from before the setting existed: no key, so the default (off)
+    fn damage_numbers_stay_on_for_older_files() {
+        // a file from before the setting existed: no key, so the default (on, as they always showed)
         let old = Saved::lenient(&serde_json::json!({ "sensitivity": 2.0 }));
         assert_eq!(old.damage_numbers, None);
-        assert!(!GameConfig::new().damage_numbers);
-        let on = Saved::lenient(&serde_json::json!({ "damage_numbers": true }));
-        assert_eq!(on.damage_numbers, Some(true));
+        assert!(GameConfig::new().damage_numbers);
+        let off = Saved::lenient(&serde_json::json!({ "damage_numbers": false }));
+        assert_eq!(off.damage_numbers, Some(false));
     }
 
     #[test]
