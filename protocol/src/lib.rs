@@ -168,6 +168,9 @@ pub const SMOKE_NO_WINNER: u8 = 255; // the round isn't over yet
 pub const MSG_BOT_SPAWN: u8 = 50;
 pub const MSG_BOT_DESPAWN_ALL: u8 = 51;
 pub const MSG_SHOTS: u8 = 52; // server -> client: shots fired by bots (one bot tick) or another player, see `Shot`
+pub const MSG_BOT_ALERT: u8 = 60; // server -> the spotted player only: [bot_id:4][level:1] (BOT_ALERT_*); clients without it ignore it
+pub const BOT_ALERT_SUSPICIOUS: u8 = 1; // "?": the bot noticed something of you
+pub const BOT_ALERT_ENGAGED: u8 = 2; // "!": the bot has spotted you and fights
 
 pub const FLAG_IS_BOT: u8 = 1 << 6; // player list flag indicating this player is a bot
 pub const FLAG_SILENT: u8 = 1 << 7; // no footstep sounds

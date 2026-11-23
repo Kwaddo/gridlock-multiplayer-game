@@ -168,7 +168,8 @@ impl Scene {
             let bot = &self.players[&self.bot];
             let state = self.manager.bot_states_mut().get_mut(&self.bot).unwrap();
             let heard = if tick == 0 { noises } else { &[] };
-            sense(bot, state, &self.players, None, heard, DT, &mut crossings);
+            sense(bot, state, &self.players, None, heard, DT);
+            crossings.extend(state.awareness.take_alerts());
         }
         crossings
     }
@@ -368,7 +369,6 @@ fn bots_still_find_a_player_who_stays_put() {
             let mut s = scene(id, blue);
             s.players.get_mut(&s.bot).unwrap().position = red;
             let cells = Some((maze.cells.as_slice(), maze.width, maze.height, maze.prop_cells()));
-            let mut crossings = Vec::new();
             let limit = 120.0;
             let mut found = None;
             for tick in 0..(limit / DT) as usize {
@@ -380,7 +380,7 @@ fn bots_still_find_a_player_who_stays_put() {
                     }
                 }
                 let state = s.manager.bot_states_mut().get_mut(&bot).unwrap();
-                sense(&s.players[&bot], state, &s.players, Some(&maze), &[], DT, &mut crossings);
+                sense(&s.players[&bot], state, &s.players, Some(&maze), &[], DT);
                 let look = state.awareness.look_at(s.players[&bot].position);
                 let body = s.players.get_mut(&bot).unwrap();
                 crate::bot::ai::tick_bot(body, state, DT, &PhysicsConfig::default(), cells, None);
@@ -395,4 +395,45 @@ fn bots_still_find_a_player_who_stays_put() {
         }
         println!("{id:?}: found within {worst:.1} s");
     }
+}
+
+/// Issue #62: the spotted player (and nobody else) hears of each level once,
+/// and a bot shot unseen tells its shooter it is on them.
+#[test]
+fn the_spotted_player_alone_gets_each_alert_once() {
+    use crate::protocols::{ServerMsg, BOT_ALERT_ENGAGED, BOT_ALERT_SUSPICIOUS};
+    let mut s = scene(BotPersonalityId::Nexto, (10.0, 0.5, 0.0));
+    let mut bystander = Player::new(2, "watcher".into());
+    bystander.world = WorldId::Maze;
+    bystander.team = Team::Red;
+    s.players.insert(PeerId(2), bystander);
+    let bot_id = s.players[&s.bot].id;
+    let outbox = Outbox::default();
+    let tick = |s: &mut Scene, secs: f32| {
+        for _ in 0..(secs / DT).round() as usize {
+            let bot = &s.players[&s.bot];
+            let state = s.manager.bot_states_mut().get_mut(&s.bot).unwrap();
+            sense(bot, state, &s.players, None, &[], DT);
+            super::sense::send_alerts(s.manager.bot_states_mut(), &s.players, &outbox);
+        }
+        outbox.drain().into_iter().map(|(to, packet)| (to, ServerMsg::decode(&packet).unwrap())).collect::<Vec<_>>()
+    };
+    let sent = tick(&mut s, 2.0);
+    let alert = |level| (ENEMY, ServerMsg::BotAlert { bot_id, level });
+    assert_eq!(sent, vec![alert(BOT_ALERT_SUSPICIOUS), alert(BOT_ALERT_ENGAGED)]);
+
+    // out of sight and back a moment later: no repeat
+    s.enemy().position = (-30.0, 0.5, 0.0);
+    tick(&mut s, ENGAGED_DECAY_DELAY_SECS + (1.0 - DISENGAGE_BELOW) / DECAY_PER_SEC + 0.5);
+    assert!(!s.state().awareness.is_engaged(ENEMY_ID));
+    s.enemy().position = (10.0, 0.5, 0.0);
+    let sent = tick(&mut s, 2.0);
+    assert!(s.state().awareness.is_engaged(ENEMY_ID));
+    assert_eq!(sent, vec![alert(BOT_ALERT_ENGAGED)], "a fresh spotting after the repeat window is news");
+
+    // shot from behind by a stranger: "!" at once
+    s.state().alert(2, (0.0, 0.5, -10.0));
+    assert!(tick(&mut s, DT).is_empty(), "a teammate (or a bot) gets nothing");
+    s.state().alert(ENEMY_ID, (10.0, 0.5, 0.0));
+    assert!(tick(&mut s, DT).is_empty(), "already told");
 }

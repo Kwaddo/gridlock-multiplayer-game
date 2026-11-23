@@ -242,3 +242,12 @@ fn smoke_break_golden_messages_round_trip() {
     rt_server(ServerMsg::SmokeFeed { shooter: 7, target: 9001, red_handed: true, points: -100 });
     rt_server(ServerMsg::SmokeFeed { shooter: 7, target: 0, red_handed: false, points: -10 });
 }
+
+#[test]
+fn bot_alert_round_trips_and_is_six_bytes() {
+    rt_server(ServerMsg::BotAlert { bot_id: 9003, level: BOT_ALERT_SUSPICIOUS });
+    rt_server(ServerMsg::BotAlert { bot_id: 9003, level: BOT_ALERT_ENGAGED });
+    let msg = ServerMsg::BotAlert { bot_id: 9003, level: BOT_ALERT_ENGAGED }.encode();
+    assert_eq!(msg.len(), 1 + 4 + 1);
+    assert_eq!(ServerMsg::decode(&msg[..5]), None, "truncated");
+}

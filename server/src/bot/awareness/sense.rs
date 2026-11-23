@@ -14,7 +14,8 @@ use crate::bot::ai::BotState;
 use crate::bot::personality::difficulty_mods;
 use crate::bot::sight::has_line_of_sight;
 use crate::maze::MazeData;
-use crate::net::PeerId;
+use crate::net::{Outbox, PeerId};
+use crate::protocols::{ServerMsg, BOT_ALERT_ENGAGED, BOT_ALERT_SUSPICIOUS};
 use crate::player::{Player, WorldId};
 use crate::server::game::MAZE_CELL_SIZE;
 use crate::server::smoke_break::is_decoy;
@@ -51,7 +52,6 @@ pub fn sense_bots(
     dt: f32,
     frozen: impl Fn(&Player) -> bool,
 ) {
-    let mut crossings = Vec::new();
     for (addr, state) in states.iter_mut() {
         if state.personality_id.is_none() {
             continue;
@@ -61,12 +61,33 @@ pub fn sense_bots(
             state.awareness.reset();
             continue;
         }
-        sense(bot, state, players, maze, noises, dt, &mut crossings);
+        sense(bot, state, players, maze, noises, dt);
+    }
+}
+
+/// Tell each spotted human what a bot's awareness of them just went up to
+/// (`BotAlert`, issue #62). Only that player gets it; alerts about bots,
+/// teammates or anyone gone are dropped.
+pub fn send_alerts(states: &mut HashMap<PeerId, BotState>, players: &HashMap<PeerId, Player>, socket: &Outbox) {
+    for (addr, state) in states.iter_mut() {
+        let bot = players.get(addr);
+        for (enemy_id, level) in state.awareness.take_alerts() {
+            let level = match level {
+                Alert::Engaged => BOT_ALERT_ENGAGED,
+                Alert::Suspicious => BOT_ALERT_SUSPICIOUS,
+                Alert::Unaware => continue,
+            };
+            let Some(bot) = bot else { continue };
+            let spotted = |p: &Player| p.id == enemy_id && !p.is_bot && bot.is_hostile_to(p);
+            if let Some((peer, _)) = players.iter().find(|(_, p)| spotted(p)) {
+                let _ = socket.send_to(&ServerMsg::BotAlert { bot_id: bot.id, level }.encode(), *peer);
+            }
+        }
     }
 }
 
 /// Update `state.awareness` for one tick of `dt`. Every enemy whose alert level
-/// went up is pushed onto `crossings` as (their id, new level).
+/// went up gets an alert queued (`Awareness::take_alerts`), rate-limited.
 pub fn sense(
     bot: &Player,
     state: &mut BotState,
@@ -74,7 +95,6 @@ pub fn sense(
     maze: Option<&MazeData>,
     noises: &[Noise],
     dt: f32,
-    crossings: &mut Vec<(u32, Alert)>,
 ) {
     let perception = tuning::perception(&state.personality, state.difficulty);
     let hearing = tuning::hearing(&state.personality, state.difficulty);
@@ -107,6 +127,7 @@ pub fn sense(
         k.fresh = true;
         let before = k.track.alert();
         k.track.age(dt);
+        k.announced.1 += dt;
 
         // their shots this tick: the loudest one heard
         let shot = noises
@@ -166,7 +187,7 @@ pub fn sense(
 
         sensed_any |= k.track.since == 0.0;
         if let Some(up) = k.track.settle(dt, before) {
-            crossings.push((p.id, up));
+            aw.announce(p.id, up);
         }
     }
     aw.known.retain(|k| k.fresh);

@@ -66,6 +66,8 @@ pub enum ServerMsg {
     SmokeDots(Vec<(Vec3, bool)>),
     // a box got shot: target is who was found, 0 when it was a decoy. points is what it cost (the found hider, or the shooter for a decoy)
     SmokeFeed { shooter: u32, target: u32, red_handed: bool, points: i16 },
+    /// A bot's awareness of you went up to `level` (BOT_ALERT_*); only you get it.
+    BotAlert { bot_id: u32, level: u8 },
 }
 
 impl ServerMsg {
@@ -293,6 +295,7 @@ impl ServerMsg {
             ServerMsg::SmokeFeed { shooter, target, red_handed, points } => {
                 Writer::new(MSG_SMOKE_FEED).u32(*shooter).u32(*target).bool(*red_handed).u16(*points as u16).finish()
             }
+            ServerMsg::BotAlert { bot_id, level } => Writer::new(MSG_BOT_ALERT).u32(*bot_id).u8(*level).finish(),
             ServerMsg::SmokeDots(dots) => {
                 let mut w = Writer::new(MSG_SMOKE_DOTS);
                 w.u8(dots.len().min(255) as u8);
@@ -488,6 +491,7 @@ impl ServerMsg {
                 red_handed: r.bool()?,
                 points: r.u16()? as i16,
             },
+            MSG_BOT_ALERT => ServerMsg::BotAlert { bot_id: r.u32()?, level: r.u8()? },
             _ => return None,
         };
         Some(msg)

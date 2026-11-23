@@ -33,6 +33,8 @@ pub struct Known {
     was_airborne: bool,
     /// Still around this step; gone ones are dropped.
     fresh: bool,
+    /// The level last announced to them, and seconds since (see `announce`).
+    announced: (Alert, f32),
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +50,9 @@ pub struct Awareness {
     hint: Option<((f32, f32, f32), f32)>,
     /// Hints given since the bot last sensed anyone: each is tighter.
     hints_given: i32,
+    /// (enemy id, level) the bot's awareness just went up to, for the
+    /// spotted player's "?" / "!" (taken by `BotManager`).
+    alerts: Vec<(u32, Alert)>,
 }
 
 impl Default for Awareness {
@@ -67,12 +72,14 @@ impl Awareness {
             stall: 0.0,
             hint: None,
             hints_given: 0,
+            alerts: Vec::new(),
         }
     }
 
     /// Forget everything (death, a new round, frozen at a spawn).
     pub fn reset(&mut self) {
         self.known.clear();
+        self.alerts.clear();
         self.stall = 0.0;
         self.hint = None;
         self.hints_given = 0;
@@ -93,6 +100,7 @@ impl Awareness {
                     seen_pos: None,
                     was_airborne: false,
                     fresh: true,
+                    announced: (Alert::Unaware, 0.0),
                 });
                 self.known.last_mut().unwrap()
             }
@@ -156,9 +164,29 @@ impl Awareness {
     /// Shot by `id` standing at `pos`: fully aware of them at once.
     pub fn hurt_by(&mut self, id: u32, pos: (f32, f32, f32)) {
         let k = self.entry(id, pos);
+        let before = k.track.alert();
         k.track.engage();
         k.last_pos = pos;
+        if before != Alert::Engaged {
+            self.announce(id, Alert::Engaged);
+        }
         self.stall = 0.0;
+    }
+
+    /// Awareness of `id` went up to `level`: queue an alert for them, unless
+    /// they were told this level (or higher) moments ago.
+    fn announce(&mut self, id: u32, level: Alert) {
+        let Some(k) = self.known.iter_mut().find(|k| k.id == id) else { return };
+        let (told, ago) = k.announced;
+        if level > told || ago >= ALERT_REPEAT_SECS {
+            k.announced = (level, 0.0);
+            self.alerts.push((id, level));
+        }
+    }
+
+    /// The alerts queued since the last call: (enemy id, level).
+    pub fn take_alerts(&mut self) -> std::vec::Drain<'_, (u32, Alert)> {
+        self.alerts.drain(..)
     }
 
     fn strongest(&self, keep: impl Fn(&Known) -> bool) -> Option<(f32, f32, f32)> {

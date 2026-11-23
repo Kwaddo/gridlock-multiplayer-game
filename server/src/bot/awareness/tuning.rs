@@ -105,6 +105,11 @@ pub const HINT_SECS: f32 = 30.0;
 pub const HINT_NARROWING: f32 = 0.6;
 pub const HINT_MIN_SPREAD: f32 = 1.5 * MAZE_CELL_SIZE;
 
+// ── Alerts (the "?" / "!" a spotted player sees, issue #62) ────────────────
+
+/// A bot tells a player about the same level at most this often.
+pub const ALERT_REPEAT_SECS: f32 = 4.0;
+
 // ── Personality and difficulty ──────────────────────────────────────────────
 
 /// How fast a bot notices people, by difficulty: a balance knob that doesn't

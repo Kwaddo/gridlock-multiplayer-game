@@ -247,6 +247,7 @@ impl BotManager {
         let noises = std::mem::take(&mut self.noises);
         let frozen = |p: &Player| is_frozen(p, now, round_frozen);
         awareness::sense::sense_bots(&mut self.bot_states, players, maze, &noises, dt, frozen);
+        awareness::sense::send_alerts(&mut self.bot_states, players, socket);
 
         // ── Brain: run decide_behavior for maze-world bots ──
         // A few times a second rather than every tick: decisions with random
