@@ -619,19 +619,19 @@ async function deliver(store, box, sender, bodies) {
 // clocks of two isolates disagree by a moment, except the ids in `have`.
 // Without `have`, only messages newer than `after`.
 //
-// The mailbox is listed from `from` on (keys sort by time; S3 start-after),
-// so older messages, however many, can't hide new ones, and a flood is
-// listed a few pages deep (UNSEEN_MAX_PAGES). Those in `have` (the caller
-// has them) are deleted, in the background and once each (`deleting`);
-// expired ones are left to the sweep. (A store that ignored start-after
-// would list from the start, and expired ones are deleted then too.)
+// The mailbox is listed from its start, a few pages deep (UNSEEN_MAX_PAGES),
+// so a mailbox with more than a page of older messages still shows new ones.
+// (Not with S3 start-after from `from`: the DCS bucket answers such a
+// listing with nothing, and every join went unseen.) Those in `have` (the
+// caller has them) and expired ones are deleted, in the background and once
+// each (`deleting`), which keeps the mailbox short.
 async function unseen(store, ctx, prefix, after, have, deleting) {
   const now = Date.now();
   const from = Math.max(have ? after - CLOCK_SKEW_MS : after + 1, now - MESSAGE_TTL_MS, 0);
   const items = [];
   let token = null;
   for (let page = 0; page < UNSEEN_MAX_PAGES; page++) {
-    const listed = await store.list(prefix, { token, startAfter: prefix + String(from).padStart(15, "0") });
+    const listed = await store.list(prefix, { token });
     items.push(...listed.items);
     token = listed.next;
     if (!token) break;
@@ -842,7 +842,7 @@ class Store {
   // { items: [{ key, modified }], next }: `next` is the token for the page
   // after, if there is one.
   // `startAfter`: only keys after it (ignored with a token, which carries on
-  // from its own page).
+  // from its own page). Not for the DCS bucket, which then lists nothing.
   async list(prefix, { token, maxKeys = 200, startAfter } = {}) {
     const query = { "list-type": "2", prefix, "max-keys": String(maxKeys) };
     if (token) query["continuation-token"] = token;

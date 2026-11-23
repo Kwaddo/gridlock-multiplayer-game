@@ -55,6 +55,7 @@ globalThis.fetch = async (input, init = {}) => {
 // ListObjectsV2: prefix, max-keys, start-after and continuation-token.
 function listObjects(params) {
   calls.LIST = (calls.LIST || 0) + 1;
+  if (params.has("start-after")) calls.startAfter = (calls.startAfter || 0) + 1;
   const prefix = params.get("prefix") || "";
   const max = Number(params.get("max-keys") || 1000);
   const after = params.get("continuation-token") || params.get("start-after") || "";
@@ -306,6 +307,19 @@ test("a poll finds a new message behind more than a page of older ones", async (
     batch.map((m) => m.NewPeer),
     [player.id],
   );
+  await settled();
+});
+
+// The DCS bucket answers a listing with start-after with nothing, so no
+// poll may send one (the 2026-11-24 deploy saw no joins because of it).
+test("a poll never lists with start-after", async () => {
+  const host = await hostRoom("NOSA1");
+  const before = calls.startAfter || 0;
+  const join = await call("POST", "/room/NOSA1/join", { body: { signals: [] } });
+  const player = await join.json();
+  const resp = await call("GET", `/room/NOSA1/poll?id=${host.id}&token=${host.token}&host&after=0&have=`);
+  assert.deepEqual((await resp.json()).map((m) => m.NewPeer), [player.id]);
+  assert.equal(calls.startAfter || 0, before);
   await settled();
 });
 
