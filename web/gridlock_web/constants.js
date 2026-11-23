@@ -24,9 +24,10 @@
     const POLL_CONNECTING_MS = 500;
     const POLL_CONNECTED_MS = 1000; // a connected player only checks whether to resume
     const HOST_KEEP_MS = 20000; // how often the host renews its claim on the room
-    // A host whose room can't take a join (ROOM_MAX_PLAYERS connected, the
-    // protocol's MATCH_MAX_PLAYERS) polls this often, plainly, instead of
-    // holding a long poll: only a join by code would be refused there.
+    // A host whose room is full (ROOM_MAX_PLAYERS in it, the protocol's
+    // MATCH_MAX_PLAYERS, counting only players that have sent something, not
+    // ones connected ahead) polls this often, plainly, instead of holding a
+    // long poll. The server still takes a join then; it is just slower.
     const POLL_FULL_MS = 8000;
     const ROOM_MAX_PLAYERS = 16;
     // A player not connected yet re-announces itself after this long, so a
@@ -76,8 +77,9 @@
     // TURN credentials to expire), and its ICE credentials never do; what
     // ages is its server reflexive candidate, the NAT mapping the browser
     // keeps alive with STUN keepalives while the connection is open (Chrome
-    // stops those after 2 min on a metered network: hence not longer).
-    const SPARE_ROTATE_MS = 120000;
+    // stops those after 2 min on a metered network). So the oldest a spare
+    // can get, 5/4 of this plus the grace, stays within 2 min: 90 + 30 s.
+    const SPARE_ROTATE_MS = 72000;
     const SPARE_GRACE_MS = 30000;
     const SPARE_TICK_MS = 5000;
     // Changes to the spares within this long go to the registry as one

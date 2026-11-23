@@ -270,10 +270,12 @@
             return [...this.peers.values()].some((p) => !p.open && now - p.t0 < PLAYER_GIVE_UP_MS);
         }
 
-        // Host: no room for another player (itself and every one connected).
+        // Host: no room for another player (itself and every one connected
+        // that has sent something: one connected ahead from the browse
+        // list, see preconnect, holds no place yet).
         roomFull() {
             let open = 1;
-            for (const p of this.peers.values()) if (p.open) open++;
+            for (const p of this.peers.values()) if (p.open && p.heard) open++;
             return open >= ROOM_MAX_PLAYERS;
         }
 
