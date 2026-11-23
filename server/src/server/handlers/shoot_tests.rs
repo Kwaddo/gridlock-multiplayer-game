@@ -233,3 +233,26 @@ fn in_smoke_break_the_lobby_still_sees_its_own_shots() {
     server.handle_packet(a, &ClientMsg::Shoot { end: (1.0, 1.0, 5.0) }.encode());
     assert!(shots_to(&flush(&mut server), b).is_empty(), "a maze shot showed while it may not fire");
 }
+
+// a Hit is heard as the gun the server knows they hold, whatever weapon name it carries
+#[test]
+fn a_hit_is_heard_as_the_held_weapon_not_the_name_it_claims() {
+    use crate::bot::awareness::tuning::GUNFIRE_RADIUS;
+    let mut server = crate::server::Server::new();
+    let (a, b) = (PeerId(1), PeerId(2));
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
+    for p in server.players.values_mut() {
+        p.world = WorldId::Maze;
+        p.current_weapon = "M4A1".into();
+    }
+    let hit = ClientMsg::Hit {
+        victim_id: 2,
+        damage: 1.0,
+        weapon: Some("Suppressed Pistol".into()),
+        backstab: None,
+        headshot: None,
+    };
+    server.handle_packet(a, &hit.encode());
+    assert_eq!(server.bot_manager.noise_radius(a), Some(GUNFIRE_RADIUS));
+}

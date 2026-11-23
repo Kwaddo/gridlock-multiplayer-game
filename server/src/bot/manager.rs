@@ -193,13 +193,24 @@ impl BotManager {
         addr
     }
 
-    /// `shooter` fired `weapon` (what they hold, if `None`): match bots near
-    /// enough hear it at the next bot tick. One shot per shooter per tick.
-    pub fn hear_shot(&mut self, players: &HashMap<PeerId, Player>, shooter: PeerId, weapon: Option<&str>) {
+    /// `shooter` fired what the server knows they hold (never a weapon name
+    /// the client sent): match bots near enough hear it at the next bot
+    /// tick. One shot per shooter per tick, the loudest, so a quiet one (a
+    /// knife hit) can't mask gunfire in the same tick.
+    pub fn hear_shot(&mut self, players: &HashMap<PeerId, Player>, shooter: PeerId) {
         let Some(p) = players.get(&shooter).filter(|p| p.is_alive && p.world == WorldId::Maze) else { return };
-        if !self.noises.iter().any(|n| n.shooter == shooter) {
-            self.noises.push(Noise::gunfire(shooter, p, weapon.unwrap_or(&p.current_weapon)));
+        let noise = Noise::gunfire(shooter, p, &p.current_weapon);
+        match self.noises.iter_mut().find(|n| n.shooter == shooter) {
+            Some(heard) if heard.radius >= noise.radius => {}
+            Some(heard) => *heard = noise,
+            None => self.noises.push(noise),
         }
+    }
+
+    /// How far `shooter`'s shot of this tick will be heard, if they fired.
+    #[cfg(test)]
+    pub(crate) fn noise_radius(&self, shooter: PeerId) -> Option<f32> {
+        self.noises.iter().find(|n| n.shooter == shooter).map(|n| n.radius)
     }
 
     pub fn set_range_challenge_deadline(&mut self, deadline: Option<Instant>) {
@@ -357,8 +368,8 @@ impl BotManager {
             }
         }
 
-        for (addr, _, _, weapon) in &pending_shots {
-            self.hear_shot(players, *addr, Some(weapon));
+        for (addr, ..) in &pending_shots {
+            self.hear_shot(players, *addr);
         }
         // every tracer of this tick, the players' queued since the last bot
         // tick with them, goes out ahead of the damage it deals

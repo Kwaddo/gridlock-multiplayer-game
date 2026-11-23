@@ -252,3 +252,25 @@ fn bots_never_target_teammates() {
     crate::bot::shooting::try_shoot(addr, &players, state, None, DT);
     assert_eq!(state.target_id, Some(2), "should look past the teammate to the enemy");
 }
+
+// a knife hit and a gunshot in the same tick: the bots hear the gunshot
+#[test]
+fn a_quiet_noise_never_masks_gunfire_in_the_same_tick() {
+    use crate::bot::awareness::tuning::{GUNFIRE_RADIUS, MELEE_NOISE_RADIUS};
+    let mut manager = BotManager::new();
+    let mut players = HashMap::new();
+    let shooter = PeerId(1);
+    let mut p = Player::new(1, "p".into());
+    p.world = WorldId::Maze;
+    p.current_weapon = "Knife".into();
+    players.insert(shooter, p);
+
+    manager.hear_shot(&players, shooter);
+    assert_eq!(manager.noise_radius(shooter), Some(MELEE_NOISE_RADIUS));
+    players.get_mut(&shooter).unwrap().current_weapon = "M4A1".into();
+    manager.hear_shot(&players, shooter);
+    assert_eq!(manager.noise_radius(shooter), Some(GUNFIRE_RADIUS), "the gunshot was masked");
+    players.get_mut(&shooter).unwrap().current_weapon = "Knife".into();
+    manager.hear_shot(&players, shooter);
+    assert_eq!(manager.noise_radius(shooter), Some(GUNFIRE_RADIUS), "a later knife hit quietened it");
+}

@@ -110,8 +110,9 @@ impl Server {
             // nobody gets hurt in smoke break, finds are box shots
             ClientMsg::Hit { .. } if self.smoke_on() => {}
             ClientMsg::Hit { victim_id, damage, weapon, backstab, headshot } => {
-                // a shot was fired: match bots nearby hear it (suppressed ones barely)
-                self.bot_manager.hear_shot(&self.players, src_addr, weapon.as_deref());
+                // a shot was fired: match bots nearby hear it (suppressed ones barely), as the
+                // weapon the server knows they hold, not the name in the Hit
+                self.bot_manager.hear_shot(&self.players, src_addr);
                 handlers::handle_hit(
                     &self.outbox,
                     &mut self.players,
@@ -135,8 +136,7 @@ impl Server {
             ClientMsg::Shoot { .. } if self.smoke_hides_shot(src_addr) => {}
             ClientMsg::Shoot { end } => {
                 // a missed shot makes noise too (a hit's Hit is heard as well, for older clients)
-                let weapon = self.players.get(&src_addr).map(|p| p.current_weapon.clone());
-                self.bot_manager.hear_shot(&self.players, src_addr, weapon.as_deref());
+                self.bot_manager.hear_shot(&self.players, src_addr);
                 handlers::handle_shoot(&mut self.shot_queue, &mut self.players, src_addr, end, Instant::now())
             }
             ClientMsg::RespawnRequest => {
@@ -319,7 +319,7 @@ impl Server {
             ClientMsg::BoxEnter { id } => self.handle_box_enter(src_addr, id),
             ClientMsg::BoxExit => self.boxes.exit(&self.players, src_addr),
             ClientMsg::BoxShot { id } => {
-                self.bot_manager.hear_shot(&self.players, src_addr, None);
+                self.bot_manager.hear_shot(&self.players, src_addr);
                 // refused: their game already broke it, it gets the list back
                 if !self.boxes.shot(&self.players, self.maze.as_ref(), src_addr, id) {
                     self.boxes.resend_to(src_addr);
