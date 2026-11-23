@@ -183,3 +183,50 @@ test("a room listed from another address is refused", async () => {
   });
   assert.equal(resp.status, 409);
 });
+
+// ---------------------------------------------------------------- signalling
+
+async function hostRoom(code) {
+  const resp = await call("POST", `/room/${code}/join?host`, { body: {} });
+  assert.equal(resp.status, 200);
+  return resp.json();
+}
+
+test("an idle host's held poll looks about once a second and reads the claim once", async () => {
+  const host = await hostRoom("IDLE1");
+  const before = { LIST: calls.LIST || 0, GET: calls.GET || 0 };
+  const started = Date.now();
+  const resp = await call("GET", `/room/IDLE1/poll?id=${host.id}&token=${host.token}&host&idle&wait&after=0&have=`);
+  assert.equal(resp.status, 200);
+  assert.deepEqual(await resp.json(), []);
+  assert.ok(Date.now() - started >= 5000, "held");
+  const lists = calls.LIST - before.LIST;
+  // one look at the start, then one a second for LONG_POLL_MS (6 s)
+  assert.ok(lists >= 2 && lists <= 9, `looks: ${lists}`);
+  // the claim, once, at the start: not again while held
+  assert.equal(calls.GET - before.GET, 1);
+  await settled();
+});
+
+test("a busy host's held poll, or an idle one a player writes to, answers at once", async () => {
+  const host = await hostRoom("BUSY1");
+  const join = await call("POST", "/room/BUSY1/join", { body: { signals: [] } });
+  assert.equal(join.status, 200);
+  const started = Date.now();
+  const resp = await call("GET", `/room/BUSY1/poll?id=${host.id}&token=${host.token}&host&busy&wait&after=0&have=`);
+  const batch = await resp.json();
+  assert.ok(batch.some((m) => m.NewPeer), "the join is there");
+  assert.ok(Date.now() - started < 1000);
+  // An idle host's held poll wakes when a player writes in the same isolate.
+  const seq = Math.max(...batch.map((m) => m.seq));
+  const have = batch.map((m) => m.id).join(",");
+  const held = call("GET", `/room/BUSY1/poll?id=${host.id}&token=${host.token}&host&idle&wait&after=${seq}&have=${have}`);
+  await new Promise((r) => setTimeout(r, 300));
+  const woke = Date.now();
+  const player = await join.json();
+  await call("POST", "/room/BUSY1/hello", { body: { id: player.id, token: player.token } });
+  const next = await (await held).json();
+  assert.ok(next.some((m) => m.NewPeer === player.id), "the hello is there");
+  assert.ok(Date.now() - woke < 1500);
+  await settled();
+});

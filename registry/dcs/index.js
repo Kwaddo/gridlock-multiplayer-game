@@ -45,7 +45,7 @@
 //                                  player's offer) reach the host with the join
 //   POST   /room/:code/hello       { id, token, to?, via?, signals? }  a player re-announcing itself
 //   POST   /room/:code/send        { id, token, host?, to?, via?, signals: [{ receiver, data }] }
-//   GET    /room/:code/poll?id&token[&host][&keep][&wait][&after=<seq>][&have=<ids>]
+//   GET    /room/:code/poll?id&token[&host][&keep][&busy|&idle][&wait][&after=<seq>][&have=<ids>]
 //                                  -> [{ id, seq, NewPeer | PeerLeft | Signal: { sender, data } }]
 //   POST   /room/:code/leave       { id, token, host?, to?, via? }
 //   POST   /room/:code/spare       { id, token, host: true, offers: [{ oid, data }] }
@@ -58,8 +58,9 @@
 //   than `after` (the newest seq it has) and not among `have` (ids it has
 //   from around then); with `wait` it is held until there is one, for up to
 //   LONG_POLL_MS, and the reply carries LONG_POLL_HEADER. The host's polls
-//   carry ?host (its token is a host token) and, every so often, ?keep to
-//   renew its claim; a room not renewed for HOST_TTL_SECONDS closes, and a
+//   carry ?host (its token is a host token), ?busy while a handshake is under
+//   way or ?idle otherwise (see LONG_POLL_IDLE_CHECK_MS), and, every so
+//   often, ?keep to renew its claim; a room not renewed for HOST_TTL_SECONDS closes, and a
 //   joining player's polls get 410. (`to` and `via` from a join are accepted
 //   for older pages; a player's messages always go to the room's host.)
 //   Players are only ever introduced to the host, never to each other.
@@ -75,21 +76,23 @@
 const TTL_SECONDS = 60;
 const HOST_TTL_SECONDS = 120;
 const MESSAGE_TTL_MS = 60000;
-// Long polling (see room): how long a poll is held, how often it looks for
-// new messages, and how often it checks that the room is still open. A
-// player's mailbox, or a host's that had a message in the last
-// LONG_POLL_ACTIVE_MS, is in the middle of a handshake and is looked at more
-// often; an idle host's (waiting for someone to join) less, since each look
-// is an S3 request.
+// Long polling (see room): how long a poll is held and how often it looks
+// for new messages. A player's mailbox, or a host's in the middle of a
+// handshake, is looked at often; an idle host's (waiting for someone to
+// join) less, since each look is an S3 request. The host says which it is
+// (?busy or ?idle); for a page that says neither, a host whose mailbox had a
+// message in the last LONG_POLL_ACTIVE_MS counts as busy. (Whether the room
+// is still open is read once per poll, at its start: a held poll is answered
+// within LONG_POLL_MS, and the next one finds out.)
 const LONG_POLL_MS = 6000; // the function itself times out at 10 s
 const LONG_POLL_ACTIVE_MS = 10000;
 // (Each look itself takes an S3 round trip, ~150 ms from the edge, on top.)
 const LONG_POLL_CHECK_MS = 25;
-// An idle host is looked at about 2.5 times a second instead of ~5: the
-// first message of a join may wait up to this long (a write in the same
-// isolate still wakes the poll at once), and each look saved is an S3 LIST.
-const LONG_POLL_IDLE_CHECK_MS = 250;
-const LONG_POLL_CLAIM_CHECK_MS = 2000;
+// An idle host is looked at about once a second: the first message of a
+// join may wait up to this long (a write in the same isolate still wakes the
+// poll at once), and each look saved is an S3 LIST. A join answering a spare
+// offer is that one message; the host is busy from then on.
+const LONG_POLL_IDLE_CHECK_MS = 1000;
 // A look that fails waits twice as long before the next, up to this; after
 // LONG_POLL_MAX_FAILURES in a row the poll gives up with a 503, as when its
 // first look fails, so a failing store is not asked 20-40 times a second.
@@ -473,10 +476,10 @@ async function room(request, env, ctx, code, action) {
     }
     // Long poll: hold the request until something arrives, looking again
     // every LONG_POLL_CHECK_MS (or at once when a write in this same isolate
-    // wakes us), and checking now and then that the room is still open.
-    let lastClaimCheck = Date.now();
-    // (A player only polls while it connects.)
-    const active = !asHost || now - after < LONG_POLL_ACTIVE_MS;
+    // wakes us). (A player only polls while it connects.)
+    const said = url.searchParams;
+    const active =
+      !asHost || (said.has("busy") || said.has("idle") ? said.has("busy") : now - after < LONG_POLL_ACTIVE_MS);
     const check = active ? LONG_POLL_CHECK_MS : LONG_POLL_IDLE_CHECK_MS;
     let failures = 0; // looks failed in a row
     while (wait && !messages.length && Date.now() - now < LONG_POLL_MS) {
@@ -488,10 +491,6 @@ async function room(request, env, ctx, code, action) {
       } catch (e) {
         if (++failures >= LONG_POLL_MAX_FAILURES) throw e;
         messages = [];
-      }
-      if (!messages.length && Date.now() - lastClaimCheck >= LONG_POLL_CLAIM_CHECK_MS) {
-        lastClaimCheck = Date.now();
-        if (!open(await loadClaim())) return json({ error: "room closed" }, 410);
       }
     }
     const resp = json(messages);

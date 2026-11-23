@@ -24,6 +24,11 @@
     const POLL_CONNECTING_MS = 500;
     const POLL_CONNECTED_MS = 1000; // a connected player only checks whether to resume
     const HOST_KEEP_MS = 20000; // how often the host renews its claim on the room
+    // A host whose room can't take a join (ROOM_MAX_PLAYERS connected, the
+    // protocol's MATCH_MAX_PLAYERS) polls this often, plainly, instead of
+    // holding a long poll: only a join by code would be refused there.
+    const POLL_FULL_MS = 8000;
+    const ROOM_MAX_PLAYERS = 16;
     // A player not connected yet re-announces itself after this long, so a
     // signalling message that went missing only costs a few seconds: the
     // host resends its answer (or offer), or offers anew if it has nothing.
@@ -116,7 +121,7 @@
 
     Object.assign(gridlockWeb, {
         PLUGIN_VERSION, EV_PEER_JOINED, EV_PEER_LEFT, EV_PACKET, EV_CLOSED, FORCE_RELAY, NO_DIRECT, STUN_FALLBACK,
-        POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, HELLO_MAX_MS, PLAYER_GIVE_UP_MS,
+        POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, POLL_FULL_MS, ROOM_MAX_PLAYERS, HELLO_MS, HELLO_MAX_MS, PLAYER_GIVE_UP_MS,
         LONG_POLL_HEADER, LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, GATHER_MS, SPARE_COUNT, SPARE_ROTATE_MS,
         SPARE_GRACE_MS, SPARE_TICK_MS, SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, PRECONNECT_RETRY_MS,
         PRECONNECT_RETRY_MAX_MS, SEND_BATCH_MS,

@@ -6,8 +6,8 @@
 
 (function (gridlockWeb) {
     const {
-        FORCE_RELAY, POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, HELLO_MAX_MS,
-        PLAYER_GIVE_UP_MS, LONG_POLL_HEADER,
+        FORCE_RELAY, POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, POLL_FULL_MS, ROOM_MAX_PLAYERS,
+        HELLO_MS, HELLO_MAX_MS, PLAYER_GIVE_UP_MS, LONG_POLL_HEADER,
         LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, SEEN_KEEP, SEND_BATCH_MS, sleep, roomHttpUrl, gathered,
         iceServersFor, spareFor,
     } = gridlockWeb;
@@ -166,18 +166,24 @@
                     console.info(`gridlock_web: no connection to the host after ${PLAYER_GIVE_UP_MS} ms, giving up`);
                     return this.shutdown();
                 }
+                // Host: whether a player is connecting (the registry then
+                // looks at its mailbox often), and whether the room is full
+                // (it then polls now and then, plainly).
+                const busy = this.isHost && this.handshaking();
+                const quiet = this.isHost && !busy && this.roomFull();
                 if (!connected) {
                     try {
                         let q = `?id=${encodeURIComponent(this.me.id)}&token=${encodeURIComponent(this.me.token)}`;
                         if (this.isHost) {
-                            q += "&host";
+                            q += busy ? "&host&busy" : "&host&idle";
                             if (Date.now() - lastKeep >= HOST_KEEP_MS) {
                                 q += "&keep";
                                 lastKeep = Date.now();
                             }
                         }
-                        // Ask to be held until something new arrives; a registry
-                        // without long polling ignores this.
+                        // Ask to be held until something new arrives (not
+                        // in a full room); a registry without long polling
+                        // ignores this.
                         // Messages too old to come again are forgotten on the
                         // way, so `seen` stays small for a host up for hours.
                         const have = [];
@@ -185,7 +191,8 @@
                             if (seq < lastSeq - SEEN_KEEP) seen.delete(id);
                             else if (seq >= lastSeq - HAVE_WINDOW) have.push(id);
                         });
-                        q += `&wait&after=${lastSeq}&have=${have.slice(-HAVE_MAX).map((id) => encodeURIComponent(id)).join(",")}`;
+                        if (!quiet) q += "&wait";
+                        q += `&after=${lastSeq}&have=${have.slice(-HAVE_MAX).map((id) => encodeURIComponent(id)).join(",")}`;
                         const resp = await fetch(this.room + "/poll" + q, { cache: "no-store" });
                         longPoll = resp.headers.has(LONG_POLL_HEADER);
                         failures = 0;
@@ -239,7 +246,9 @@
                 }
                 const delay = failures
                     ? Math.min(POLL_RETRY_MS * 2 ** (failures - 1), this.pollDelay(connected))
-                    : longPoll && !connected
+                    : quiet
+                      ? POLL_FULL_MS
+                      : longPoll && !connected
                       ? LONG_POLL_GAP_MS
                       : this.pollDelay(connected);
                 await sleep(delay);
@@ -252,6 +261,20 @@
             if ([...this.peers.values()].some((p) => !p.open)) return POLL_CONNECTING_MS;
             if (this.isHost) return POLL_HOST_MS;
             return connected ? POLL_CONNECTED_MS : POLL_CONNECTING_MS;
+        }
+
+        // Host: a player's connection under way (one stuck that long is
+        // not: its player gives up by then).
+        handshaking() {
+            const now = performance.now();
+            return [...this.peers.values()].some((p) => !p.open && now - p.t0 < PLAYER_GIVE_UP_MS);
+        }
+
+        // Host: no room for another player (itself and every one connected).
+        roomFull() {
+            let open = 1;
+            for (const p of this.peers.values()) if (p.open) open++;
+            return open >= ROOM_MAX_PLAYERS;
         }
 
         async reclaim() {
