@@ -29,6 +29,10 @@ pub struct DevModeState {
     pub show_hitboxes: bool,
     pub god_mode: bool,
     pub show_health_bars: bool,
+    /// Log shot -> hit report -> kill times to the console on each kill.
+    pub log_hit_timing: bool,
+    /// The last of those times (shown in the Debug tab either way).
+    pub hit_timing: super::HitTiming,
     pub code_input: String,
     pub code_verified: bool,
     pub show_code_prompt: bool,
@@ -66,6 +70,8 @@ impl DevModeState {
             show_hitboxes: false,
             god_mode: false,
             show_health_bars: false,
+            log_hit_timing: false,
+            hit_timing: Default::default(),
             code_input: String::new(),
             code_verified: false,
             show_code_prompt: false,

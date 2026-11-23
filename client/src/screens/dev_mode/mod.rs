@@ -1,9 +1,11 @@
+mod hit_timing;
 mod overlay;
 mod state;
 mod tabs;
 mod text_queue;
 mod widgets;
 
+pub use hit_timing::HitTiming;
 pub use overlay::draw_dev_overlay;
 pub use state::{DevModeState, HandsAnimRequest, DEBUG_TAB};
 pub use text_queue::queue_fmt_public;

@@ -122,6 +122,7 @@ impl PlayingState {
                 }
                 .encode();
                 s.send(&msg);
+                self.dev_mode.hit_timing.sent(macroquad::time::get_time());
             }
 
             // S&D interactions: bomb pickup, plant, defuse

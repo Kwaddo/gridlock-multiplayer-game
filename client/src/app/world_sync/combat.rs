@@ -160,6 +160,16 @@ pub(super) fn apply_kill_feed(
         if killer_id == player_id {
             playing_state.kill_confirm_timer = 0.3;
             playing_state.note_local_kill(headshot);
+            let dev = &mut playing_state.dev_mode;
+            if let Some(ms) = dev.hit_timing.kill(get_time()) {
+                if dev.log_hit_timing {
+                    macroquad::miniquad::info!(
+                        "hit timing: shot -> report {:?} ms, shot -> kill {:.0} ms",
+                        dev.hit_timing.sent_ms.map(|v| v.round()),
+                        ms
+                    );
+                }
+            }
             // TDM: resupply ammo on kill
             if playing_state.match_mode == Some(client::net::protocols::MODE_TEAM_DEATHMATCH) {
                 playing_state.weapons.resupply_active(15);

@@ -389,6 +389,10 @@ impl PlayingState {
             });
         }
 
+        // dev hit timing: this shot starts the shot -> report -> kill clock
+        if !player_hits.is_empty() {
+            self.dev_mode.hit_timing.shot(get_time());
+        }
         // Send hit reports in all worlds; server enforces lobby combat rules.
         for (victim_id, damage, is_backstab, is_headshot) in player_hits {
             if damage > 0.0 {
