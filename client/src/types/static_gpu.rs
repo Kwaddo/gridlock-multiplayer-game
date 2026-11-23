@@ -65,37 +65,11 @@ struct Draw {
 }
 
 struct Entry {
-    /// Which `Vec<Mesh>` this was built from; a reloaded model re-uploads.
-    source: Source,
-    batches: Vec<Batch>,
-}
-
-/// Identifies the meshes an entry was uploaded from: where they live, plus a
-/// cheap content sample, so a reloaded model that lands at the same address
-/// with the same mesh count is still noticed.
-#[derive(PartialEq)]
-struct Source {
+    /// Where the `Vec<Mesh>` this was built from lives (pointer, length); a
+    /// model that moves or changes length re-uploads. One rewritten in place
+    /// is caught by `forget`, which the asset loader calls on every write.
     address: (usize, usize),
-    vertices: usize,
-    sample: u64,
-}
-
-impl Source {
-    fn of(meshes: &[Mesh]) -> Self {
-        let mut sample = 0xcbf2_9ce4_8422_2325u64;
-        let mut vertices = 0;
-        for m in meshes {
-            vertices += m.vertices.len();
-            // first, middle and last vertex of every mesh
-            for v in [m.vertices.first(), m.vertices.get(m.vertices.len() / 2), m.vertices.last()].into_iter().flatten() {
-                for x in v.position.to_array() {
-                    sample = (sample ^ x.to_bits() as u64).wrapping_mul(0x100_0000_01b3);
-                }
-            }
-            sample = (sample ^ m.indices.len() as u64).wrapping_mul(0x100_0000_01b3);
-        }
-        Source { address: (meshes.as_ptr() as usize, meshes.len()), vertices, sample }
-    }
+    batches: Vec<Batch>,
 }
 
 thread_local! {
@@ -144,7 +118,7 @@ const BATCH_MAX_VERTICES: usize = u16::MAX as usize + 1;
 fn upload(ctx: &mut dyn miniquad::RenderingBackend, meshes: &[Mesh]) -> Vec<Batch> {
     use miniquad::*;
     // same-texture meshes next to each other, so they merge into one draw
-    let mut order: Vec<&Mesh> = meshes.iter().filter(|m| m.vertices.len() <= BATCH_MAX_VERTICES).collect();
+    let mut order: Vec<&Mesh> = meshes.iter().collect();
     order.sort_by_key(|m| m.texture.as_ref().map(|t| format!("{:?}", t.raw_miniquad_id())));
 
     let mut out = Vec::new();
@@ -169,12 +143,15 @@ fn upload(ctx: &mut dyn miniquad::RenderingBackend, meshes: &[Mesh]) -> Vec<Batc
         if mesh.indices.is_empty() {
             continue;
         }
-        if vertices.len() + mesh.vertices.len() > BATCH_MAX_VERTICES {
+        // u16 indices reach only the first 65536 vertices, so any past them
+        // are never drawn (by draw_mesh either): leave them out, keep the mesh
+        let mesh_vertices = &mesh.vertices[..mesh.vertices.len().min(BATCH_MAX_VERTICES)];
+        if vertices.len() + mesh_vertices.len() > BATCH_MAX_VERTICES {
             flush(&mut vertices, &mut indices, &mut draws, &mut out, ctx);
         }
         let base = vertices.len() as u16;
         let first_index = indices.len() as i32;
-        vertices.extend_from_slice(&mesh.vertices);
+        vertices.extend_from_slice(mesh_vertices);
         indices.extend(mesh.indices.iter().map(|&i| base + i));
         let index_count = mesh.indices.len() as i32;
         match draws.last_mut() {
@@ -199,21 +176,20 @@ pub fn draw_static_meshes(key: &str, meshes: &[Mesh], transform: Mat4) -> bool {
     else {
         return false;
     };
-    let source = Source::of(meshes);
+    let address = (meshes.as_ptr() as usize, meshes.len());
 
     CACHE.with_borrow_mut(|cache| {
-        let stale = cache.get(key).is_some_and(|e| e.source != source);
-        if stale {
+        // the common case, an entry for these very meshes: no key String built
+        if cache.get(key).is_none_or(|e| e.address != address) {
             if let Some(old) = cache.remove(key) {
                 for b in old.batches {
                     gl.quad_context.delete_buffer(b.vertices);
                     gl.quad_context.delete_buffer(b.indices);
                 }
             }
+            cache.insert(key.to_string(), Entry { address, batches: upload(gl.quad_context, meshes) });
         }
-        let entry = cache
-            .entry(key.to_string())
-            .or_insert_with(|| Entry { source, batches: upload(gl.quad_context, meshes) });
+        let Some(entry) = cache.get(key) else { return };
 
         let uniforms = Uniforms { mvp: gl.quad_gl.get_projection_matrix() * transform };
         // Draw in macroquad's current pass, after what it has batched so far.
