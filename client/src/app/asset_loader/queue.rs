@@ -28,6 +28,9 @@ pub struct AssetQueue {
     essential_total: usize,
     /// Spaces out loads while playing ([`AssetQueue::pump_paced`]).
     pacer: LoadPacer,
+    /// How many of `pending` the last [`prioritize`](Self::prioritize) put
+    /// at the front: needed now, so not paced.
+    wanted: usize,
 }
 
 impl AssetQueue {
@@ -62,6 +65,7 @@ impl AssetQueue {
             essential,
             prefetcher: Prefetcher::default(),
             pacer: LoadPacer::default(),
+            wanted: 0,
         }
     }
 
@@ -77,6 +81,7 @@ impl AssetQueue {
                 front += 1;
             }
         }
+        self.wanted = front;
     }
 
     /// Mark `keys` (those still pending) as needed before spawning too, and
@@ -108,12 +113,15 @@ impl AssetQueue {
     /// and uploads on this thread, so it is a hitch as long as itself, and
     /// back to back they stutter. [`LoadPacer`] decides from `prev_frame_s`
     /// (the previous frame's length, seconds) whether one may start; the
-    /// downloads ahead keep going either way.
+    /// downloads ahead keep going either way. What the player needs now
+    /// (put at the front by `prioritize`: clips and models of the players in
+    /// the game, whose hitboxes come from them) is not held back: one a frame,
+    /// as before pacing; its time still counts against the rest.
     pub async fn pump_paced(&mut self, playing_state: &mut PlayingState, prev_frame_s: f32) -> bool {
         // every frame, so the pacer counts all the time that passes
         let allowed = self.pacer.ready(prev_frame_s * 1000.0);
         let next = self.next_arrived(playing_state);
-        let (true, Some(i)) = (allowed, next) else {
+        let Some(i) = next.filter(|&i| allowed || i < self.wanted) else {
             return false;
         };
         let started = Instant::now();
@@ -127,7 +135,15 @@ impl AssetQueue {
     fn next_arrived(&mut self, playing_state: &PlayingState) -> Option<usize> {
         // Something else loaded these meanwhile (e.g. the player list asking
         // for a model): nothing left to do for them.
-        self.pending.retain(|p| !asset_loaded(playing_state, p.key(), p.path()));
+        let (mut at, mut gone_wanted) = (0, 0);
+        let wanted = self.wanted;
+        self.pending.retain(|p| {
+            let keep = !asset_loaded(playing_state, p.key(), p.path());
+            gone_wanted += usize::from(!keep && at < wanted);
+            at += 1;
+            keep
+        });
+        self.wanted -= gone_wanted;
         for p in self.pending.iter().take(PREFETCH_AHEAD) {
             self.prefetcher.start(&p.resolved);
         }
@@ -137,6 +153,9 @@ impl AssetQueue {
 
     async fn load(&mut self, i: usize, playing_state: &mut PlayingState) {
         let (key, path) = self.pending.remove(i).entry;
+        if i < self.wanted {
+            self.wanted -= 1;
+        }
         // A failed load is dropped too: retrying would stall the queue.
         load_asset_entry(&key, &path, playing_state).await;
         if self.pending.is_empty() {
@@ -206,6 +225,7 @@ const MAX_GAP_MS: f32 = 500.0;
 struct LoadPacer {
     debt_ms: f32,
     since_load_ms: f32,
+    load_in_next_frame_ms: f32,
 }
 
 impl LoadPacer {
@@ -213,7 +233,7 @@ impl LoadPacer {
     /// start in this one?
     fn ready(&mut self, prev_frame_ms: f32) -> bool {
         let frame = prev_frame_ms.max(0.0);
-        self.since_load_ms += frame;
+        self.since_load_ms += (frame - std::mem::take(&mut self.load_in_next_frame_ms)).max(0.0);
         self.debt_ms = (self.debt_ms - frame * LOAD_SHARE).max(0.0);
         self.since_load_ms >= MAX_GAP_MS || (self.debt_ms <= 0.0 && frame <= SLOW_FRAME_MS)
     }
@@ -221,9 +241,13 @@ impl LoadPacer {
     /// A load just took `took_ms`.
     fn loaded(&mut self, took_ms: f32) {
         self.debt_ms = took_ms.max(0.0);
-        // The next frame's length includes this load: the gap counts from
-        // its end, or a long one would start the next right after.
-        self.since_load_ms = -self.debt_ms;
+        // The gap counts from the load's end. The next frame's length
+        // includes a load done in one go, so that much of it is left out (or
+        // a long one would start the next right after); a load that awaited
+        // a download over several frames is over by then, and leaves out
+        // no more than that one frame.
+        self.since_load_ms = 0.0;
+        self.load_in_next_frame_ms = self.debt_ms;
     }
 }
 
@@ -310,6 +334,17 @@ mod tests {
         let starts = paced(16.7, 5000.0, 400);
         assert!(starts.len() >= 2);
         assert!(starts.windows(2).all(|w| w[1] - w[0] <= (MAX_GAP_MS / 16.7).ceil() as usize + 1));
+    }
+
+    // a load that waited on a download over several short frames: the next
+    // still comes within the guarantee of its end, not that plus the wait
+    #[test]
+    fn a_long_wait_on_the_network_does_not_push_the_next_load_back() {
+        let mut pacer = LoadPacer::default();
+        assert!(pacer.ready(16.7));
+        pacer.loaded(3000.0);
+        let frames = (1..100).position(|_| pacer.ready(16.7)).unwrap() + 1;
+        assert!(frames as f32 * 16.7 <= MAX_GAP_MS + 2.0 * 16.7, "{frames} frames");
     }
 
     #[test]
