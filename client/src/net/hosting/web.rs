@@ -156,9 +156,15 @@ impl LocalHost {
     /// sent, tick if one is due, and deliver what it sent. Call once per
     /// frame; the ticker steps it between frames as well.
     pub fn update(&mut self) {
-        if let Ok(mut core) = self.core.try_borrow_mut() {
-            core.step();
-        }
+        // Frames and the ticker's steps are separate tasks, so no step is
+        // under way here: still borrowed means one stopped half way (a
+        // panic, which aborts on wasm). Fail this frame too, as a crash
+        // did before the ticker, rather than draw on with a server that
+        // never steps again.
+        let Ok(mut core) = self.core.try_borrow_mut() else {
+            panic!("the hosted server failed in an earlier step");
+        };
+        core.step();
     }
 
     pub fn take_notice(&mut self) -> Option<String> {
