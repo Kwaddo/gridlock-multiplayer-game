@@ -336,6 +336,9 @@ pub async fn run() {
                         playing_state.last_mouse_pos = mouse_position();
                     }
 
+                    // keepalives too: a hosted server keeps ticking under the prompt
+                    finish_frame(&mut session, &mut asset_queue, &mut state, &mut playing_state, &loadout,
+                        &mut last_keepalive, &config, &mut last_server_contact, &mut login_screen).await;
                     next_frame().await;
                     continue;
                 }
