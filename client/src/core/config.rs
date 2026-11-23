@@ -100,6 +100,8 @@ pub struct GameConfig {
     pub match_time_override_secs: Option<u32>,
     // If true, hide the match timer (treat as infinite locally)
     pub hide_match_timer: bool,
+    // smoke break: a tiny dot in the middle of the screen for hiders, off by default
+    pub smoke_hider_dot: bool,
     // Audio
 }
 
@@ -171,6 +173,7 @@ impl GameConfig {
             master_volume: 0.75,
             match_time_override_secs: None,
             hide_match_timer: false,
+            smoke_hider_dot: false,
         }
     }
 

@@ -11,3 +11,5 @@ mod snd_hud;
 mod tracers;
 mod viewmodel;
 pub mod viewmodel_shader;
+mod smoke_break_hud;
+pub(super) use smoke_break_hud::BOTTOM_PILL_W;

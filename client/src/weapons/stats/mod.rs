@@ -342,7 +342,6 @@ pub struct WeaponStats {
     // visual crosshair config (color, gap, thickness, textures) lives on CrosshairConfig in state.rs
 
     // --- HUD icon
-    pub fire_sound_asset_key: &'static str, // key used to look up shot sound in manifest-loaded audio map
     pub icon_asset_key: &'static str,       // key used to look up texture in assets HashMap
     pub icon_width: f32,                    // display width in pixels (tweak per weapon)
     pub icon_height: f32,                   // display height in pixels

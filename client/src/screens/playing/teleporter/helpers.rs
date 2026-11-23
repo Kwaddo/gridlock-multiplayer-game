@@ -1,5 +1,5 @@
 use crate::net::protocols::{
-    MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH, balanced_bot_order,
+    MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH, MODE_SMOKE_BREAK, balanced_bot_order,
 };
 use macroquad::prelude::*;
 
@@ -20,6 +20,7 @@ pub(super) fn mode_name(mode: u8) -> &'static str {
         MODE_GUN_GAME => "GUN GAME",
         MODE_TEAM_DEATHMATCH => "TEAM DEATHMATCH",
         MODE_SEARCH_AND_DESTROY => "SEARCH & DESTROY",
+        MODE_SMOKE_BREAK => "SMOKE BREAK",
         _ => "UNKNOWN MODE",
     }
 }
@@ -31,6 +32,7 @@ pub(super) fn mode_description(mode: u8) -> &'static str {
         MODE_SEARCH_AND_DESTROY => {
             "Attackers plant the bomb, defenders defuse it. No respawns — rounds decide the match."
         }
+        MODE_SMOKE_BREAK => "Hide as a box among decoys. Hunters have to spot the hiders.",
         _ => "",
     }
 }
@@ -52,15 +54,20 @@ pub(super) fn mode_tips(mode: u8) -> &'static [&'static str] {
             "One life per round: the dead wait for the next round.",
             "Win the most rounds to win the match.",
         ],
+        MODE_SMOKE_BREAK => &["Hide among the decoys or hunt the hiders.", "Collect coins and score points across rounds.", "Needs at least 2 players."],
         _ => &[],
     }
 }
 
 /// A `StartGame` duration code as players read it.
 pub(super) fn duration_text(mode: u8, code: u16) -> String {
+    // smoke break's code is its round count
+    if mode == MODE_SMOKE_BREAK {
+        return format!("{} ROUNDS", if code == 0 { 3 } else { code });
+    }
     match code {
         u16::MAX => "Unlimited".to_string(),
-        0 if mode == MODE_SEARCH_AND_DESTROY => "Rounds".to_string(),
+        0 if mode == MODE_SEARCH_AND_DESTROY || mode == MODE_SMOKE_BREAK => "Rounds".to_string(),
         0 => "15 MIN".to_string(),
         secs if secs % 60 == 0 => format!("{} MIN", secs / 60),
         secs => format!("{}:{:02}", secs / 60, secs % 60),

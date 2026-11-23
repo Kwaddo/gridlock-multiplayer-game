@@ -43,7 +43,10 @@ pub(super) fn join_running_match(
         return;
     };
 
-    let team = if match_mode == MODE_GUN_GAME { Team::Spectator } else { pick_team(players) };
+    // Gun Game and Smoke Break have no teams (Smoke Break makes the joiner a
+    // hunter on its next tick)
+    let teamless = match_mode == MODE_GUN_GAME || match_mode == MODE_SMOKE_BREAK;
+    let team = if teamless { Team::Spectator } else { pick_team(players) };
     let full = players.values().filter(|p| p.world == WorldId::Maze).count() >= MATCH_MAX_PLAYERS;
     let bot = bot_to_replace(players, snd_state.as_ref(), match_mode, team, full);
     if full && bot.is_none() {
@@ -105,6 +108,7 @@ pub(super) fn join_running_match(
     match team {
         Team::Red => notices.push("Joining Red team"),
         Team::Blue => notices.push("Joining Blue team"),
+        Team::Spectator if match_mode == MODE_SMOKE_BREAK => notices.push("Joining as a hunter"),
         Team::Spectator => notices.push("Joining at gun level 1"),
     }
     if spectating {
@@ -155,7 +159,8 @@ fn pick_team(players: &HashMap<PeerId, Player>) -> Team {
 
 /// The bot that gives up its place for a joiner on `team`: in team modes any
 /// bot on that team, in Gun Game one only when the match is full. A dead bot
-/// goes first, and the S&D bomb carrier last.
+/// goes first, and the S&D bomb carrier last. Smoke Break has no auto-fill
+/// bots (its decoys are bots, but they belong to the round), so never there.
 fn bot_to_replace(
     players: &HashMap<PeerId, Player>,
     snd: Option<&SndState>,
@@ -163,7 +168,7 @@ fn bot_to_replace(
     team: Team,
     full: bool,
 ) -> Option<PeerId> {
-    if match_mode == MODE_GUN_GAME && !full {
+    if match_mode == MODE_SMOKE_BREAK || (match_mode == MODE_GUN_GAME && !full) {
         return None;
     }
     let carrier = snd.and_then(|s| s.bomb_carrier);

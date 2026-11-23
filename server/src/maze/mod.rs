@@ -1,6 +1,7 @@
 mod data;
 mod decoration;
 mod generation;
+pub mod arena;
 pub mod pathfinding;
 pub mod types;
 pub mod analysis;

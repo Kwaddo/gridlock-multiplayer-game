@@ -78,7 +78,7 @@ impl PlayingState {
     /// frame (it was hidden last frame, or became due).
     pub(super) fn prepare_bodies(&mut self, config: &GameConfig, maze: Option<&Maze>) {
         let nothing_drawn = NOTHING_DRAWN.with(|n| n.replace(false));
-        let mut camera = self.build_camera(config);
+        let mut camera = self.build_camera(config, maze);
         camera.fovy = (camera.fovy * FOV_SLACK).min(3.0);
         let frustum = Frustum::new(camera.matrix());
         let eye = camera.position;
@@ -91,12 +91,16 @@ impl PlayingState {
                     && !walls.is_some_and(|m| hidden_by_walls(m, eye, at)))
         };
 
+        // a smoke break box carrier is drawn as its box: only its hitbox bones are needed
+        let boxes = (self.cardboard.world == self.current_world).then_some(&self.cardboard.boxes);
+        let boxed = |id: u32| boxes.is_some_and(|bs| bs.iter().any(|b| b.carrier == id));
+
         let models = &self.animated_models;
         let bodies = self.other_players.iter_mut().chain(self.practice_bots.iter_mut().map(|b| &mut b.player));
         for p in bodies {
             let at = p.render_position();
             let far = (at - eye).length() > FAR_POSE_DISTANCE;
-            let seen = !nothing_drawn && seen_at(at);
+            let seen = !nothing_drawn && !boxed(p.id) && seen_at(at);
             p.anim.view.set(seen, far, p.id);
             if p.anim.needs_full_pose() {
                 p.anim.evaluate(models, PoseDetail::Full);

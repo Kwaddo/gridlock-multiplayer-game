@@ -31,6 +31,7 @@ struct Saved {
     crouch_toggle: Option<bool>,
     slow_walk_toggle: Option<bool>,
     prone_toggle: Option<bool>,
+    smoke_hider_dot: Option<bool>,
     /// binding field name (e.g. "forward") -> "Key:W" or "Mouse:Right"
     binds: BTreeMap<String, String>,
 }
@@ -61,6 +62,7 @@ impl Saved {
             crouch_toggle: field(value, "crouch_toggle"),
             slow_walk_toggle: field(value, "slow_walk_toggle"),
             prone_toggle: field(value, "prone_toggle"),
+            smoke_hider_dot: field(value, "smoke_hider_dot"),
             binds,
         }
     }
@@ -151,6 +153,9 @@ impl GameConfig {
         if let Some(v) = saved.prone_toggle {
             config.prone_toggle = v;
         }
+        if let Some(v) = saved.smoke_hider_dot {
+            config.smoke_hider_dot = v;
+        }
         apply_binds(&mut config, &saved.binds);
         config
     }
@@ -168,6 +173,7 @@ impl GameConfig {
             crouch_toggle: Some(self.crouch_toggle),
             slow_walk_toggle: Some(self.slow_walk_toggle),
             prone_toggle: Some(self.prone_toggle),
+            smoke_hider_dot: Some(self.smoke_hider_dot),
             binds: binds_of(self),
         };
         if let Ok(json) = serde_json::to_string_pretty(&saved) {

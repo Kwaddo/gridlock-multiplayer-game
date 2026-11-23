@@ -32,9 +32,13 @@ pub(super) fn apply_player_list(
     let server_ids: std::collections::HashSet<u32> =
         list.iter().map(|(id, ..)| *id).collect();
     let before = playing_state.other_players.len();
-    playing_state
-        .other_players
-        .retain(|p| server_ids.contains(&p.id) || p.death_timer.is_some());
+    // box carriers stay: in smoke break decoys and hidden players arrive under ids the
+    // player list never names, and a State without them prunes them anyway
+    let carriers: std::collections::HashSet<u32> =
+        playing_state.cardboard.boxes.iter().map(|b| b.carrier).filter(|&c| c != 0).collect();
+    playing_state.other_players.retain(|p| {
+        server_ids.contains(&p.id) || carriers.contains(&p.id) || p.death_timer.is_some()
+    });
     if playing_state.other_players.len() != before {
         playing_state.rebuild_player_index();
     }

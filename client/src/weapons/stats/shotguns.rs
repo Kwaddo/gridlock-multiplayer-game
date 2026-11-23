@@ -61,7 +61,6 @@ pub const SPAS: WeaponStats = WeaponStats {
     fsa_time: None,
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "shotgun_shot",
     icon_asset_key: "shotgun_icon",
     icon_width: 100.0,
     icon_height: 50.0,
@@ -145,7 +144,6 @@ pub const BENELLI: WeaponStats = WeaponStats {
     crosshair_kick_decay: 9.0,
     crosshair_kick_max: 3.5,
 
-    fire_sound_asset_key: "shotgun_shot",
     icon_asset_key: "shotgun_icon",
 
     viewmodel_model: Some("benelli_model"),
@@ -238,7 +236,6 @@ pub const SAWNOFF: WeaponStats = WeaponStats {
     fsa_time: None,
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "shotgun_shot",
     icon_asset_key: "shotgun_icon",
     icon_width: 90.0,
     icon_height: 45.0,

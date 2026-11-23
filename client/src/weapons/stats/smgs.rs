@@ -48,7 +48,6 @@ pub const MP5: WeaponStats = WeaponStats {
     fsa_time: None,
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "smg_shot",
     icon_asset_key: "smg_icon",
     icon_width: 90.0,
     icon_height: 45.0,
@@ -133,7 +132,6 @@ pub const P90: WeaponStats = WeaponStats {
 
     fsa_time: None,
 
-    fire_sound_asset_key: "smg_shot",
     icon_asset_key: "smg_icon",
 
     viewmodel_model: Some("p90_model"),
@@ -214,7 +212,6 @@ pub const HONEY_BADGER: WeaponStats = WeaponStats {
     fsa_time: Some(0.22),
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "smg_shot",
     icon_asset_key: "smg_icon",
     icon_width: 95.0,
     icon_height: 45.0,
@@ -296,7 +293,6 @@ pub const TOMMY_GUN: WeaponStats = WeaponStats {
 
     fsa_time: None,
 
-    fire_sound_asset_key: "smg_shot",
     icon_asset_key: "smg_icon",
 
     viewmodel_model: Some("tommy_gun_model"),

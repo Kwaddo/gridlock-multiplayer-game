@@ -40,11 +40,11 @@ impl PlayingState {
         };
 
         // and skip bodies the frame's camera test (simulation/body_view.rs) found hidden behind walls,
-        // that test is a little wider than this frustum and counts every body when there's a mirror
+        // that test is a little wider than this frustum and counts every body when there's a mirror;
+        // a smoke break box carrier is drawn as its box, not a body
         let mut drawn = 0;
-        let bodies = self.other_players.iter().chain(self.practice_bots.iter().map(|bot| &bot.player));
-        for p in bodies {
-            if p.anim.view.seen() && may_see(p) {
+        for p in self.other_players.iter().chain(self.practice_bots.iter().map(|bot| &bot.player)) {
+            if p.anim.view.seen() && may_see(p) && !self.is_boxed(p.id) {
                 self.draw_player_model(p);
                 drawn += 1;
             }

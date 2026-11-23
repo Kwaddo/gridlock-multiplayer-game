@@ -158,8 +158,13 @@ impl Chat {
     }
 
     pub fn draw(&self) {
-        let bottom = screen_height() - BOTTOM_GAP;
-        let max_w = MAX_W.min(screen_width() - LEFT * 2.0);
+        self.draw_at(BOTTOM_GAP, MAX_W);
+    }
+
+    /// the feed with its input line `bottom_gap` above the bottom, at most `max_w` wide
+    pub fn draw_at(&self, bottom_gap: f32, max_w: f32) {
+        let bottom = screen_height() - bottom_gap;
+        let max_w = max_w.min(screen_width() - LEFT * 2.0).max(120.0);
 
         let mut y = bottom;
         if self.open {

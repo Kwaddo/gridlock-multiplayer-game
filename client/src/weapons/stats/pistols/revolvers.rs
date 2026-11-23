@@ -47,7 +47,6 @@ pub const REVOLVER: WeaponStats = WeaponStats {
     fsa_time: Some(0.35),
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "revolver_shot",
     icon_asset_key: "pistol_icon",
     icon_width: 85.0,
     icon_height: 50.0,
@@ -146,7 +145,6 @@ pub const TAURUS_RAGING: WeaponStats = WeaponStats {
     fsa_time: Some(0.4),
     fsa_suppresses_kick: false,
 
-    fire_sound_asset_key: "revolver_shot",
     icon_asset_key: "pistol_icon",
     icon_width: 85.0,
     icon_height: 50.0,

@@ -143,6 +143,8 @@ impl BotManager {
             is_silent: false, // spawn_bot will set based on archetype
             auto_respawn: true,
             regen_resume_at: None,
+            in_box: false,
+            smoke_alias: None,
         };
 
         let bot_state = BotState {
@@ -266,7 +268,7 @@ impl BotManager {
             let Some(state) = self.bot_states.get_mut(addr) else {
                 continue;
             };
-            let find_alive = |id: u32| players.values().find(|p| p.id == id && p.is_alive).map(|p| p.position);
+            let find_alive = |id: u32| players.values().find(|p| p.id == id && p.is_alive && !p.in_box).map(|p| p.position);
             // the enemy in sight, if any
             let target_pos = state.target_id.and_then(find_alive);
             // else whoever shot us: where they are now, or where they shot from

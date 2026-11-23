@@ -1,3 +1,4 @@
+pub mod cardboard_box;
 mod maze;
 pub mod nametags;
 pub mod players;

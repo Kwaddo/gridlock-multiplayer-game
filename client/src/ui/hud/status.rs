@@ -39,7 +39,15 @@ pub(super) fn draw_status_panels(
     max_hp: f32,
     match_time_left: f32,
     config: &crate::core::GameConfig,
+    hider: bool,
 ) {
+    // a smoke break hider can't be hurt (one shot finds them) and can't sprint
+    // in a box: only the match timer shows
+    if hider {
+        draw_match_timer(match_time_left, config);
+        return;
+    }
+
     // All bars first, then all text: none of the text overlaps a later bar,
     // so this only saves the draw calls of switching to the font atlas.
     let hp_bar_x = 20.0;
@@ -87,30 +95,7 @@ pub(super) fn draw_status_panels(
     draw_rectangle(bar_x, bar_y, bar_width * fill, bar_height, bar_color);
     draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, GRAY);
 
-    // Match timer (top-center) — only display when not hidden by user and
-    // when the server has sent a time.  infinite matches show as “∞”.
-    if !config.hide_match_timer && match_time_left > 0.0 {
-        let secs = match_time_left.ceil() as u32;
-        TIME_TEXT.with_borrow_mut(|cache| {
-            let time_text = cache.get(secs, || {
-                if secs == u16::MAX as u32 {
-                    // sentinel value used by server to indicate “infinite” duration
-                    "∞".to_string()
-                } else {
-                    let mins = secs / 60;
-                    let s = secs % 60;
-                    format!("{:02}:{:02}", mins, s)
-                }
-            });
-            let tw = crate::ui::fonts::measure_game_text(time_text, 20);
-            draw_text_ex(
-                time_text,
-                (screen_width() - tw) / 2.0,
-                32.0,
-                text_params(20, Color::from_rgba(220, 220, 220, 220)),
-            );
-        });
-    }
+    draw_match_timer(match_time_left, config);
 
     HP_TEXT.with_borrow_mut(|cache| {
         let hp_text = cache.get(hp.to_bits(), || format!("{:.0} HP", hp));
@@ -151,6 +136,34 @@ pub(super) fn draw_status_panels(
                 20.0,
                 screen_height() - 20.0,
                 text_params(16, Color::from_rgba(150, 150, 150, 255)),
+            );
+        });
+    }
+}
+
+/// Match timer (top-center), unless hidden or no time came from the server.
+fn draw_match_timer(match_time_left: f32, config: &crate::core::GameConfig) {
+    // Match timer (top-center) — only display when not hidden by user and
+    // when the server has sent a time.  infinite matches show as “∞”.
+    if !config.hide_match_timer && match_time_left > 0.0 {
+        let secs = match_time_left.ceil() as u32;
+        TIME_TEXT.with_borrow_mut(|cache| {
+            let time_text = cache.get(secs, || {
+                if secs == u16::MAX as u32 {
+                    // sentinel value used by server to indicate “infinite” duration
+                    "∞".to_string()
+                } else {
+                    let mins = secs / 60;
+                    let s = secs % 60;
+                    format!("{:02}:{:02}", mins, s)
+                }
+            });
+            let tw = crate::ui::fonts::measure_game_text(time_text, 20);
+            draw_text_ex(
+                time_text,
+                (screen_width() - tw) / 2.0,
+                32.0,
+                text_params(20, Color::from_rgba(220, 220, 220, 220)),
             );
         });
     }

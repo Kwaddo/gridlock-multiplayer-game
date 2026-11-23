@@ -36,27 +36,20 @@ pub(super) fn apply_damage(
 }
 
 /// Spawns tracers and muzzle flashes for shots fired by bots.
-/// Their reports play where they were fired, through walls muffled.
 pub(super) fn spawn_bot_shots(
     playing_state: &mut PlayingState,
     bot_shots: Vec<(u32, Vec3, Vec3)>,
-    maze: Option<&client::types::maze::Maze>,
 ) {
     // The server sends every bot shot to every human, wherever they are: a
     // shot from a bot in another world (the maze, seen from the lobby) would
-    // play its sound and draw its tracer at that world's coordinates here.
-    // (The server now sends a bot's shots only to its world; this also covers
-    // older hosts.) A shooter we do not know yet still shows, as before.
+    // draw its tracer at that world's coordinates here. (The server now sends
+    // a bot's shots only to its world; this also covers older hosts.) A
+    // shooter we do not know yet still shows, as before.
     let world = playing_state.current_world;
     let mut bot_shots = bot_shots;
     bot_shots.retain(|&(shooter, ..)| {
         playing_state.other_players.iter().find(|p| p.id == shooter).is_none_or(|p| p.world == world)
     });
-    for &(_, start, _) in &bot_shots {
-        // the shot message carries no weapon, so bots all sound like rifles
-        let volume = client::audio::catalog::SHOT_VOLUME;
-        playing_state.play_spatial_sound("ar_shot", start, Vec3::ZERO, volume, maze);
-    }
     for (shooter, start, end) in bot_shots {
         // the bot's body kicks too, before this only the tracer and flash showed
         if let Some(bot) = playing_state.other_players.iter_mut().find(|p| p.id == shooter) {
@@ -154,6 +147,7 @@ pub(super) fn apply_kill_feed(
                 victim_team,
                 weapon,
                 timer: 5.0,
+                tag: None,
             });
 
         // kill confirmation effect for local player

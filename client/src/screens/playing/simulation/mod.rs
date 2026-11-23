@@ -1,7 +1,6 @@
 mod audio;
 mod body_view;
 mod constants;
-mod event_sounds;
 mod hands;
 mod hitboxes;
 mod players;
@@ -17,7 +16,6 @@ use macroquad::prelude::*;
 
 use super::PlayingState;
 
-pub use event_sounds::EventSoundState;
 pub(super) use body_view::count as count_bodies;
 
 // player_anims_in_use is gone, it picked which shared clip clocks to tick each frame
@@ -66,6 +64,9 @@ impl PlayingState {
             self.set_character(Self::DEFAULT_CHARACTER); // straight back to the default soldier
         }
 
+        self.update_box_feel(delta);
+        self.update_smoke_break(delta);
+
         // update kill feed timers and drop expired entries in a single pass
         self.kill_feed.retain_mut(|entry| {
             entry.timer -= delta;
@@ -94,8 +95,6 @@ impl PlayingState {
         }
 
 
-        self.play_event_sounds(maze);
-
         if self.is_dead {
             self.simulate_dead(delta);
             return;
@@ -116,7 +115,7 @@ impl PlayingState {
 
         self.target_dummy.update(delta);
 
-        self.update_remote_players(delta, config, maze);
+        self.update_remote_players(delta, config);
         self.tick_timers(delta, maze);
 
         self.update_stamina(config, delta);
@@ -197,6 +196,7 @@ impl PlayingState {
             self.movement_state.height,
             &self.mirrors,
         );
+        self.resolve_box_collision();
 
         if !was_grounded && self.movement_state.is_grounded {
             self.just_landed = true;
@@ -205,7 +205,6 @@ impl PlayingState {
         }
         self.prev_was_reloading = self.weapons.active().is_reloading;
 
-        self.update_local_footsteps(delta, config);
 
         // your one third person body follows you, after movement so the mirror isnt a frame behind
         self.update_self_avatar(delta);

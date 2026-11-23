@@ -38,6 +38,8 @@ impl PlayingState {
     /// pellet's ray against surfaces, the dummy, players and bots, with
     /// tracers, bullet holes, hit markers and hit reports.
     pub(super) fn fire_hitscan(&mut self, maze: &mut Option<&mut Maze>) {
+        let box_targets = self.box_targets();
+        let mut boxes_hit: Vec<u16> = Vec::new();
         let weapon = self.weapons.active_mut();
 
         if self.dev_mode.infinite_ammo {
@@ -142,7 +144,9 @@ impl PlayingState {
             // gets hit (no wall damage, no hole, no light broken).
             let mirror_dist =
                 crate::world::mirror::nearest_mirror_hit(&self.mirrors, eye, fwd, range);
-            let world_range = mirror_dist.unwrap_or(range);
+            // boxes too, nothing behind one gets hit
+            let box_hit = super::super::cardboard::ray_test_boxes(&box_targets, eye, fwd, mirror_dist.unwrap_or(range));
+            let world_range = box_hit.map(|(_, d)| d).or(mirror_dist).unwrap_or(range);
             let world_dist = if self.current_world == WorldId::Maze {
                 // the closest of walls, props, floor/ceiling and lights, as
                 // (distance, normal, Option<wall_cell>, Option<light_cell>)
@@ -186,15 +190,21 @@ impl PlayingState {
             } else {
                 None
             };
-            // nothing in the world was closer, but a mirror was: the bullet
-            // stops at the glass. No normal = no bullet hole.
-            let closest_blocking_dist = match (world_dist, mirror_dist) {
-                (Some(d), _) => Some(d),
-                (None, Some(md)) => {
+            // nothing in the world was closer, so a box or a mirror stops it.
+            // No normal = no bullet hole.
+            let closest_blocking_dist = match (world_dist, box_hit, mirror_dist) {
+                (Some(d), _, _) => Some(d),
+                // a box stops the bullet and breaks, no bullet hole on it
+                (None, Some((id, d)), _) => {
+                    surface_hit = true;
+                    boxes_hit.push(id);
+                    Some(d)
+                }
+                (None, None, Some(md)) => {
                     surface_hit = true;
                     Some(md)
                 }
-                (None, None) => None,
+                (None, None, None) => None,
             };
 
             let tracer_start = eye + fwd * 1.5 + vec3(0.0, -0.025, 0.0);
@@ -266,7 +276,7 @@ impl PlayingState {
 
             // check other players (client-side prediction / hit registration)
             for (idx, other) in self.other_players.iter().enumerate() {
-                if !other.is_alive() {
+                if !other.is_alive() || box_targets_carrier(&self.cardboard.boxes, other.id) {
                     continue;
                 }
                 if let Some((zone, dist)) =
@@ -346,11 +356,6 @@ impl PlayingState {
         }
 
         if total_dmg > 0.0 {
-            self.audio.play_cue(if any_headshot {
-                crate::audio::catalog::HEADSHOT
-            } else {
-                crate::audio::catalog::HIT_MARKER
-            });
             self.hit_marker_timer = 0.35;
             self.hit_marker_headshot = any_headshot;
             self.hit_marker_pellet_mask = pellet_mask;
@@ -375,9 +380,12 @@ impl PlayingState {
             self.knife_miss_slow_timer = KNIFE_MISS_MOVE_SLOW_DURATION;
         }
 
-        if let Some(at) = impact_at {
-            let impact = crate::audio::catalog::WALL_IMPACT;
-            self.play_spatial_sound(impact.key, at, Vec3::ZERO, impact.volume, None);
+        for id in boxes_hit {
+            self.break_box(id);
         }
     }
+}
+
+fn box_targets_carrier(boxes: &[crate::net::protocols::CardboardBox], player_id: u32) -> bool {
+    boxes.iter().any(|b| b.carrier == player_id)
 }

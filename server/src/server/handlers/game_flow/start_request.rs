@@ -53,6 +53,14 @@ pub fn handle_start_game(
             return;
         }
 
+        // smoke break needs a hider and a hunter, so 2 people at least
+        let humans_in_lobby = players.values().filter(|p| p.world == WorldId::Lobby && !p.is_bot).count();
+        if match_mode == MODE_SMOKE_BREAK && humans_in_lobby < 2 {
+            let _ = socket.send_to(&ServerMsg::StartDenied { reason: Some(START_DENIED_TOO_FEW) }.encode(), src_addr);
+            log!("Smoke Break start from {} rejected: only {} in the lobby.", src_addr, humans_in_lobby);
+            return;
+        }
+
         // honour requested duration when scheduling new match
         *match_duration = requested_duration;
         // require minimal number of players in lobby

@@ -340,7 +340,9 @@ impl PlayingState {
             let scoped = matches!(weapon.stats().crosshair_style, crate::weapons::stats::CrosshairStyle::Scope)
                 && weapon.ads_progress > 0.85
                 && !(self.dev_mode.is_unlocked() && self.dev_mode.force_ads);
-            !self.lobby_console_open && !self.is_dead && !scoped
+            // the same as render_frame's viewmodel gate (a smoke break box, hider or locked gun has none)
+            let no_gun = self.cardboard.in_box.is_some() || self.smoke_hiding() || self.smoke_gun_locked();
+            !self.lobby_console_open && !self.is_dead && !scoped && !no_gun
         };
         if let Some(model) = update_key.and_then(|k| self.animated_models.get_mut(k)) {
             if hands_visible {

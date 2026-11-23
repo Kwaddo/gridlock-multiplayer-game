@@ -47,6 +47,23 @@ pub enum ServerMsg {
     MatchStatus { status: u8 },
     TeamScore { red: u16, blue: u16, to_win: u16 },
     LobbySettings(LobbySettings),
+    /// Every box in `world`, whole, sent on join/world change and after any change
+    /// (enter, exit, destroyed, respawned). It's also the answer to `BoxEnter`:
+    /// if the box doesn't list you as carrier, you didn't get in.
+    Boxes { world: u8, boxes: Vec<CardboardBox> },
+    SmokeRound(SmokeRound),
+    // where every coin still is, only hiders get it
+    SmokeCoins(Vec<Vec3>),
+    SmokeScores(Vec<SmokeScore>),
+    SmokeCoinTaken { at: Vec3 },
+    // where the golden coin is and seconds left, None once it's taken or gone
+    SmokeGoldCoin(Option<(Vec3, f32)>),
+    // player ids of everyone gold right now
+    SmokeGolden(Vec<u32>),
+    // (where, gold right now) for each dot, false is a "last seen here" dot
+    SmokeDots(Vec<(Vec3, bool)>),
+    // a box got shot: target is who was found, 0 when it was a decoy. points is what it cost (the found hider, or the shooter for a decoy)
+    SmokeFeed { shooter: u32, target: u32, red_handed: bool, points: i16 },
 }
 
 impl ServerMsg {
@@ -221,6 +238,63 @@ impl ServerMsg {
             ServerMsg::TeamScore { red, blue, to_win } => {
                 Writer::new(MSG_TEAM_SCORE).u16(*red).u16(*blue).u16(*to_win).finish()
             }
+            ServerMsg::Boxes { world, boxes } => {
+                let mut w = Writer::new(MSG_BOXES);
+                w.u8(*world).u8(boxes.len().min(255) as u8);
+                for b in boxes.iter().take(255) {
+                    b.write(&mut w);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeRound(h) => {
+                let mut w = Writer::new(MSG_SMOKE_ROUND);
+                h.write(&mut w);
+                w.finish()
+            }
+            ServerMsg::SmokeCoins(coins) => {
+                let mut w = Writer::new(MSG_SMOKE_COINS);
+                w.u8(coins.len().min(255) as u8);
+                for c in coins.iter().take(255) {
+                    w.pos16(*c);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeScores(scores) => {
+                let mut w = Writer::new(MSG_SMOKE_SCORES);
+                w.u8(scores.len().min(255) as u8);
+                for s in scores.iter().take(255) {
+                    s.write(&mut w);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeCoinTaken { at } => Writer::new(MSG_SMOKE_COIN_TAKEN).pos16(*at).finish(),
+            ServerMsg::SmokeGoldCoin(coin) => {
+                let mut w = Writer::new(MSG_SMOKE_GOLD_COIN);
+                w.bool(coin.is_some());
+                if let Some((at, left)) = coin {
+                    w.pos16(*at).f32(*left);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeGolden(ids) => {
+                let mut w = Writer::new(MSG_SMOKE_GOLDEN);
+                w.u8(ids.len().min(255) as u8);
+                for id in ids.iter().take(255) {
+                    w.u32(*id);
+                }
+                w.finish()
+            }
+            ServerMsg::SmokeFeed { shooter, target, red_handed, points } => {
+                Writer::new(MSG_SMOKE_FEED).u32(*shooter).u32(*target).bool(*red_handed).u16(*points as u16).finish()
+            }
+            ServerMsg::SmokeDots(dots) => {
+                let mut w = Writer::new(MSG_SMOKE_DOTS);
+                w.u8(dots.len().min(255) as u8);
+                for (at, gold) in dots.iter().take(255) {
+                    w.pos16(*at).bool(*gold);
+                }
+                w.finish()
+            }
         }
     }
 
@@ -360,6 +434,54 @@ impl ServerMsg {
             MSG_MATCH_STATUS => ServerMsg::MatchStatus { status: r.u8()? },
             MSG_TEAM_SCORE => ServerMsg::TeamScore { red: r.u16()?, blue: r.u16()?, to_win: r.u16()? },
             MSG_LOBBY_SETTINGS => ServerMsg::LobbySettings(LobbySettings::read(&mut r)?),
+            MSG_BOXES => {
+                let world = r.u8()?;
+                let mut boxes = Vec::new();
+                for _ in 0..r.u8()? {
+                    boxes.push(CardboardBox::read(&mut r)?);
+                }
+                ServerMsg::Boxes { world, boxes }
+            }
+            MSG_SMOKE_ROUND => ServerMsg::SmokeRound(SmokeRound::read(&mut r)?),
+            MSG_SMOKE_COINS => {
+                let mut coins = Vec::new();
+                for _ in 0..r.u8()? {
+                    coins.push(r.pos16()?);
+                }
+                ServerMsg::SmokeCoins(coins)
+            }
+            MSG_SMOKE_SCORES => {
+                let mut scores = Vec::new();
+                for _ in 0..r.u8()? {
+                    scores.push(SmokeScore::read(&mut r)?);
+                }
+                ServerMsg::SmokeScores(scores)
+            }
+            MSG_SMOKE_COIN_TAKEN => ServerMsg::SmokeCoinTaken { at: r.pos16()? },
+            MSG_SMOKE_GOLD_COIN => {
+                let coin = if r.bool()? { Some((r.pos16()?, r.f32()?)) } else { None };
+                ServerMsg::SmokeGoldCoin(coin)
+            }
+            MSG_SMOKE_GOLDEN => {
+                let mut ids = Vec::new();
+                for _ in 0..r.u8()? {
+                    ids.push(r.u32()?);
+                }
+                ServerMsg::SmokeGolden(ids)
+            }
+            MSG_SMOKE_DOTS => {
+                let mut dots = Vec::new();
+                for _ in 0..r.u8()? {
+                    dots.push((r.pos16()?, r.bool()?));
+                }
+                ServerMsg::SmokeDots(dots)
+            }
+            MSG_SMOKE_FEED => ServerMsg::SmokeFeed {
+                shooter: r.u32()?,
+                target: r.u32()?,
+                red_handed: r.bool()?,
+                points: r.u16()? as i16,
+            },
             _ => return None,
         };
         Some(msg)

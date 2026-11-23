@@ -20,7 +20,8 @@ impl Server {
         self.last_tick = now_tick;
 
         // Auto-respawn dead players EXCEPT in Search & Destroy mode (one life per round)
-        if self.match_mode != MODE_SEARCH_AND_DESTROY {
+        // nobody respawns in smoke break either, found bots stay down
+        if self.match_mode != MODE_SEARCH_AND_DESTROY && self.match_mode != MODE_SMOKE_BREAK {
             game::process_auto_respawns(&self.outbox, self.maze.as_ref(), &mut self.players, self.match_mode);
         }
 
@@ -49,6 +50,9 @@ impl Server {
                 }
             }
         }
+        // smoke break runs its own rounds, and cleans up once its match is fully over
+        self.forget_smoke_break();
+        self.tick_smoke_break(dt);
         // tick bots
         self.bot_manager.tick(
             &self.outbox,
@@ -74,6 +78,10 @@ impl Server {
         // what rarely changes goes out ahead of the state that may first show it
         self.sync_lobby_leader(now_tick);
         self.sync_player_info();
+
+        // sync boxes with clients
+        self.sync_boxes();
+
         let due = self.state_cadence.due(now_tick);
         if due || self.players.len() != self.last_broadcast_players {
             if !due {
@@ -150,6 +158,7 @@ impl Server {
                 &mut self.match_total_maze_entries,
                 self.match_mode,
                 &mut self.snd_state,
+                &mut self.smoke_state,
                 self.match_duration,
                 &mut self.bot_manager,
                 self.autofill_red_bots,
@@ -181,7 +190,11 @@ impl Server {
         }
 
         // If a match is running, check player counts for early end conditions (skip for S&D, it handles its own)
-        if self.match_running && self.match_end_pending.is_none() && self.match_mode != MODE_SEARCH_AND_DESTROY {
+        if self.match_running
+            && self.match_end_pending.is_none()
+            && self.match_mode != MODE_SEARCH_AND_DESTROY
+            && self.match_mode != MODE_SMOKE_BREAK
+        {
             handlers::check_early_end_conditions(
                 &self.outbox,
                 &mut self.players,
@@ -197,7 +210,7 @@ impl Server {
         }
 
         // Basic match timer: end match after MATCH_DURATION (skip for S&D, rounds handle timing)
-        if self.match_running && self.match_mode != MODE_SEARCH_AND_DESTROY {
+        if self.match_running && self.match_mode != MODE_SEARCH_AND_DESTROY && self.match_mode != MODE_SMOKE_BREAK {
             handlers::update_match_timer(
                 &self.outbox,
                 &mut self.players,

@@ -9,7 +9,6 @@ use crate::weapons::recoil::recover;
 use crate::weapons::{recoil, SpreadContext};
 
 use macroquad::prelude::*;
-use macroquad::rand::gen_range;
 
 use super::PlayingState;
 
@@ -112,7 +111,18 @@ impl PlayingState {
             return None;
         }
 
+        if let (Some(id), true) = (self.cardboard.in_box, config.bind_fire.is_pressed()) {
+            if !self.smoke_mode() {
+                self.break_box(id);
+            }
+        }
+        // nothing fires (so no hit or box shot gets queued) from a box, mid hop, or while smoke break says no
+        if self.cardboard.in_box.is_some() || self.cardboard.tween.is_some() || self.smoke_cant_fire() {
+            weapon_input_locked = true;
+        }
         self.process_look_and_movement(config, weapon_input_locked);
+        self.lock_box_movement();
+        if !self.smoke_mode() { self.process_box_key(); }
 
         let delta = raw_delta.min(0.05);
         let vel = self.movement_state.velocity;
@@ -130,11 +140,12 @@ impl PlayingState {
         let spread = recoil::current_spread(self.weapons.active(), &ctx);
         self.weapons.active_mut().computed_spread = spread;
 
-        let mut fire_sound_key: Option<&'static str> = None;
 
         // Punch button: fire melee hit immediately, auto-return to gun when animation ends.
+        // Not in smoke break, hunters hold the deagle and nothing else and a punch would swing the knife.
         let mut punch_fire_this_frame = false;
         if (!weapon_input_locked)
+            && !self.smoke_on()
             && (self.post_teleport_freeze_timer <= 0.0 || self.current_world != WorldId::Maze)
             && !self.weapons.knife_active
             && !self.knife_attack_locked
@@ -172,17 +183,8 @@ impl PlayingState {
                     if weapon.id == crate::weapons::stats::WeaponId::Sawnoff {
                         self.sawnoff_shot_requested = true;
                     }
-                    fire_sound_key = Some(weapon.stats().fire_sound_asset_key);
 
                     self.fire_hitscan(&mut maze);
-                } else if config.bind_fire.is_pressed()
-                    && weapon.id != crate::weapons::stats::WeaponId::Knife
-                    && weapon.ammo == 0
-                    && weapon.reserve == 0
-                    && !weapon.is_reloading
-                {
-                    // out of ammo entirely: the trigger only clicks
-                    self.audio.play_cue(crate::audio::catalog::DRY_FIRE);
                 }
                 // `fire_hitscan` borrowed all of `self`; take the active weapon again
                 let weapon = self.weapons.active_mut();
@@ -195,18 +197,8 @@ impl PlayingState {
             weapon.trigger_held = false;
         }
 
-        if let Some(sound_key) = fire_sound_key {
-            self.play_weapon_shot_sound(sound_key, config);
-        }
-
         // teleporter interaction removed; lobby console handled earlier
 
         return None;
-    }
-
-    fn play_weapon_shot_sound(&self, sound_key: &str, _config: &GameConfig) {
-        let pitch = gen_range(0.94f32, 1.06f32);
-        let volume = crate::audio::catalog::SHOT_VOLUME * gen_range(0.92f32, 1.0f32);
-        self.audio.play(sound_key, pitch, volume);
     }
 }

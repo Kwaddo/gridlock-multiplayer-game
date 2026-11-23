@@ -48,7 +48,6 @@ pub const M16_STATS: WeaponStats = WeaponStats {
     crosshair_style: CrosshairStyle::Standard,
     fsa_time: Some(0.35),
     fsa_suppresses_kick: false,
-    fire_sound_asset_key: "ar_shot",
     icon_asset_key: "ar_icon",
     icon_width: 100.0,
     icon_height: 45.0,
@@ -131,7 +130,6 @@ pub const M4A1: WeaponStats = WeaponStats {
 
     fsa_time: Some(0.3),
 
-    fire_sound_asset_key: "ar_shot",
     icon_asset_key: "ar_icon",
 
     viewmodel_model: Some("m4a1_model"),
@@ -215,7 +213,6 @@ pub const AK: WeaponStats = WeaponStats {
     fsa_time: Some(0.4),
     fsa_suppresses_kick: false, // AK always kicks hard
 
-    fire_sound_asset_key: "ar_shot",
     icon_asset_key: "ar_icon",
 
     viewmodel_model: Some("ak_model"),

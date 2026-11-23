@@ -127,7 +127,7 @@ impl PlayerSkin {
             PlayerSkin::Land => Some("anim_land"),
             PlayerSkin::DeathFront => Some("anim_death_front"),
             PlayerSkin::DeathBack => Some("anim_death_back"),
-            // no left death clip, the right one covers both sides (ahmed's call)
+            // no left death clip, the right one covers both sides
             PlayerSkin::DeathSide => Some("anim_death_right"),
             PlayerSkin::DeathFrontHeadshot => Some("anim_death_front_headshot"),
             PlayerSkin::DeathBackHeadshot => Some("anim_death_back_headshot"),
@@ -288,8 +288,6 @@ pub struct OtherPlayer {
     pub is_bot: bool,
     pub is_silent: bool, // no footstep sounds
 
-    // footstep audio
-    pub footstep_timer: f32,
 
     // death animation: when Some, the player is dying and will be removed when timer hits 0
     pub death_timer: Option<f32>,
@@ -358,7 +356,6 @@ impl OtherPlayer {
             resolved_weapon: std::cell::RefCell::new((String::new(), None)),
             is_bot: false,
             is_silent: false,
-            footstep_timer: 0.0,
             death_timer: None,
             anim: crate::types::player_anim::PlayerAnim::new(),
             fired: false,

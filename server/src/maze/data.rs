@@ -37,6 +37,29 @@ impl MazeData {
     pub fn new(width: u8, height: u8) -> Self {
         let seed = rand::thread_rng().gen();
         let (cells, rooms, props, lights, teleporter) = generate_maze(width, height, seed);
+        Self::from_parts(width, height, cells, seed, rooms, props, lights, teleporter)
+    }
+
+    /// The fixed smoke break map, see `maze::arena`.
+    pub fn smoke_break_arena() -> Self {
+        use crate::maze::arena;
+        let cells = arena::arena_cells();
+        let rooms = arena::arena_rooms();
+        let lights = crate::maze::generation::lights_for(arena::ARENA_W, arena::ARENA_H, &cells, &rooms);
+        Self::from_parts(arena::ARENA_W, arena::ARENA_H, cells, 0, rooms, Vec::new(), lights, arena::ARENA_TELEPORTER)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_parts(
+        width: u8,
+        height: u8,
+        cells: Vec<u8>,
+        seed: u64,
+        rooms: Vec<Room>,
+        props: Vec<Prop>,
+        lights: Vec<MazeLight>,
+        teleporter: (u8, u8),
+    ) -> Self {
         let maze_analysis = analysis::compute(&cells, width, height, &rooms);
         let mut prop_cells = vec![false; cells.len()];
         for prop in &props {

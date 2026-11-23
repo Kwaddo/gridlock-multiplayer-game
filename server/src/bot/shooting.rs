@@ -65,6 +65,7 @@ pub fn try_shoot(
     let can_engage = |p: &Player| {
         p.id != bot.id
             && p.is_alive
+            && !p.in_box
             && p.world == bot.world
             && (if bot.world == WorldId::Lobby {
                 !p.is_bot

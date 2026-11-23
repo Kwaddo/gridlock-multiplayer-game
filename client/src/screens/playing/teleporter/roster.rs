@@ -1,4 +1,4 @@
-use crate::net::protocols::MODE_GUN_GAME;
+use crate::net::protocols::{MODE_GUN_GAME, MODE_SMOKE_BREAK};
 use macroquad::prelude::*;
 
 use super::PlayingState;
@@ -191,7 +191,10 @@ impl PlayingState {
         };
         let any_bots = bots != "None" && bots != "-";
         let details = [
-            ("TIME LIMIT", settings.map_or("-".to_string(), |s| duration_text(s.mode, s.duration))),
+            (
+                if settings.is_some_and(|s| s.mode == MODE_SMOKE_BREAK) { "ROUNDS" } else { "TIME LIMIT" },
+                settings.map_or("-".to_string(), |s| duration_text(s.mode, s.duration)),
+            ),
             ("BOTS", bots),
             (
                 "BOT DIFFICULTY",

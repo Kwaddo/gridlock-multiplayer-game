@@ -1,4 +1,5 @@
 use crate::core::GameConfig;
+use crate::types::maze::Maze;
 use macroquad::prelude::*;
 
 use super::state::DeathCameraPhase;
@@ -12,7 +13,7 @@ const DEATH_CAM_BEHIND_DIST: f32 = 3.0;
 const DEATH_CAM_HEIGHT: f32 = 2.0;
 
 impl PlayingState {
-    pub(super) fn build_camera(&self, config: &GameConfig) -> Camera3D {
+    pub(super) fn build_camera(&self, config: &GameConfig, maze: Option<&Maze>) -> Camera3D {
         // If in death camera mode, use the death camera instead
         if let Some((t_interp, corpse_pos, corpse_yaw)) = match self.death_camera_phase {
             DeathCameraPhase::ZoomOut { timer, corpse_pos, corpse_yaw } => {
@@ -58,6 +59,10 @@ impl PlayingState {
                 render_target: None,
                 viewport: None,
             };
+        }
+
+        if let Some(cam) = self.box_camera(config, maze) {
+            return cam;
         }
 
         let bob_offset = if self.movement_state.is_sprinting && self.movement_state.is_grounded {

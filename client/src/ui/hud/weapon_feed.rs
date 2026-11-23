@@ -89,7 +89,8 @@ fn draw_feed_lines(
     for (entry, feed_y) in lines() {
         let alpha = feed_alpha(entry);
         let text = feed_text(texts, entry);
-        let full_w = measure_game_text(&text.full_text, 14);
+        let tag_w = entry.tag.as_ref().map_or(0.0, |(t, _)| measure_game_text(t, 14) + 8.0);
+        let full_w = measure_game_text(&text.full_text, 14) + tag_w;
         draw_rectangle(
             feed_x - 4.0,
             feed_y - 14.0,
@@ -143,6 +144,11 @@ fn draw_feed_lines(
         }
 
         draw_text_ex(victim_name, x_offset, feed_y, text_params(14, victim_color));
+        if let Some((tag, color)) = &entry.tag {
+            let tx = x_offset + measure_game_text(victim_name, 14) + 8.0;
+            let c = Color::new(color.r, color.g, color.b, alpha as f32 / 255.0);
+            draw_text_ex(tag, tx, feed_y, text_params(14, c));
+        }
     }
 
     for (entry, feed_y) in lines() {
@@ -178,7 +184,13 @@ pub(super) fn draw_weapon_and_kill_feed(
     _local_username: &str,
     local_team: u8,
     config: &crate::core::GameConfig,
+    no_gun: bool,
 ) {
+    // a smoke break hider (or a locked gun) has no gun to show, just the feed
+    if no_gun {
+        draw_kill_feed(kill_feed, assets, local_player_id, local_team);
+        return;
+    }
     // --- Valorant-style 2-slot weapon display (bottom-right) ---
     let hud_scale = 1.5;
     let slot_width = 180.0 * hud_scale;

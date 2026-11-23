@@ -98,7 +98,7 @@ impl MovementConfig {
             walk_speed: 5.0,
             sprint_speed: 8.0,
             crouch_speed: 2.5,
-            slow_walk_speed: 1.8, // much slower, was 3.5 (ahmed: slow walk = careful + dead accurate)
+            slow_walk_speed: 1.8, // much slower, was 3.5, i want slow walk careful and dead accurate
             prone_speed: 1.5,
             prone_transition_time: 0.8,
             prone_height: 0.3,

@@ -77,6 +77,11 @@ pub fn handle_hit(
 
     // apply_damage finds the victim and ignores hits on the dead and the
     // frozen itself, so there is nothing to check here first
+    // boxes stop bullets, a hit claimed on someone inside one does nothing
+    if players.values().any(|p| p.id == victim_id && p.in_box) {
+        return;
+    }
+
     apply_damage(
         socket,
         players,
