@@ -43,8 +43,8 @@ pub(super) fn join_running_match(
         return;
     };
 
-    // Gun Game and Smoke Break have no teams (Smoke Break makes the joiner a
-    // hunter on its next tick)
+    // Gun Game and Smoke Break have no teams (Smoke Break gives the joiner a
+    // side itself: a hunter mid-round, either at a round's start)
     let teamless = match_mode == MODE_GUN_GAME || match_mode == MODE_SMOKE_BREAK;
     let team = if teamless { Team::Spectator } else { pick_team(players) };
     let full = players.values().filter(|p| p.world == WorldId::Maze).count() >= MATCH_MAX_PLAYERS;
@@ -108,7 +108,7 @@ pub(super) fn join_running_match(
     match team {
         Team::Red => notices.push("Joining Red team"),
         Team::Blue => notices.push("Joining Blue team"),
-        Team::Spectator if match_mode == MODE_SMOKE_BREAK => notices.push("Joining as a hunter"),
+        Team::Spectator if match_mode == MODE_SMOKE_BREAK => notices.push("Joining Smoke Break"),
         Team::Spectator => notices.push("Joining at gun level 1"),
     }
     if spectating {

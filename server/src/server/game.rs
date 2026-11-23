@@ -189,14 +189,16 @@ pub fn choose_team_weapon_for_player(
 /// (timed auto-respawn and the client's `RespawnRequest`):
 /// - Gun Game: the weapon of their `gun_level` (Punch past the last level).
 /// - TDM / S&D: the weapon they hold, or one from their team's loadout.
+/// - Smoke Break: what the round gave them (a hunter's gun, a hider's none).
 /// - Otherwise (or with no team): Knife.
 pub fn respawn_weapon_for(
     players: &HashMap<PeerId, Player>,
     player: &Player,
     match_mode: u8,
 ) -> String {
-    use crate::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_TEAM_DEATHMATCH};
+    use crate::protocols::{MODE_GUN_GAME, MODE_SEARCH_AND_DESTROY, MODE_SMOKE_BREAK, MODE_TEAM_DEATHMATCH};
     match match_mode {
+        MODE_SMOKE_BREAK => player.current_weapon.clone(),
         MODE_GUN_GAME => {
             let level = (player.gun_level as usize).max(1);
             GUN_GAME_PROGRESSION.get(level - 1).unwrap_or(&"Punch").to_string()

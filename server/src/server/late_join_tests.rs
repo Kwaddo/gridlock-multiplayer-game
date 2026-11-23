@@ -138,3 +138,25 @@ fn a_gun_game_late_joiner_starts_at_level_one() {
     // room to spare: no bot leaves
     assert_eq!(server.bot_manager.bot_states_mut().len(), bots);
 }
+
+#[test]
+fn a_smoke_break_late_joiner_hunts_and_no_decoy_makes_room() {
+    let (mut server, c) = running(MODE_SMOKE_BREAK, 0);
+    let msgs = late_join(&mut server, c);
+    assert!(msgs.contains(&notice("Joining Smoke Break")));
+    let cat = &server.players[&c];
+    assert_eq!((cat.world, cat.team), (WorldId::Maze, Team::Spectator));
+    // round 1 starts on the next tick and gives them a side like everyone
+    server.tick();
+    let smoke = server.smoke_state.as_ref().unwrap();
+    assert!(smoke.hunters.contains(&c) || smoke.hiders.contains(&c));
+
+    // the decoys count toward the match size (as before), and none gives up its place
+    let decoys = |s: &Server| s.players.keys().filter(|p| crate::server::smoke_break::is_decoy(**p)).count();
+    let before = decoys(&server);
+    let dan = PeerId(4);
+    server.handle_packet(dan, &ClientMsg::join("dan").encode());
+    let msgs = late_join(&mut server, dan);
+    assert!(msgs.iter().any(|m| matches!(m, ServerMsg::StartDenied { .. })));
+    assert_eq!(decoys(&server), before);
+}

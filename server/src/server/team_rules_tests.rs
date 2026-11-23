@@ -43,6 +43,13 @@ fn team_modes_keep_the_weapon_held() {
     assert_eq!(respawn_weapon(&player(Team::Red, 1, "M4A1"), 0), "Knife");
 }
 
+#[test]
+fn smoke_break_keeps_the_rounds_weapon() {
+    let hunter = player(Team::Spectator, 1, crate::server::smoke_break::HUNTER_WEAPON);
+    assert_eq!(respawn_weapon(&hunter, MODE_SMOKE_BREAK), crate::server::smoke_break::HUNTER_WEAPON);
+    assert_eq!(respawn_weapon(&player(Team::Spectator, 1, ""), MODE_SMOKE_BREAK), "");
+}
+
 fn unfreeze(server: &mut Server) {
     for p in server.players.values_mut() {
         p.post_teleport_freeze_until = None;
