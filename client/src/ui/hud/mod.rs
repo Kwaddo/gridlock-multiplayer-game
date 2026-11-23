@@ -2,6 +2,7 @@ use macroquad::prelude::*;
 use std::collections::HashMap;
 
 mod crosshair;
+mod hit_feedback;
 mod loading;
 mod minimap;
 mod players;
