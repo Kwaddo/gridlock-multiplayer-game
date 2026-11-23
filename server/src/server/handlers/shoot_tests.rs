@@ -145,6 +145,8 @@ fn in_smoke_break_only_a_released_hunters_shot_is_relayed() {
     assert!(shots_to(&flush(&mut server), hider).is_empty(), "a blind hunter was seen firing");
 
     server.smoke_state.as_mut().unwrap().tick(SMOKE_BLIND_TIME);
+    // the blind time has passed: so has the hunter's spawn freeze, which ends with it
+    server.players.get_mut(&hunter).unwrap().post_teleport_freeze_until = None;
     server.handle_packet(hider, &shoot);
     let out = flush(&mut server);
     assert!(shots_to(&out, hunter).is_empty(), "a hider's shot gave their box away");
@@ -255,4 +257,28 @@ fn a_hit_is_heard_as_the_held_weapon_not_the_name_it_claims() {
     };
     server.handle_packet(a, &hit.encode());
     assert_eq!(server.bot_manager.noise_radius(a), Some(GUNFIRE_RADIUS));
+}
+
+// frozen at a spawn after a teleport: no shot is relayed and no bot hears one
+#[test]
+fn a_spawn_frozen_player_in_the_maze_fires_nothing() {
+    let mut server = crate::server::Server::new();
+    let (a, b) = (PeerId(1), PeerId(2));
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
+    for p in server.players.values_mut() {
+        p.world = WorldId::Maze;
+        p.current_weapon = "M4A1".into();
+    }
+    server.players.get_mut(&a).unwrap().post_teleport_freeze_until = Some(Instant::now() + Duration::from_secs(5));
+    let shoot = ClientMsg::Shoot { end: (1.0, 1.0, 5.0) }.encode();
+    server.handle_packet(a, &shoot);
+    assert!(shots_to(&flush(&mut server), b).is_empty(), "a frozen player's shot was relayed");
+    assert_eq!(server.bot_manager.noise_radius(a), None, "bots heard a frozen player's shot");
+
+    // the freeze over, the same shot goes out and is heard
+    server.players.get_mut(&a).unwrap().post_teleport_freeze_until = None;
+    server.handle_packet(a, &shoot);
+    assert_eq!(shots_to(&flush(&mut server), b).len(), 1);
+    assert!(server.bot_manager.noise_radius(a).is_some());
 }

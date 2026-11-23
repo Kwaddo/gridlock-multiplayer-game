@@ -196,9 +196,11 @@ impl BotManager {
     /// `shooter` fired what the server knows they hold (never a weapon name
     /// the client sent): match bots near enough hear it at the next bot
     /// tick. One shot per shooter per tick, the loudest, so a quiet one (a
-    /// knife hit) can't mask gunfire in the same tick.
+    /// knife hit) can't mask gunfire in the same tick. A shooter in their
+    /// spawn freeze fires nothing (`handle_shoot`, `apply_damage`): unheard.
     pub fn hear_shot(&mut self, players: &HashMap<PeerId, Player>, shooter: PeerId) {
-        let Some(p) = players.get(&shooter).filter(|p| p.is_alive && p.world == WorldId::Maze) else { return };
+        let heard = |p: &&Player| p.is_alive && p.world == WorldId::Maze && !p.spawn_frozen(Instant::now());
+        let Some(p) = players.get(&shooter).filter(heard) else { return };
         let noise = Noise::gunfire(shooter, p, &p.current_weapon);
         match self.noises.iter_mut().find(|n| n.shooter == shooter) {
             Some(heard) if heard.radius >= noise.radius => {}

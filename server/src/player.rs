@@ -143,4 +143,10 @@ impl Player {
         }
         other.team != self.team && other.team != Team::Spectator
     }
+
+    /// In the maze and still in its post-teleport freeze at `now`: may not
+    /// move or shoot (the damage it would deal is refused too).
+    pub fn spawn_frozen(&self, now: Instant) -> bool {
+        self.world == WorldId::Maze && self.post_teleport_freeze_until.is_some_and(|t| t > now)
+    }
 }

@@ -34,8 +34,8 @@ pub fn min_shot_interval(weapon: &str) -> Duration {
 /// drops it, it drew the shot when it fired). The tracer starts
 /// at the shooter's position as the server knows it (at gun height), never
 /// where the client says, and ends at most `MAX_SHOT_DISTANCE` away. Shots
-/// from the dead, from bots, from an aliased (Smoke Break) box and faster than
-/// the weapon fires are dropped.
+/// from the dead, from bots, from an aliased (Smoke Break) box, from someone
+/// in their spawn freeze and faster than the weapon fires are dropped.
 pub fn handle_shoot(
     shots: &mut ShotQueue,
     players: &mut HashMap<PeerId, Player>,
@@ -49,6 +49,10 @@ pub fn handle_shoot(
     let Some(shooter) = players.get_mut(&src) else { return };
     // a box under a Smoke Break alias must never show its real id where it stands
     if shooter.is_bot || !shooter.is_alive || shooter.smoke_alias.is_some() {
+        return;
+    }
+    // frozen at a spawn: the shot can't hurt anyone, so nobody sees it either
+    if shooter.spawn_frozen(now) {
         return;
     }
     let interval = min_shot_interval(&shooter.current_weapon);
