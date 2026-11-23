@@ -24,10 +24,17 @@
     const POLL_CONNECTING_MS = 500;
     const POLL_CONNECTED_MS = 1000; // a connected player only checks whether to resume
     const HOST_KEEP_MS = 20000; // how often the host renews its claim on the room
-    // A player not connected yet re-announces itself this often, so a
+    // A player not connected yet re-announces itself after this long, so a
     // signalling message that went missing only costs a few seconds: the
     // host resends its answer (or offer), or offers anew if it has nothing.
+    // Each hello after that waits twice as long, up to HELLO_MAX_MS: every
+    // one is a registry write and a look for the host.
     const HELLO_MS = 3000;
+    const HELLO_MAX_MS = 12000;
+    // A player whose channel has not opened this long after it started (or
+    // after it lost its host) gives up: the socket closes, which the game
+    // reads as a failed connect (its own timeout, LINK_TIMEOUT, is 25 s).
+    const PLAYER_GIVE_UP_MS = 20000;
     // A registry that holds polls until something arrives (both registries
     // do) marks its replies with this header; the page then polls again at
     // once instead of waiting out an interval.
@@ -75,8 +82,10 @@
     const PRECONNECT_IDLE_MS = 10000;
     const PRECONNECT_MAX = 8;
     // A connection ahead that failed (the host just left, still listed) is
-    // tried again after this, not on every frame.
+    // tried again after this, not on every frame; twice as long after each
+    // failure in a row, up to PRECONNECT_RETRY_MAX_MS.
     const PRECONNECT_RETRY_MS = 5000;
+    const PRECONNECT_RETRY_MAX_MS = 60000;
     // ICE candidates come in bursts; signals queued within this long go out
     // as one request.
     const SEND_BATCH_MS = 20;
@@ -107,9 +116,10 @@
 
     Object.assign(gridlockWeb, {
         PLUGIN_VERSION, EV_PEER_JOINED, EV_PEER_LEFT, EV_PACKET, EV_CLOSED, FORCE_RELAY, NO_DIRECT, STUN_FALLBACK,
-        POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, LONG_POLL_HEADER, LONG_POLL_GAP_MS,
-        POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, GATHER_MS, SPARE_COUNT, SPARE_ROTATE_MS, SPARE_GRACE_MS, SPARE_TICK_MS,
-        SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, PRECONNECT_RETRY_MS, SEND_BATCH_MS,
+        POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, HELLO_MAX_MS, PLAYER_GIVE_UP_MS,
+        LONG_POLL_HEADER, LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, GATHER_MS, SPARE_COUNT, SPARE_ROTATE_MS,
+        SPARE_GRACE_MS, SPARE_TICK_MS, SPARE_GATHER_MS, PREWARM_MS, PRECONNECT_IDLE_MS, PRECONNECT_MAX, PRECONNECT_RETRY_MS,
+        PRECONNECT_RETRY_MAX_MS, SEND_BATCH_MS,
         DISCONNECT_GRACE_MS, DIRECT_ATTEMPT_MS, ICE_CACHE_MS, RELIABLE_MIN_BYTES, RELIABLE_MAX_BUFFERED, UNRELIABLE_MAX_BUFFERED,
         SEEN_KEEP, CHANNEL, RELIABLE_CHANNEL,
     });

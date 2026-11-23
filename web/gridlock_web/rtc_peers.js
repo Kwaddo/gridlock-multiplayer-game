@@ -231,6 +231,7 @@
         shutdown() {
             if (this.closed) return;
             this.closed = true;
+            this.closedAt = Date.now();
             for (const id of [...this.peers.keys()]) this.drop(id);
             this.dropSpares();
             if (this.onPageHide) window.removeEventListener("pagehide", this.onPageHide);

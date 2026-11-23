@@ -6,7 +6,8 @@
 
 (function (gridlockWeb) {
     const {
-        FORCE_RELAY, POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, LONG_POLL_HEADER,
+        FORCE_RELAY, POLL_HOST_MS, POLL_CONNECTING_MS, POLL_CONNECTED_MS, HOST_KEEP_MS, HELLO_MS, HELLO_MAX_MS,
+        PLAYER_GIVE_UP_MS, LONG_POLL_HEADER,
         LONG_POLL_GAP_MS, POLL_RETRY_MS, HAVE_WINDOW, HAVE_MAX, SEEN_KEEP, SEND_BATCH_MS, sleep, roomHttpUrl, gathered,
         iceServersFor, spareFor,
     } = gridlockWeb;
@@ -37,6 +38,10 @@
             // How long each step of a join took, logged once it connects.
             this.t0 = performance.now();
             this.marks = [];
+            // Player: since when it has had no open channel (see poll). The
+            // game restarts it when it takes over a socket opened ahead.
+            this.waitingSince = Date.now();
+            this.closedAt = null; // set by shutdown
             this.start(roomUrl);
         }
 
@@ -139,6 +144,7 @@
         async poll() {
             let lastKeep = Date.now();
             let lastHello = Date.now();
+            let helloGap = HELLO_MS; // doubles with each hello, up to HELLO_MAX_MS
             const seen = new Map(); // id -> seq of messages already handled
             let longPoll = false; // the registry holds polls (see LONG_POLL_HEADER)
             let lastSeq = 0; // newest message seq seen, for a long poll's `after`
@@ -147,6 +153,19 @@
                 // A connected player needs no signalling: if the host goes,
                 // the WebRTC connection itself reports it.
                 const connected = !this.isHost && [...this.peers.values()].some((p) => p.open);
+                if (connected) {
+                    // Lost later, the host is looked for afresh: hellos
+                    // start over, and so does the time to give up.
+                    this.waitingSince = lastHello = Date.now();
+                    helloGap = HELLO_MS;
+                } else if (!this.isHost && Date.now() - this.waitingSince >= PLAYER_GIVE_UP_MS) {
+                    // Nothing opened in all this time: the host is gone or
+                    // can't be reached. Stop asking (every poll and hello
+                    // keeps the registry, and the host's poll, busy); the
+                    // game sees the socket close, a failed connect.
+                    console.info(`gridlock_web: no connection to the host after ${PLAYER_GIVE_UP_MS} ms, giving up`);
+                    return this.shutdown();
+                }
                 if (!connected) {
                     try {
                         let q = `?id=${encodeURIComponent(this.me.id)}&token=${encodeURIComponent(this.me.token)}`;
@@ -209,8 +228,9 @@
                                 this.onSignal(msg, offering);
                             }
                         }
-                        if (!this.isHost && Date.now() - lastHello >= HELLO_MS) {
+                        if (!this.isHost && Date.now() - lastHello >= helloGap) {
                             lastHello = Date.now();
+                            helloGap = Math.min(helloGap * 2, HELLO_MAX_MS);
                             this.post("/hello", {});
                         }
                     } catch {
