@@ -50,3 +50,58 @@ fn particles_die_out() {
     }
     assert_eq!(fx.particles.len(), 0);
 }
+
+fn settle(fx: &mut HitFx, secs: f32) {
+    let steps = (secs * 60.0) as usize;
+    for _ in 0..steps {
+        fx.tick(1.0 / 60.0);
+    }
+}
+
+#[test]
+fn a_hit_punches_then_springs_back_to_nothing() {
+    let mut fx = HitFx::default();
+    fx.punch.hit(40.0, 1.0, 1.0);
+    fx.tick(1.0 / 30.0);
+    let (pitch, yaw, roll, _) = fx.view_offsets();
+    assert!(pitch > 0.0, "tips up");
+    // shot from the right: the view turns and rolls away, to the left
+    assert!(yaw < 0.0 && roll < 0.0);
+    settle(&mut fx, 0.5);
+    assert_eq!(fx.view_offsets(), (0.0, 0.0, 0.0, 0.0));
+}
+
+#[test]
+fn the_punch_peaks_near_its_target_and_scales_with_damage() {
+    let peak = |damage: f32, scale: f32| {
+        let mut fx = HitFx::default();
+        fx.punch.hit(damage, 0.0, scale);
+        let mut best = 0.0f32;
+        for _ in 0..240 {
+            fx.tick(1.0 / 240.0);
+            best = best.max(fx.view_offsets().0);
+        }
+        best
+    };
+    let full = peak(40.0, 1.0);
+    assert!((full - punch::MAX_PITCH * 0.6).abs() < punch::MAX_PITCH * 0.05, "{full}");
+    assert!(peak(10.0, 1.0) < full * 0.5);
+    // aimed down sights it's a quarter
+    assert!((peak(40.0, 0.25) - full * 0.25).abs() < full * 0.05);
+}
+
+#[test]
+fn stacked_hits_stay_capped_and_a_long_frame_is_stable() {
+    let mut fx = HitFx::default();
+    for _ in 0..50 {
+        fx.punch.hit(200.0, 1.0, 1.0);
+        fx.tick(1.0 / 120.0);
+        let (p, y, r, f) = fx.view_offsets();
+        assert!(p.abs() <= punch::MAX_PITCH && y.abs() <= punch::MAX_YAW);
+        assert!(r.abs() <= punch::MAX_ROLL && f <= punch::MAX_FOV);
+    }
+    // a half-second hitch: no blow-up, just settled
+    fx.tick(0.5);
+    let (p, ..) = fx.view_offsets();
+    assert!(p.abs() < 1e-3);
+}

@@ -37,8 +37,8 @@ thread_local! {
 impl PlayingState {
     /// Remember where a hit from `attacker_id` came from. Attackers we cannot
     /// place (unknown, or yourself: you are not among the other players) get
-    /// no indicator.
-    pub(crate) fn note_damage_direction(&mut self, attacker_id: u32) {
+    /// no indicator. Returns where they were, if known.
+    pub(crate) fn note_damage_direction(&mut self, attacker_id: u32) -> Option<Vec3> {
         let source = self
             .player_index
             .get(&attacker_id)
@@ -47,12 +47,12 @@ impl PlayingState {
             .or_else(|| self.other_players.iter().find(|p| p.id == attacker_id))
             .or_else(|| self.practice_bots.iter().map(|b| &b.player).find(|p| p.id == attacker_id))
             .map(|p| p.render_position());
-        let Some(source) = source else { return };
+        let source = source?;
 
         if let Some(existing) = self.damage_indicators.iter_mut().find(|d| d.attacker_id == attacker_id) {
             existing.source = source;
             existing.timer = INDICATOR_SECS;
-            return;
+            return Some(source);
         }
         if self.damage_indicators.len() >= MAX_INDICATORS {
             // drop the one closest to fading out
@@ -67,6 +67,7 @@ impl PlayingState {
             }
         }
         self.damage_indicators.push(DamageIndicator { attacker_id, source, timer: INDICATOR_SECS });
+        Some(source)
     }
 
     pub(crate) fn tick_damage_indicators(&mut self, delta: f32) {

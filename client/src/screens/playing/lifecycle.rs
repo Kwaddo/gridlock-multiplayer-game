@@ -83,10 +83,9 @@ impl PlayingState {
                 .find(|(id, ..)| *id == aid)
                 .map(|(_, name, ..)| name.clone())
         });
-        if let Some(aid) = attacker_id {
-            self.note_damage_direction(aid);
-        }
-        let _ = damage;
+        let source = attacker_id.and_then(|aid| self.note_damage_direction(aid));
+        // a short camera punch, view only: the aim stays where it was
+        self.punch_from_hit(damage, source);
     }
 
     pub fn die(&mut self, _killer_id: Option<u32>) {
