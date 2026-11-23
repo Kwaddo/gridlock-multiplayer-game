@@ -44,7 +44,7 @@ extern "C" {
 
 thread_local! {
     /// The game this tab hosts, for [`gridlock_host_tick`].
-    static HOSTED: RefCell<Weak<RefCell<Core>>> = RefCell::new(Weak::new());
+    static HOSTED: RefCell<Weak<RefCell<Core>>> = const { RefCell::new(Weak::new()) };
 }
 
 /// Called by the ticker in web/gridlock_web/tickers.js, between frames: step
@@ -79,13 +79,18 @@ struct Core {
     clock: TickClock,
     /// Packets taken from the server for sending; kept so its capacity is reused.
     sending: Vec<(PeerId, Packet)>,
+    /// The WebRTC peers one packet is going to (likewise kept).
+    sending_to: Vec<u32>,
 }
 
 /// Packets between the hosting player and the in-tab server.
 #[derive(Default)]
 struct Loopback {
-    to_server: Vec<Vec<u8>>,
-    to_player: Vec<Box<[u8]>>,
+    /// What the hosting player sent, back to back (no allocation per
+    /// packet), and where each packet ends in it.
+    to_server: Vec<u8>,
+    to_server_ends: Vec<usize>,
+    to_player: Vec<Packet>,
 }
 
 impl LocalHost {
@@ -127,6 +132,7 @@ impl LocalHost {
             notice,
             clock: TickClock::new(Instant::now()),
             sending: Vec::new(),
+            sending_to: Vec::new(),
         }));
         // The newest host is the one ticked (an older one still being
         // dropped is not).
@@ -176,9 +182,16 @@ impl Core {
                 }
             });
         }
-        let from_player = std::mem::take(&mut self.local.borrow_mut().to_server);
-        for packet in from_player {
-            self.server.handle_packet(LOCAL_PEER, &packet);
+        {
+            let mut local = self.local.borrow_mut();
+            let Loopback { to_server, to_server_ends, .. } = &mut *local;
+            let mut start = 0;
+            for &end in to_server_ends.iter() {
+                self.server.handle_packet(LOCAL_PEER, &to_server[start..end]);
+                start = end;
+            }
+            to_server.clear();
+            to_server_ends.clear();
         }
 
         if self.clock.due(Instant::now()) {
@@ -186,14 +199,27 @@ impl Core {
         }
 
         self.server.drain_outbox_into(&mut self.sending);
-        for (peer, bytes) in self.sending.drain(..) {
-            if peer == LOCAL_PEER {
-                self.local.borrow_mut().to_player.push(Box::from(&*bytes));
-            } else if let Some(room) = &mut self.room {
-                room.send(peer.0, &bytes);
+        let mut local = self.local.borrow_mut();
+        // A packet queued for several players (one broadcast) comes as a run
+        // of the same bytes: one call into JS sends it to all its WebRTC
+        // peers, and the hosting player gets the bytes themselves.
+        for run in self.sending.chunk_by(|(_, a), (_, b)| Packet::ptr_eq(a, b)) {
+            let packet = &run[0].1;
+            self.sending_to.clear();
+            for (peer, _) in run {
+                if *peer == LOCAL_PEER {
+                    local.to_player.push(Packet::clone(packet));
+                } else {
+                    self.sending_to.push(peer.0);
+                }
+            }
+            if let (Some(room), false) = (&mut self.room, self.sending_to.is_empty()) {
+                room.send_many(&self.sending_to, packet);
             }
         }
-        trim_backlog(&mut self.local.borrow_mut().to_player);
+        self.sending.clear();
+        trim_backlog(&mut local.to_player);
+        drop(local);
 
         self.players.store(self.server.player_count(), Ordering::Relaxed);
         if let Some(listing) = &mut self.listing {
@@ -219,10 +245,13 @@ struct LoopbackLink(Rc<RefCell<Loopback>>);
 
 impl Link for LoopbackLink {
     fn send(&mut self, packet: &[u8]) {
-        self.0.borrow_mut().to_server.push(packet.to_vec());
+        let mut local = self.0.borrow_mut();
+        local.to_server.extend_from_slice(packet);
+        let end = local.to_server.len();
+        local.to_server_ends.push(end);
     }
 
-    fn recv(&mut self) -> Vec<Box<[u8]>> {
+    fn recv(&mut self) -> Vec<Packet> {
         std::mem::take(&mut self.0.borrow_mut().to_player)
     }
 

@@ -10,12 +10,12 @@ use platform::Instant;
 
 use crate::rtc_event::for_each_event;
 pub use crate::rtc_event::RtcEvent;
-use crate::{Link, LinkStatus};
+use crate::{Link, LinkStatus, Packet};
 
 mod ffi {
     extern "C" {
         pub fn gridlock_rtc_open(url: *const u8, url_len: u32, is_host: u32) -> u32;
-        pub fn gridlock_rtc_send(handle: u32, peer: u32, data: *const u8, len: u32);
+        pub fn gridlock_rtc_send_many(handle: u32, peers: *const u32, n: u32, data: *const u8, len: u32);
         pub fn gridlock_rtc_drain(handle: u32, buf: *mut u8, cap: u32, need_out: *mut u32) -> u32;
         pub fn gridlock_rtc_close(handle: u32);
         pub fn gridlock_rtc_prewarm(url: *const u8, url_len: u32);
@@ -64,7 +64,13 @@ impl RtcSocket {
     }
 
     pub fn send(&mut self, peer: u32, packet: &[u8]) {
-        unsafe { ffi::gridlock_rtc_send(self.handle, peer, packet.as_ptr(), packet.len() as u32) }
+        self.send_many(&[peer], packet);
+    }
+
+    /// Send the same packet to each of `peers`, in one call into JS.
+    pub fn send_many(&mut self, peers: &[u32], packet: &[u8]) {
+        let (n, len) = (peers.len() as u32, packet.len() as u32);
+        unsafe { ffi::gridlock_rtc_send_many(self.handle, peers.as_ptr(), n, packet.as_ptr(), len) }
     }
 
     /// Hand every event since the last poll to `on`, in order. They come
@@ -148,7 +154,7 @@ pub struct RtcLink {
     host: Option<u32>,
     closed: bool,
     // packets polled but not yet handed out by recv()
-    inbox: Vec<Box<[u8]>>,
+    inbox: Vec<Packet>,
 }
 
 impl RtcLink {
@@ -176,7 +182,7 @@ impl Link for RtcLink {
         }
     }
 
-    fn recv(&mut self) -> Vec<Box<[u8]>> {
+    fn recv(&mut self) -> Vec<Packet> {
         self.update();
         std::mem::take(&mut self.inbox)
     }

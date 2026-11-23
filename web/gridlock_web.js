@@ -346,11 +346,16 @@
             } catch {}
         };
 
-        env.gridlock_rtc_send = function (handle, peer, ptr, len) {
+        // One packet to each of n peers (u32s at peersPtr): a broadcast is one
+        // call, not one per player.
+        env.gridlock_rtc_send_many = function (handle, peersPtr, n, ptr, len) {
             const socket = sockets.get(handle);
+            if (!socket) return;
             // A view, not a copy: a data channel's send copies what it sends
             // at once (RtcSocket.send keeps nothing).
-            if (socket) socket.send(peer, new Uint8Array(wasm_memory.buffer, ptr, len));
+            const bytes = new Uint8Array(wasm_memory.buffer, ptr, len);
+            const peers = new Uint32Array(wasm_memory.buffer, peersPtr, n);
+            for (let i = 0; i < n; i++) socket.send(peers[i], bytes);
         };
 
         // Moves a socket's events into wasm memory at ptr (cap bytes), as many
