@@ -296,17 +296,16 @@ impl PlayingState {
                         // uploaded once, drawn from GPU buffers; draw_mesh only as fallback
                         if !crate::types::static_gpu::draw_static_meshes(world_key, weapon_meshes, weapon_transform) {
                             wgl.quad_gl.push_model_matrix(weapon_transform);
-                            for mesh in weapon_meshes {
-                                draw_mesh(mesh);
-                            }
+                            weapon_meshes.iter().for_each(draw_mesh);
                             wgl.quad_gl.pop_model_matrix();
                         }
                     } else if let Some(animated) = self.animated_models.get(world_key) {
-                        wgl.quad_gl.push_model_matrix(weapon_transform);
-                        for mesh in animated.meshes() {
-                            draw_mesh(mesh);
+                        // no sawn-off world model: its first-person rig, GPU-skinned like draw_mesh drew it
+                        if !animated.draw_gpu(weapon_transform, WHITE) {
+                            wgl.quad_gl.push_model_matrix(weapon_transform);
+                            animated.meshes().for_each(draw_mesh);
+                            wgl.quad_gl.pop_model_matrix();
                         }
-                        wgl.quad_gl.pop_model_matrix();
                     }
                     // the end of the barrel, a bit out from the gun along where they aim
                     let aim_dir = forward_dir * p.render_pitch.cos() + Vec3::Y * p.render_pitch.sin();
