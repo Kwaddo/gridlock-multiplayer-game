@@ -179,10 +179,6 @@ impl PlayingState {
                         self.knife_attack_locked = true;
                         self.knife_attack_lock_timer = KNIFE_LIGHT_ANIM_DURATION;
                     }
-                    // Signal sawnoff shot animation
-                    if weapon.id == crate::weapons::stats::WeaponId::Sawnoff {
-                        self.sawnoff_shot_requested = true;
-                    }
 
                     self.fire_hitscan(&mut maze);
                 }

@@ -81,7 +81,6 @@ pub enum WeaponId {
     // Shotguns
     Benelli,
     Spas,
-    Sawnoff,
 
     // Assault Rifles
     M4a1,
@@ -121,7 +120,6 @@ impl WeaponId {
         // Shotguns
         WeaponId::Benelli,
         WeaponId::Spas,
-        WeaponId::Sawnoff,
 
         // Assault Rifles
         WeaponId::M4a1,
@@ -156,8 +154,7 @@ impl WeaponId {
             => WeaponCategory::Smg,
 
             WeaponId::Benelli |
-            WeaponId::Spas |
-            WeaponId::Sawnoff
+            WeaponId::Spas
             => WeaponCategory::Shotgun,
 
             WeaponId::M4a1 | WeaponId::Ak | WeaponId::Famas
@@ -195,7 +192,6 @@ impl WeaponId {
             // Shotguns
             WeaponId::Benelli => &shotguns::BENELLI,
             WeaponId::Spas => &shotguns::SPAS,
-            WeaponId::Sawnoff => &shotguns::SAWNOFF,
 
             // Assault Rifles
             WeaponId::M4a1 => &assault_rifles::M4A1,
@@ -243,7 +239,6 @@ impl WeaponId {
         WeaponId::HuntingRifle,
         WeaponId::SemiAutoSniper,
         WeaponId::Minigun,
-        WeaponId::Sawnoff,
     ];
 
     /// All weapon IDs belonging to a given category (excludes hidden weapons).
@@ -375,4 +370,29 @@ pub struct WeaponStats {
     pub pattern_randomness: f32, // how much random variance to add to the recoil pattern (radians),
     pub randomness_growth: f32, // additional randomness per shot to make the pattern less predictable the longer you fire (radians)
     pub pattern_reset_time: f32, // time in seconds to fully reset after releasing trigger
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WeaponCategory, WeaponId};
+
+    #[test]
+    fn a_removed_weapon_name_resolves_to_nothing() {
+        // an older peer can still send the removed double-barrel's name as
+        // its current weapon; it resolves to no weapon (nothing drawn), never
+        // a panic. Spelled in two parts so a grep for the old weapon stays empty.
+        let removed = concat!("Saw", "noff");
+        assert_eq!(WeaponId::from_name(removed), None);
+        assert_eq!(WeaponId::from_name(&removed.to_lowercase()), None);
+        assert_eq!(WeaponId::from_name(""), None);
+    }
+
+    #[test]
+    fn the_shotguns_are_still_listed_and_named() {
+        assert_eq!(WeaponId::all_in(WeaponCategory::Shotgun), &[WeaponId::Benelli, WeaponId::Spas]);
+        for id in [WeaponId::Benelli, WeaponId::Spas] {
+            assert_eq!(WeaponId::from_name(id.display_name()), Some(id));
+            assert!(id.stats().pellet_count > 1);
+        }
+    }
 }

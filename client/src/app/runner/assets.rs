@@ -150,7 +150,6 @@ pub(super) fn missing_viewmodel_assets(playing_state: &PlayingState) -> Vec<(Str
         ("fp_hands_smg", "assets/models/hand/fps_animated_smg.glb"),
         ("fp_hands_sniper", "assets/models/hand/sniper_animated.glb"),
         ("fp_hands_minigun", "assets/models/hand/minigun_animated.glb"),
-        ("fp_hands_sawnoff", "assets/models/hand/sawnoff_animated.glb"),
         ("m1911_model", "assets/models/weapons/Pistols/m1911.glb"),
         ("deagle_model", "assets/models/weapons/Pistols/deagle.glb"),
         ("mp5_model", "assets/models/weapons/SMGs/mp5.glb"),

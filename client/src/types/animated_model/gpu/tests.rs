@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 /// Hips (joint 0) slide, the arm (joint 1) turns, and a gun node (not a
 /// joint) rides on the arm: one skinned part over both joints, one rigid
-/// part on the gun node, like the sawn-off first-person rig.
+/// part on the gun node, like the minigun first-person rig.
 fn rig_with_rigid_gun() -> AnimatedModel {
     let rest = |translation: Vec3, rotation: Quat| LocalTransform { translation, rotation, scale: Vec3::ONE };
     let node_rest = vec![

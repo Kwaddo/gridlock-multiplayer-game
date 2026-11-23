@@ -190,7 +190,7 @@ impl GlbJob {
 /// Whether the animated loader keeps `key`'s unskinned primitives too. Some
 /// static weapon GLBs are exported with a skin/animation placeholder.
 fn keep_unskinned_primitives(key: &str) -> bool {
-    key == "fp_hands_sawnoff" || key == "fp_hands_minigun"
+    key == "fp_hands_minigun"
 }
 
 fn store_animated(playing_state: &mut PlayingState, key: &str, path: &str, animated: AnimatedModel) {

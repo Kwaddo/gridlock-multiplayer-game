@@ -189,17 +189,12 @@ impl PlayingState {
                 } else {
                     model_key
                 };
-                let is_sawnoff = world_key.contains("sawnoff");
-                let is_hands_rig = is_sawnoff || world_key.contains("minigun");
+                let is_hands_rig = world_key.contains("minigun");
 
                 let wgl = unsafe { get_internal_gl() };
                 if let Some(hand_world) = hand_world_pos {
-                    // reduce overall model scale; sawnoff tends to come in huge so
-                    // apply an additional shrink factor when its key is detected.
-                    let mut scale_factor = anim_scale * 0.1;
-                    if is_sawnoff {
-                        scale_factor *= 0.1;
-                    }
+                    // reduce overall model scale
+                    let scale_factor = anim_scale * 0.1;
 
                     // rotate most guns slightly to the right when the player
                     // is moving (walking/sprinting) or aiming down sights. idle
@@ -300,7 +295,7 @@ impl PlayingState {
                             wgl.quad_gl.pop_model_matrix();
                         }
                     } else if let Some(animated) = self.animated_models.get(world_key) {
-                        // no sawn-off world model: its first-person rig, GPU-skinned like draw_mesh drew it
+                        // no world model loaded (yet): the first-person rig, GPU-skinned like draw_mesh drew it
                         if !animated.draw_gpu(weapon_transform, WHITE) {
                             wgl.quad_gl.push_model_matrix(weapon_transform);
                             animated.meshes().for_each(draw_mesh);

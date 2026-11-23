@@ -7,7 +7,6 @@
     "fp_hands_smg": "assets/models/hand/fps_animated_smg.glb",
     "fp_hands_sniper": "assets/models/hand/sniper_animated.glb",
     "fp_hands_minigun": "assets/models/hand/minigun_animated.glb",
-    "fp_hands_sawnoff": "assets/models/hand/sawnoff_animated.glb",
     "pistol_icon": "assets/images/weapons/pistol.png",
     "pistol_fp_sprite": "assets/images/weapons/FPS Weapon Sprites/frames/pistol3.png",
     "smg_icon": "assets/images/weapons/smg.png",

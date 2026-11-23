@@ -54,8 +54,8 @@ pub const MINIGUN: WeaponStats = WeaponStats {
     icon_height: 50.0,
     icon_flip_x: false,
 
-    // Minigun model includes hands — rendered as a single animated model
-    // like the sawnoff/knife. No separate hands drawn.
+    // Minigun model includes hands — rendered as a single animated model.
+    // No separate hands drawn.
     viewmodel_model: Some("fp_hands_minigun"),
     viewmodel_asset_key: None,
     viewmodel_scale: 0.0300,

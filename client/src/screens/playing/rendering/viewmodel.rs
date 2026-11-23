@@ -15,9 +15,6 @@ impl PlayingState {
         if id == WeaponId::Minigun {
             return "fp_hands_minigun";
         }
-        if id == WeaponId::Sawnoff {
-            return "fp_hands_sawnoff";
-        }
         match id.category() {
             WeaponCategory::Pistol => "fp_hands_pistol",
             WeaponCategory::Smg => "fp_hands_smg",
@@ -82,7 +79,7 @@ impl PlayingState {
             .get(preferred_hands_key)
             .and_then(|mvec| mvec.first())
             .or_else(|| self.models.get("fp_hands").and_then(|mvec| mvec.first()));
-        let draw_hands = !matches!(weapon.id, WeaponId::Sawnoff | WeaponId::Minigun);
+        let draw_hands = weapon.id != WeaponId::Minigun;
 
         if let Some(model_key) = stats.viewmodel_model {
             // All of a weapon's meshes are drawn in one call, under one
@@ -245,8 +242,8 @@ impl PlayingState {
         let gl = unsafe { get_internal_gl() }; // unsafe is required to access internal GL for custom shader uniforms
         gl.quad_gl.depth_test(true);
 
-        // The minigun and sawn-off rigs (arms and gun in one animated model)
-        // skin on the GPU like the hands, untinted and with their materials'
+        // The minigun rig (arms and gun in one animated model)
+        // skins on the GPU like the hands, untinted and with their materials'
         // own alpha, as `draw_mesh` drew them; after a GPU draw, update()
         // stops re-skinning them on the CPU.
         let on_gpu = match weapon_model {
@@ -427,7 +424,7 @@ impl PlayingState {
 }
 
 /// The first-person weapon model: a static model (its key and meshes), or an
-/// animated rig that holds the arms and gun together (minigun, sawn-off).
+/// animated rig that holds the arms and gun together (the minigun).
 #[derive(Clone, Copy)]
 enum ViewmodelWeapon<'m> {
     Static(&'m str, &'m [Mesh]),

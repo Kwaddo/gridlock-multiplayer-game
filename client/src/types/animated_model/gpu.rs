@@ -32,8 +32,8 @@ pub(super) enum GpuGeometry {
 }
 
 /// A model's GPU buffers, and where its rigid parts' nodes go in the joint
-/// table: rigid (unskinned) primitives, like the gun in the sawn-off and
-/// minigun first-person rigs, are drawn as vertices bound with weight 1 to
+/// table: rigid (unskinned) primitives, like the gun in the minigun
+/// first-person rig, are drawn as vertices bound with weight 1 to
 /// one extra joint slot each, filled with their node's matrix, which is the
 /// matrix the CPU fallback moves them by (`Pose::global_of`).
 pub(super) struct GpuMesh {

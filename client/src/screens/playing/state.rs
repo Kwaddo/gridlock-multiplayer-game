@@ -38,12 +38,6 @@ pub enum HandsPlaybackMode {
     IdleLoop,
     ReloadOnce,
     Stopped,
-    // Sawnoff-specific states (sawnoff_animated.glb includes hands)
-    SawnoffIdle,
-    SawnoffShot,   // playing shot animation, returns to SawnoffIdle when done
-    SawnoffReload, // playing reload animation, returns to SawnoffIdle when done
-    SawnoffEquip,  // equip animation when switching to sawnoff
-    SawnoffLower,  // lowering animation when switching away from sawnoff
     // Minigun-specific states (minigun_animated.glb includes hands)
     MinigunIdle,
     MinigunShooting, // playing shoot loop
@@ -207,9 +201,6 @@ pub struct PlayingState {
     pub knife_miss_slow_timer: f32, // movement slow after missed punch
     pub punch_auto_return: bool, // when true: put knife away when lock expires
 
-    pub sawnoff_shot_requested: bool, // set by input_processing when sawnoff fires
-    pub sawnoff_anim_initialized: bool, // whether fp_hands_sawnoff has been set up
-    pub prev_weapon_was_sawnoff: bool, // track weapon switches to/from sawnoff
     pub minigun_anim_initialized: bool,
     pub prev_weapon_was_minigun: bool,
     pub minigun_was_firing: bool, // tracks whether minigun was firing last frame
@@ -406,9 +397,6 @@ impl PlayingState {
             knife_attack_lock_timer: 0.0,
             knife_miss_slow_timer: 0.0,
             punch_auto_return: false,
-            sawnoff_shot_requested: false,
-            sawnoff_anim_initialized: false,
-            prev_weapon_was_sawnoff: false,
             minigun_anim_initialized: false,
             prev_weapon_was_minigun: false,
             minigun_was_firing: false,
