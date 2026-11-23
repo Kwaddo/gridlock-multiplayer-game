@@ -4,6 +4,7 @@ mod clip_select;
 mod constants;
 mod glb;
 mod gpu;
+mod hit_pose;
 mod joints;
 mod loader;
 mod nodes;
@@ -20,7 +21,9 @@ use macroquad::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
-pub use pose::Pose;
+pub use pose::{Nodes, Pose};
+#[cfg(test)]
+pub(crate) use hit_pose::test_rig;
 
 
 use gpu::GpuGeometry;

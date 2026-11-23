@@ -25,6 +25,31 @@ pub struct Pose { // how eac join is bent/moved compared to its parent
     pub(super) cpu_meshes_for: usize,
 }
 
+/// Which nodes a pose step works on. Hidden bodies only need the nodes their
+/// hitboxes are built from (see `AnimatedModel::hit_nodes`), and every step
+/// works node by node with the same sums whichever nodes it is given, so
+/// those nodes come out bit for bit the same as with `All`.
+#[derive(Clone, Copy)]
+pub enum Nodes<'a> {
+    All,
+    Only(&'a [usize]),
+}
+
+// f(node, mine, theirs) for each picked node both poses have, All in order like a zip
+#[inline]
+fn pair_each<A, B>(mine: &mut [A], theirs: &[B], nodes: Nodes, mut f: impl FnMut(usize, &mut A, &B)) {
+    match nodes {
+        Nodes::All => mine.iter_mut().zip(theirs).enumerate().for_each(|(i, (m, t))| f(i, m, t)),
+        Nodes::Only(list) => {
+            for &i in list {
+                if let (Some(m), Some(t)) = (mine.get_mut(i), theirs.get(i)) {
+                    f(i, m, t);
+                }
+            }
+        }
+    }
+}
+
 impl Pose {
     pub(super) fn new(rest: &[LocalTransform], joint_count: usize) -> Self {
         Self { // here we assume that the rest pose is valid, so we can use it to initialize the global transforms
@@ -44,51 +69,75 @@ impl Pose {
     // the blends use nlerp (Quat::lerp, normalised) not slerp, like ue does: same ends, the short way round too,
     // within about a degree mid blend for bends under 90 degrees apart, and no acos + 3 sin per joint
     pub fn blend_from(&mut self, from: &Pose, w: f32) {
-        for (mine, theirs) in self.local.iter_mut().zip(&from.local) {
+        self.blend_from_nodes(from, w, Nodes::All);
+    }
+
+    // blend_from on only some nodes, same sums on each, see Nodes
+    pub fn blend_from_nodes(&mut self, from: &Pose, w: f32, nodes: Nodes) {
+        pair_each(&mut self.local, &from.local, nodes, |_, mine, theirs| {
             mine.translation = theirs.translation.lerp(mine.translation, w);
             mine.rotation = theirs.rotation.lerp(mine.rotation, w); // nlerp takes the short way round too
             mine.scale = theirs.scale.lerp(mine.scale, w);
-        }
+        });
         self.global_valid.iter_mut().for_each(|v| *v = false); // the mix changed the bends, old answers are stale
     }
 
     // move this pose toward the other pose by t (0 = stay, 1 = become other), for mixing many clips by weight
     // mixing a, b, c = start at a, mix_in(b, wb/(wa+wb)), then mix_in(c, wc/(wa+wb+wc))
     pub fn mix_in(&mut self, other: &Pose, t: f32) {
+        self.mix_in_nodes(other, t, Nodes::All);
+    }
+
+    // mix_in on only some nodes, same sums on each, see Nodes
+    pub fn mix_in_nodes(&mut self, other: &Pose, t: f32, nodes: Nodes) {
         if t <= 0.0 {
             return;
         }
-        for (mine, theirs) in self.local.iter_mut().zip(&other.local) {
+        pair_each(&mut self.local, &other.local, nodes, |_, mine, theirs| {
             mine.translation = mine.translation.lerp(theirs.translation, t);
             mine.rotation = mine.rotation.lerp(theirs.rotation, t); // nlerp, see blend_from
             mine.scale = mine.scale.lerp(theirs.scale, t);
-        }
+        });
         self.global_valid.iter_mut().for_each(|v| *v = false);
     }
 
     // copy bends of another pose to fade from later
     pub fn copy_from(&mut self, other: &Pose) {
-        self.local.clone_from(&other.local);
+        self.copy_from_nodes(other, Nodes::All);
+    }
+
+    // copy_from on only some nodes
+    pub fn copy_from_nodes(&mut self, other: &Pose, nodes: Nodes) {
+        match nodes {
+            Nodes::All => self.local.clone_from(&other.local),
+            Nodes::Only(_) => pair_each(&mut self.local, &other.local, nodes, |_, mine, theirs| *mine = *theirs),
+        }
         self.global_valid.iter_mut().for_each(|v| *v = false);
     }
 
     // like blend_from but only where mask > 0, and toward the layer
     pub(super) fn blend_masked_from(&mut self, layer: &Pose, mask: &[f32], w: f32) {
-        for ((mine, theirs), m) in self.local.iter_mut().zip(&layer.local).zip(mask) {
+        self.blend_masked_from_nodes(layer, mask, w, Nodes::All);
+    }
+
+    // blend_masked_from on only some nodes, same sums on each, see Nodes
+    pub(super) fn blend_masked_from_nodes(&mut self, layer: &Pose, mask: &[f32], w: f32, nodes: Nodes) {
+        pair_each(&mut self.local, &layer.local, nodes, |i, mine, theirs| {
+            let Some(m) = mask.get(i) else { return };
             let t = m * w;
             if t <= 0.0 {
-                continue;
+                return;
             }
             // fully the layer's (arms, fingers, head while aiming), just take it, before this it slerped to the same answer
             if t >= 1.0 {
                 *mine = *theirs;
-                continue;
+                return;
             }
             // slerp kept here, the mask's partial weights hold for as long as the layer shows, so they stay exact
             mine.translation = mine.translation.lerp(theirs.translation, t);
             mine.rotation = mine.rotation.slerp(theirs.rotation, t);
             mine.scale = mine.scale.lerp(theirs.scale, t);
-        }
+        });
         self.global_valid.iter_mut().for_each(|v| *v = false);
     }
 
@@ -146,28 +195,40 @@ impl AnimatedModel {
     // only step 1 of sample_pose, how each joint is bent at this time, so two clips can be mixed before finishing
     // before this sampling and finishing were one step, so there was no gap to blend in
     pub fn sample_local(&self, time: f32, out: &mut Pose) {
+        self.sample_local_nodes(time, out, Nodes::All);
+    }
 
-        // first step is to find out how each joint is bent off its parent from the keyframes
-
-        for i in 0..self.node_rest.len() { // loop over all nodes in the skeleton
-            let mut p = self.node_rest[i];
-
-            let track = &self.node_tracks[i];
-            
-            // if there is a translation track, sample it at the given time and update the pose's local transform
-            if let Some(t) = &track.translation {
-                p.translation = sample_vec3(t, time);
-            }        
-             if let Some(t) = &track.rotation {
-                p.rotation = sample_quat(t, time);
-            }
-            if let Some(t) = &track.scale {
-                p.scale = sample_vec3(t, time);
-            }
-
-            out.local[i] = p;
-            out.global_valid[i] = false; // new frame, old answers are stale
+    // sample_local on only some nodes, each node is sampled on its own so the picked ones come out the same
+    pub fn sample_local_nodes(&self, time: f32, out: &mut Pose, nodes: Nodes) {
+        match nodes {
+            Nodes::All => (0..self.node_rest.len()).for_each(|i| self.sample_node(i, time, out)), // loop over all nodes in the skeleton
+            Nodes::Only(list) => list
+                .iter()
+                .filter(|&&i| i < self.node_rest.len())
+                .for_each(|&i| self.sample_node(i, time, out)),
         }
+    }
+
+    // first step is to find out how each joint is bent off its parent from the keyframes
+    #[inline]
+    fn sample_node(&self, i: usize, time: f32, out: &mut Pose) {
+        let mut p = self.node_rest[i];
+
+        let track = &self.node_tracks[i];
+
+        // if there is a translation track, sample it at the given time and update the pose's local transform
+        if let Some(t) = &track.translation {
+            p.translation = sample_vec3(t, time);
+        }
+        if let Some(t) = &track.rotation {
+            p.rotation = sample_quat(t, time);
+        }
+        if let Some(t) = &track.scale {
+            p.scale = sample_vec3(t, time);
+        }
+
+        out.local[i] = p;
+        out.global_valid[i] = false; // new frame, old answers are stale
     }
 
     // step 2, turn the bent joints into where they actually are + the gpu matrices
