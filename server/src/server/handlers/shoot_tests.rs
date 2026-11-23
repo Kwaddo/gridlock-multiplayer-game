@@ -206,3 +206,30 @@ fn a_full_queue_is_split_at_the_packet_limit() {
     queue.flush(&outbox, &players);
     assert!(outbox.drain().is_empty(), "a flushed queue sent again");
 }
+
+// a smoke break match hides shots in its maze only: the lobby's shooting range still shows them
+#[test]
+fn in_smoke_break_the_lobby_still_sees_its_own_shots() {
+    use crate::protocols::MODE_SMOKE_BREAK;
+    use crate::server::smoke_break::SmokeState;
+    let mut server = crate::server::Server::new();
+    let (a, b) = (PeerId(1), PeerId(2));
+    server.handle_packet(a, &ClientMsg::join("alice").encode());
+    server.handle_packet(b, &ClientMsg::join("bob").encode());
+    server.match_mode = MODE_SMOKE_BREAK;
+    server.match_running = true;
+    server.smoke_state = Some(SmokeState::new());
+    server.drain_outbox();
+    // neither is in the round (both in the lobby), so neither may fire there
+    assert!(!server.smoke_state.as_ref().unwrap().may_fire(a));
+    server.handle_packet(a, &ClientMsg::Shoot { end: (1.0, 1.0, 5.0) }.encode());
+    assert_eq!(shots_to(&flush(&mut server), b).len(), 1, "a lobby shot was hidden by the smoke break");
+
+    // the same shot from the maze is hidden
+    for p in server.players.values_mut() {
+        p.world = WorldId::Maze;
+        p.last_shot_at = None;
+    }
+    server.handle_packet(a, &ClientMsg::Shoot { end: (1.0, 1.0, 5.0) }.encode());
+    assert!(shots_to(&flush(&mut server), b).is_empty(), "a maze shot showed while it may not fire");
+}

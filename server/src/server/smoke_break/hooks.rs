@@ -31,6 +31,15 @@ impl Server {
         self.match_mode == MODE_SMOKE_BREAK && self.smoke_state.is_some()
     }
 
+    /// `shooter`'s shot must not be seen: in the smoke break maze only a hunter who may fire is
+    /// seen firing, a hider's shot would give their box away. The lobby (the shooting range,
+    /// a late joiner) isn't part of the round, its shots show as always.
+    pub(in crate::server) fn smoke_hides_shot(&self, shooter: PeerId) -> bool {
+        self.smoke_on()
+            && self.players.get(&shooter).is_some_and(|p| p.world == WorldId::Maze)
+            && !self.smoke_state.as_ref().is_some_and(|s| s.may_fire(shooter))
+    }
+
     /// one tick of the round, then whatever it needs sent
     pub(in crate::server) fn tick_smoke_break(&mut self, dt: f32) {
         if !self.smoke_active() {

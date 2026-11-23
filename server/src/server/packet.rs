@@ -131,8 +131,8 @@ impl Server {
                     &mut self.team_score,
                 )
             }
-            // smoke break: only a hunter who may fire is seen firing, a hider's shot would give their box away
-            ClientMsg::Shoot { .. } if self.smoke_on() && !self.smoke_state.as_ref().is_some_and(|s| s.may_fire(src_addr)) => {}
+            // smoke break: only a hunter who may fire is seen firing in the maze, a hider's shot would give their box away
+            ClientMsg::Shoot { .. } if self.smoke_hides_shot(src_addr) => {}
             ClientMsg::Shoot { end } => {
                 // a missed shot makes noise too (a hit's Hit is heard as well, for older clients)
                 let weapon = self.players.get(&src_addr).map(|p| p.current_weapon.clone());
