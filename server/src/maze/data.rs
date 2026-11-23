@@ -388,7 +388,8 @@ mod tests {
                 assert!(open_at(&maze, red) && open_at(&maze, blue), "side {side}: team spawn in a wall");
                 let apart = ((red.0 - blue.0).powi(2) + (red.2 - blue.2).powi(2)).sqrt();
                 let min_apart = (side as usize * 2 / 5) as f32 * MAZE_CELL_SIZE;
-                assert!(apart >= min_apart, "side {side}: team spawns only {apart} m apart");
+                // a whole number of cells apart, measured in f32 metres: allow its rounding
+                assert!(apart >= min_apart - 1e-3, "side {side}: team spawns only {apart} m apart");
                 assert!(open_at(&maze, maze.bomb_site_position(MAZE_CELL_SIZE)), "side {side}: bomb site in a wall");
                 let (x, y, z, _) = maze.random_spawn_world(MAZE_CELL_SIZE);
                 assert!(open_at(&maze, (x, y, z)), "side {side}: random spawn in a wall");
