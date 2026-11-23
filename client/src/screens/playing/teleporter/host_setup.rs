@@ -52,8 +52,9 @@ impl PlayingState {
 
         // tab shapes first and labels after, so the labels share one text
         // batch; the colours are kept from the first pass so a click this
-        // frame looks the same as before
-        let mut label_colors = [WHITE; 3];
+        // frame looks the same as before (one per tab, sized from `modes`:
+        // a fixed [_; 3] panicked once Smoke Break made it four tabs)
+        let mut label_colors = modes.map(|_| WHITE);
         for (i, (_, val)) in modes.iter().enumerate() {
             let tx = tab_start_x + i as f32 * tab_w;
             let selected = self.pending_start_gamemode == *val;
@@ -166,7 +167,7 @@ impl PlayingState {
             let btn_w = section_w / durations.len() as f32;
 
             // shapes first, labels after (colours kept from the first pass)
-            let mut label_colors = [WHITE; 4];
+            let mut label_colors = durations.map(|_| WHITE);
             for (i, (_, secs)) in durations.iter().enumerate() {
                 let bx = section_x + i as f32 * btn_w;
                 let selected = config.match_time_override_secs == Some(*secs);
