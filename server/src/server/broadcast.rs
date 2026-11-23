@@ -49,7 +49,11 @@ fn player_list_msg(players: &HashMap<PeerId, Player>) -> Vec<u8> {
 /// Broadcast updated player list to every connected client.
 /// The host indicator (`LobbyLeader`) goes out on its own when it changes
 /// (`Server::sync_lobby_leader`), not with every list.
+///
+/// A list owed for an earlier score change ([`player_list_changed`]) goes out
+/// with this one.
 pub fn broadcast_player_list(socket: &Outbox, players: &HashMap<PeerId, Player>) {
+    socket.set_player_list_stale(false);
     // Build the message once; the content is identical for every receiver.
     let msg = Packet::from(player_list_msg(players));
 
@@ -59,6 +63,15 @@ pub fn broadcast_player_list(socket: &Outbox, players: &HashMap<PeerId, Player>)
         }
         socket.send_shared(&msg, *addr);
     }
+}
+
+/// Kills, deaths or gun levels changed: the list goes out from the tick
+/// (`Server::flush_player_list`), at most every `PLAYER_LIST_MIN_GAP`, so a
+/// burst of kills sends one list instead of one each. Only the scoreboards
+/// read these from the list; the kill feed, own kills and gun level, and
+/// who is dead all travel in their own messages at once.
+pub fn player_list_changed(socket: &Outbox) {
+    socket.set_player_list_stale(true);
 }
 
 /// The host's player id, 0 for none.

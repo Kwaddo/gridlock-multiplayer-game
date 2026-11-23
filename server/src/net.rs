@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::sync::Arc;
 
@@ -32,6 +32,9 @@ pub type Packet = Arc<[u8]>;
 #[derive(Default)]
 pub struct Outbox {
     queue: RefCell<Vec<(PeerId, Packet)>>,
+    /// Scores changed since the last player list went out: one is owed,
+    /// at a limited rate (`Server::flush_player_list`).
+    player_list_stale: Cell<bool>,
 }
 
 impl Outbox {
@@ -50,6 +53,18 @@ impl Outbox {
         if !to.is_bot() {
             self.queue.borrow_mut().push((to, Packet::clone(packet)));
         }
+    }
+
+    /// Whether a player list is owed (see [`set_player_list_stale`](Self::set_player_list_stale)).
+    pub fn player_list_stale(&self) -> bool {
+        self.player_list_stale.get()
+    }
+
+    /// Mark a player list as owed, or as just sent. It rides on the outbox
+    /// because the code that changes scores (a kill, deep in the hit and bot
+    /// paths) only has the outbox to hand.
+    pub fn set_player_list_stale(&self, stale: bool) {
+        self.player_list_stale.set(stale);
     }
 
     pub fn drain(&self) -> Vec<(PeerId, Packet)> {

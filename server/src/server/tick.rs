@@ -11,6 +11,9 @@ use crate::protocols::*;
 const BOOKKEEPING_INTERVAL: Duration = game::STATE_BROADCAST_INTERVAL;
 /// How often the lobby leader is repeated while it stays the same.
 const LEADER_REFRESH: Duration = Duration::from_secs(5);
+/// Least time between player lists sent for score changes: a list per kill
+/// was the biggest share of a match's non-state traffic.
+pub(super) const PLAYER_LIST_MIN_GAP: Duration = Duration::from_millis(500);
 
 impl Server {
     /// Periodic simulation step; call after each packet and at least every 100ms.
@@ -278,6 +281,26 @@ impl Server {
         }
         self.send_match_status(false);
         self.send_team_score();
+        self.flush_player_list(now_tick);
+    }
+
+    /// Send the player list a score change owes, unless one went out less
+    /// than `PLAYER_LIST_MIN_GAP` ago: a lone kill's list goes out with this
+    /// tick, the rest of a burst together at most that much later. Once a
+    /// match is decided it goes at once, so the end screen shows the final
+    /// scores. Joins, leaves and team changes send their own at once.
+    fn flush_player_list(&mut self, now: Instant) {
+        if !self.outbox.player_list_stale() {
+            return;
+        }
+        let due = self.match_end_pending.is_some()
+            || self
+                .last_player_list
+                .map_or(true, |t| now.saturating_duration_since(t) >= PLAYER_LIST_MIN_GAP);
+        if due {
+            broadcast::broadcast_player_list(&self.outbox, &self.players);
+            self.last_player_list = Some(now);
+        }
     }
 
     /// Tell everyone who the lobby leader is when that changes, and every few

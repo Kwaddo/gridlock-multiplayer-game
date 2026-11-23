@@ -332,3 +332,120 @@ fn an_endless_match_sends_its_timer_heartbeat_once_a_second() {
     }
     assert_eq!(timers(&server.drain_outbox()), 1);
 }
+
+fn player_lists(out: &[(PeerId, crate::net::Packet)], peer: PeerId) -> Vec<Vec<PlayerListEntry>> {
+    to(out, peer)
+        .into_iter()
+        .filter_map(|m| match m {
+            ServerMsg::PlayerList(entries) => Some(entries),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Four players in a running match, nobody frozen, the outbox drained.
+fn match_of_four() -> (Server, [PeerId; 4]) {
+    let mut server = Server::new();
+    let peers = [PeerId(1), PeerId(2), PeerId(3), PeerId(4)];
+    for (i, p) in peers.iter().enumerate() {
+        server.handle_packet(*p, &ClientMsg::join(&format!("p{i}")).encode());
+    }
+    start_match(&mut server, peers[0]);
+    for p in server.players.values_mut() {
+        p.post_teleport_freeze_until = None;
+    }
+    server.tick();
+    server.drain_outbox();
+    (server, peers)
+}
+
+fn kill(server: &mut Server, attacker: PeerId, victim: PeerId) {
+    let victim_id = server.players[&victim].id;
+    let hit = ClientMsg::Hit {
+        victim_id,
+        damage: 500.0,
+        weapon: Some("AK-47".into()),
+        backstab: Some(false),
+        headshot: Some(false),
+    };
+    server.handle_packet(attacker, &hit.encode());
+    assert!(!server.players[&victim].is_alive);
+}
+
+#[test]
+fn kills_of_one_tick_send_one_player_list() {
+    let (mut server, [a, b, c, d]) = match_of_four();
+    kill(&mut server, a, b);
+    kill(&mut server, c, d);
+    assert!(player_lists(&server.drain_outbox(), a).is_empty(), "the list waits for the tick");
+    server.tick();
+    let out = server.drain_outbox();
+    for peer in [a, b, c, d] {
+        let lists = player_lists(&out, peer);
+        assert_eq!(lists.len(), 1, "one list for both kills");
+        let deaths: u32 = lists[0].iter().map(|e| e.deaths).sum();
+        let kills: u32 = lists[0].iter().map(|e| e.kills).sum();
+        assert_eq!((kills, deaths), (2, 2));
+    }
+    // nothing more owed: the next tick sends none
+    server.tick();
+    assert!(player_lists(&server.drain_outbox(), a).is_empty());
+}
+
+#[test]
+fn a_kill_soon_after_a_list_waits_out_the_gap() {
+    let (mut server, [a, b, c, d]) = match_of_four();
+    kill(&mut server, a, b);
+    server.tick();
+    assert_eq!(player_lists(&server.drain_outbox(), c).len(), 1);
+
+    kill(&mut server, c, d);
+    server.tick();
+    assert!(player_lists(&server.drain_outbox(), c).is_empty(), "within the gap");
+
+    // the gap has passed
+    server.last_player_list = server.last_player_list.map(|t| t - tick::PLAYER_LIST_MIN_GAP);
+    server.tick();
+    let lists = player_lists(&server.drain_outbox(), c);
+    assert_eq!(lists.len(), 1);
+    assert_eq!(lists[0].iter().map(|e| e.deaths).sum::<u32>(), 2);
+}
+
+#[test]
+fn a_join_sends_the_list_at_once_with_any_owed_scores() {
+    let (mut server, [a, b, c, _]) = match_of_four();
+    kill(&mut server, a, b);
+    server.tick();
+    server.drain_outbox();
+    kill(&mut server, c, a);
+    server.tick();
+    assert!(player_lists(&server.drain_outbox(), c).is_empty(), "within the gap");
+
+    let e = PeerId(5);
+    server.handle_packet(e, &ClientMsg::join("late").encode());
+    let out = server.drain_outbox();
+    for peer in [a, c, e] {
+        let lists = player_lists(&out, peer);
+        assert_eq!(lists.len(), 1, "the join's list goes out at once");
+        assert_eq!(lists[0].iter().map(|en| en.deaths).sum::<u32>(), 2, "with the owed kill");
+    }
+    // and it settled what was owed
+    server.last_player_list = None;
+    server.tick();
+    assert!(player_lists(&server.drain_outbox(), a).is_empty());
+}
+
+#[test]
+fn a_decided_match_sends_its_final_scores_at_once() {
+    let (mut server, [a, b, c, d]) = match_of_four();
+    kill(&mut server, a, b);
+    server.tick();
+    server.drain_outbox();
+
+    kill(&mut server, c, d);
+    server.match_end_pending = Some((Instant::now() + Duration::from_secs(10), server.players[&c].id, "p2".into()));
+    server.tick();
+    let lists = player_lists(&server.drain_outbox(), a);
+    assert_eq!(lists.len(), 1, "no waiting out the gap");
+    assert_eq!(lists[0].iter().map(|e| e.deaths).sum::<u32>(), 2);
+}

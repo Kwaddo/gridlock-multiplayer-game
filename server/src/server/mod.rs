@@ -100,6 +100,8 @@ pub struct Server {
     last_leader_sent: Option<(u32, Instant)>,
     /// What `MSG_PLAYER_INFO` has told whom.
     info_sync: player_info::InfoSync,
+    /// Last player list sent for a score change (`flush_player_list`).
+    last_player_list: Option<Instant>,
     /// Clients of another protocol version, turned away at the door.
     rejected: HashMap<PeerId, version::Rejected>,
     /// every cardboard box
@@ -151,6 +153,7 @@ impl Server {
             last_team_score_sent: None,
             last_leader_sent: None,
             info_sync: player_info::InfoSync::default(),
+            last_player_list: None,
             rejected: HashMap::new(),
             boxes: boxes::Boxes::new(),
         }

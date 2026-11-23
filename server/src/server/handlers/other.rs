@@ -404,7 +404,8 @@ pub fn apply_damage(
         // The death reaches everyone's state with the next periodic broadcast
         // (within 33 ms); the kill feed below starts each client's death
         // animation at once, and a dying body ignores state until it is done.
-        broadcast::broadcast_player_list(socket, players);
+        // The new scores go out with the next rate-limited player list.
+        broadcast::player_list_changed(socket);
 
         let feed = ServerMsg::KillFeed {
             killer_id: players.get(&attacker).map_or(0, |killer| killer.id),
