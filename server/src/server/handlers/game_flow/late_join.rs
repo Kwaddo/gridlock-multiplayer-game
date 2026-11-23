@@ -57,8 +57,7 @@ pub(super) fn join_running_match(
                 snd.round_alive.remove(&addr);
                 if snd.bomb_carrier == Some(gone.id) {
                     // the bomb stays in play where the bot stood
-                    snd.bomb_carrier = None;
-                    snd.bomb_dropped_pos = Some(gone.position);
+                    snd.drop_bomb(gone.position);
                 }
             }
             log!("Bot '{}' left the match to make room for a late joiner", gone.username);
